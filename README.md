@@ -17,6 +17,9 @@ The first implementation focuses on the product shell:
 - High-density TUI workbench
 - Vim-style keyboard navigation
 - Time-sorted global session list with source tags
+- Source filter defaults to `All`; `Source` is a session-list filter, not a global handoff mode
+- Target selection lives inside the launch flow, with explicit `> [x]` radio-list selection
+- Last confirmed target is persisted in `~/.config/moonbox/config.json`
 - Demo sessions, timeline, original-session open command, Work Capsule, and branch tree
 - Serializable core models for future adapters
 
@@ -30,10 +33,26 @@ Useful commands:
 
 ```bash
 cargo run -- tui
+cargo run -- tui --filter claude
+cargo run -- tui --target codex
 cargo run -- sessions --json
 cargo run -- open --session codex-cxcp-design
 cargo run -- capsule --json
 ```
+
+## Interaction Model
+
+Moonbox has two separate actions for a selected session:
+
+- `o`: open the original session with its original CLI.
+- `enter`: choose a target CLI and prepare the handoff launch command.
+
+The main screen is a global session entry point. Sessions are sorted by time and
+tagged by source CLI. Source filtering is controlled by `f` or `[` / `]` and
+starts at `All`. Target is not shown as a global mode on the main screen; it is
+chosen only in the launch picker. In the target picker, `j/k` moves the pending
+selection, `enter` confirms and persists it, and `Esc` / `q` cancels without
+changing the saved target.
 
 ## TUI Keys
 
@@ -56,6 +75,14 @@ cargo run -- capsule --json
 | `?` | Help |
 | `q` / `Esc` | Back / quit |
 
+### Target Picker Keys
+
+| Key | Action |
+| --- | --- |
+| `j` / `k` | Move target selection |
+| `enter` | Confirm target and remember it |
+| `q` / `Esc` | Cancel without changing target |
+
 ## Architecture Direction
 
 ```text
@@ -70,3 +97,29 @@ Stable interfaces matter more than any single framework:
 - `CapsuleCompiler`: snapshot to Work Capsule
 - `TargetLauncher`: create target CLI new branch
 - `Verifier`: schema, token, capability, and handoff checks
+
+## TODO
+
+### Can Build Now
+
+- Real-time `/` filtering while typing, instead of only applying on `enter`.
+- Clear-filter shortcut, likely `a`, returning the session list to `All`.
+- Header and empty-state copy that show combined filter state, such as `Claude · /502`.
+- Toast/status feedback for actions like target saved, launch cancelled, or no session selected.
+- Rewind marker in the timeline, with a visible `◆ rewind` state after pressing `space`.
+- Context-aware key bar that shows the most relevant keys for the current panel or modal.
+
+### Prototype Now, Improve With Real Data
+
+- Session-driven detail panes: selected session should drive timeline, capsule preview, and branch preview.
+- Session row density: tune whether `cwd`, branch, token count, status, or error reason is most useful.
+- Launch preview: keep the command structure now, generate exact commands after real adapters exist.
+- Session health badges: mock status now, compute from real resume errors and compatibility signals later.
+
+### Best After Real Session Data
+
+- Real session discovery for Codex, Claude, and Hermes.
+- Target compatibility checks, disabled target options, and human-readable incompatibility reasons.
+- Token budget and compression strategy previews.
+- Tool-call, attachment, git diff, and compact-point restoration status.
+- Real original-session launching instead of command preview/printing only.
