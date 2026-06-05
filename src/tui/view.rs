@@ -377,7 +377,7 @@ fn render_branch_tree(frame: &mut Frame, area: Rect, app: &App) {
         .current_session()
         .map(|session| format!("original/{}", session.id))
         .unwrap_or_else(|| "original/no-session".into());
-    let target = format!("handoff/{}-new-branch", app.data.target.id());
+    let target = format!("handoff/{}", app.data.target.id());
     let nodes = [
         (original, false, "original session, read-only"),
         ("rewind/evt-091".into(), false, "before raw resume failure"),
@@ -391,13 +391,17 @@ fn render_branch_tree(frame: &mut Frame, area: Rect, app: &App) {
         }
         let style = if *active {
             Style::default()
-                .fg(ratatui::style::Color::Black)
-                .bg(theme::BLUE)
+                .fg(theme::CYAN)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme::TEXT)
         };
-        spans.push(Span::styled(format!(" {label} "), style));
+        let label = if *active {
+            format!(" > {label} ")
+        } else {
+            format!(" {label} ")
+        };
+        spans.push(Span::styled(label, style));
     }
     let active = nodes
         .iter()
