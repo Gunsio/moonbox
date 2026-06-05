@@ -4,7 +4,15 @@ use super::model::{CanonicalTimeline, CliTool, SessionSummary};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdapterError {
-    SessionNotFound { tool: CliTool, session_id: String },
+    SessionNotFound {
+        tool: CliTool,
+        session_id: String,
+    },
+    InvalidFixture {
+        tool: CliTool,
+        path: String,
+        reason: String,
+    },
 }
 
 impl fmt::Display for AdapterError {
@@ -12,6 +20,9 @@ impl fmt::Display for AdapterError {
         match self {
             Self::SessionNotFound { tool, session_id } => {
                 write!(f, "{tool} session not found: {session_id}")
+            }
+            Self::InvalidFixture { tool, path, reason } => {
+                write!(f, "{tool} fixture {path} is invalid: {reason}")
             }
         }
     }

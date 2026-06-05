@@ -1,8 +1,9 @@
 use super::{
-    adapter::{AdapterError, SourceAdapter, collect_sessions},
+    adapter::{SourceAdapter, collect_sessions},
+    fixture::FixtureSourceAdapter,
     model::{
         BranchNode, CanonicalTimeline, CapsuleCompileOutput, CapsuleCompileRequest, ChecklistItem,
-        CliTool, DemoData, SessionStatus, SessionSummary, TimelineEvent, TimelineKind, WorkCapsule,
+        CliTool, DemoData, SessionStatus, SessionSummary, TimelineEvent, WorkCapsule,
     },
 };
 
@@ -93,46 +94,7 @@ fn build_demo_data(
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct DemoSourceAdapter {
-    tool: CliTool,
-}
-
-impl DemoSourceAdapter {
-    pub fn new(tool: CliTool) -> Self {
-        Self { tool }
-    }
-}
-
-impl SourceAdapter for DemoSourceAdapter {
-    fn tool(&self) -> CliTool {
-        self.tool
-    }
-
-    fn list_sessions(&self) -> Vec<SessionSummary> {
-        demo_session_fixtures()
-            .into_iter()
-            .filter(|session| session.cli == self.tool)
-            .collect()
-    }
-
-    fn load_timeline(&self, session_id: &str) -> Result<CanonicalTimeline, AdapterError> {
-        let session = self
-            .list_sessions()
-            .into_iter()
-            .find(|session| session.id == session_id)
-            .ok_or_else(|| AdapterError::SessionNotFound {
-                tool: self.tool,
-                session_id: session_id.to_string(),
-            })?;
-        Ok(CanonicalTimeline {
-            version: 1,
-            source_cli: self.tool,
-            source_session: session.id.clone(),
-            events: demo_timeline_for_session(&session),
-        })
-    }
-}
+pub type DemoSourceAdapter = FixtureSourceAdapter;
 
 pub fn demo_adapters() -> [DemoSourceAdapter; 3] {
     [
@@ -153,133 +115,10 @@ pub fn demo_sessions() -> Vec<SessionSummary> {
 }
 
 pub fn demo_timeline_for_session(session: &SessionSummary) -> Vec<TimelineEvent> {
-    match session.id.as_str() {
-        "claude-qc-platform" => vec![
-            event(
-                "evt-001",
-                "15:02",
-                TimelineKind::User,
-                "User",
-                "Repair trace propagation across the QC platform gateway.",
-            ),
-            event(
-                "evt-018",
-                "15:09",
-                TimelineKind::Tool,
-                "Tool: rg",
-                "Found missing request_id forwarding in gateway middleware.",
-            ),
-            event(
-                "evt-041",
-                "15:21",
-                TimelineKind::Assistant,
-                "Assistant",
-                "Prepared trace header patch and marked health as warning pending staging verification.",
-            ),
-            event(
-                "evt-059",
-                "15:37",
-                TimelineKind::GitDiff,
-                "Git Diff",
-                "+ gateway trace propagation, + request_id fallback.",
-            ),
-            event(
-                "evt-074",
-                "15:48",
-                TimelineKind::RewindPoint,
-                "Rewind Point",
-                "Before staging verification. Compile continuation for Codex.",
-            ),
-        ],
-        "hermes-cxcp-502" => vec![
-            event(
-                "evt-001",
-                "18:04",
-                TimelineKind::User,
-                "User",
-                "Investigate why copied Codex sessions return 502 after Hermes resume.",
-            ),
-            event(
-                "evt-013",
-                "18:11",
-                TimelineKind::Tool,
-                "Tool: sqlite",
-                "Inspected copied session rows and rollout JSONL metadata.",
-            ),
-            event(
-                "evt-029",
-                "18:28",
-                TimelineKind::Error,
-                "Error",
-                "Hermes resume rejected provider/session mismatch and returned 502.",
-            ),
-            event(
-                "evt-044",
-                "18:43",
-                TimelineKind::Compact,
-                "Compact",
-                "Captured root cause: raw DB copy skips hidden provider state.",
-            ),
-            event(
-                "evt-052",
-                "18:55",
-                TimelineKind::RewindPoint,
-                "Rewind Point",
-                "Before retrying raw resume. Compile Work Capsule instead.",
-            ),
-        ],
-        _ => vec![
-            event(
-                "evt-001",
-                "16:02",
-                TimelineKind::User,
-                "User",
-                "Analyze cxcp and explain why copied sessions fail after resume.",
-            ),
-            event(
-                "evt-017",
-                "16:04",
-                TimelineKind::Tool,
-                "Tool: rg",
-                "Found cxcp alias in ~/.zshrc and migration script in ~/.local/bin.",
-            ),
-            event(
-                "evt-034",
-                "16:08",
-                TimelineKind::Assistant,
-                "Assistant",
-                "Conclusion: raw session copy is the wrong abstraction.",
-            ),
-            event(
-                "evt-049",
-                "16:14",
-                TimelineKind::Compact,
-                "Compact",
-                "Conversation summary created; hidden state cannot be ported safely.",
-            ),
-            event(
-                "evt-063",
-                "16:18",
-                TimelineKind::Error,
-                "Error",
-                "Target CLI resume returned 502 after provider/session mismatch.",
-            ),
-            event(
-                "evt-078",
-                "16:23",
-                TimelineKind::GitDiff,
-                "Git Diff",
-                "+ Canonical Timeline schema, + Work Capsule schema.",
-            ),
-            event(
-                "evt-091",
-                "16:26",
-                TimelineKind::RewindPoint,
-                "Rewind Point",
-                "Before raw resume. Compile new Work Capsule for Hermes.",
-            ),
-        ],
-    }
+    DemoSourceAdapter::new(session.cli)
+        .load_timeline(&session.id)
+        .map(|timeline| timeline.events)
+        .unwrap_or_default()
 }
 
 pub fn demo_compile_request(
@@ -318,53 +157,6 @@ pub fn demo_compile_output(source: CliTool, target: CliTool) -> CapsuleCompileOu
         version: 1,
         capsule: demo_data(source, target).capsule,
     }
-}
-
-fn demo_session_fixtures() -> Vec<SessionSummary> {
-    vec![
-        SessionSummary {
-            id: "codex-cxcp-design".into(),
-            cli: CliTool::Codex,
-            title: "Moonbox session rewind design".into(),
-            cwd: "~/coding/moonbox".into(),
-            updated_at: "2026-06-05T16:50:00+08:00".into(),
-            updated: "updated 10 min ago".into(),
-            status: SessionStatus::Healthy,
-            branch: Some("main".into()),
-            token_count: Some(42_000),
-            health_reason: Some("ready".into()),
-            event_count: 148,
-            resume_command: "codex resume codex-cxcp-design".into(),
-        },
-        SessionSummary {
-            id: "claude-qc-platform".into(),
-            cli: CliTool::Claude,
-            title: "QC platform trace repair".into(),
-            cwd: "~/coding/qc-platform".into(),
-            updated_at: "2026-06-05T15:00:00+08:00".into(),
-            updated: "updated 2 hours ago".into(),
-            status: SessionStatus::Warning,
-            branch: Some("fix/trace-propagation".into()),
-            token_count: Some(67_000),
-            health_reason: Some("staging verification pending".into()),
-            event_count: 92,
-            resume_command: "claude --resume claude-qc-platform".into(),
-        },
-        SessionSummary {
-            id: "hermes-cxcp-502".into(),
-            cli: CliTool::Hermes,
-            title: "cxcp 502 resume failure".into(),
-            cwd: "~/.codex".into(),
-            updated_at: "2026-06-04T18:00:00+08:00".into(),
-            updated: "failed yesterday".into(),
-            status: SessionStatus::Failed,
-            branch: Some("cxcp/raw-copy".into()),
-            token_count: Some(58_000),
-            health_reason: Some("502 after raw resume".into()),
-            event_count: 61,
-            resume_command: "hermes resume hermes-cxcp-502".into(),
-        },
-    ]
 }
 
 fn demo_capsule_for_session(session: &SessionSummary, target: CliTool) -> WorkCapsule {
@@ -466,16 +258,6 @@ fn demo_compilers() -> Vec<String> {
         "bugfix-continuation".into(),
         "design-review".into(),
     ]
-}
-
-fn event(id: &str, time: &str, kind: TimelineKind, title: &str, detail: &str) -> TimelineEvent {
-    TimelineEvent {
-        id: id.into(),
-        time: time.into(),
-        kind,
-        title: title.into(),
-        detail: detail.into(),
-    }
 }
 
 #[cfg(test)]

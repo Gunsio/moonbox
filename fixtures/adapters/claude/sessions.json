@@ -1,0 +1,18 @@
+{
+  "sessions": [
+    {
+      "id": "claude-qc-platform",
+      "cli": "claude",
+      "title": "QC platform trace repair",
+      "cwd": "~/coding/qc-platform",
+      "updated_at": "2026-06-05T15:00:00+08:00",
+      "updated": "updated 2 hours ago",
+      "status": "warning",
+      "branch": "fix/trace-propagation",
+      "token_count": 67000,
+      "health_reason": "staging verification pending",
+      "event_count": 92,
+      "resume_command": "claude --resume claude-qc-platform"
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "source_cli": "codex",
+  "source_session": "codex-cxcp-design",
+  "events": [
+    {
+      "id": "evt-001",
+      "time": "16:02",
+      "kind": "user",
+      "title": "User",
+      "detail": "Analyze cxcp and explain why copied sessions fail after resume."
+    },
+    {
+      "id": "evt-017",
+      "time": "16:04",
+      "kind": "tool",
+      "title": "Tool: rg",
+      "detail": "Found cxcp alias in ~/.zshrc and migration script in ~/.local/bin."
+    },
+    {
+      "id": "evt-034",
+      "time": "16:08",
+      "kind": "assistant",
+      "title": "Assistant",
+      "detail": "Conclusion: raw session copy is the wrong abstraction."
+    },
+    {
+      "id": "evt-049",
+      "time": "16:14",
+      "kind": "compact",
+      "title": "Compact",
+      "detail": "Conversation summary created; hidden state cannot be ported safely."
+    },
+    {
+      "id": "evt-063",
+      "time": "16:18",
+      "kind": "error",
+      "title": "Error",
+      "detail": "Target CLI resume returned 502 after provider/session mismatch."
+    },
+    {
+      "id": "evt-078",
+      "time": "16:23",
+      "kind": "git_diff",
+      "title": "Git Diff",
+      "detail": "+ Canonical Timeline schema, + Work Capsule schema."
+    },
+    {
+      "id": "evt-091",
+      "time": "16:26",
+      "kind": "rewind_point",
+      "title": "Rewind Point",
+      "detail": "Before raw resume. Compile new Work Capsule for Hermes."
+    }
+  ]
+}

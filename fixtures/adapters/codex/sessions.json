@@ -1,0 +1,18 @@
+{
+  "sessions": [
+    {
+      "id": "codex-cxcp-design",
+      "cli": "codex",
+      "title": "Moonbox session rewind design",
+      "cwd": "~/coding/moonbox",
+      "updated_at": "2026-06-05T16:50:00+08:00",
+      "updated": "updated 10 min ago",
+      "status": "healthy",
+      "branch": "main",
+      "token_count": 42000,
+      "health_reason": "ready",
+      "event_count": 148,
+      "resume_command": "codex resume codex-cxcp-design"
+    }
+  ]
+}
