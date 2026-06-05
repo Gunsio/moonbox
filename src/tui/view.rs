@@ -539,7 +539,7 @@ fn render_help(frame: &mut Frame, root: Rect) {
         Line::raw("f               cycle session source filter"),
         Line::raw("/text           filter sessions by text"),
         Line::raw("o               open original session"),
-        Line::raw("[ / ]           previous / next source CLI"),
+        Line::raw("[ / ]           previous / next source CLI and filter"),
         Line::raw("{ / }           previous / next target CLI"),
         Line::raw("space           set rewind point"),
         Line::raw("c, v, d, s      compile, verify, diff, switch skill"),

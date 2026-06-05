@@ -40,6 +40,11 @@ pub fn demo_data(source: CliTool, target: CliTool) -> DemoData {
         },
     ];
     sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+    let source_session_id = sessions
+        .iter()
+        .find(|session| session.cli == source)
+        .map(|session| session.id.clone())
+        .unwrap_or_else(|| format!("{}-session", source.id()));
 
     let timeline = vec![
         event(
@@ -97,7 +102,7 @@ pub fn demo_data(source: CliTool, target: CliTool) -> DemoData {
         version: 1,
         source_cli: source,
         target_cli: target,
-        source_session: "codex-cxcp-design".into(),
+        source_session: source_session_id.clone(),
         rewind_point: "evt-091 / before raw resume".into(),
         compiler: "engineering-handoff".into(),
         target_branch: format!("moonbox/{}-rewind-evt-091", target.id()),
@@ -136,7 +141,7 @@ pub fn demo_data(source: CliTool, target: CliTool) -> DemoData {
     let branches = vec![
         BranchNode {
             id: "root".into(),
-            label: format!("source/{}-cxcp-design", source.id()),
+            label: format!("source/{source_session_id}"),
             detail: "original session, read-only".into(),
             active: false,
         },

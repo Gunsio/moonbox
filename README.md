@@ -45,7 +45,7 @@ cargo run -- capsule --json
 | `/` | Filter sessions by text |
 | `f` | Cycle session source filter |
 | `o` | Open original session |
-| `[` / `]` | Previous / next source CLI |
+| `[` / `]` | Previous / next source CLI and filter sessions by source |
 | `{` / `}` | Previous / next target CLI |
 | `space` | Set rewind point |
 | `c` | Compile capsule |

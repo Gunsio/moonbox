@@ -363,6 +363,7 @@ impl App {
             self.data.source.previous()
         };
         self.replace_demo_data(source, self.data.target);
+        self.set_session_filter(SessionFilter::Tool(source));
     }
 
     fn cycle_target(&mut self, forward: bool) {
@@ -443,6 +444,13 @@ mod tests {
         app.handle_key(key(']'));
         assert_eq!(app.data.source, CliTool::Claude);
         assert_eq!(app.data.capsule.source_cli, CliTool::Claude);
+        assert_eq!(app.data.capsule.source_session, "claude-qc-platform");
+        assert_eq!(app.session_filter, SessionFilter::Tool(CliTool::Claude));
+        assert!(
+            app.visible_session_indices()
+                .iter()
+                .all(|index| app.data.sessions[*index].cli == CliTool::Claude)
+        );
 
         app.handle_key(key('{'));
         assert_eq!(app.data.target, CliTool::Claude);
