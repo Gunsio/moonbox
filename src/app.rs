@@ -87,11 +87,17 @@ impl App {
     pub fn new(source: CliTool, target: CliTool) -> Self {
         let data = workbench::load_demo_workbench(source, target);
         let rewind_event_id = initial_rewind_event_id(&data);
+        let selected_session = data
+            .sessions
+            .iter()
+            .position(|session| session.id == data.capsule.source_session)
+            .unwrap_or(0);
+        let selected_event = rewind_event_index(&data, &rewind_event_id);
         Self {
             data,
             focus: Focus::Sessions,
-            selected_session: 0,
-            selected_event: 6,
+            selected_session,
+            selected_event,
             selected_compiler: 0,
             command_mode: false,
             command_input: String::new(),
@@ -262,6 +268,7 @@ impl App {
         if let Some(query) = self.command_input.strip_prefix('/') {
             self.search_query = query.trim().to_string();
             self.clamp_selected_session();
+            self.sync_selected_session_details();
         }
     }
 
@@ -523,6 +530,14 @@ impl App {
                     || session.title.to_ascii_lowercase().contains(&query)
                     || session.cwd.to_ascii_lowercase().contains(&query)
                     || session.cli.id().contains(&query)
+                    || session
+                        .branch
+                        .as_ref()
+                        .is_some_and(|branch| branch.to_ascii_lowercase().contains(&query))
+                    || session
+                        .health_reason
+                        .as_ref()
+                        .is_some_and(|reason| reason.to_ascii_lowercase().contains(&query))
             })
             .map(|(index, _)| index)
             .collect()
@@ -543,6 +558,10 @@ impl App {
             current.saturating_sub(1)
         };
         self.selected_session = visible[next];
+        self.sync_selected_session_details();
+        if let Some(session) = self.current_session() {
+            self.set_status(format!("Session: {} {}", session.cli, session.title));
+        }
     }
 
     fn cycle_session_filter(&mut self, forward: bool) {
@@ -557,6 +576,7 @@ impl App {
     pub fn apply_session_filter(&mut self, filter: SessionFilter) {
         self.session_filter = filter;
         self.clamp_selected_session();
+        self.sync_selected_session_details();
         self.set_status(format!("Filter: {}", self.session_filter.label()));
         self.pending_g = false;
     }
@@ -565,6 +585,7 @@ impl App {
         self.session_filter = SessionFilter::All;
         self.search_query.clear();
         self.clamp_selected_session();
+        self.sync_selected_session_details();
         self.set_status("Filters cleared");
         self.pending_g = false;
     }
@@ -607,7 +628,7 @@ impl App {
 
     fn confirm_launch_target(&mut self) {
         let target = self.pending_target;
-        self.replace_demo_data(self.active_source(), target);
+        self.replace_data_for_target(target);
         let _ = config::save_last_target(target);
         self.show_launch = false;
         self.modal_scroll = 0;
@@ -615,16 +636,17 @@ impl App {
         self.pending_g = false;
     }
 
-    fn active_source(&self) -> CliTool {
-        self.current_session()
-            .map(|session| session.cli)
-            .unwrap_or(self.data.source)
-    }
-
-    fn replace_demo_data(&mut self, source: CliTool, target: CliTool) {
+    fn replace_data_for_target(&mut self, target: CliTool) {
         let selected_compiler = self.selected_compiler;
         let rewind_event_id = self.rewind_event_id.clone();
-        self.data = workbench::load_demo_workbench(source, target);
+        let session_id = self.current_session().map(|session| session.id.clone());
+        if let Some(session_id) = session_id {
+            if let Some(data) = workbench::load_demo_workbench_for_session(&session_id, target) {
+                self.data = data;
+            }
+        } else {
+            self.data = workbench::load_demo_workbench(self.data.source, target);
+        }
         self.selected_session = self
             .selected_session
             .min(self.data.sessions.len().saturating_sub(1));
@@ -642,6 +664,33 @@ impl App {
         self.compile_status = "ACTIVE";
         self.verify_passed = true;
         self.pending_g = false;
+    }
+
+    fn sync_selected_session_details(&mut self) {
+        let Some(session_id) = self
+            .data
+            .sessions
+            .get(self.selected_session)
+            .map(|session| session.id.clone())
+        else {
+            return;
+        };
+        let target = self.data.target;
+        let selected_session = self.selected_session;
+        let selected_compiler = self.selected_compiler;
+        if let Some(data) = workbench::load_demo_workbench_for_session(&session_id, target) {
+            let rewind_event_id = initial_rewind_event_id(&data);
+            let selected_event = rewind_event_index(&data, &rewind_event_id);
+            self.data = data;
+            self.selected_session =
+                selected_session.min(self.data.sessions.len().saturating_sub(1));
+            self.selected_event = selected_event;
+            self.selected_compiler =
+                selected_compiler.min(self.data.compilers.len().saturating_sub(1));
+            self.data.capsule.compiler = self.data.compilers[self.selected_compiler].clone();
+            self.rewind_event_id = rewind_event_id;
+            self.capsule_scroll = 0;
+        }
     }
 
     fn set_status(&mut self, message: impl Into<String>) {
@@ -741,6 +790,13 @@ fn initial_rewind_event_id(data: &DemoData) -> String {
         .to_string()
 }
 
+fn rewind_event_index(data: &DemoData, rewind_event_id: &str) -> usize {
+    data.timeline
+        .iter()
+        .position(|event| event.id == rewind_event_id)
+        .unwrap_or_else(|| data.timeline.len().saturating_sub(1))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -765,6 +821,19 @@ mod tests {
         let first = app.data.capsule.compiler.clone();
         app.handle_key(key('s'));
         assert_ne!(app.data.capsule.compiler, first);
+    }
+
+    #[test]
+    fn new_selects_requested_source_session() {
+        let app = App::new(CliTool::Hermes, CliTool::Codex);
+
+        assert_eq!(
+            app.current_session().map(|session| session.id.as_str()),
+            Some("hermes-cxcp-502")
+        );
+        assert_eq!(app.data.source, CliTool::Hermes);
+        assert_eq!(app.data.target, CliTool::Codex);
+        assert_eq!(app.rewind_event_id, "evt-052");
     }
 
     #[test]
@@ -802,6 +871,9 @@ mod tests {
             app.current_session().map(|session| session.id.as_str()),
             Some("hermes-cxcp-502")
         );
+        assert_eq!(app.data.source, CliTool::Hermes);
+        assert_eq!(app.data.capsule.source_session, "hermes-cxcp-502");
+        assert_eq!(app.rewind_event_id, "evt-052");
     }
 
     #[test]
@@ -841,6 +913,9 @@ mod tests {
 
         app.handle_key(key(']'));
         assert_eq!(app.session_filter, SessionFilter::Tool(CliTool::Claude));
+        assert_eq!(app.data.source, CliTool::Claude);
+        assert_eq!(app.data.capsule.source_session, "claude-qc-platform");
+        assert_eq!(app.rewind_event_id, "evt-074");
         assert!(
             app.visible_session_indices()
                 .iter()
@@ -849,6 +924,29 @@ mod tests {
 
         app.handle_key(key('['));
         assert_eq!(app.session_filter, SessionFilter::Tool(CliTool::Codex));
+    }
+
+    #[test]
+    fn moving_session_reloads_timeline_capsule_and_rewind() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+
+        app.handle_key(key('j'));
+
+        assert_eq!(
+            app.current_session().map(|session| session.id.as_str()),
+            Some("claude-qc-platform")
+        );
+        assert_eq!(app.data.source, CliTool::Claude);
+        assert_eq!(app.data.capsule.source_cli, CliTool::Claude);
+        assert_eq!(app.data.capsule.source_session, "claude-qc-platform");
+        assert_eq!(app.rewind_event_id, "evt-074");
+        assert_eq!(app.selected_event, 4);
+        assert!(app.data.timeline[0].detail.contains("QC platform"));
+        assert!(app.data.branches[1].label.contains("evt-074"));
+        assert_eq!(
+            app.status_message,
+            "Session: Claude QC platform trace repair"
+        );
     }
 
     #[test]
