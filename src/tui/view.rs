@@ -1,7 +1,7 @@
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
         Block, BorderType, Borders, Clear, List, ListItem, ListState, Padding, Paragraph, Wrap,
@@ -26,7 +26,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     let header_height = if root.width < 120 { 4 } else { 3 };
     let body_min = if root.height < 32 { 8 } else { 18 };
     let branch_height = if root.height < 32 { 3 } else { 4 };
-    let command_height = if root.width < 120 { 4 } else { 3 };
+    let command_height = if root.width < 120 { 5 } else { 3 };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -266,32 +266,65 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
     let mut lines = Vec::new();
     for (idx, event) in app.data.timeline.iter().enumerate() {
         let selected = idx == app.selected_event;
-        let (label, color) = match event.kind {
-            TimelineKind::User => ("USER", theme::BLUE),
-            TimelineKind::Assistant => ("ASSISTANT", theme::GOLD),
-            TimelineKind::Tool => ("TOOL", theme::MUTED),
-            TimelineKind::Compact => ("COMPACT", theme::CYAN),
-            TimelineKind::Error => ("ERROR", theme::RED),
-            TimelineKind::GitDiff => ("GIT DIFF", theme::GREEN),
-            TimelineKind::RewindPoint => ("REWIND", theme::GOLD),
+        let active = selected && app.focus == Focus::Timeline;
+        let is_rewind = event.id == app.rewind_event_id;
+        let (label, color) = if is_rewind {
+            ("REWIND", theme::GOLD)
+        } else {
+            match event.kind {
+                TimelineKind::User => ("USER", theme::BLUE),
+                TimelineKind::Assistant => ("ASSISTANT", theme::GOLD),
+                TimelineKind::Tool => ("TOOL", theme::MUTED),
+                TimelineKind::Compact => ("COMPACT", theme::CYAN),
+                TimelineKind::Error => ("ERROR", theme::RED),
+                TimelineKind::GitDiff => ("GIT DIFF", theme::GREEN),
+                TimelineKind::RewindPoint => ("REWIND", theme::GOLD),
+            }
         };
-        let prefix = if selected { "●" } else { "│" };
+        let marker = if active && is_rewind {
+            "▶◆"
+        } else if active {
+            "▶ "
+        } else if is_rewind {
+            "◆ "
+        } else if selected {
+            "● "
+        } else {
+            "│ "
+        };
+        let time_style = if active {
+            Style::default()
+                .fg(theme::GOLD)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(color)
+        };
+        let label_style = if active {
+            Style::default()
+                .fg(Color::Black)
+                .bg(theme::GOLD)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(color).add_modifier(Modifier::BOLD)
+        };
+        let title_style = if active {
+            Style::default()
+                .fg(theme::TEXT)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme::TEXT)
+        };
         lines.push(Line::from(vec![
-            Span::styled(
-                format!("{prefix} {} ", event.time),
-                Style::default().fg(color),
-            ),
-            Span::styled(
-                format!(" {label} "),
-                Style::default().fg(color).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!(" {}", event.title),
-                Style::default().fg(theme::TEXT),
-            ),
+            Span::styled(format!("{marker} {} ", event.time), time_style),
+            Span::styled(format!(" {label} "), label_style),
+            Span::styled(format!(" {}", event.title), title_style),
         ]));
 
-        let detail_style = if event.kind == TimelineKind::RewindPoint {
+        let detail_style = if active {
+            Style::default()
+                .fg(theme::TEXT)
+                .add_modifier(Modifier::BOLD)
+        } else if is_rewind || event.kind == TimelineKind::RewindPoint {
             Style::default()
                 .fg(theme::GOLD)
                 .add_modifier(Modifier::BOLD)
@@ -299,7 +332,10 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(theme::MUTED)
         };
         lines.push(Line::from(vec![
-            Span::raw("   "),
+            Span::styled(
+                if active { "  └ " } else { "   " },
+                Style::default().fg(if active { theme::GOLD } else { theme::MUTED }),
+            ),
             Span::styled(&event.detail, detail_style),
         ]));
         lines.push(Line::raw(""));
@@ -395,10 +431,18 @@ fn render_branch_tree(frame: &mut Frame, area: Rect, app: &App) {
         .current_session()
         .map(|session| format!("original/{}", session.id))
         .unwrap_or_else(|| "original/no-session".into());
+    let rewind = format!("rewind/{}", app.rewind_event_id);
     let target = format!("handoff/{}", app.data.target.id());
+    let rewind_detail = app
+        .data
+        .timeline
+        .iter()
+        .find(|event| event.id == app.rewind_event_id)
+        .map(|event| event.title.as_str())
+        .unwrap_or("selected rewind point");
     let nodes = [
         (original, false, "original session, read-only"),
-        ("rewind/evt-091".into(), false, "before raw resume failure"),
+        (rewind, false, rewind_detail),
         (target, true, "compiled by engineering-handoff"),
     ];
 
@@ -450,91 +494,26 @@ fn render_command_bar(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             (":", app.command_input.as_str())
         };
-        vec![Line::from(vec![
-            Span::styled(
-                prompt,
-                Style::default()
-                    .fg(theme::GOLD)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(input, Style::default().fg(theme::TEXT)),
-        ])]
-    } else if area.width < 120 {
         vec![
+            status_line(app),
             Line::from(vec![
-                key("j/k"),
-                txt(" Nav  "),
-                key("gg/G"),
-                txt(" Jump  "),
-                key("/"),
-                txt(" Search  "),
-                key("[ ]"),
-                txt(" Filter"),
-            ]),
-            Line::from(vec![
-                key("f"),
-                txt(" Filter  "),
-                key("a"),
-                txt(" Clear  "),
-                key("o"),
-                txt(" Original  "),
-                key("space"),
-                txt(" Rewind  "),
-                key("c"),
-                txt(" Compile  "),
-                key("v"),
-                txt(" Verify"),
-            ]),
-            Line::from(vec![
-                key("d"),
-                txt(" Diff  "),
-                key("s"),
-                txt(" Skill  "),
-                key("enter"),
-                txt(" Target  "),
-                key(":"),
-                txt(" Cmd  "),
-                key("?"),
-                txt(" Help  "),
-                key("q"),
-                txt(" Quit"),
+                Span::styled(
+                    prompt,
+                    Style::default()
+                        .fg(theme::GOLD)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(input, Style::default().fg(theme::TEXT)),
             ]),
         ]
     } else {
-        vec![Line::from(vec![
-            key("j/k"),
-            txt(" Nav  "),
-            key("gg/G"),
-            txt(" Jump  "),
-            key("/"),
-            txt(" Search  "),
-            key("f"),
-            txt(" Filter  "),
-            key("a"),
-            txt(" Clear  "),
-            key("o"),
-            txt(" Original  "),
-            key("[ ]"),
-            txt(" Filter  "),
-            key("space"),
-            txt(" Rewind  "),
-            key("c"),
-            txt(" Compile  "),
-            key("v"),
-            txt(" Verify  "),
-            key("d"),
-            txt(" Diff  "),
-            key("s"),
-            txt(" Skill  "),
-            key("enter"),
-            txt(" Target  "),
-            key(":"),
-            txt(" Cmd  "),
-            key("?"),
-            txt(" Help  "),
-            key("q"),
-            txt(" Quit"),
-        ])]
+        let mut lines = vec![status_line(app)];
+        let hints = active_key_hints(app);
+        let chunk_size = if area.width < 120 { 4 } else { hints.len() };
+        for chunk in hints.chunks(chunk_size.max(1)).take(3) {
+            lines.push(hint_line(chunk));
+        }
+        lines
     };
 
     frame.render_widget(
@@ -546,6 +525,100 @@ fn render_command_bar(frame: &mut Frame, area: Rect, app: &App) {
         ),
         area,
     );
+}
+
+type KeyHint = (&'static str, &'static str);
+
+fn active_key_hints(app: &App) -> Vec<KeyHint> {
+    if app.show_launch {
+        return vec![
+            ("j/k", "Target"),
+            ("enter", "Save"),
+            ("Esc", "Cancel"),
+            ("q", "Cancel"),
+        ];
+    }
+    if app.show_open_original || app.show_diff || app.show_help {
+        return vec![("Esc", "Close"), ("q", "Close")];
+    }
+
+    match app.focus {
+        Focus::Sessions => vec![
+            ("j/k", "Sessions"),
+            ("gg/G", "Jump"),
+            ("/", "Search"),
+            ("[ ]", "Source"),
+            ("a", "Clear"),
+            ("o", "Original"),
+            ("enter", "Target"),
+            ("tab", "Next"),
+        ],
+        Focus::Timeline => vec![
+            ("j/k", "Events"),
+            ("gg/G", "Jump"),
+            ("space", "Rewind"),
+            ("c", "Compile"),
+            ("d", "Diff"),
+            ("tab", "Next"),
+            (":", "Cmd"),
+            ("q", "Quit"),
+        ],
+        Focus::Capsule => vec![
+            ("c", "Compile"),
+            ("v", "Verify"),
+            ("s", "Skill"),
+            ("d", "Diff"),
+            ("space", "Rewind"),
+            ("tab", "Next"),
+            (":", "Cmd"),
+            ("q", "Quit"),
+        ],
+        Focus::Branches => vec![
+            ("enter", "Target"),
+            ("o", "Original"),
+            ("space", "Rewind"),
+            ("tab", "Next"),
+            (":", "Cmd"),
+            ("?", "Help"),
+            ("q", "Quit"),
+        ],
+    }
+}
+
+fn hint_line(hints: &[KeyHint]) -> Line<'static> {
+    let mut spans = Vec::new();
+    for &(label, action) in hints {
+        spans.push(key(label));
+        spans.push(txt(action));
+        spans.push(Span::raw("  "));
+    }
+    Line::from(spans)
+}
+
+fn status_line(app: &App) -> Line<'_> {
+    let color = if app.status_message.contains("cancelled")
+        || app.status_message.contains("No session")
+        || app.status_message.contains("Unknown")
+        || app.status_message.contains("NEEDS REVIEW")
+    {
+        theme::ORANGE
+    } else if app.status_message.contains("PASS")
+        || app.status_message.contains("saved")
+        || app.status_message.contains("compiled")
+        || app.status_message.contains("cleared")
+    {
+        theme::GREEN
+    } else {
+        theme::CYAN
+    };
+
+    Line::from(vec![
+        Span::styled("Status ", Style::default().fg(theme::MUTED)),
+        Span::styled(
+            &app.status_message,
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ),
+    ])
 }
 
 fn render_help(frame: &mut Frame, root: Rect) {
@@ -605,7 +678,11 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             Span::styled("  handoff target", Style::default().fg(theme::MUTED)),
         ]));
     }
-    let target_branch = format!("moonbox/{}-rewind-evt-091", app.pending_target.id());
+    let target_branch = format!(
+        "moonbox/{}-rewind-{}",
+        app.pending_target.id(),
+        app.rewind_event_id
+    );
     let mut lines = vec![
         Line::from(Span::styled(
             "Choose target CLI",
@@ -640,8 +717,9 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         Line::raw(""),
         Line::from(Span::styled(
             format!(
-                "moonbox launch --target {} --capsule ~/.moonbox/capsules/evt-091.json",
-                app.pending_target.id()
+                "moonbox launch --target {} --capsule ~/.moonbox/capsules/{}.json",
+                app.pending_target.id(),
+                app.rewind_event_id
             ),
             Style::default().fg(theme::CYAN),
         )),

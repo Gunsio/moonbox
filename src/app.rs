@@ -71,6 +71,8 @@ pub struct App {
     pub session_filter: SessionFilter,
     pub search_query: String,
     pub pending_target: CliTool,
+    pub status_message: String,
+    pub rewind_event_id: String,
     pub verify_passed: bool,
     pub compile_status: &'static str,
     pub pending_g: bool,
@@ -79,8 +81,10 @@ pub struct App {
 
 impl App {
     pub fn new(source: CliTool, target: CliTool) -> Self {
+        let data = demo::demo_data(source, target);
+        let rewind_event_id = initial_rewind_event_id(&data);
         Self {
-            data: demo::demo_data(source, target),
+            data,
             focus: Focus::Sessions,
             selected_session: 0,
             selected_event: 6,
@@ -94,6 +98,8 @@ impl App {
             session_filter: SessionFilter::All,
             search_query: String::new(),
             pending_target: target,
+            status_message: "Ready".into(),
+            rewind_event_id,
             verify_passed: true,
             compile_status: "ACTIVE",
             pending_g: false,
@@ -124,12 +130,12 @@ impl App {
         match key.code {
             KeyCode::Esc => self.back_or_quit(),
             KeyCode::Char('q') => self.back_or_quit(),
-            KeyCode::Char('?') => self.show_help = true,
+            KeyCode::Char('?') => self.open_help(),
             KeyCode::Char('[') => self.cycle_session_filter(false),
             KeyCode::Char(']') => self.cycle_session_filter(true),
             KeyCode::Char('f') => self.cycle_session_filter(true),
             KeyCode::Char('a') => self.clear_session_filters(),
-            KeyCode::Char('o') => self.show_open_original = true,
+            KeyCode::Char('o') => self.open_original(),
             KeyCode::Char(':') => {
                 self.command_mode = true;
                 self.command_input.clear();
@@ -148,8 +154,8 @@ impl App {
             }
             KeyCode::Char(' ') => self.set_rewind_point(),
             KeyCode::Char('c') => self.compile_capsule(),
-            KeyCode::Char('v') => self.verify_passed = !self.verify_passed,
-            KeyCode::Char('d') => self.show_diff = !self.show_diff,
+            KeyCode::Char('v') => self.toggle_verify(),
+            KeyCode::Char('d') => self.toggle_diff(),
             KeyCode::Char('s') => self.cycle_compiler(),
             KeyCode::Enter => self.open_launch_picker(),
             _ => self.pending_g = false,
@@ -159,14 +165,21 @@ impl App {
     fn handle_command_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc => {
+                let was_search = self.is_search_command();
                 self.command_mode = false;
                 self.command_input.clear();
+                if was_search {
+                    self.set_search_status();
+                } else {
+                    self.set_status("Command cancelled");
+                }
             }
             KeyCode::Enter => {
                 if self.is_search_command() {
                     self.sync_live_search();
                     self.command_mode = false;
                     self.command_input.clear();
+                    self.set_search_status();
                     return;
                 }
 
@@ -175,11 +188,12 @@ impl App {
                 self.command_input.clear();
                 match command.as_str() {
                     "q" | "quit" => self.should_quit = true,
-                    "open" | "o" => self.show_open_original = true,
+                    "" => self.set_status("Command cancelled"),
+                    "open" | "o" => self.open_original(),
                     "compile" | "c" => self.compile_capsule(),
-                    "verify" | "v" => self.verify_passed = true,
-                    "help" | "?" => self.show_help = true,
-                    "diff" | "d" => self.show_diff = !self.show_diff,
+                    "verify" | "v" => self.mark_verify_passed(),
+                    "help" | "?" => self.open_help(),
+                    "diff" | "d" => self.toggle_diff(),
                     "filter" | "filter next" => self.cycle_session_filter(true),
                     "filter prev" | "filter previous" => self.cycle_session_filter(false),
                     "filter all" | "filter clear" | "clear" | "all" => self.clear_session_filters(),
@@ -201,7 +215,7 @@ impl App {
                     "source" | "source next" => self.cycle_session_filter(true),
                     "source prev" | "source previous" => self.cycle_session_filter(false),
                     "target" | "launch" => self.open_launch_picker(),
-                    _ => {}
+                    _ => self.set_status(format!("Unknown command: {command}")),
                 }
             }
             KeyCode::Backspace => {
@@ -235,9 +249,20 @@ impl App {
         }
     }
 
+    fn set_search_status(&mut self) {
+        if self.search_query.is_empty() {
+            self.set_status("Search cleared");
+        } else {
+            self.set_status(format!("Search: /{}", self.search_query));
+        }
+    }
+
     fn handle_launch_key(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Esc | KeyCode::Char('q') => self.show_launch = false,
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.show_launch = false;
+                self.set_status("Launch cancelled");
+            }
             KeyCode::Enter => self.confirm_launch_target(),
             KeyCode::Char('j')
             | KeyCode::Char('l')
@@ -256,12 +281,16 @@ impl App {
     fn back_or_quit(&mut self) {
         if self.show_diff {
             self.show_diff = false;
+            self.set_status("Diff closed");
         } else if self.show_open_original {
             self.show_open_original = false;
+            self.set_status("Original preview closed");
         } else if self.show_launch {
             self.show_launch = false;
+            self.set_status("Launch cancelled");
         } else if self.show_help {
             self.show_help = false;
+            self.set_status("Help closed");
         } else {
             self.should_quit = true;
         }
@@ -343,21 +372,79 @@ impl App {
     }
 
     fn set_rewind_point(&mut self) {
-        if let Some(event) = self.data.timeline.get(self.selected_event) {
-            self.data.capsule.rewind_point = format!("{} / {}", event.id, event.title);
+        if let Some((id, title)) = self
+            .data
+            .timeline
+            .get(self.selected_event)
+            .map(|event| (event.id.clone(), event.title.clone()))
+        {
+            self.apply_rewind_event(id.clone(), title);
+            self.set_status(format!("Rewind set: {id}"));
+        } else {
+            self.set_status("No rewind point available");
         }
         self.pending_g = false;
     }
 
     fn compile_capsule(&mut self) {
+        let compiler = self.data.compilers[self.selected_compiler].clone();
         self.compile_status = "COMPILED";
-        self.data.capsule.compiler = self.data.compilers[self.selected_compiler].clone();
+        self.data.capsule.compiler = compiler.clone();
+        self.set_status(format!("Capsule compiled: {compiler}"));
         self.pending_g = false;
     }
 
     fn cycle_compiler(&mut self) {
         self.selected_compiler = (self.selected_compiler + 1) % self.data.compilers.len();
         self.data.capsule.compiler = self.data.compilers[self.selected_compiler].clone();
+        self.set_status(format!("Skill: {}", self.data.capsule.compiler));
+        self.pending_g = false;
+    }
+
+    fn toggle_verify(&mut self) {
+        self.verify_passed = !self.verify_passed;
+        self.set_verify_status();
+        self.pending_g = false;
+    }
+
+    fn mark_verify_passed(&mut self) {
+        self.verify_passed = true;
+        self.set_verify_status();
+        self.pending_g = false;
+    }
+
+    fn set_verify_status(&mut self) {
+        let status = if self.verify_passed {
+            "PASS"
+        } else {
+            "NEEDS REVIEW"
+        };
+        self.set_status(format!("Verify: {status}"));
+    }
+
+    fn toggle_diff(&mut self) {
+        self.show_diff = !self.show_diff;
+        if self.show_diff {
+            self.set_status("Diff opened");
+        } else {
+            self.set_status("Diff closed");
+        }
+        self.pending_g = false;
+    }
+
+    fn open_help(&mut self) {
+        self.show_help = true;
+        self.set_status("Help opened");
+        self.pending_g = false;
+    }
+
+    fn open_original(&mut self) {
+        self.show_open_original = true;
+        if let Some(session) = self.current_session() {
+            self.set_status(format!("Original ready: {} {}", session.cli, session.id));
+        } else {
+            self.set_status("No session selected");
+        }
         self.pending_g = false;
     }
 
@@ -415,6 +502,7 @@ impl App {
     pub fn apply_session_filter(&mut self, filter: SessionFilter) {
         self.session_filter = filter;
         self.clamp_selected_session();
+        self.set_status(format!("Filter: {}", self.session_filter.label()));
         self.pending_g = false;
     }
 
@@ -422,6 +510,7 @@ impl App {
         self.session_filter = SessionFilter::All;
         self.search_query.clear();
         self.clamp_selected_session();
+        self.set_status("Filters cleared");
         self.pending_g = false;
     }
 
@@ -440,11 +529,19 @@ impl App {
         } else {
             self.pending_target.previous()
         };
+        self.set_status(format!("Target: {}", self.pending_target));
     }
 
     fn open_launch_picker(&mut self) {
+        if self.current_session().is_none() {
+            self.show_launch = false;
+            self.set_status("No session selected");
+            self.pending_g = false;
+            return;
+        }
         self.pending_target = self.data.target;
         self.show_launch = true;
+        self.set_status("Choose target CLI");
         self.pending_g = false;
     }
 
@@ -453,6 +550,7 @@ impl App {
         self.replace_demo_data(self.active_source(), target);
         let _ = config::save_last_target(target);
         self.show_launch = false;
+        self.set_status(format!("Target saved: {target}"));
         self.pending_g = false;
     }
 
@@ -464,6 +562,7 @@ impl App {
 
     fn replace_demo_data(&mut self, source: CliTool, target: CliTool) {
         let selected_compiler = self.selected_compiler;
+        let rewind_event_id = self.rewind_event_id.clone();
         self.data = demo::demo_data(source, target);
         self.selected_session = self
             .selected_session
@@ -474,10 +573,42 @@ impl App {
             .min(self.data.timeline.len().saturating_sub(1));
         self.selected_compiler = selected_compiler.min(self.data.compilers.len().saturating_sub(1));
         self.data.capsule.compiler = self.data.compilers[self.selected_compiler].clone();
+        if let Some(title) = self.timeline_event_title(&rewind_event_id) {
+            self.apply_rewind_event(rewind_event_id, title);
+        } else {
+            self.rewind_event_id = initial_rewind_event_id(&self.data);
+        }
         self.compile_status = "ACTIVE";
         self.verify_passed = true;
         self.pending_g = false;
     }
+
+    fn set_status(&mut self, message: impl Into<String>) {
+        self.status_message = message.into();
+    }
+
+    fn apply_rewind_event(&mut self, id: String, title: String) {
+        self.rewind_event_id = id.clone();
+        self.data.capsule.rewind_point = format!("{id} / {title}");
+        self.data.capsule.target_branch = format!("moonbox/{}-rewind-{id}", self.data.target.id());
+    }
+
+    fn timeline_event_title(&self, id: &str) -> Option<String> {
+        self.data
+            .timeline
+            .iter()
+            .find(|event| event.id == id)
+            .map(|event| event.title.clone())
+    }
+}
+
+fn initial_rewind_event_id(data: &DemoData) -> String {
+    data.capsule
+        .rewind_point
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .to_string()
 }
 
 #[cfg(test)]
@@ -493,7 +624,9 @@ mod tests {
         let mut app = App::new(CliTool::Codex, CliTool::Hermes);
         app.selected_event = 0;
         app.handle_key(key(' '));
+        assert_eq!(app.rewind_event_id, "evt-001");
         assert!(app.data.capsule.rewind_point.contains("evt-001"));
+        assert!(app.data.capsule.target_branch.contains("evt-001"));
     }
 
     #[test]
@@ -567,6 +700,7 @@ mod tests {
         assert_eq!(app.session_filter, SessionFilter::All);
         assert!(app.search_query.is_empty());
         assert_eq!(app.visible_session_indices().len(), 3);
+        assert_eq!(app.status_message, "Filters cleared");
     }
 
     #[test]
@@ -592,19 +726,35 @@ mod tests {
         let mut app = App::new(CliTool::Codex, CliTool::Hermes);
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
         assert!(app.show_launch);
+        assert_eq!(app.status_message, "Choose target CLI");
 
         app.handle_key(key('j'));
         assert_eq!(app.pending_target, CliTool::Codex);
         assert_eq!(app.data.target, CliTool::Hermes);
+        assert_eq!(app.status_message, "Target: Codex");
 
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
         assert!(!app.show_launch);
         assert_eq!(app.data.target, CliTool::Codex);
+        assert_eq!(app.status_message, "Target saved: Codex");
         assert_eq!(app.data.source, CliTool::Codex);
         assert_eq!(app.data.capsule.source_cli, CliTool::Codex);
         assert_eq!(app.data.capsule.source_session, "codex-cxcp-design");
         assert!(app.data.capsule.target_branch.contains("codex"));
         assert!(app.data.branches[2].label.contains("codex"));
+    }
+
+    #[test]
+    fn target_change_preserves_selected_rewind_point() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        app.selected_event = 0;
+        app.handle_key(key(' '));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert_eq!(app.rewind_event_id, "evt-001");
+        assert!(app.data.capsule.rewind_point.contains("evt-001"));
+        assert!(app.data.capsule.target_branch.contains("evt-001"));
     }
 
     #[test]
@@ -617,5 +767,28 @@ mod tests {
         assert!(!app.show_launch);
         assert_eq!(app.pending_target, CliTool::Codex);
         assert_eq!(app.data.target, CliTool::Hermes);
+        assert_eq!(app.status_message, "Launch cancelled");
+    }
+
+    #[test]
+    fn launch_picker_requires_visible_session() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        app.search_query = "no-match".into();
+        app.clamp_selected_session();
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(!app.show_launch);
+        assert_eq!(app.status_message, "No session selected");
+    }
+
+    #[test]
+    fn verify_toggle_reports_status() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+
+        app.handle_key(key('v'));
+
+        assert!(!app.verify_passed);
+        assert_eq!(app.status_message, "Verify: NEEDS REVIEW");
     }
 }

@@ -21,6 +21,10 @@ The first implementation focuses on the product shell:
 - Target selection lives inside the launch flow, with explicit `> [x]` radio-list selection
 - Last confirmed target is persisted in `~/.config/moonbox/config.json`
 - Demo sessions, timeline, original-session open command, Work Capsule, and branch tree
+- Live `/` session search, combined filter display, and one-key clear with `a`
+- Fixed status line for action feedback
+- Context-aware key bar for the current panel or modal
+- Visible rewind marker in the timeline, plus rewind-aware branch and launch preview
 - Serializable core models for future adapters
 
 ## Run
@@ -109,12 +113,9 @@ Stable interfaces matter more than any single framework:
 
 ### Can Build Now
 
-- Real-time `/` filtering while typing, instead of only applying on `enter`.
-- Clear-filter shortcut, likely `a`, returning the session list to `All`.
-- Header and empty-state copy that show combined filter state, such as `Claude · /502`.
-- Toast/status feedback for actions like target saved, launch cancelled, or no session selected.
-- Rewind marker in the timeline, with a visible `◆ rewind` state after pressing `space`.
-- Context-aware key bar that shows the most relevant keys for the current panel or modal.
+- Scroll handling for long timeline, capsule, and modal content.
+- Small-terminal polish for launch/help/diff overlays.
+- Copyable command output for launch and original-session resume previews.
 
 ### Prototype Now, Improve With Real Data
 
