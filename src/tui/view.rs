@@ -9,8 +9,8 @@ use ratatui::{
 };
 
 use crate::{
-    app::{App, Focus, LaunchValidationState},
-    core::model::{CliTool, SessionStatus, TimelineKind},
+    app::{App, Focus},
+    core::model::{CliTool, LaunchValidationState, SessionStatus, TimelineKind},
 };
 
 use super::theme;

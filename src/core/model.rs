@@ -189,6 +189,51 @@ pub struct VerificationReport {
     pub checks: Vec<VerificationCheck>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LaunchValidationState {
+    Ready,
+    Warning,
+    Blocked,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LaunchValidation {
+    pub state: LaunchValidationState,
+    pub reasons: Vec<String>,
+}
+
+impl LaunchValidation {
+    pub fn ready() -> Self {
+        Self {
+            state: LaunchValidationState::Ready,
+            reasons: vec!["Ready".into()],
+        }
+    }
+
+    pub fn warning(reasons: Vec<String>) -> Self {
+        Self {
+            state: LaunchValidationState::Warning,
+            reasons,
+        }
+    }
+
+    pub fn blocked(reasons: Vec<String>) -> Self {
+        Self {
+            state: LaunchValidationState::Blocked,
+            reasons,
+        }
+    }
+
+    pub fn summary(&self) -> String {
+        self.reasons.join("; ")
+    }
+
+    pub fn is_blocked(&self) -> bool {
+        self.state == LaunchValidationState::Blocked
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LaunchPlan {
     pub version: u16,
@@ -196,7 +241,7 @@ pub struct LaunchPlan {
     pub source_session: SessionSummary,
     pub target_cli: CliTool,
     pub target_branch: String,
-    pub capsule_path: String,
+    pub capsule_path: Option<String>,
     pub command: String,
     pub verification: VerificationReport,
 }

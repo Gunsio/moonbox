@@ -62,9 +62,8 @@ impl SourceAdapter for FixtureSourceAdapter {
         self.fixture.tool
     }
 
-    fn list_sessions(&self) -> Vec<SessionSummary> {
+    fn list_sessions(&self) -> Result<Vec<SessionSummary>, AdapterError> {
         self.parse_sessions()
-            .expect("adapter session fixture should be valid")
     }
 
     fn load_timeline(&self, session_id: &str) -> Result<CanonicalTimeline, AdapterError> {
@@ -127,7 +126,7 @@ mod tests {
     fn parses_session_fixture_for_each_source() {
         for tool in CliTool::ALL {
             let adapter = FixtureSourceAdapter::new(tool);
-            let sessions = adapter.list_sessions();
+            let sessions = adapter.list_sessions().expect("sessions");
 
             assert_eq!(sessions.len(), 1);
             assert_eq!(sessions[0].cli, tool);
@@ -139,7 +138,7 @@ mod tests {
     fn parses_timeline_fixture_for_each_session() {
         for tool in CliTool::ALL {
             let adapter = FixtureSourceAdapter::new(tool);
-            let session = adapter.list_sessions().remove(0);
+            let session = adapter.list_sessions().expect("sessions").remove(0);
             let timeline = adapter.load_timeline(&session.id).expect("timeline");
 
             assert_eq!(timeline.source_cli, tool);

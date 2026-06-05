@@ -2,8 +2,9 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::core::{
     config,
-    model::{CliTool, DemoData, SessionStatus, SessionSummary},
-    workbench,
+    error::CoreError,
+    model::{CliTool, DemoData, LaunchValidation, LaunchValidationState, SessionSummary},
+    verifier, workbench,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,50 +57,6 @@ impl SessionFilter {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LaunchValidationState {
-    Ready,
-    Warning,
-    Blocked,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LaunchValidation {
-    pub state: LaunchValidationState,
-    pub reasons: Vec<String>,
-}
-
-impl LaunchValidation {
-    pub fn ready() -> Self {
-        Self {
-            state: LaunchValidationState::Ready,
-            reasons: vec!["Ready".into()],
-        }
-    }
-
-    pub fn summary(&self) -> String {
-        self.reasons.join("; ")
-    }
-
-    fn warning(reasons: Vec<String>) -> Self {
-        Self {
-            state: LaunchValidationState::Warning,
-            reasons,
-        }
-    }
-
-    fn blocked(reasons: Vec<String>) -> Self {
-        Self {
-            state: LaunchValidationState::Blocked,
-            reasons,
-        }
-    }
-
-    fn is_blocked(&self) -> bool {
-        self.state == LaunchValidationState::Blocked
-    }
-}
-
 #[derive(Debug)]
 pub struct App {
     pub data: DemoData,
@@ -128,8 +85,8 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(source: CliTool, target: CliTool) -> Self {
-        let data = workbench::load_demo_workbench(source, target);
+    pub fn new(source: CliTool, target: CliTool) -> Result<Self, CoreError> {
+        let data = workbench::load_demo_workbench(source, target)?;
         let rewind_event_id = initial_rewind_event_id(&data);
         let selected_session = data
             .sessions
@@ -137,7 +94,7 @@ impl App {
             .position(|session| session.id == data.capsule.source_session)
             .unwrap_or(0);
         let selected_event = rewind_event_index(&data, &rewind_event_id);
-        Self {
+        Ok(Self {
             data,
             focus: Focus::Sessions,
             selected_session,
@@ -161,7 +118,7 @@ impl App {
             pending_g: false,
             clipboard_text: None,
             should_quit: false,
-        }
+        })
     }
 
     pub fn should_quit(&self) -> bool {
@@ -516,10 +473,18 @@ impl App {
 
     fn run_verification(&mut self) {
         let session_id = self.current_session().map(|session| session.id.clone());
-        let Some(report) = workbench::verify_launch(session_id.as_deref(), self.data.target) else {
-            self.verify_passed = false;
-            self.set_status("Verify: FAIL No session selected");
-            return;
+        let report = match workbench::verify_launch(session_id.as_deref(), self.data.target, None) {
+            Ok(Some(report)) => report,
+            Ok(None) => {
+                self.verify_passed = false;
+                self.set_status("Verify: FAIL No session selected");
+                return;
+            }
+            Err(error) => {
+                self.verify_passed = false;
+                self.set_status(format!("Verify: FAIL {error}"));
+                return;
+            }
         };
         self.verify_passed = report.ready;
         self.set_status(format!(
@@ -682,7 +647,11 @@ impl App {
             self.pending_g = false;
             return;
         }
-        self.replace_data_for_target(target);
+        if let Err(error) = self.replace_data_for_target(target) {
+            self.set_status(format!("Target failed: {error}"));
+            self.pending_g = false;
+            return;
+        }
         let _ = config::save_last_target(target);
         self.show_launch = false;
         self.modal_scroll = 0;
@@ -694,16 +663,16 @@ impl App {
         self.pending_g = false;
     }
 
-    fn replace_data_for_target(&mut self, target: CliTool) {
+    fn replace_data_for_target(&mut self, target: CliTool) -> Result<(), CoreError> {
         let selected_compiler = self.selected_compiler;
         let rewind_event_id = self.rewind_event_id.clone();
         let session_id = self.current_session().map(|session| session.id.clone());
         if let Some(session_id) = session_id {
-            if let Some(data) = workbench::load_demo_workbench_for_session(&session_id, target) {
+            if let Some(data) = workbench::load_demo_workbench_for_session(&session_id, target)? {
                 self.data = data;
             }
         } else {
-            self.data = workbench::load_demo_workbench(self.data.source, target);
+            self.data = workbench::load_demo_workbench(self.data.source, target)?;
         }
         self.selected_session = self
             .selected_session
@@ -722,6 +691,7 @@ impl App {
         self.compile_status = "ACTIVE";
         self.verify_passed = true;
         self.pending_g = false;
+        Ok(())
     }
 
     fn sync_selected_session_details(&mut self) {
@@ -736,18 +706,22 @@ impl App {
         let target = self.data.target;
         let selected_session = self.selected_session;
         let selected_compiler = self.selected_compiler;
-        if let Some(data) = workbench::load_demo_workbench_for_session(&session_id, target) {
-            let rewind_event_id = initial_rewind_event_id(&data);
-            let selected_event = rewind_event_index(&data, &rewind_event_id);
-            self.data = data;
-            self.selected_session =
-                selected_session.min(self.data.sessions.len().saturating_sub(1));
-            self.selected_event = selected_event;
-            self.selected_compiler =
-                selected_compiler.min(self.data.compilers.len().saturating_sub(1));
-            self.data.capsule.compiler = self.data.compilers[self.selected_compiler].clone();
-            self.rewind_event_id = rewind_event_id;
-            self.capsule_scroll = 0;
+        match workbench::load_demo_workbench_for_session(&session_id, target) {
+            Ok(Some(data)) => {
+                let rewind_event_id = initial_rewind_event_id(&data);
+                let selected_event = rewind_event_index(&data, &rewind_event_id);
+                self.data = data;
+                self.selected_session =
+                    selected_session.min(self.data.sessions.len().saturating_sub(1));
+                self.selected_event = selected_event;
+                self.selected_compiler =
+                    selected_compiler.min(self.data.compilers.len().saturating_sub(1));
+                self.data.capsule.compiler = self.data.compilers[self.selected_compiler].clone();
+                self.rewind_event_id = rewind_event_id;
+                self.capsule_scroll = 0;
+            }
+            Ok(None) => {}
+            Err(error) => self.set_status(format!("Session reload failed: {error}")),
         }
     }
 
@@ -810,10 +784,9 @@ impl App {
             .map(|session| session.id.as_str())
             .unwrap_or("no-session");
         format!(
-            "moonbox launch --target {} --session {} --capsule {}",
+            "moonbox launch --target {} --session {}",
             self.pending_target.id(),
-            session,
-            self.capsule_path()
+            session
         )
     }
 
@@ -823,10 +796,6 @@ impl App {
             self.pending_target.id(),
             self.rewind_event_id
         )
-    }
-
-    pub fn capsule_path(&self) -> String {
-        format!("~/.moonbox/capsules/{}.json", self.rewind_event_id)
     }
 
     pub fn original_resume_command(&self) -> Option<String> {
@@ -839,61 +808,10 @@ impl App {
             return LaunchValidation::blocked(vec!["No session selected".into()]);
         };
 
-        let mut blockers = Vec::new();
-        let mut warnings = Vec::new();
-
-        if self.data.capsule.source_session != session.id {
-            blockers.push(format!(
-                "Capsule source {} does not match selected session {}",
-                self.data.capsule.source_session, session.id
-            ));
-        }
-
-        if !self
-            .data
-            .timeline
-            .iter()
-            .any(|event| event.id == self.rewind_event_id)
-        {
-            blockers.push(format!(
-                "Rewind {} is not present in the selected timeline",
-                self.rewind_event_id
-            ));
-        }
-
-        if self.data.capsule.target_cli != target {
-            warnings.push(format!(
-                "Confirm will refresh capsule target from {} to {}",
-                self.data.capsule.target_cli, target
-            ));
-        }
-
-        if target == session.cli {
-            warnings.push("Same-CLI handoff; use o for original resume".into());
-        }
-
-        if session.status == SessionStatus::Failed {
-            let reason = session
-                .health_reason
-                .as_deref()
-                .unwrap_or("source health is failed");
-            warnings.push(format!("Source health: {reason}"));
-        }
-
-        if session.status == SessionStatus::Failed && target == session.cli {
-            blockers.push(format!(
-                "{} raw resume is known failed for this session",
-                target
-            ));
-        }
-
-        if !blockers.is_empty() {
-            LaunchValidation::blocked(blockers)
-        } else if !warnings.is_empty() {
-            LaunchValidation::warning(warnings)
-        } else {
-            LaunchValidation::ready()
-        }
+        let mut capsule = self.data.capsule.clone();
+        capsule.target_cli = target;
+        capsule.target_branch = format!("moonbox/{}-rewind-{}", target.id(), self.rewind_event_id);
+        verifier::validate_launch(&capsule, session, &self.data.timeline, target)
     }
 
     fn apply_rewind_event(&mut self, id: String, title: String) {
@@ -935,9 +853,13 @@ mod tests {
         KeyEvent::new(KeyCode::Char(ch), KeyModifiers::empty())
     }
 
+    fn new_app(source: CliTool, target: CliTool) -> App {
+        App::new(source, target).expect("app")
+    }
+
     #[test]
     fn space_updates_rewind_point_from_selected_event() {
-        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.selected_event = 0;
         app.handle_key(key(' '));
         assert_eq!(app.rewind_event_id, "evt-001");
@@ -947,7 +869,7 @@ mod tests {
 
     #[test]
     fn compiler_cycles() {
-        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         let first = app.data.capsule.compiler.clone();
         app.handle_key(key('s'));
         assert_ne!(app.data.capsule.compiler, first);
@@ -955,7 +877,7 @@ mod tests {
 
     #[test]
     fn new_selects_requested_source_session() {
-        let app = App::new(CliTool::Hermes, CliTool::Codex);
+        let app = new_app(CliTool::Hermes, CliTool::Codex);
 
         assert_eq!(
             app.current_session().map(|session| session.id.as_str()),
@@ -968,7 +890,7 @@ mod tests {
 
     #[test]
     fn session_filter_limits_visible_sessions() {
-        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.handle_key(key('f'));
         assert!(
             app.visible_session_indices()
@@ -979,7 +901,7 @@ mod tests {
 
     #[test]
     fn current_session_respects_empty_filter_results() {
-        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.search_query = "no-match".into();
         app.clamp_selected_session();
 
@@ -989,7 +911,7 @@ mod tests {
 
     #[test]
     fn slash_search_filters_while_typing() {
-        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
 
         app.handle_key(key('/'));
         app.handle_key(key('5'));
@@ -1008,7 +930,7 @@ mod tests {
 
     #[test]
     fn slash_search_escape_keeps_filter_result() {
-        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
 
         app.handle_key(key('/'));
         app.handle_key(key('5'));
@@ -1021,7 +943,7 @@ mod tests {
 
     #[test]
     fn clear_filter_resets_source_and_search() {
-        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
 
         app.apply_session_filter(SessionFilter::Tool(CliTool::Hermes));
         app.handle_key(key('/'));
@@ -1037,7 +959,7 @@ mod tests {
 
     #[test]
     fn source_filter_cycles_in_tui() {
-        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.handle_key(key(']'));
         assert_eq!(app.session_filter, SessionFilter::Tool(CliTool::Codex));
 
@@ -1058,7 +980,7 @@ mod tests {
 
     #[test]
     fn moving_session_reloads_timeline_capsule_and_rewind() {
-        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
 
         app.handle_key(key('j'));
 
@@ -1081,7 +1003,7 @@ mod tests {
 
     #[test]
     fn target_cycles_inside_launch_picker() {
-        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
         assert!(app.show_launch);
         assert_eq!(app.status_message, "Choose target CLI");
@@ -1104,7 +1026,7 @@ mod tests {
 
     #[test]
     fn target_change_preserves_selected_rewind_point() {
-        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.selected_event = 0;
         app.handle_key(key(' '));
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
@@ -1117,7 +1039,7 @@ mod tests {
 
     #[test]
     fn launch_picker_cancel_discards_pending_target() {
-        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
         app.handle_key(key('j'));
         app.handle_key(key('q'));
@@ -1130,7 +1052,7 @@ mod tests {
 
     #[test]
     fn launch_validation_warns_for_same_cli_handoff() {
-        let app = App::new(CliTool::Codex, CliTool::Codex);
+        let app = new_app(CliTool::Codex, CliTool::Codex);
 
         let validation = app.validate_launch_for_target(CliTool::Codex);
 
@@ -1140,7 +1062,7 @@ mod tests {
 
     #[test]
     fn target_picker_blocks_failed_same_cli_resume_path() {
-        let mut app = App::new(CliTool::Hermes, CliTool::Hermes);
+        let mut app = new_app(CliTool::Hermes, CliTool::Hermes);
 
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
@@ -1153,7 +1075,7 @@ mod tests {
 
     #[test]
     fn blocked_target_cannot_copy_launch_command() {
-        let mut app = App::new(CliTool::Hermes, CliTool::Hermes);
+        let mut app = new_app(CliTool::Hermes, CliTool::Hermes);
 
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
         app.handle_key(key('y'));
@@ -1164,7 +1086,7 @@ mod tests {
 
     #[test]
     fn launch_picker_requires_visible_session() {
-        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.search_query = "no-match".into();
         app.clamp_selected_session();
 
@@ -1176,30 +1098,30 @@ mod tests {
 
     #[test]
     fn verify_toggle_reports_status() {
-        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
 
         app.handle_key(key('v'));
 
         assert!(app.verify_passed);
-        assert_eq!(app.status_message, "Verify: PASS (6 checks)");
+        assert_eq!(app.status_message, "Verify: PASS (7 checks)");
     }
 
     #[test]
     fn launch_copy_queues_clipboard_text() {
-        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
         app.handle_key(key('y'));
 
         let copied = app.take_clipboard_text().expect("clipboard text");
         assert!(copied.starts_with("moonbox launch --target"));
         assert!(copied.contains("--session codex-cxcp-design"));
-        assert!(copied.contains("evt-091.json"));
+        assert!(!copied.contains("--capsule"));
         assert_eq!(app.status_message, "Copied launch command");
     }
 
     #[test]
     fn original_copy_queues_resume_command() {
-        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.handle_key(key('o'));
         app.handle_key(key('y'));
 
@@ -1212,7 +1134,7 @@ mod tests {
 
     #[test]
     fn overlay_navigation_scrolls_modal_without_moving_timeline() {
-        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.focus = Focus::Timeline;
         app.selected_event = 3;
         app.handle_key(key('?'));
@@ -1224,7 +1146,7 @@ mod tests {
 
     #[test]
     fn capsule_panel_scrolls_with_vim_navigation() {
-        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.focus = Focus::Capsule;
 
         app.handle_key(key('j'));
