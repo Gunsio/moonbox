@@ -505,24 +505,28 @@ impl App {
     }
 
     fn toggle_verify(&mut self) {
-        self.verify_passed = !self.verify_passed;
-        self.set_verify_status();
+        self.run_verification();
         self.pending_g = false;
     }
 
     fn mark_verify_passed(&mut self) {
-        self.verify_passed = true;
-        self.set_verify_status();
+        self.run_verification();
         self.pending_g = false;
     }
 
-    fn set_verify_status(&mut self) {
-        let status = if self.verify_passed {
-            "PASS"
-        } else {
-            "NEEDS REVIEW"
+    fn run_verification(&mut self) {
+        let session_id = self.current_session().map(|session| session.id.clone());
+        let Some(report) = workbench::verify_launch(session_id.as_deref(), self.data.target) else {
+            self.verify_passed = false;
+            self.set_status("Verify: FAIL No session selected");
+            return;
         };
-        self.set_status(format!("Verify: {status}"));
+        self.verify_passed = report.ready;
+        self.set_status(format!(
+            "Verify: {} ({} checks)",
+            report.status,
+            report.checks.len()
+        ));
     }
 
     fn toggle_diff(&mut self) {
@@ -801,9 +805,14 @@ impl App {
     }
 
     pub fn launch_command(&self) -> String {
+        let session = self
+            .current_session()
+            .map(|session| session.id.as_str())
+            .unwrap_or("no-session");
         format!(
-            "moonbox launch --target {} --capsule {}",
+            "moonbox launch --target {} --session {} --capsule {}",
             self.pending_target.id(),
+            session,
             self.capsule_path()
         )
     }
@@ -1171,8 +1180,8 @@ mod tests {
 
         app.handle_key(key('v'));
 
-        assert!(!app.verify_passed);
-        assert_eq!(app.status_message, "Verify: NEEDS REVIEW");
+        assert!(app.verify_passed);
+        assert_eq!(app.status_message, "Verify: PASS (6 checks)");
     }
 
     #[test]
@@ -1183,6 +1192,7 @@ mod tests {
 
         let copied = app.take_clipboard_text().expect("clipboard text");
         assert!(copied.starts_with("moonbox launch --target"));
+        assert!(copied.contains("--session codex-cxcp-design"));
         assert!(copied.contains("evt-091.json"));
         assert_eq!(app.status_message, "Copied launch command");
     }

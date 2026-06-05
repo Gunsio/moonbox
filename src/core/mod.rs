@@ -3,4 +3,5 @@ pub mod config;
 pub mod demo;
 pub mod fixture;
 pub mod model;
+pub mod verifier;
 pub mod workbench;

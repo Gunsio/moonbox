@@ -27,6 +27,10 @@ pub enum Command {
     CompileRequest(JsonArgs),
     /// Print the compiler output contract fixture. Currently uses demo data.
     CompileOutput(JsonArgs),
+    /// Dry-run a target launch plan and verification report.
+    Launch(LaunchArgs),
+    /// Verify the selected Work Capsule without launching.
+    Verify(LaunchArgs),
 }
 
 impl Default for Command {
@@ -59,4 +63,20 @@ pub struct OpenArgs {
     /// Session id to open. Defaults to the first demo session.
     #[arg(long)]
     pub session: Option<String>,
+}
+
+#[derive(Debug, Args, Clone, Default)]
+pub struct LaunchArgs {
+    /// Source session id. Defaults to the newest discovered session.
+    #[arg(long)]
+    pub session: Option<String>,
+    /// Target CLI. Defaults to the last confirmed target.
+    #[arg(long, value_enum)]
+    pub target: Option<CliTool>,
+    /// Capsule path to validate. Defaults to the selected rewind capsule path.
+    #[arg(long)]
+    pub capsule: Option<String>,
+    /// Print JSON output.
+    #[arg(long)]
+    pub json: bool,
 }
