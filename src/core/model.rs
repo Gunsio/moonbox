@@ -11,6 +11,28 @@ pub enum CliTool {
     Hermes,
 }
 
+impl CliTool {
+    pub const ALL: [Self; 3] = [Self::Codex, Self::Claude, Self::Hermes];
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Codex => "codex",
+            Self::Claude => "claude",
+            Self::Hermes => "hermes",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        let current = Self::ALL.iter().position(|tool| *tool == self).unwrap_or(0);
+        Self::ALL[(current + 1) % Self::ALL.len()]
+    }
+
+    pub fn previous(self) -> Self {
+        let current = Self::ALL.iter().position(|tool| *tool == self).unwrap_or(0);
+        Self::ALL[(current + Self::ALL.len() - 1) % Self::ALL.len()]
+    }
+}
+
 impl Display for CliTool {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {

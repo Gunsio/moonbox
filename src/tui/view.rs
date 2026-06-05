@@ -75,14 +75,18 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
         Span::styled("月光宝盒", Style::default().fg(theme::MUTED)),
     ]);
     let state = Line::from(vec![
-        Span::raw("Source: "),
+        Span::raw("Source "),
+        Span::styled("[ ]", Style::default().fg(theme::MUTED)),
+        Span::raw(": "),
         Span::styled(
             app.data.source.to_string(),
             Style::default()
                 .fg(theme::BLUE)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw("   Target: "),
+        Span::raw("   Target "),
+        Span::styled("{ }", Style::default().fg(theme::MUTED)),
+        Span::raw(": "),
         Span::styled(
             app.data.target.to_string(),
             Style::default()
@@ -398,6 +402,12 @@ fn render_command_bar(frame: &mut Frame, area: Rect, app: &App) {
                 txt(" Jump  "),
                 key("/"),
                 txt(" Search  "),
+                key("[ ]"),
+                txt(" Source  "),
+                key("{ }"),
+                txt(" Target"),
+            ]),
+            Line::from(vec![
                 key("space"),
                 txt(" Rewind  "),
                 key("c"),
@@ -428,6 +438,10 @@ fn render_command_bar(frame: &mut Frame, area: Rect, app: &App) {
             txt(" Jump  "),
             key("/"),
             txt(" Search  "),
+            key("[ ]"),
+            txt(" Source  "),
+            key("{ }"),
+            txt(" Target  "),
             key("space"),
             txt(" Rewind  "),
             key("c"),
@@ -473,6 +487,8 @@ fn render_help(frame: &mut Frame, root: Rect) {
         Line::raw(""),
         Line::raw("j/k, gg/G       navigate"),
         Line::raw("tab, shift-tab  switch panel"),
+        Line::raw("[ / ]           previous / next source CLI"),
+        Line::raw("{ / }           previous / next target CLI"),
         Line::raw("space           set rewind point"),
         Line::raw("c, v, d, s      compile, verify, diff, switch skill"),
         Line::raw("enter           launch target command preview"),
@@ -509,7 +525,10 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         ]),
         Line::raw(""),
         Line::from(Span::styled(
-            "moonbox launch --target hermes --capsule ~/.moonbox/capsules/evt-091.json",
+            format!(
+                "moonbox launch --target {} --capsule ~/.moonbox/capsules/evt-091.json",
+                capsule.target_cli.id()
+            ),
             Style::default().fg(theme::CYAN),
         )),
         Line::raw(""),

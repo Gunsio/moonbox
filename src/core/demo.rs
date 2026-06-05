@@ -93,7 +93,7 @@ pub fn demo_data(source: CliTool, target: CliTool) -> DemoData {
         source_session: "codex-cxcp-design".into(),
         rewind_point: "evt-091 / before raw resume".into(),
         compiler: "engineering-handoff".into(),
-        target_branch: "moonbox/hermes-rewind-evt-091".into(),
+        target_branch: format!("moonbox/{}-rewind-evt-091", target.id()),
         goal: "Build Moonbox as a cross-CLI session rewind workbench.".into(),
         state: "Raw resume is rejected. The target path is new branch + Work Capsule.".into(),
         decisions: vec![
@@ -129,7 +129,7 @@ pub fn demo_data(source: CliTool, target: CliTool) -> DemoData {
     let branches = vec![
         BranchNode {
             id: "root".into(),
-            label: "source/codex-cxcp-design".into(),
+            label: format!("source/{}-cxcp-design", source.id()),
             detail: "original session, read-only".into(),
             active: false,
         },
@@ -141,7 +141,7 @@ pub fn demo_data(source: CliTool, target: CliTool) -> DemoData {
         },
         BranchNode {
             id: "target".into(),
-            label: "target/hermes-new-branch".into(),
+            label: format!("target/{}-new-branch", target.id()),
             detail: "compiled by engineering-handoff".into(),
             active: true,
         },

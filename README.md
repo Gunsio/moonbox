@@ -41,6 +41,8 @@ cargo run -- capsule --json
 | `gg` / `G` | Jump to top / bottom |
 | `tab` / `shift-tab` | Switch panel |
 | `/` | Search mode placeholder |
+| `[` / `]` | Previous / next source CLI |
+| `{` / `}` | Previous / next target CLI |
 | `space` | Set rewind point |
 | `c` | Compile capsule |
 | `v` | Verify capsule |
@@ -65,4 +67,3 @@ Stable interfaces matter more than any single framework:
 - `CapsuleCompiler`: snapshot to Work Capsule
 - `TargetLauncher`: create target CLI new branch
 - `Verifier`: schema, token, capability, and handoff checks
-

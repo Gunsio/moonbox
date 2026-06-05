@@ -70,6 +70,10 @@ impl App {
             KeyCode::Esc => self.back_or_quit(),
             KeyCode::Char('q') => self.back_or_quit(),
             KeyCode::Char('?') => self.show_help = true,
+            KeyCode::Char('[') => self.cycle_source(false),
+            KeyCode::Char(']') => self.cycle_source(true),
+            KeyCode::Char('{') => self.cycle_target(false),
+            KeyCode::Char('}') => self.cycle_target(true),
             KeyCode::Char(':') => {
                 self.command_mode = true;
                 self.command_input.clear();
@@ -112,6 +116,10 @@ impl App {
                     "verify" | "v" => self.verify_passed = true,
                     "help" | "?" => self.show_help = true,
                     "diff" | "d" => self.show_diff = !self.show_diff,
+                    "source" | "source next" => self.cycle_source(true),
+                    "source prev" | "source previous" => self.cycle_source(false),
+                    "target" | "target next" => self.cycle_target(true),
+                    "target prev" | "target previous" => self.cycle_target(false),
                     _ => {}
                 }
             }
@@ -223,6 +231,40 @@ impl App {
         self.data.capsule.compiler = self.data.compilers[self.selected_compiler].clone();
         self.pending_g = false;
     }
+
+    fn cycle_source(&mut self, forward: bool) {
+        let source = if forward {
+            self.data.source.next()
+        } else {
+            self.data.source.previous()
+        };
+        self.replace_demo_data(source, self.data.target);
+    }
+
+    fn cycle_target(&mut self, forward: bool) {
+        let target = if forward {
+            self.data.target.next()
+        } else {
+            self.data.target.previous()
+        };
+        self.replace_demo_data(self.data.source, target);
+    }
+
+    fn replace_demo_data(&mut self, source: CliTool, target: CliTool) {
+        let selected_compiler = self.selected_compiler;
+        self.data = demo::demo_data(source, target);
+        self.selected_session = self
+            .selected_session
+            .min(self.data.sessions.len().saturating_sub(1));
+        self.selected_event = self
+            .selected_event
+            .min(self.data.timeline.len().saturating_sub(1));
+        self.selected_compiler = selected_compiler.min(self.data.compilers.len().saturating_sub(1));
+        self.data.capsule.compiler = self.data.compilers[self.selected_compiler].clone();
+        self.compile_status = "ACTIVE";
+        self.verify_passed = true;
+        self.pending_g = false;
+    }
 }
 
 #[cfg(test)]
@@ -247,5 +289,19 @@ mod tests {
         let first = app.data.capsule.compiler.clone();
         app.handle_key(key('s'));
         assert_ne!(app.data.capsule.compiler, first);
+    }
+
+    #[test]
+    fn source_and_target_cycle_in_tui() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        app.handle_key(key(']'));
+        assert_eq!(app.data.source, CliTool::Claude);
+        assert_eq!(app.data.capsule.source_cli, CliTool::Claude);
+
+        app.handle_key(key('{'));
+        assert_eq!(app.data.target, CliTool::Claude);
+        assert_eq!(app.data.capsule.target_cli, CliTool::Claude);
+        assert!(app.data.capsule.target_branch.contains("claude"));
+        assert!(app.data.branches[2].label.contains("claude"));
     }
 }
