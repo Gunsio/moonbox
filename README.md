@@ -25,6 +25,8 @@ The first implementation focuses on the product shell:
 - Fixed status line for action feedback
 - Context-aware key bar for the current panel or modal
 - Visible rewind marker in the timeline, plus rewind-aware branch and launch preview
+- Timeline auto-scroll, Capsule/modal scroll, and small-terminal modal polish
+- Copyable launch/original commands via `y` with OSC52 clipboard support
 - Serializable core models for future adapters
 
 ## Run
@@ -113,9 +115,9 @@ Stable interfaces matter more than any single framework:
 
 ### Can Build Now
 
-- Scroll handling for long timeline, capsule, and modal content.
-- Small-terminal polish for launch/help/diff overlays.
-- Copyable command output for launch and original-session resume previews.
+- Command output panes for copied launch/original commands.
+- More precise modal scroll indicators.
+- Inline command validation before launch.
 
 ### Prototype Now, Improve With Real Data
 

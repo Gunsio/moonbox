@@ -43,7 +43,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     render_command_bar(frame, chunks[3], app);
 
     if app.show_help {
-        render_help(frame, root);
+        render_help(frame, root, app);
     }
     if app.show_launch {
         render_launch(frame, root, app);
@@ -52,7 +52,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         render_open_original(frame, root, app);
     }
     if app.show_diff {
-        render_diff(frame, root);
+        render_diff(frame, root, app);
     }
 }
 
@@ -344,9 +344,16 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(
         Paragraph::new(lines)
             .block(panel_block(" Timeline ", app.focus == Focus::Timeline))
+            .scroll((timeline_scroll(app, area), 0))
             .wrap(Wrap { trim: true }),
         area,
     );
+}
+
+fn timeline_scroll(app: &App, area: Rect) -> u16 {
+    let viewport = area.height.saturating_sub(2).max(1);
+    let selected_line = app.selected_event.saturating_mul(3) as u16;
+    selected_line.saturating_sub(viewport / 2)
 }
 
 fn render_capsule(frame: &mut Frame, area: Rect, app: &App) {
@@ -421,6 +428,7 @@ fn render_capsule(frame: &mut Frame, area: Rect, app: &App) {
                 " Work Capsule Preview ",
                 app.focus == Focus::Capsule,
             ))
+            .scroll((app.capsule_scroll, 0))
             .wrap(Wrap { trim: true }),
         area,
     );
@@ -534,12 +542,26 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
         return vec![
             ("j/k", "Target"),
             ("enter", "Save"),
+            ("y", "Copy"),
+            ("PgUp/Dn", "Scroll"),
             ("Esc", "Cancel"),
-            ("q", "Cancel"),
         ];
     }
-    if app.show_open_original || app.show_diff || app.show_help {
-        return vec![("Esc", "Close"), ("q", "Close")];
+    if app.show_open_original {
+        return vec![
+            ("y", "Copy"),
+            ("j/k", "Scroll"),
+            ("PgUp/Dn", "Scroll"),
+            ("Esc", "Close"),
+        ];
+    }
+    if app.show_diff || app.show_help {
+        return vec![
+            ("j/k", "Scroll"),
+            ("PgUp/Dn", "Scroll"),
+            ("Esc", "Close"),
+            ("q", "Close"),
+        ];
     }
 
     match app.focus {
@@ -564,11 +586,12 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("q", "Quit"),
         ],
         Focus::Capsule => vec![
+            ("j/k", "Scroll"),
+            ("gg/G", "Top/Bottom"),
             ("c", "Compile"),
             ("v", "Verify"),
             ("s", "Skill"),
             ("d", "Diff"),
-            ("space", "Rewind"),
             ("tab", "Next"),
             (":", "Cmd"),
             ("q", "Quit"),
@@ -621,8 +644,8 @@ fn status_line(app: &App) -> Line<'_> {
     ])
 }
 
-fn render_help(frame: &mut Frame, root: Rect) {
-    let area = centered(root, 52, 48);
+fn render_help(frame: &mut Frame, root: Rect, app: &App) {
+    let area = modal_area(root, 52, 48);
     frame.render_widget(Clear, area);
     let lines = vec![
         Line::from(Span::styled(
@@ -648,13 +671,14 @@ fn render_help(frame: &mut Frame, root: Rect) {
     frame.render_widget(
         Paragraph::new(lines)
             .block(panel_block(" Help ", true))
+            .scroll((app.modal_scroll, 0))
             .wrap(Wrap { trim: true }),
         area,
     );
 }
 
 fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
-    let area = centered(root, 76, 78);
+    let area = modal_area(root, 76, 78);
     frame.render_widget(Clear, area);
     let session = app
         .current_session()
@@ -678,11 +702,7 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             Span::styled("  handoff target", Style::default().fg(theme::MUTED)),
         ]));
     }
-    let target_branch = format!(
-        "moonbox/{}-rewind-{}",
-        app.pending_target.id(),
-        app.rewind_event_id
-    );
+    let target_branch = app.launch_branch();
     let mut lines = vec![
         Line::from(Span::styled(
             "Choose target CLI",
@@ -716,29 +736,26 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         ]),
         Line::raw(""),
         Line::from(Span::styled(
-            format!(
-                "moonbox launch --target {} --capsule ~/.moonbox/capsules/{}.json",
-                app.pending_target.id(),
-                app.rewind_event_id
-            ),
+            app.launch_command(),
             Style::default().fg(theme::CYAN),
         )),
         Line::raw(""),
         Line::from(Span::styled(
-            "j/k choose target   enter confirm   Esc cancel",
+            "j/k choose target   y copy command   enter confirm   Esc cancel",
             Style::default().fg(theme::MUTED),
         )),
     ]);
     frame.render_widget(
         Paragraph::new(lines)
             .block(panel_block(" Launch ", true))
+            .scroll((app.modal_scroll, 0))
             .wrap(Wrap { trim: true }),
         area,
     );
 }
 
 fn render_open_original(frame: &mut Frame, root: Rect, app: &App) {
-    let area = centered(root, 72, 64);
+    let area = modal_area(root, 72, 64);
     frame.render_widget(Clear, area);
     let lines = if let Some(session) = app.current_session() {
         vec![
@@ -772,7 +789,7 @@ fn render_open_original(frame: &mut Frame, root: Rect, app: &App) {
                 Style::default().fg(theme::MUTED),
             )),
             Line::from(Span::styled(
-                "Press Esc to close",
+                "y copy command   Esc close",
                 Style::default().fg(theme::MUTED),
             )),
         ]
@@ -795,13 +812,14 @@ fn render_open_original(frame: &mut Frame, root: Rect, app: &App) {
     frame.render_widget(
         Paragraph::new(lines)
             .block(panel_block(" Open Original ", true))
+            .scroll((app.modal_scroll, 0))
             .wrap(Wrap { trim: true }),
         area,
     );
 }
 
-fn render_diff(frame: &mut Frame, root: Rect) {
-    let area = centered(root, 64, 42);
+fn render_diff(frame: &mut Frame, root: Rect, app: &App) {
+    let area = modal_area(root, 64, 42);
     frame.render_widget(Clear, area);
     let lines = vec![
         Line::from(Span::styled(
@@ -836,6 +854,7 @@ fn render_diff(frame: &mut Frame, root: Rect) {
     frame.render_widget(
         Paragraph::new(lines)
             .block(panel_block(" Diff ", true))
+            .scroll((app.modal_scroll, 0))
             .wrap(Wrap { trim: true }),
         area,
     );
@@ -884,6 +903,12 @@ fn key(label: &'static str) -> Span<'static> {
 
 fn txt(label: &'static str) -> Span<'static> {
     Span::styled(label, Style::default().fg(theme::MUTED))
+}
+
+fn modal_area(root: Rect, percent_x: u16, percent_y: u16) -> Rect {
+    let width = if root.width < 100 { 100 } else { percent_x };
+    let height = if root.height < 34 { 100 } else { percent_y };
+    centered(root, width, height)
 }
 
 fn centered(area: Rect, percent_x: u16, percent_y: u16) -> Rect {

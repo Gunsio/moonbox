@@ -73,9 +73,12 @@ pub struct App {
     pub pending_target: CliTool,
     pub status_message: String,
     pub rewind_event_id: String,
+    pub capsule_scroll: u16,
+    pub modal_scroll: u16,
     pub verify_passed: bool,
     pub compile_status: &'static str,
     pub pending_g: bool,
+    clipboard_text: Option<String>,
     should_quit: bool,
 }
 
@@ -100,15 +103,22 @@ impl App {
             pending_target: target,
             status_message: "Ready".into(),
             rewind_event_id,
+            capsule_scroll: 0,
+            modal_scroll: 0,
             verify_passed: true,
             compile_status: "ACTIVE",
             pending_g: false,
+            clipboard_text: None,
             should_quit: false,
         }
     }
 
     pub fn should_quit(&self) -> bool {
         self.should_quit
+    }
+
+    pub fn take_clipboard_text(&mut self) -> Option<String> {
+        self.clipboard_text.take()
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) {
@@ -124,6 +134,10 @@ impl App {
 
         if self.show_launch {
             self.handle_launch_key(key);
+            return;
+        }
+        if self.has_overlay() {
+            self.handle_overlay_key(key);
             return;
         }
 
@@ -157,6 +171,7 @@ impl App {
             KeyCode::Char('v') => self.toggle_verify(),
             KeyCode::Char('d') => self.toggle_diff(),
             KeyCode::Char('s') => self.cycle_compiler(),
+            KeyCode::Char('y') => self.copy_focused_command(),
             KeyCode::Enter => self.open_launch_picker(),
             _ => self.pending_g = false,
         }
@@ -261,9 +276,19 @@ impl App {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.show_launch = false;
+                self.modal_scroll = 0;
                 self.set_status("Launch cancelled");
             }
             KeyCode::Enter => self.confirm_launch_target(),
+            KeyCode::Char('y') => self.copy_launch_command(),
+            KeyCode::PageDown => self.scroll_modal(true, 6),
+            KeyCode::PageUp => self.scroll_modal(false, 6),
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.scroll_modal(true, 6)
+            }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.scroll_modal(false, 6)
+            }
             KeyCode::Char('j')
             | KeyCode::Char('l')
             | KeyCode::Down
@@ -278,18 +303,40 @@ impl App {
         }
     }
 
+    fn handle_overlay_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => self.back_or_quit(),
+            KeyCode::Char('y') => self.copy_focused_command(),
+            KeyCode::Char('j') | KeyCode::Down => self.scroll_modal(true, 1),
+            KeyCode::Char('k') | KeyCode::Up => self.scroll_modal(false, 1),
+            KeyCode::PageDown => self.scroll_modal(true, 6),
+            KeyCode::PageUp => self.scroll_modal(false, 6),
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.scroll_modal(true, 6)
+            }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.scroll_modal(false, 6)
+            }
+            _ => {}
+        }
+    }
+
     fn back_or_quit(&mut self) {
         if self.show_diff {
             self.show_diff = false;
+            self.modal_scroll = 0;
             self.set_status("Diff closed");
         } else if self.show_open_original {
             self.show_open_original = false;
+            self.modal_scroll = 0;
             self.set_status("Original preview closed");
         } else if self.show_launch {
             self.show_launch = false;
+            self.modal_scroll = 0;
             self.set_status("Launch cancelled");
         } else if self.show_help {
             self.show_help = false;
+            self.modal_scroll = 0;
             self.set_status("Help closed");
         } else {
             self.should_quit = true;
@@ -323,7 +370,8 @@ impl App {
                 self.selected_event =
                     (self.selected_event + 1).min(self.data.timeline.len().saturating_sub(1));
             }
-            Focus::Capsule | Focus::Branches => {}
+            Focus::Capsule => self.scroll_capsule(true, 1),
+            Focus::Branches => {}
         }
         self.pending_g = false;
     }
@@ -332,7 +380,8 @@ impl App {
         match self.focus {
             Focus::Sessions => self.move_session(false),
             Focus::Timeline => self.selected_event = self.selected_event.saturating_sub(1),
-            Focus::Capsule | Focus::Branches => {}
+            Focus::Capsule => self.scroll_capsule(false, 1),
+            Focus::Branches => {}
         }
         self.pending_g = false;
     }
@@ -345,7 +394,8 @@ impl App {
                 }
             }
             Focus::Timeline => self.selected_event = 0,
-            Focus::Capsule | Focus::Branches => {}
+            Focus::Capsule => self.capsule_scroll = 0,
+            Focus::Branches => {}
         }
         self.pending_g = false;
     }
@@ -358,7 +408,8 @@ impl App {
                 }
             }
             Focus::Timeline => self.selected_event = self.data.timeline.len().saturating_sub(1),
-            Focus::Capsule | Focus::Branches => {}
+            Focus::Capsule => self.scroll_capsule(true, 999),
+            Focus::Branches => {}
         }
         self.pending_g = false;
     }
@@ -424,6 +475,7 @@ impl App {
 
     fn toggle_diff(&mut self) {
         self.show_diff = !self.show_diff;
+        self.modal_scroll = 0;
         if self.show_diff {
             self.set_status("Diff opened");
         } else {
@@ -434,12 +486,14 @@ impl App {
 
     fn open_help(&mut self) {
         self.show_help = true;
+        self.modal_scroll = 0;
         self.set_status("Help opened");
         self.pending_g = false;
     }
 
     fn open_original(&mut self) {
         self.show_open_original = true;
+        self.modal_scroll = 0;
         if let Some(session) = self.current_session() {
             self.set_status(format!("Original ready: {} {}", session.cli, session.id));
         } else {
@@ -523,6 +577,10 @@ impl App {
         }
     }
 
+    fn has_overlay(&self) -> bool {
+        self.show_help || self.show_open_original || self.show_diff
+    }
+
     fn cycle_target(&mut self, forward: bool) {
         self.pending_target = if forward {
             self.pending_target.next()
@@ -541,6 +599,7 @@ impl App {
         }
         self.pending_target = self.data.target;
         self.show_launch = true;
+        self.modal_scroll = 0;
         self.set_status("Choose target CLI");
         self.pending_g = false;
     }
@@ -550,6 +609,7 @@ impl App {
         self.replace_demo_data(self.active_source(), target);
         let _ = config::save_last_target(target);
         self.show_launch = false;
+        self.modal_scroll = 0;
         self.set_status(format!("Target saved: {target}"));
         self.pending_g = false;
     }
@@ -585,6 +645,75 @@ impl App {
 
     fn set_status(&mut self, message: impl Into<String>) {
         self.status_message = message.into();
+    }
+
+    fn scroll_capsule(&mut self, forward: bool, amount: u16) {
+        self.capsule_scroll = if forward {
+            self.capsule_scroll.saturating_add(amount)
+        } else {
+            self.capsule_scroll.saturating_sub(amount)
+        };
+    }
+
+    fn scroll_modal(&mut self, forward: bool, amount: u16) {
+        self.modal_scroll = if forward {
+            self.modal_scroll.saturating_add(amount)
+        } else {
+            self.modal_scroll.saturating_sub(amount)
+        };
+    }
+
+    fn copy_text(&mut self, label: &str, text: String) {
+        self.clipboard_text = Some(text);
+        self.set_status(format!("Copied {label} command"));
+    }
+
+    fn copy_focused_command(&mut self) {
+        if self.show_launch {
+            self.copy_launch_command();
+        } else if self.show_open_original {
+            self.copy_original_command();
+        } else {
+            self.set_status("No command to copy");
+        }
+        self.pending_g = false;
+    }
+
+    fn copy_launch_command(&mut self) {
+        self.copy_text("launch", self.launch_command());
+    }
+
+    fn copy_original_command(&mut self) {
+        if let Some(command) = self.original_resume_command() {
+            self.copy_text("original", command);
+        } else {
+            self.set_status("No session selected");
+        }
+    }
+
+    pub fn launch_command(&self) -> String {
+        format!(
+            "moonbox launch --target {} --capsule {}",
+            self.pending_target.id(),
+            self.capsule_path()
+        )
+    }
+
+    pub fn launch_branch(&self) -> String {
+        format!(
+            "moonbox/{}-rewind-{}",
+            self.pending_target.id(),
+            self.rewind_event_id
+        )
+    }
+
+    pub fn capsule_path(&self) -> String {
+        format!("~/.moonbox/capsules/{}.json", self.rewind_event_id)
+    }
+
+    pub fn original_resume_command(&self) -> Option<String> {
+        self.current_session()
+            .map(|session| session.resume_command.clone())
     }
 
     fn apply_rewind_event(&mut self, id: String, title: String) {
@@ -790,5 +919,54 @@ mod tests {
 
         assert!(!app.verify_passed);
         assert_eq!(app.status_message, "Verify: NEEDS REVIEW");
+    }
+
+    #[test]
+    fn launch_copy_queues_clipboard_text() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        app.handle_key(key('y'));
+
+        let copied = app.take_clipboard_text().expect("clipboard text");
+        assert!(copied.starts_with("moonbox launch --target"));
+        assert!(copied.contains("evt-091.json"));
+        assert_eq!(app.status_message, "Copied launch command");
+    }
+
+    #[test]
+    fn original_copy_queues_resume_command() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        app.handle_key(key('o'));
+        app.handle_key(key('y'));
+
+        assert_eq!(
+            app.take_clipboard_text().as_deref(),
+            Some("codex resume codex-cxcp-design")
+        );
+        assert_eq!(app.status_message, "Copied original command");
+    }
+
+    #[test]
+    fn overlay_navigation_scrolls_modal_without_moving_timeline() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        app.focus = Focus::Timeline;
+        app.selected_event = 3;
+        app.handle_key(key('?'));
+        app.handle_key(key('j'));
+
+        assert_eq!(app.selected_event, 3);
+        assert_eq!(app.modal_scroll, 1);
+    }
+
+    #[test]
+    fn capsule_panel_scrolls_with_vim_navigation() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        app.focus = Focus::Capsule;
+
+        app.handle_key(key('j'));
+        app.handle_key(key('j'));
+        app.handle_key(key('k'));
+
+        assert_eq!(app.capsule_scroll, 1);
     }
 }
