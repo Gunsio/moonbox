@@ -16,6 +16,8 @@ fn main() -> Result<()> {
         Command::Sessions(args) => print_sessions(args),
         Command::Open(args) => print_open_command(args),
         Command::Capsule(args) => print_capsule(args),
+        Command::CompileRequest(args) => print_compile_request(args),
+        Command::CompileOutput(args) => print_compile_output(args),
     }
 }
 
@@ -37,11 +39,11 @@ fn run_tui(args: cli::TuiArgs) -> Result<()> {
 }
 
 fn print_sessions(args: cli::JsonArgs) -> Result<()> {
-    let data = core::demo::demo_data(core::model::CliTool::Codex, core::model::CliTool::Hermes);
+    let sessions = core::workbench::list_sessions();
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&data.sessions)?);
+        println!("{}", serde_json::to_string_pretty(&sessions)?);
     } else {
-        for session in data.sessions {
+        for session in sessions {
             println!(
                 "{:<8} {:<28} {:<24} {}",
                 session.cli, session.title, session.cwd, session.updated
@@ -52,26 +54,53 @@ fn print_sessions(args: cli::JsonArgs) -> Result<()> {
 }
 
 fn print_open_command(args: cli::OpenArgs) -> Result<()> {
-    let data = core::demo::demo_data(core::model::CliTool::Codex, core::model::CliTool::Hermes);
-    let session = args
-        .session
-        .as_deref()
-        .and_then(|id| data.sessions.iter().find(|session| session.id == id))
-        .unwrap_or(&data.sessions[0]);
-
-    println!("{}", session.resume_command);
+    if let Some(command) = core::workbench::open_command(args.session.as_deref()) {
+        println!("{command}");
+    }
     Ok(())
 }
 
 fn print_capsule(args: cli::JsonArgs) -> Result<()> {
-    let data = core::demo::demo_data(core::model::CliTool::Codex, core::model::CliTool::Hermes);
+    let capsule =
+        core::workbench::capsule(core::model::CliTool::Codex, core::model::CliTool::Hermes);
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&data.capsule)?);
+        println!("{}", serde_json::to_string_pretty(&capsule)?);
     } else {
-        println!("goal: {}", data.capsule.goal);
-        println!("state: {}", data.capsule.state);
-        println!("rewind: {}", data.capsule.rewind_point);
-        println!("target: {}", data.capsule.target_branch);
+        println!("goal: {}", capsule.goal);
+        println!("state: {}", capsule.state);
+        println!("rewind: {}", capsule.rewind_point);
+        println!("target: {}", capsule.target_branch);
+    }
+    Ok(())
+}
+
+fn print_compile_request(args: cli::JsonArgs) -> Result<()> {
+    let request = core::workbench::compile_request(
+        core::model::CliTool::Codex,
+        core::model::CliTool::Hermes,
+        "evt-091",
+    );
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&request)?);
+    } else {
+        println!("source: {}", request.source_cli);
+        println!("target: {}", request.target_cli);
+        println!("session: {}", request.source_session.id);
+        println!("rewind: {}", request.rewind_event_id);
+        println!("compiler: {}", request.compiler);
+    }
+    Ok(())
+}
+
+fn print_compile_output(args: cli::JsonArgs) -> Result<()> {
+    let output =
+        core::workbench::compile_output(core::model::CliTool::Codex, core::model::CliTool::Hermes);
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        println!("version: {}", output.version);
+        println!("goal: {}", output.capsule.goal);
+        println!("target: {}", output.capsule.target_branch);
     }
     Ok(())
 }

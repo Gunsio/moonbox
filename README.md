@@ -28,6 +28,8 @@ The first implementation focuses on the product shell:
 - Timeline auto-scroll, Capsule/modal scroll, and small-terminal modal polish
 - Copyable launch/original commands via `y` with OSC52 clipboard support
 - Serializable core models for future adapters
+- `SourceAdapter` contract and demo adapter fixture layer
+- Canonical Timeline and compiler request/output JSON contract fixtures
 
 ## Run
 
@@ -51,6 +53,8 @@ cargo run -- tui --target codex
 cargo run -- sessions --json
 cargo run -- open --session codex-cxcp-design
 cargo run -- capsule --json
+cargo run -- compile-request --json
+cargo run -- compile-output --json
 ```
 
 ## Interaction Model
@@ -115,13 +119,12 @@ Stable interfaces matter more than any single framework:
 
 ### Can Build Now
 
-- Command output panes for copied launch/original commands.
-- More precise modal scroll indicators.
+- Session-driven detail panes: selected session should drive timeline, capsule preview, and branch preview.
+- Adapter fixture snapshots for each source tool.
 - Inline command validation before launch.
 
 ### Prototype Now, Improve With Real Data
 
-- Session-driven detail panes: selected session should drive timeline, capsule preview, and branch preview.
 - Session row density: tune whether `cwd`, branch, token count, status, or error reason is most useful.
 - Launch preview: keep the command structure now, generate exact commands after real adapters exist.
 - Session health badges: mock status now, compute from real resume errors and compatibility signals later.

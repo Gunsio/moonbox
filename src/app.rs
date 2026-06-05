@@ -1,8 +1,9 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::core::{
-    config, demo,
+    config,
     model::{CliTool, DemoData, SessionSummary},
+    workbench,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,7 +85,7 @@ pub struct App {
 
 impl App {
     pub fn new(source: CliTool, target: CliTool) -> Self {
-        let data = demo::demo_data(source, target);
+        let data = workbench::load_demo_workbench(source, target);
         let rewind_event_id = initial_rewind_event_id(&data);
         Self {
             data,
@@ -623,7 +624,7 @@ impl App {
     fn replace_demo_data(&mut self, source: CliTool, target: CliTool) {
         let selected_compiler = self.selected_compiler;
         let rewind_event_id = self.rewind_event_id.clone();
-        self.data = demo::demo_data(source, target);
+        self.data = workbench::load_demo_workbench(source, target);
         self.selected_session = self
             .selected_session
             .min(self.data.sessions.len().saturating_sub(1));

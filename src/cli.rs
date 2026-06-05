@@ -23,6 +23,10 @@ pub enum Command {
     Open(OpenArgs),
     /// Print the current Work Capsule. Currently uses demo data.
     Capsule(JsonArgs),
+    /// Print the compiler request contract fixture. Currently uses demo data.
+    CompileRequest(JsonArgs),
+    /// Print the compiler output contract fixture. Currently uses demo data.
+    CompileOutput(JsonArgs),
 }
 
 impl Default for Command {
