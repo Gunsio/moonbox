@@ -141,7 +141,7 @@ pub fn demo_data(source: CliTool, target: CliTool) -> DemoData {
     let branches = vec![
         BranchNode {
             id: "root".into(),
-            label: format!("source/{source_session_id}"),
+            label: format!("original/{source_session_id}"),
             detail: "original session, read-only".into(),
             active: false,
         },
@@ -153,7 +153,7 @@ pub fn demo_data(source: CliTool, target: CliTool) -> DemoData {
         },
         BranchNode {
             id: "target".into(),
-            label: format!("target/{}-new-branch", target.id()),
+            label: format!("handoff/{}-new-branch", target.id()),
             detail: "compiled by engineering-handoff".into(),
             active: true,
         },

@@ -20,7 +20,16 @@ fn main() -> Result<()> {
 }
 
 fn run_tui(args: cli::TuiArgs) -> Result<()> {
-    let app = app::App::new(args.source, args.target);
+    let target = args
+        .target
+        .or_else(core::config::load_last_target)
+        .unwrap_or(core::model::CliTool::Hermes);
+    let filter = args.filter.or(args.source);
+    let source = filter.unwrap_or(core::model::CliTool::Codex);
+    let mut app = app::App::new(source, target);
+    if let Some(filter) = filter {
+        app.apply_session_filter(app::SessionFilter::Tool(filter));
+    }
     let mut terminal = ratatui::init();
     let result = tui::run(&mut terminal, app);
     ratatui::restore();

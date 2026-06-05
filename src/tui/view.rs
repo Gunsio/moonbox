@@ -10,7 +10,7 @@ use ratatui::{
 
 use crate::{
     app::{App, Focus},
-    core::model::{SessionStatus, TimelineKind},
+    core::model::{CliTool, SessionStatus, TimelineKind},
 };
 
 use super::theme;
@@ -23,7 +23,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     );
 
     let root = centered(area, 98, 96);
-    let header_height = if root.width < 120 { 5 } else { 3 };
+    let header_height = if root.width < 120 { 4 } else { 3 };
     let body_min = if root.height < 32 { 8 } else { 18 };
     let branch_height = if root.height < 32 { 3 } else { 4 };
     let command_height = if root.width < 120 { 4 } else { 3 };
@@ -78,20 +78,11 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
         Span::styled("月光宝盒", Style::default().fg(theme::MUTED)),
     ]);
     let state = Line::from(vec![
-        Span::raw("Source "),
+        Span::raw("Filter "),
         Span::styled("[ ]", Style::default().fg(theme::MUTED)),
         Span::raw(": "),
         Span::styled(
-            app.data.source.to_string(),
-            Style::default()
-                .fg(theme::BLUE)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw("   Target "),
-        Span::styled("{ }", Style::default().fg(theme::MUTED)),
-        Span::raw(": "),
-        Span::styled(
-            app.data.target.to_string(),
+            app.session_filter.label(),
             Style::default()
                 .fg(theme::BLUE)
                 .add_modifier(Modifier::BOLD),
@@ -304,16 +295,12 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
 
 fn render_capsule(frame: &mut Frame, area: Rect, app: &App) {
     let capsule = &app.data.capsule;
-    let source = format!("{} / {}", capsule.source_cli, capsule.source_session);
-    let target = format!("{} / {}", capsule.target_cli, capsule.target_branch);
     let mut lines = vec![
         label_line("Goal", &capsule.goal, theme::BLUE),
         Line::raw(""),
         label_line("State", &capsule.state, theme::GOLD),
         Line::raw(""),
-        label_line("Source", &source, theme::CYAN),
         label_line("Rewind", &capsule.rewind_point, theme::GOLD),
-        label_line("Target", &target, theme::GREEN),
         Line::raw(""),
         Line::from(Span::styled(
             "Decisions",
@@ -384,12 +371,23 @@ fn render_capsule(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_branch_tree(frame: &mut Frame, area: Rect, app: &App) {
+    let original = app
+        .current_session()
+        .map(|session| format!("original/{}", session.id))
+        .unwrap_or_else(|| "original/no-session".into());
+    let target = format!("handoff/{}-new-branch", app.data.target.id());
+    let nodes = [
+        (original, false, "original session, read-only"),
+        ("rewind/evt-091".into(), false, "before raw resume failure"),
+        (target, true, "compiled by engineering-handoff"),
+    ];
+
     let mut spans = vec![Span::styled(" * ", Style::default().fg(theme::MUTED))];
-    for (idx, node) in app.data.branches.iter().enumerate() {
+    for (idx, (label, active, _)) in nodes.iter().enumerate() {
         if idx > 0 {
             spans.push(Span::styled(" ── ", Style::default().fg(theme::BORDER)));
         }
-        let style = if node.active {
+        let style = if *active {
             Style::default()
                 .fg(ratatui::style::Color::Black)
                 .bg(theme::BLUE)
@@ -397,14 +395,12 @@ fn render_branch_tree(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             Style::default().fg(theme::TEXT)
         };
-        spans.push(Span::styled(format!(" {} ", node.label), style));
+        spans.push(Span::styled(format!(" {label} "), style));
     }
-    let active = app
-        .data
-        .branches
+    let active = nodes
         .iter()
-        .find(|node| node.active)
-        .map(|node| node.detail.as_str())
+        .find(|(_, active, _)| *active)
+        .map(|(_, _, detail)| *detail)
         .unwrap_or("no active branch");
     let lines = if area.height < 4 {
         vec![Line::from(spans)]
@@ -444,9 +440,7 @@ fn render_command_bar(frame: &mut Frame, area: Rect, app: &App) {
                 key("/"),
                 txt(" Search  "),
                 key("[ ]"),
-                txt(" Source  "),
-                key("{ }"),
-                txt(" Target"),
+                txt(" Filter"),
             ]),
             Line::from(vec![
                 key("f"),
@@ -488,9 +482,7 @@ fn render_command_bar(frame: &mut Frame, area: Rect, app: &App) {
             key("o"),
             txt(" Original  "),
             key("[ ]"),
-            txt(" Source  "),
-            key("{ }"),
-            txt(" Target  "),
+            txt(" Filter  "),
             key("space"),
             txt(" Rewind  "),
             key("c"),
@@ -539,11 +531,10 @@ fn render_help(frame: &mut Frame, root: Rect) {
         Line::raw("f               cycle session source filter"),
         Line::raw("/text           filter sessions by text"),
         Line::raw("o               open original session with original CLI"),
-        Line::raw("[ / ]           previous / next source CLI and filter"),
-        Line::raw("{ / }           previous / next target CLI"),
+        Line::raw("[ / ]           previous / next session source filter"),
         Line::raw("space           set rewind point"),
         Line::raw("c, v, d, s      compile, verify, diff, switch skill"),
-        Line::raw("enter           launch target handoff preview"),
+        Line::raw("enter           choose target and show handoff command"),
         Line::raw(":               command mode"),
         Line::raw("q / Esc         close or quit"),
     ];
@@ -559,13 +550,44 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
     let area = centered(root, 72, 64);
     frame.render_widget(Clear, area);
     let capsule = &app.data.capsule;
+    let session = app
+        .current_session()
+        .map(|session| format!("{} / {}", session.cli, session.id))
+        .unwrap_or_else(|| "No session selected".into());
+    let mut target_spans = Vec::new();
+    for target in CliTool::ALL {
+        if !target_spans.is_empty() {
+            target_spans.push(Span::raw("  "));
+        }
+        let style = if target == capsule.target_cli {
+            Style::default()
+                .fg(ratatui::style::Color::Black)
+                .bg(theme::BLUE)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme::TEXT)
+        };
+        let label = if target == capsule.target_cli {
+            format!("[ {target} ]")
+        } else {
+            format!("  {target}  ")
+        };
+        target_spans.push(Span::styled(label, style));
+    }
     let lines = vec![
         Line::from(Span::styled(
-            "Target launch preview",
+            "Choose target CLI",
             Style::default()
                 .fg(theme::GOLD)
                 .add_modifier(Modifier::BOLD),
         )),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled("Session: ", Style::default().fg(theme::BLUE)),
+            Span::raw(session),
+        ]),
+        Line::raw(""),
+        Line::from(target_spans),
         Line::raw(""),
         Line::from(vec![
             Span::styled("Target: ", Style::default().fg(theme::BLUE)),
@@ -585,7 +607,7 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         )),
         Line::raw(""),
         Line::from(Span::styled(
-            "Press Esc to close",
+            "j/k choose target   enter confirm   Esc close",
             Style::default().fg(theme::MUTED),
         )),
     ];

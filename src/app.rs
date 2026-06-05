@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::core::{
-    demo,
+    config, demo,
     model::{CliTool, DemoData, SessionSummary},
 };
 
@@ -42,6 +42,15 @@ impl SessionFilter {
             Self::Tool(CliTool::Codex) => Self::Tool(CliTool::Claude),
             Self::Tool(CliTool::Claude) => Self::Tool(CliTool::Hermes),
             Self::Tool(CliTool::Hermes) => Self::All,
+        }
+    }
+
+    fn previous(self) -> Self {
+        match self {
+            Self::All => Self::Tool(CliTool::Hermes),
+            Self::Tool(CliTool::Codex) => Self::All,
+            Self::Tool(CliTool::Claude) => Self::Tool(CliTool::Codex),
+            Self::Tool(CliTool::Hermes) => Self::Tool(CliTool::Claude),
         }
     }
 }
@@ -105,15 +114,18 @@ impl App {
             return;
         }
 
+        if self.show_launch {
+            self.handle_launch_key(key);
+            return;
+        }
+
         match key.code {
             KeyCode::Esc => self.back_or_quit(),
             KeyCode::Char('q') => self.back_or_quit(),
             KeyCode::Char('?') => self.show_help = true,
-            KeyCode::Char('[') => self.cycle_source(false),
-            KeyCode::Char(']') => self.cycle_source(true),
-            KeyCode::Char('{') => self.cycle_target(false),
-            KeyCode::Char('}') => self.cycle_target(true),
-            KeyCode::Char('f') => self.cycle_session_filter(),
+            KeyCode::Char('[') => self.cycle_session_filter(false),
+            KeyCode::Char(']') => self.cycle_session_filter(true),
+            KeyCode::Char('f') => self.cycle_session_filter(true),
             KeyCode::Char('o') => self.show_open_original = true,
             KeyCode::Char(':') => {
                 self.command_mode = true;
@@ -163,19 +175,27 @@ impl App {
                     "verify" | "v" => self.verify_passed = true,
                     "help" | "?" => self.show_help = true,
                     "diff" | "d" => self.show_diff = !self.show_diff,
-                    "filter" | "filter next" => self.cycle_session_filter(),
-                    "filter all" | "filter clear" => self.set_session_filter(SessionFilter::All),
-                    "filter codex" => self.set_session_filter(SessionFilter::Tool(CliTool::Codex)),
+                    "filter" | "filter next" => self.cycle_session_filter(true),
+                    "filter prev" | "filter previous" => self.cycle_session_filter(false),
+                    "filter all" | "filter clear" => self.apply_session_filter(SessionFilter::All),
+                    "filter codex" | "source codex" => {
+                        self.apply_session_filter(SessionFilter::Tool(CliTool::Codex))
+                    }
                     "filter claude" => {
-                        self.set_session_filter(SessionFilter::Tool(CliTool::Claude))
+                        self.apply_session_filter(SessionFilter::Tool(CliTool::Claude))
                     }
                     "filter hermes" => {
-                        self.set_session_filter(SessionFilter::Tool(CliTool::Hermes))
+                        self.apply_session_filter(SessionFilter::Tool(CliTool::Hermes))
                     }
-                    "source" | "source next" => self.cycle_source(true),
-                    "source prev" | "source previous" => self.cycle_source(false),
-                    "target" | "target next" => self.cycle_target(true),
-                    "target prev" | "target previous" => self.cycle_target(false),
+                    "source claude" => {
+                        self.apply_session_filter(SessionFilter::Tool(CliTool::Claude))
+                    }
+                    "source hermes" => {
+                        self.apply_session_filter(SessionFilter::Tool(CliTool::Hermes))
+                    }
+                    "source" | "source next" => self.cycle_session_filter(true),
+                    "source prev" | "source previous" => self.cycle_session_filter(false),
+                    "target" | "launch" => self.show_launch = true,
                     _ => {}
                 }
             }
@@ -183,6 +203,24 @@ impl App {
                 self.command_input.pop();
             }
             KeyCode::Char(ch) => self.command_input.push(ch),
+            _ => {}
+        }
+    }
+
+    fn handle_launch_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => self.show_launch = false,
+            KeyCode::Enter => self.confirm_launch_target(),
+            KeyCode::Char('j')
+            | KeyCode::Char('l')
+            | KeyCode::Down
+            | KeyCode::Right
+            | KeyCode::Char('}') => self.cycle_target(true),
+            KeyCode::Char('k')
+            | KeyCode::Char('h')
+            | KeyCode::Up
+            | KeyCode::Left
+            | KeyCode::Char('{') => self.cycle_target(false),
             _ => {}
         }
     }
@@ -337,11 +375,16 @@ impl App {
         self.selected_session = visible[next];
     }
 
-    fn cycle_session_filter(&mut self) {
-        self.set_session_filter(self.session_filter.next());
+    fn cycle_session_filter(&mut self, forward: bool) {
+        let filter = if forward {
+            self.session_filter.next()
+        } else {
+            self.session_filter.previous()
+        };
+        self.apply_session_filter(filter);
     }
 
-    fn set_session_filter(&mut self, filter: SessionFilter) {
+    pub fn apply_session_filter(&mut self, filter: SessionFilter) {
         self.session_filter = filter;
         self.clamp_selected_session();
         self.pending_g = false;
@@ -356,23 +399,25 @@ impl App {
         }
     }
 
-    fn cycle_source(&mut self, forward: bool) {
-        let source = if forward {
-            self.data.source.next()
-        } else {
-            self.data.source.previous()
-        };
-        self.replace_demo_data(source, self.data.target);
-        self.set_session_filter(SessionFilter::Tool(source));
-    }
-
     fn cycle_target(&mut self, forward: bool) {
         let target = if forward {
             self.data.target.next()
         } else {
             self.data.target.previous()
         };
-        self.replace_demo_data(self.data.source, target);
+        self.replace_demo_data(self.active_source(), target);
+    }
+
+    fn confirm_launch_target(&mut self) {
+        let _ = config::save_last_target(self.data.target);
+        self.show_launch = false;
+        self.pending_g = false;
+    }
+
+    fn active_source(&self) -> CliTool {
+        self.current_session()
+            .map(|session| session.cli)
+            .unwrap_or(self.data.source)
     }
 
     fn replace_demo_data(&mut self, source: CliTool, target: CliTool) {
@@ -439,12 +484,12 @@ mod tests {
     }
 
     #[test]
-    fn source_and_target_cycle_in_tui() {
+    fn source_filter_cycles_in_tui() {
         let mut app = App::new(CliTool::Codex, CliTool::Hermes);
         app.handle_key(key(']'));
-        assert_eq!(app.data.source, CliTool::Claude);
-        assert_eq!(app.data.capsule.source_cli, CliTool::Claude);
-        assert_eq!(app.data.capsule.source_session, "claude-qc-platform");
+        assert_eq!(app.session_filter, SessionFilter::Tool(CliTool::Codex));
+
+        app.handle_key(key(']'));
         assert_eq!(app.session_filter, SessionFilter::Tool(CliTool::Claude));
         assert!(
             app.visible_session_indices()
@@ -452,10 +497,22 @@ mod tests {
                 .all(|index| app.data.sessions[*index].cli == CliTool::Claude)
         );
 
-        app.handle_key(key('{'));
-        assert_eq!(app.data.target, CliTool::Claude);
-        assert_eq!(app.data.capsule.target_cli, CliTool::Claude);
-        assert!(app.data.capsule.target_branch.contains("claude"));
-        assert!(app.data.branches[2].label.contains("claude"));
+        app.handle_key(key('['));
+        assert_eq!(app.session_filter, SessionFilter::Tool(CliTool::Codex));
+    }
+
+    #[test]
+    fn target_cycles_inside_launch_picker() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        assert!(app.show_launch);
+
+        app.handle_key(key('j'));
+        assert_eq!(app.data.target, CliTool::Codex);
+        assert_eq!(app.data.source, CliTool::Codex);
+        assert_eq!(app.data.capsule.source_cli, CliTool::Codex);
+        assert_eq!(app.data.capsule.source_session, "codex-cxcp-design");
+        assert!(app.data.capsule.target_branch.contains("codex"));
+        assert!(app.data.branches[2].label.contains("codex"));
     }
 }

@@ -31,21 +31,17 @@ impl Default for Command {
     }
 }
 
-#[derive(Debug, Args, Clone)]
+#[derive(Debug, Args, Clone, Default)]
 pub struct TuiArgs {
-    #[arg(long, value_enum, default_value_t = CliTool::Codex)]
-    pub source: CliTool,
-    #[arg(long, value_enum, default_value_t = CliTool::Hermes)]
-    pub target: CliTool,
-}
-
-impl Default for TuiArgs {
-    fn default() -> Self {
-        Self {
-            source: CliTool::Codex,
-            target: CliTool::Hermes,
-        }
-    }
+    /// Initial session source filter. Defaults to all sessions.
+    #[arg(long, value_enum)]
+    pub filter: Option<CliTool>,
+    /// Backward-compatible alias for --filter.
+    #[arg(long, value_enum, hide = true)]
+    pub source: Option<CliTool>,
+    /// Initial target CLI. Defaults to the last confirmed target.
+    #[arg(long, value_enum)]
+    pub target: Option<CliTool>,
 }
 
 #[derive(Debug, Args, Clone, Default)]

@@ -45,14 +45,13 @@ cargo run -- capsule --json
 | `/` | Filter sessions by text |
 | `f` | Cycle session source filter |
 | `o` | Open original session with original CLI |
-| `[` / `]` | Previous / next source CLI and filter sessions by source |
-| `{` / `}` | Previous / next target CLI |
+| `[` / `]` | Previous / next session source filter |
 | `space` | Set rewind point |
 | `c` | Compile capsule |
 | `v` | Verify capsule |
 | `d` | Toggle diff preview |
 | `s` | Cycle compiler skill |
-| `enter` | Show target handoff launch command |
+| `enter` | Choose target and show handoff launch command |
 | `:` | Command mode |
 | `?` | Help |
 | `q` / `Esc` | Back / quit |
