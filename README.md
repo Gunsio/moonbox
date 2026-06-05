@@ -19,6 +19,7 @@ The first implementation focuses on the product shell:
 - Time-sorted global session list with source tags
 - Source filter defaults to `All`; `Source` is a session-list filter, not a global handoff mode
 - Target selection lives inside the launch flow, with explicit `> [x]` radio-list selection
+- Target picker validates each target as `READY`, `WARN`, or `BLOCKED`; blocked targets cannot confirm or copy launch commands
 - Last confirmed target is persisted in `~/.config/moonbox/config.json`
 - Demo sessions, timeline, original-session open command, Work Capsule, and branch tree
 - Live `/` session search, combined filter display, and one-key clear with `a`
@@ -71,7 +72,9 @@ tagged by source CLI. Source filtering is controlled by `f` or `[` / `]` and
 starts at `All`. Target is not shown as a global mode on the main screen; it is
 chosen only in the launch picker. In the target picker, `j/k` moves the pending
 selection, `enter` confirms and persists it, and `Esc` / `q` cancels without
-changing the saved target.
+changing the saved target. The picker keeps every target visible and annotates
+each option with `READY`, `WARN`, or `BLOCKED`; blocked targets keep the launch
+command disabled until validation passes.
 
 Session search matches id, title, cwd, source, branch, and health reason. When a
 different session becomes selected by movement, source filter, or search,
@@ -130,18 +133,17 @@ Stable interfaces matter more than any single framework:
 - M1: modal/capsule scroll, copyable launch/original commands, small-terminal polish.
 - M2: serializable core models, `SourceAdapter`, Canonical Timeline, compiler request/output fixtures.
 - M3: session-driven detail panes with per-source demo fixtures and searchable branch/health metadata.
+- M4: launch validation with target picker READY/WARN/BLOCKED states and blocked command confirmation/copy guards.
 
 ### Can Build Now
 
-- M4: inline command validation before launch, including missing session, missing capsule path, target mismatch, and unsupported target states.
-- M4: target picker affordances for disabled or risky choices without hiding them.
 - M5: adapter fixture snapshots for Codex, Claude, and Hermes session discovery/parsing.
+- M6: target launcher dry-run plus verification loop around generated Work Capsule output.
 
 ### Prototype Now, Improve With Real Data
 
 - Launch preview: keep the command structure now, generate exact commands after real adapters exist.
 - Session health badges: demo status now, compute from real resume errors and compatibility signals later.
-- M6: target launcher dry-run plus verification loop around generated Work Capsule output.
 
 ### Best After Real Session Data
 

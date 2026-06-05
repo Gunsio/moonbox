@@ -9,7 +9,7 @@ use ratatui::{
 };
 
 use crate::{
-    app::{App, Focus},
+    app::{App, Focus, LaunchValidationState},
     core::model::{CliTool, SessionStatus, TimelineKind},
 };
 
@@ -575,6 +575,16 @@ type KeyHint = (&'static str, &'static str);
 
 fn active_key_hints(app: &App) -> Vec<KeyHint> {
     if app.show_launch {
+        if app.validate_launch_for_target(app.pending_target).state
+            == LaunchValidationState::Blocked
+        {
+            return vec![
+                ("j/k", "Target"),
+                ("enter/y", "Blocked"),
+                ("PgUp/Dn", "Scroll"),
+                ("Esc", "Cancel"),
+            ];
+        }
         return vec![
             ("j/k", "Target"),
             ("enter", "Save"),
@@ -723,22 +733,35 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
     let mut target_lines = Vec::new();
     for target in CliTool::ALL {
         let selected = target == app.pending_target;
+        let validation = app.validate_launch_for_target(target);
         let style = if selected {
             Style::default()
                 .fg(ratatui::style::Color::Black)
-                .bg(theme::BLUE)
+                .bg(validation_color(validation.state))
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(theme::TEXT)
+            Style::default().fg(validation_color(validation.state))
+        };
+        let muted_style = if selected {
+            Style::default()
+                .fg(ratatui::style::Color::Black)
+                .bg(validation_color(validation.state))
+        } else {
+            Style::default().fg(theme::MUTED)
         };
         let cursor = if selected { ">" } else { " " };
         let mark = if selected { "[x]" } else { "[ ]" };
         target_lines.push(Line::from(vec![
             Span::styled(format!("{cursor} {mark} {target:<6}"), style),
-            Span::styled("  handoff target", Style::default().fg(theme::MUTED)),
+            Span::styled(format!("  {}", validation_label(validation.state)), style),
+        ]));
+        target_lines.push(Line::from(vec![
+            Span::raw("    "),
+            Span::styled(validation.summary(), muted_style),
         ]));
     }
     let target_branch = app.launch_branch();
+    let pending_validation = app.validate_launch_for_target(app.pending_target);
     let mut lines = vec![
         Line::from(Span::styled(
             "Choose target CLI",
@@ -767,17 +790,42 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             Span::raw(app.pending_target.to_string()),
         ]),
         Line::from(vec![
+            Span::styled("Validation: ", Style::default().fg(theme::BLUE)),
+            Span::styled(
+                validation_label(pending_validation.state),
+                Style::default()
+                    .fg(validation_color(pending_validation.state))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                pending_validation.summary(),
+                Style::default().fg(theme::MUTED),
+            ),
+        ]),
+        Line::from(vec![
             Span::styled("Branch: ", Style::default().fg(theme::BLUE)),
             Span::raw(target_branch),
         ]),
         Line::raw(""),
-        Line::from(Span::styled(
-            app.launch_command(),
-            Style::default().fg(theme::CYAN),
-        )),
+        if pending_validation.state == LaunchValidationState::Blocked {
+            Line::from(Span::styled(
+                "Launch command disabled until validation passes",
+                Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+            ))
+        } else {
+            Line::from(Span::styled(
+                app.launch_command(),
+                Style::default().fg(theme::CYAN),
+            ))
+        },
         Line::raw(""),
         Line::from(Span::styled(
-            "j/k choose target   y copy command   enter confirm   Esc cancel",
+            if pending_validation.state == LaunchValidationState::Blocked {
+                "j/k choose target   enter/y blocked   Esc cancel"
+            } else {
+                "j/k choose target   y copy command   enter confirm   Esc cancel"
+            },
             Style::default().fg(theme::MUTED),
         )),
     ]);
@@ -788,6 +836,22 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             .wrap(Wrap { trim: true }),
         area,
     );
+}
+
+fn validation_label(state: LaunchValidationState) -> &'static str {
+    match state {
+        LaunchValidationState::Ready => "READY",
+        LaunchValidationState::Warning => "WARN",
+        LaunchValidationState::Blocked => "BLOCKED",
+    }
+}
+
+fn validation_color(state: LaunchValidationState) -> Color {
+    match state {
+        LaunchValidationState::Ready => theme::GREEN,
+        LaunchValidationState::Warning => theme::GOLD,
+        LaunchValidationState::Blocked => theme::RED,
+    }
 }
 
 fn render_open_original(frame: &mut Frame, root: Rect, app: &App) {
