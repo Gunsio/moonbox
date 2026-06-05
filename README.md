@@ -29,10 +29,17 @@ The first implementation focuses on the product shell:
 cargo run
 ```
 
+Global command after local install:
+
+```bash
+moon
+```
+
 Useful commands:
 
 ```bash
 cargo run -- tui
+moon tui
 cargo run -- tui --filter claude
 cargo run -- tui --target codex
 cargo run -- sessions --json
