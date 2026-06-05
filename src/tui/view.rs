@@ -82,7 +82,7 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
         Span::styled("[ ]", Style::default().fg(theme::MUTED)),
         Span::raw(": "),
         Span::styled(
-            app.session_filter.label(),
+            filter_label(app),
             Style::default()
                 .fg(theme::BLUE)
                 .add_modifier(Modifier::BOLD),
@@ -155,16 +155,30 @@ fn render_body(frame: &mut Frame, area: Rect, app: &App) {
 fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
     let visible = app.visible_session_indices();
     let items: Vec<ListItem> = if visible.is_empty() {
-        vec![ListItem::new(vec![
+        let mut lines = vec![
             Line::from(Span::styled(
-                "No sessions match filter",
+                "No sessions match",
                 Style::default().fg(theme::MUTED),
             )),
-            Line::from(Span::styled(
-                "Use a to clear filter",
-                Style::default().fg(theme::MUTED),
-            )),
-        ])]
+            Line::from(vec![
+                Span::styled("Filter: ", Style::default().fg(theme::MUTED)),
+                Span::styled(app.session_filter.label(), Style::default().fg(theme::CYAN)),
+            ]),
+        ];
+        if !app.search_query.is_empty() {
+            lines.push(Line::from(vec![
+                Span::styled("Query: ", Style::default().fg(theme::MUTED)),
+                Span::styled(
+                    format!("/{}", app.search_query),
+                    Style::default().fg(theme::CYAN),
+                ),
+            ]));
+        }
+        lines.push(Line::from(Span::styled(
+            "Press a to clear",
+            Style::default().fg(theme::MUTED),
+        )));
+        vec![ListItem::new(lines)]
     } else {
         visible
             .iter()
@@ -226,11 +240,7 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
     } else if area.width < 28 {
         format!(" Sessions /{} ", app.search_query)
     } else {
-        format!(
-            " Sessions · {} · /{} ",
-            app.session_filter.label(),
-            app.search_query
-        )
+        format!(" Sessions · {} ", filter_label(app))
     };
 
     let list = List::new(items)
@@ -242,6 +252,14 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         );
     frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn filter_label(app: &App) -> String {
+    if app.search_query.is_empty() {
+        app.session_filter.label().to_string()
+    } else {
+        format!("{} · /{}", app.session_filter.label(), app.search_query)
+    }
 }
 
 fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
