@@ -18,7 +18,7 @@ use super::theme;
 pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
     frame.render_widget(
-        Block::default().style(Style::default().bg(theme::BG).fg(theme::TEXT)),
+        Block::default().style(Style::default().fg(theme::TEXT)),
         area,
     );
 
@@ -198,7 +198,11 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
     let list = List::new(items)
         .block(panel_block(" Sessions ", app.focus == Focus::Sessions))
         .highlight_symbol("▸ ")
-        .highlight_style(Style::default().bg(theme::PANEL_HI).fg(theme::TEXT));
+        .highlight_style(
+            Style::default()
+                .fg(theme::TEXT)
+                .add_modifier(Modifier::BOLD),
+        );
     frame.render_stateful_widget(list, area, &mut state);
 }
 
@@ -342,7 +346,7 @@ fn render_branch_tree(frame: &mut Frame, area: Rect, app: &App) {
         }
         let style = if node.active {
             Style::default()
-                .fg(theme::BG)
+                .fg(ratatui::style::Color::Black)
                 .bg(theme::BLUE)
                 .add_modifier(Modifier::BOLD)
         } else {
@@ -450,7 +454,7 @@ fn render_command_bar(frame: &mut Frame, area: Rect, app: &App) {
             Block::default()
                 .borders(Borders::TOP)
                 .border_style(Style::default().fg(theme::BORDER))
-                .style(Style::default().bg(theme::BG)),
+                .style(Style::default()),
         ),
         area,
     );
@@ -570,7 +574,7 @@ fn panel_block(title: &'static str, focused: bool) -> Block<'static> {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(color))
-        .style(Style::default().bg(theme::PANEL).fg(theme::TEXT))
+        .style(Style::default().fg(theme::TEXT))
         .padding(Padding::horizontal(1))
 }
 
@@ -589,7 +593,6 @@ fn key(label: &'static str) -> Span<'static> {
         format!(" {label} "),
         Style::default()
             .fg(theme::BLUE)
-            .bg(theme::PANEL_HI)
             .add_modifier(Modifier::BOLD),
     )
 }
