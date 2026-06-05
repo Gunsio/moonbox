@@ -161,7 +161,7 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
                 Style::default().fg(theme::MUTED),
             )),
             Line::from(Span::styled(
-                "Use f or / to adjust",
+                "Use a to clear filter",
                 Style::default().fg(theme::MUTED),
             )),
         ])]
@@ -452,6 +452,8 @@ fn render_command_bar(frame: &mut Frame, area: Rect, app: &App) {
             Line::from(vec![
                 key("f"),
                 txt(" Filter  "),
+                key("a"),
+                txt(" Clear  "),
                 key("o"),
                 txt(" Original  "),
                 key("space"),
@@ -486,6 +488,8 @@ fn render_command_bar(frame: &mut Frame, area: Rect, app: &App) {
             txt(" Search  "),
             key("f"),
             txt(" Filter  "),
+            key("a"),
+            txt(" Clear  "),
             key("o"),
             txt(" Original  "),
             key("[ ]"),
@@ -536,6 +540,7 @@ fn render_help(frame: &mut Frame, root: Rect) {
         Line::raw("j/k, gg/G       navigate"),
         Line::raw("tab, shift-tab  switch panel"),
         Line::raw("f               cycle session source filter"),
+        Line::raw("a               clear source and text filters"),
         Line::raw("/text           filter sessions by text"),
         Line::raw("o               open original session with original CLI"),
         Line::raw("[ / ]           previous / next session source filter"),

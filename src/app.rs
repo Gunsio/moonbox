@@ -128,6 +128,7 @@ impl App {
             KeyCode::Char('[') => self.cycle_session_filter(false),
             KeyCode::Char(']') => self.cycle_session_filter(true),
             KeyCode::Char('f') => self.cycle_session_filter(true),
+            KeyCode::Char('a') => self.clear_session_filters(),
             KeyCode::Char('o') => self.show_open_original = true,
             KeyCode::Char(':') => {
                 self.command_mode = true;
@@ -181,7 +182,7 @@ impl App {
                     "diff" | "d" => self.show_diff = !self.show_diff,
                     "filter" | "filter next" => self.cycle_session_filter(true),
                     "filter prev" | "filter previous" => self.cycle_session_filter(false),
-                    "filter all" | "filter clear" => self.apply_session_filter(SessionFilter::All),
+                    "filter all" | "filter clear" | "clear" | "all" => self.clear_session_filters(),
                     "filter codex" | "source codex" => {
                         self.apply_session_filter(SessionFilter::Tool(CliTool::Codex))
                     }
@@ -417,6 +418,13 @@ impl App {
         self.pending_g = false;
     }
 
+    fn clear_session_filters(&mut self) {
+        self.session_filter = SessionFilter::All;
+        self.search_query.clear();
+        self.clamp_selected_session();
+        self.pending_g = false;
+    }
+
     fn clamp_selected_session(&mut self) {
         let visible = self.visible_session_indices();
         if visible.is_empty() {
@@ -544,6 +552,21 @@ mod tests {
         assert!(!app.command_mode);
         assert_eq!(app.search_query, "5");
         assert_eq!(app.visible_session_indices().len(), 1);
+    }
+
+    #[test]
+    fn clear_filter_resets_source_and_search() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+
+        app.apply_session_filter(SessionFilter::Tool(CliTool::Hermes));
+        app.handle_key(key('/'));
+        app.handle_key(key('5'));
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+        app.handle_key(key('a'));
+
+        assert_eq!(app.session_filter, SessionFilter::All);
+        assert!(app.search_query.is_empty());
+        assert_eq!(app.visible_session_indices().len(), 3);
     }
 
     #[test]
