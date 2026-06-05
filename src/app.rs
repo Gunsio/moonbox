@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::core::{
     demo,
-    model::{CliTool, DemoData},
+    model::{CliTool, DemoData, SessionSummary},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,6 +11,39 @@ pub enum Focus {
     Timeline,
     Capsule,
     Branches,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionFilter {
+    All,
+    Tool(CliTool),
+}
+
+impl SessionFilter {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Tool(CliTool::Codex) => "Codex",
+            Self::Tool(CliTool::Claude) => "Claude",
+            Self::Tool(CliTool::Hermes) => "Hermes",
+        }
+    }
+
+    fn matches(self, session: &SessionSummary) -> bool {
+        match self {
+            Self::All => true,
+            Self::Tool(tool) => session.cli == tool,
+        }
+    }
+
+    fn next(self) -> Self {
+        match self {
+            Self::All => Self::Tool(CliTool::Codex),
+            Self::Tool(CliTool::Codex) => Self::Tool(CliTool::Claude),
+            Self::Tool(CliTool::Claude) => Self::Tool(CliTool::Hermes),
+            Self::Tool(CliTool::Hermes) => Self::All,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -24,7 +57,10 @@ pub struct App {
     pub command_input: String,
     pub show_help: bool,
     pub show_launch: bool,
+    pub show_open_original: bool,
     pub show_diff: bool,
+    pub session_filter: SessionFilter,
+    pub search_query: String,
     pub verify_passed: bool,
     pub compile_status: &'static str,
     pub pending_g: bool,
@@ -35,7 +71,7 @@ impl App {
     pub fn new(source: CliTool, target: CliTool) -> Self {
         Self {
             data: demo::demo_data(source, target),
-            focus: Focus::Timeline,
+            focus: Focus::Sessions,
             selected_session: 0,
             selected_event: 6,
             selected_compiler: 0,
@@ -43,7 +79,10 @@ impl App {
             command_input: String::new(),
             show_help: false,
             show_launch: false,
+            show_open_original: false,
             show_diff: false,
+            session_filter: SessionFilter::All,
+            search_query: String::new(),
             verify_passed: true,
             compile_status: "ACTIVE",
             pending_g: false,
@@ -74,6 +113,8 @@ impl App {
             KeyCode::Char(']') => self.cycle_source(true),
             KeyCode::Char('{') => self.cycle_target(false),
             KeyCode::Char('}') => self.cycle_target(true),
+            KeyCode::Char('f') => self.cycle_session_filter(),
+            KeyCode::Char('o') => self.show_open_original = true,
             KeyCode::Char(':') => {
                 self.command_mode = true;
                 self.command_input.clear();
@@ -110,12 +151,27 @@ impl App {
                 let command = self.command_input.trim().to_ascii_lowercase();
                 self.command_mode = false;
                 self.command_input.clear();
+                if let Some(query) = command.strip_prefix('/') {
+                    self.search_query = query.trim().to_string();
+                    self.clamp_selected_session();
+                    return;
+                }
                 match command.as_str() {
                     "q" | "quit" => self.should_quit = true,
+                    "open" | "o" => self.show_open_original = true,
                     "compile" | "c" => self.compile_capsule(),
                     "verify" | "v" => self.verify_passed = true,
                     "help" | "?" => self.show_help = true,
                     "diff" | "d" => self.show_diff = !self.show_diff,
+                    "filter" | "filter next" => self.cycle_session_filter(),
+                    "filter all" | "filter clear" => self.set_session_filter(SessionFilter::All),
+                    "filter codex" => self.set_session_filter(SessionFilter::Tool(CliTool::Codex)),
+                    "filter claude" => {
+                        self.set_session_filter(SessionFilter::Tool(CliTool::Claude))
+                    }
+                    "filter hermes" => {
+                        self.set_session_filter(SessionFilter::Tool(CliTool::Hermes))
+                    }
                     "source" | "source next" => self.cycle_source(true),
                     "source prev" | "source previous" => self.cycle_source(false),
                     "target" | "target next" => self.cycle_target(true),
@@ -132,12 +188,14 @@ impl App {
     }
 
     fn back_or_quit(&mut self) {
-        if self.show_help {
-            self.show_help = false;
+        if self.show_diff {
+            self.show_diff = false;
+        } else if self.show_open_original {
+            self.show_open_original = false;
         } else if self.show_launch {
             self.show_launch = false;
-        } else if self.show_diff {
-            self.show_diff = false;
+        } else if self.show_help {
+            self.show_help = false;
         } else {
             self.should_quit = true;
         }
@@ -165,10 +223,7 @@ impl App {
 
     fn move_down(&mut self) {
         match self.focus {
-            Focus::Sessions => {
-                self.selected_session =
-                    (self.selected_session + 1).min(self.data.sessions.len().saturating_sub(1));
-            }
+            Focus::Sessions => self.move_session(true),
             Focus::Timeline => {
                 self.selected_event =
                     (self.selected_event + 1).min(self.data.timeline.len().saturating_sub(1));
@@ -180,7 +235,7 @@ impl App {
 
     fn move_up(&mut self) {
         match self.focus {
-            Focus::Sessions => self.selected_session = self.selected_session.saturating_sub(1),
+            Focus::Sessions => self.move_session(false),
             Focus::Timeline => self.selected_event = self.selected_event.saturating_sub(1),
             Focus::Capsule | Focus::Branches => {}
         }
@@ -189,7 +244,11 @@ impl App {
 
     fn move_top(&mut self) {
         match self.focus {
-            Focus::Sessions => self.selected_session = 0,
+            Focus::Sessions => {
+                if let Some(first) = self.visible_session_indices().first() {
+                    self.selected_session = *first;
+                }
+            }
             Focus::Timeline => self.selected_event = 0,
             Focus::Capsule | Focus::Branches => {}
         }
@@ -198,7 +257,11 @@ impl App {
 
     fn move_bottom(&mut self) {
         match self.focus {
-            Focus::Sessions => self.selected_session = self.data.sessions.len().saturating_sub(1),
+            Focus::Sessions => {
+                if let Some(last) = self.visible_session_indices().last() {
+                    self.selected_session = *last;
+                }
+            }
             Focus::Timeline => self.selected_event = self.data.timeline.len().saturating_sub(1),
             Focus::Capsule | Focus::Branches => {}
         }
@@ -232,6 +295,67 @@ impl App {
         self.pending_g = false;
     }
 
+    pub fn current_session(&self) -> Option<&SessionSummary> {
+        self.visible_session_indices()
+            .contains(&self.selected_session)
+            .then(|| self.data.sessions.get(self.selected_session))
+            .flatten()
+    }
+
+    pub fn visible_session_indices(&self) -> Vec<usize> {
+        let query = self.search_query.trim().to_ascii_lowercase();
+        self.data
+            .sessions
+            .iter()
+            .enumerate()
+            .filter(|(_, session)| self.session_filter.matches(session))
+            .filter(|(_, session)| {
+                query.is_empty()
+                    || session.id.to_ascii_lowercase().contains(&query)
+                    || session.title.to_ascii_lowercase().contains(&query)
+                    || session.cwd.to_ascii_lowercase().contains(&query)
+                    || session.cli.id().contains(&query)
+            })
+            .map(|(index, _)| index)
+            .collect()
+    }
+
+    fn move_session(&mut self, forward: bool) {
+        let visible = self.visible_session_indices();
+        if visible.is_empty() {
+            return;
+        }
+        let current = visible
+            .iter()
+            .position(|index| *index == self.selected_session)
+            .unwrap_or(0);
+        let next = if forward {
+            (current + 1).min(visible.len().saturating_sub(1))
+        } else {
+            current.saturating_sub(1)
+        };
+        self.selected_session = visible[next];
+    }
+
+    fn cycle_session_filter(&mut self) {
+        self.set_session_filter(self.session_filter.next());
+    }
+
+    fn set_session_filter(&mut self, filter: SessionFilter) {
+        self.session_filter = filter;
+        self.clamp_selected_session();
+        self.pending_g = false;
+    }
+
+    fn clamp_selected_session(&mut self) {
+        let visible = self.visible_session_indices();
+        if visible.is_empty() {
+            self.selected_session = 0;
+        } else if !visible.contains(&self.selected_session) {
+            self.selected_session = visible[0];
+        }
+    }
+
     fn cycle_source(&mut self, forward: bool) {
         let source = if forward {
             self.data.source.next()
@@ -256,6 +380,7 @@ impl App {
         self.selected_session = self
             .selected_session
             .min(self.data.sessions.len().saturating_sub(1));
+        self.clamp_selected_session();
         self.selected_event = self
             .selected_event
             .min(self.data.timeline.len().saturating_sub(1));
@@ -289,6 +414,27 @@ mod tests {
         let first = app.data.capsule.compiler.clone();
         app.handle_key(key('s'));
         assert_ne!(app.data.capsule.compiler, first);
+    }
+
+    #[test]
+    fn session_filter_limits_visible_sessions() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        app.handle_key(key('f'));
+        assert!(
+            app.visible_session_indices()
+                .iter()
+                .all(|index| app.data.sessions[*index].cli == CliTool::Codex)
+        );
+    }
+
+    #[test]
+    fn current_session_respects_empty_filter_results() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        app.search_query = "no-match".into();
+        app.clamp_selected_session();
+
+        assert!(app.visible_session_indices().is_empty());
+        assert!(app.current_session().is_none());
     }
 
     #[test]

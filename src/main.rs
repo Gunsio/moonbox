@@ -14,6 +14,7 @@ fn main() -> Result<()> {
     match cli.command.unwrap_or_default() {
         Command::Tui(args) => run_tui(args),
         Command::Sessions(args) => print_sessions(args),
+        Command::Open(args) => print_open_command(args),
         Command::Capsule(args) => print_capsule(args),
     }
 }
@@ -38,6 +39,18 @@ fn print_sessions(args: cli::JsonArgs) -> Result<()> {
             );
         }
     }
+    Ok(())
+}
+
+fn print_open_command(args: cli::OpenArgs) -> Result<()> {
+    let data = core::demo::demo_data(core::model::CliTool::Codex, core::model::CliTool::Hermes);
+    let session = args
+        .session
+        .as_deref()
+        .and_then(|id| data.sessions.iter().find(|session| session.id == id))
+        .unwrap_or(&data.sessions[0]);
+
+    println!("{}", session.resume_command);
     Ok(())
 }
 

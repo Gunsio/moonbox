@@ -4,35 +4,42 @@ use super::model::{
 };
 
 pub fn demo_data(source: CliTool, target: CliTool) -> DemoData {
-    let sessions = vec![
+    let mut sessions = vec![
         SessionSummary {
             id: "codex-cxcp-design".into(),
-            cli: source,
+            cli: CliTool::Codex,
             title: "Moonbox session rewind design".into(),
             cwd: "~/coding/moonbox".into(),
+            updated_at: "2026-06-05T16:50:00+08:00".into(),
             updated: "updated 10 min ago".into(),
             status: SessionStatus::Healthy,
             event_count: 148,
+            resume_command: "codex resume codex-cxcp-design".into(),
         },
         SessionSummary {
             id: "claude-qc-platform".into(),
             cli: CliTool::Claude,
             title: "QC platform trace repair".into(),
             cwd: "~/coding/qc-platform".into(),
+            updated_at: "2026-06-05T15:00:00+08:00".into(),
             updated: "updated 2 hours ago".into(),
             status: SessionStatus::Warning,
             event_count: 92,
+            resume_command: "claude --resume claude-qc-platform".into(),
         },
         SessionSummary {
             id: "hermes-cxcp-502".into(),
             cli: CliTool::Hermes,
             title: "cxcp 502 resume failure".into(),
             cwd: "~/.codex".into(),
+            updated_at: "2026-06-04T18:00:00+08:00".into(),
             updated: "failed yesterday".into(),
             status: SessionStatus::Failed,
             event_count: 61,
+            resume_command: "hermes resume hermes-cxcp-502".into(),
         },
     ];
+    sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
 
     let timeline = vec![
         event(

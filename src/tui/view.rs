@@ -48,6 +48,9 @@ pub fn render(frame: &mut Frame, app: &App) {
     if app.show_launch {
         render_launch(frame, root, app);
     }
+    if app.show_open_original {
+        render_open_original(frame, root, app);
+    }
     if app.show_diff {
         render_diff(frame, root);
     }
@@ -159,48 +162,86 @@ fn render_body(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
-    let items = app.data.sessions.iter().map(|session| {
-        let status = match session.status {
-            SessionStatus::Healthy => Span::styled("●", Style::default().fg(theme::GREEN)),
-            SessionStatus::Warning => Span::styled("▲", Style::default().fg(theme::GOLD)),
-            SessionStatus::Failed => Span::styled(
-                "!",
-                Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
-            ),
-        };
-        ListItem::new(vec![
-            Line::from(vec![
-                status,
-                Span::raw(" "),
-                Span::styled(
-                    &session.title,
-                    Style::default()
-                        .fg(theme::TEXT)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]),
-            Line::from(vec![Span::styled(
-                format!("  {}", session.cwd),
+    let visible = app.visible_session_indices();
+    let items: Vec<ListItem> = if visible.is_empty() {
+        vec![ListItem::new(vec![
+            Line::from(Span::styled(
+                "No sessions match filter",
                 Style::default().fg(theme::MUTED),
-            )]),
-            Line::from(vec![
-                Span::styled(
-                    format!("  {}  ", session.updated),
-                    Style::default().fg(theme::BLUE),
-                ),
-                Span::styled(
-                    format!("{} events", session.event_count),
-                    Style::default().fg(theme::MUTED),
-                ),
-            ]),
-        ])
-    });
+            )),
+            Line::from(Span::styled(
+                "Use f or / to adjust",
+                Style::default().fg(theme::MUTED),
+            )),
+        ])]
+    } else {
+        visible
+            .iter()
+            .map(|index| {
+                let session = &app.data.sessions[*index];
+                let status = match session.status {
+                    SessionStatus::Healthy => Span::styled("●", Style::default().fg(theme::GREEN)),
+                    SessionStatus::Warning => Span::styled("▲", Style::default().fg(theme::GOLD)),
+                    SessionStatus::Failed => Span::styled(
+                        "!",
+                        Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+                    ),
+                };
+                ListItem::new(vec![
+                    Line::from(vec![
+                        status,
+                        Span::raw(" "),
+                        Span::styled(
+                            format!("[{}] ", session.cli),
+                            Style::default()
+                                .fg(theme::CYAN)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            &session.title,
+                            Style::default()
+                                .fg(theme::TEXT)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]),
+                    Line::from(vec![Span::styled(
+                        format!("  {}", session.cwd),
+                        Style::default().fg(theme::MUTED),
+                    )]),
+                    Line::from(vec![
+                        Span::styled(
+                            format!("  {}  ", session.updated),
+                            Style::default().fg(theme::BLUE),
+                        ),
+                        Span::styled(
+                            format!("{} events", session.event_count),
+                            Style::default().fg(theme::MUTED),
+                        ),
+                    ]),
+                ])
+            })
+            .collect()
+    };
 
     let mut state = ListState::default();
-    state.select(Some(app.selected_session));
+    let selected = visible
+        .iter()
+        .position(|index| *index == app.selected_session)
+        .unwrap_or(0);
+    state.select((!visible.is_empty()).then_some(selected));
+
+    let title = if app.search_query.is_empty() {
+        format!(" Sessions · {} ", app.session_filter.label())
+    } else {
+        format!(
+            " Sessions · {} · /{} ",
+            app.session_filter.label(),
+            app.search_query
+        )
+    };
 
     let list = List::new(items)
-        .block(panel_block(" Sessions ", app.focus == Focus::Sessions))
+        .block(dynamic_panel_block(title, app.focus == Focus::Sessions))
         .highlight_symbol("▸ ")
         .highlight_style(
             Style::default()
@@ -408,6 +449,10 @@ fn render_command_bar(frame: &mut Frame, area: Rect, app: &App) {
                 txt(" Target"),
             ]),
             Line::from(vec![
+                key("f"),
+                txt(" Filter  "),
+                key("o"),
+                txt(" Open  "),
                 key("space"),
                 txt(" Rewind  "),
                 key("c"),
@@ -438,6 +483,10 @@ fn render_command_bar(frame: &mut Frame, area: Rect, app: &App) {
             txt(" Jump  "),
             key("/"),
             txt(" Search  "),
+            key("f"),
+            txt(" Filter  "),
+            key("o"),
+            txt(" Open  "),
             key("[ ]"),
             txt(" Source  "),
             key("{ }"),
@@ -487,6 +536,9 @@ fn render_help(frame: &mut Frame, root: Rect) {
         Line::raw(""),
         Line::raw("j/k, gg/G       navigate"),
         Line::raw("tab, shift-tab  switch panel"),
+        Line::raw("f               cycle session source filter"),
+        Line::raw("/text           filter sessions by text"),
+        Line::raw("o               open original session"),
         Line::raw("[ / ]           previous / next source CLI"),
         Line::raw("{ / }           previous / next target CLI"),
         Line::raw("space           set rewind point"),
@@ -504,7 +556,7 @@ fn render_help(frame: &mut Frame, root: Rect) {
 }
 
 fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
-    let area = centered(root, 62, 34);
+    let area = centered(root, 72, 64);
     frame.render_widget(Clear, area);
     let capsule = &app.data.capsule;
     let lines = vec![
@@ -540,6 +592,69 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
     frame.render_widget(
         Paragraph::new(lines)
             .block(panel_block(" Launch ", true))
+            .wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
+fn render_open_original(frame: &mut Frame, root: Rect, app: &App) {
+    let area = centered(root, 72, 64);
+    frame.render_widget(Clear, area);
+    let lines = if let Some(session) = app.current_session() {
+        vec![
+            Line::from(Span::styled(
+                "Open original session",
+                Style::default()
+                    .fg(theme::GOLD)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::raw(""),
+            Line::from(vec![
+                Span::styled("CLI: ", Style::default().fg(theme::BLUE)),
+                Span::raw(session.cli.to_string()),
+            ]),
+            Line::from(vec![
+                Span::styled("Session: ", Style::default().fg(theme::BLUE)),
+                Span::raw(&session.id),
+            ]),
+            Line::from(vec![
+                Span::styled("cwd: ", Style::default().fg(theme::BLUE)),
+                Span::raw(&session.cwd),
+            ]),
+            Line::raw(""),
+            Line::from(Span::styled(
+                &session.resume_command,
+                Style::default().fg(theme::CYAN),
+            )),
+            Line::raw(""),
+            Line::from(Span::styled(
+                "Original resume only. Handoff uses Launch.",
+                Style::default().fg(theme::MUTED),
+            )),
+            Line::from(Span::styled(
+                "Press Esc to close",
+                Style::default().fg(theme::MUTED),
+            )),
+        ]
+    } else {
+        vec![
+            Line::from(Span::styled(
+                "No session selected",
+                Style::default()
+                    .fg(theme::GOLD)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::raw(""),
+            Line::from(Span::styled(
+                "Adjust filter or search, then try again.",
+                Style::default().fg(theme::MUTED),
+            )),
+        ]
+    };
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(panel_block(" Open Original ", true))
             .wrap(Wrap { trim: true }),
         area,
     );
@@ -587,6 +702,17 @@ fn render_diff(frame: &mut Frame, root: Rect) {
 }
 
 fn panel_block(title: &'static str, focused: bool) -> Block<'static> {
+    let color = if focused { theme::GOLD } else { theme::BORDER };
+    Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(color))
+        .style(Style::default().fg(theme::TEXT))
+        .padding(Padding::horizontal(1))
+}
+
+fn dynamic_panel_block(title: String, focused: bool) -> Block<'static> {
     let color = if focused { theme::GOLD } else { theme::BORDER };
     Block::default()
         .title(title)

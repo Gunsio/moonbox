@@ -19,6 +19,8 @@ pub enum Command {
     Tui(TuiArgs),
     /// List discovered sessions. Currently uses demo data.
     Sessions(JsonArgs),
+    /// Print the command for opening an original session.
+    Open(OpenArgs),
     /// Print the current Work Capsule. Currently uses demo data.
     Capsule(JsonArgs),
 }
@@ -50,4 +52,11 @@ impl Default for TuiArgs {
 pub struct JsonArgs {
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct OpenArgs {
+    /// Session id to open. Defaults to the first demo session.
+    #[arg(long)]
+    pub session: Option<String>,
 }

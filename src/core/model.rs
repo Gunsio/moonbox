@@ -57,9 +57,11 @@ pub struct SessionSummary {
     pub cli: CliTool,
     pub title: String,
     pub cwd: String,
+    pub updated_at: String,
     pub updated: String,
     pub status: SessionStatus,
     pub event_count: usize,
+    pub resume_command: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

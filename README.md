@@ -16,7 +16,8 @@ The first implementation focuses on the product shell:
 - Rust + Ratatui standalone binary
 - High-density TUI workbench
 - Vim-style keyboard navigation
-- Demo sessions, timeline, Work Capsule, and branch tree
+- Time-sorted global session list with source tags
+- Demo sessions, timeline, original-session open command, Work Capsule, and branch tree
 - Serializable core models for future adapters
 
 ## Run
@@ -30,6 +31,7 @@ Useful commands:
 ```bash
 cargo run -- tui
 cargo run -- sessions --json
+cargo run -- open --session codex-cxcp-design
 cargo run -- capsule --json
 ```
 
@@ -40,7 +42,9 @@ cargo run -- capsule --json
 | `j` / `k` | Move selection |
 | `gg` / `G` | Jump to top / bottom |
 | `tab` / `shift-tab` | Switch panel |
-| `/` | Search mode placeholder |
+| `/` | Filter sessions by text |
+| `f` | Cycle session source filter |
+| `o` | Open original session |
 | `[` / `]` | Previous / next source CLI |
 | `{` / `}` | Previous / next target CLI |
 | `space` | Set rewind point |
