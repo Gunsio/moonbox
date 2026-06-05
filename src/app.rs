@@ -143,7 +143,7 @@ impl App {
             KeyCode::Char('l') | KeyCode::Right => self.next_focus(),
             KeyCode::Char('/') => {
                 self.command_mode = true;
-                self.command_input.push('/');
+                self.command_input = format!("/{}", self.search_query);
             }
             KeyCode::Char(' ') => self.set_rewind_point(),
             KeyCode::Char('c') => self.compile_capsule(),
@@ -162,14 +162,16 @@ impl App {
                 self.command_input.clear();
             }
             KeyCode::Enter => {
+                if self.is_search_command() {
+                    self.sync_live_search();
+                    self.command_mode = false;
+                    self.command_input.clear();
+                    return;
+                }
+
                 let command = self.command_input.trim().to_ascii_lowercase();
                 self.command_mode = false;
                 self.command_input.clear();
-                if let Some(query) = command.strip_prefix('/') {
-                    self.search_query = query.trim().to_string();
-                    self.clamp_selected_session();
-                    return;
-                }
                 match command.as_str() {
                     "q" | "quit" => self.should_quit = true,
                     "open" | "o" => self.show_open_original = true,
@@ -202,10 +204,33 @@ impl App {
                 }
             }
             KeyCode::Backspace => {
-                self.command_input.pop();
+                if self.is_search_command() {
+                    if self.command_input.len() > 1 {
+                        self.command_input.pop();
+                    }
+                    self.sync_live_search();
+                } else {
+                    self.command_input.pop();
+                }
             }
-            KeyCode::Char(ch) => self.command_input.push(ch),
+            KeyCode::Char(ch) => {
+                self.command_input.push(ch);
+                if self.is_search_command() {
+                    self.sync_live_search();
+                }
+            }
             _ => {}
+        }
+    }
+
+    fn is_search_command(&self) -> bool {
+        self.command_input.starts_with('/')
+    }
+
+    fn sync_live_search(&mut self) {
+        if let Some(query) = self.command_input.strip_prefix('/') {
+            self.search_query = query.trim().to_string();
+            self.clamp_selected_session();
         }
     }
 
@@ -490,6 +515,35 @@ mod tests {
 
         assert!(app.visible_session_indices().is_empty());
         assert!(app.current_session().is_none());
+    }
+
+    #[test]
+    fn slash_search_filters_while_typing() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+
+        app.handle_key(key('/'));
+        app.handle_key(key('5'));
+
+        assert!(app.command_mode);
+        assert_eq!(app.search_query, "5");
+        assert_eq!(app.visible_session_indices().len(), 1);
+        assert_eq!(
+            app.current_session().map(|session| session.id.as_str()),
+            Some("hermes-cxcp-502")
+        );
+    }
+
+    #[test]
+    fn slash_search_escape_keeps_filter_result() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+
+        app.handle_key(key('/'));
+        app.handle_key(key('5'));
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+        assert!(!app.command_mode);
+        assert_eq!(app.search_query, "5");
+        assert_eq!(app.visible_session_indices().len(), 1);
     }
 
     #[test]

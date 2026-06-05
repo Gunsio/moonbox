@@ -223,6 +223,8 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
 
     let title = if app.search_query.is_empty() {
         format!(" Sessions · {} ", app.session_filter.label())
+    } else if area.width < 28 {
+        format!(" Sessions /{} ", app.search_query)
     } else {
         format!(
             " Sessions · {} · /{} ",
@@ -421,14 +423,19 @@ fn render_branch_tree(frame: &mut Frame, area: Rect, app: &App) {
 
 fn render_command_bar(frame: &mut Frame, area: Rect, app: &App) {
     let lines = if app.command_mode {
+        let (prompt, input) = if let Some(query) = app.command_input.strip_prefix('/') {
+            ("/", query)
+        } else {
+            (":", app.command_input.as_str())
+        };
         vec![Line::from(vec![
             Span::styled(
-                ":",
+                prompt,
                 Style::default()
                     .fg(theme::GOLD)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(&app.command_input, Style::default().fg(theme::TEXT)),
+            Span::styled(input, Style::default().fg(theme::TEXT)),
         ])]
     } else if area.width < 120 {
         vec![
