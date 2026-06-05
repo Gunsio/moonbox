@@ -9,6 +9,57 @@ This repository is intentionally not a raw session copier. The source session
 is read-only. Compatibility and compression are delegated to replaceable
 compiler skills.
 
+![Moonbox TUI screenshot](docs/assets/moonbox-tui.svg)
+
+## Install
+
+### Cargo
+
+Install the current repository version:
+
+```bash
+cargo install --git https://github.com/Gunsio/moonbox
+moonbox --version
+```
+
+Moonbox also supports the shorter `moon` command. Until binary aliases are part
+of a tagged release, create a local symlink:
+
+```bash
+mkdir -p ~/.local/bin
+ln -sf "$(command -v moonbox)" ~/.local/bin/moon
+moon --version
+```
+
+### Source Checkout
+
+```bash
+git clone https://github.com/Gunsio/moonbox.git
+cd moonbox
+cargo run -- tui
+```
+
+For local development:
+
+```bash
+cargo fmt --check
+cargo test
+cargo clippy -- -D warnings
+```
+
+### Homebrew
+
+Homebrew distribution is planned, but not published yet. After the accepted
+release is tagged, the intended install path is:
+
+```bash
+brew tap Gunsio/tap
+brew install moonbox
+```
+
+See [docs/release/homebrew.md](docs/release/homebrew.md) for the release
+checklist and formula shape.
+
 ## Current State
 
 The first implementation focuses on the product shell:
@@ -43,12 +94,7 @@ The first implementation focuses on the product shell:
 ## Run
 
 ```bash
-cargo run
-```
-
-Global command after local install:
-
-```bash
+moonbox
 moon
 ```
 
