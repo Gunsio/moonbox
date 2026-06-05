@@ -33,10 +33,17 @@ fn config_path() -> Option<PathBuf> {
     if let Ok(path) = env::var("MOONBOX_CONFIG") {
         return Some(PathBuf::from(path));
     }
-    env::var_os("HOME").map(|home| {
-        PathBuf::from(home)
-            .join(".config")
-            .join("moonbox")
-            .join("config.json")
-    })
+    #[cfg(test)]
+    {
+        Some(env::temp_dir().join(format!("moonbox-test-config-{}.json", std::process::id())))
+    }
+    #[cfg(not(test))]
+    {
+        env::var_os("HOME").map(|home| {
+            PathBuf::from(home)
+                .join(".config")
+                .join("moonbox")
+                .join("config.json")
+        })
+    }
 }

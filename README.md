@@ -22,6 +22,8 @@ The first implementation focuses on the product shell:
 - Last confirmed target is persisted in `~/.config/moonbox/config.json`
 - Demo sessions, timeline, original-session open command, Work Capsule, and branch tree
 - Live `/` session search, combined filter display, and one-key clear with `a`
+- Selected/filtered session drives timeline, Work Capsule, branch preview, token budget, and default rewind point
+- Per-source demo fixtures with branch, token count, health reason, and session-specific timeline/capsule content
 - Fixed status line for action feedback
 - Context-aware key bar for the current panel or modal
 - Visible rewind marker in the timeline, plus rewind-aware branch and launch preview
@@ -71,6 +73,11 @@ chosen only in the launch picker. In the target picker, `j/k` moves the pending
 selection, `enter` confirms and persists it, and `Esc` / `q` cancels without
 changing the saved target.
 
+Session search matches id, title, cwd, source, branch, and health reason. When a
+different session becomes selected by movement, source filter, or search,
+Moonbox reloads that session's timeline, capsule preview, branch preview, and
+recommended rewind point.
+
 ## TUI Keys
 
 | Key | Action |
@@ -117,17 +124,24 @@ Stable interfaces matter more than any single framework:
 
 ## TODO
 
+### Completed Milestones
+
+- M0: action feedback, contextual keybar, visible rewind marker, clearer timeline selection.
+- M1: modal/capsule scroll, copyable launch/original commands, small-terminal polish.
+- M2: serializable core models, `SourceAdapter`, Canonical Timeline, compiler request/output fixtures.
+- M3: session-driven detail panes with per-source demo fixtures and searchable branch/health metadata.
+
 ### Can Build Now
 
-- Session-driven detail panes: selected session should drive timeline, capsule preview, and branch preview.
-- Adapter fixture snapshots for each source tool.
-- Inline command validation before launch.
+- M4: inline command validation before launch, including missing session, missing capsule path, target mismatch, and unsupported target states.
+- M4: target picker affordances for disabled or risky choices without hiding them.
+- M5: adapter fixture snapshots for Codex, Claude, and Hermes session discovery/parsing.
 
 ### Prototype Now, Improve With Real Data
 
-- Session row density: tune whether `cwd`, branch, token count, status, or error reason is most useful.
 - Launch preview: keep the command structure now, generate exact commands after real adapters exist.
-- Session health badges: mock status now, compute from real resume errors and compatibility signals later.
+- Session health badges: demo status now, compute from real resume errors and compatibility signals later.
+- M6: target launcher dry-run plus verification loop around generated Work Capsule output.
 
 ### Best After Real Session Data
 

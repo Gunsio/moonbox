@@ -60,6 +60,9 @@ pub struct SessionSummary {
     pub updated_at: String,
     pub updated: String,
     pub status: SessionStatus,
+    pub branch: Option<String>,
+    pub token_count: Option<usize>,
+    pub health_reason: Option<String>,
     pub event_count: usize,
     pub resume_command: String,
 }

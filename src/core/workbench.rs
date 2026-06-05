@@ -9,6 +9,10 @@ pub fn load_demo_workbench(source: CliTool, target: CliTool) -> DemoData {
     demo::demo_data(source, target)
 }
 
+pub fn load_demo_workbench_for_session(session_id: &str, target: CliTool) -> Option<DemoData> {
+    demo::demo_data_for_session(session_id, target)
+}
+
 pub fn list_sessions() -> Vec<SessionSummary> {
     demo::demo_sessions()
 }

@@ -97,10 +97,14 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
         Span::raw("   Skill: "),
         Span::styled(&app.data.capsule.compiler, Style::default().fg(theme::CYAN)),
     ]);
+    let token_budget = app
+        .current_session()
+        .map(|session| format!("{} / 100K", format_token_count(session.token_count)))
+        .unwrap_or_else(|| "- / 100K".into());
     let budget = Line::from(vec![
         Span::raw("Tokens: "),
         Span::styled(
-            "42K / 100K",
+            token_budget,
             Style::default()
                 .fg(theme::GOLD)
                 .add_modifier(Modifier::BOLD),
@@ -219,8 +223,24 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
                             Style::default().fg(theme::BLUE),
                         ),
                         Span::styled(
-                            format!("{} events", session.event_count),
+                            format!("{} events  ", session.event_count),
                             Style::default().fg(theme::MUTED),
+                        ),
+                        Span::styled(
+                            format_token_count(session.token_count),
+                            Style::default().fg(theme::GOLD),
+                        ),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("  branch ", Style::default().fg(theme::MUTED)),
+                        Span::styled(
+                            session.branch.as_deref().unwrap_or("-"),
+                            Style::default().fg(theme::CYAN),
+                        ),
+                        Span::styled("  ·  ", Style::default().fg(theme::MUTED)),
+                        Span::styled(
+                            session.health_reason.as_deref().unwrap_or("ready"),
+                            session_health_style(session.status),
                         ),
                     ]),
                 ])
@@ -259,6 +279,22 @@ fn filter_label(app: &App) -> String {
         app.session_filter.label().to_string()
     } else {
         format!("{} · /{}", app.session_filter.label(), app.search_query)
+    }
+}
+
+fn format_token_count(token_count: Option<usize>) -> String {
+    match token_count {
+        Some(count) if count >= 1_000 => format!("{}K", count / 1_000),
+        Some(count) => count.to_string(),
+        None => "-".into(),
+    }
+}
+
+fn session_health_style(status: SessionStatus) -> Style {
+    match status {
+        SessionStatus::Healthy => Style::default().fg(theme::GREEN),
+        SessionStatus::Warning => Style::default().fg(theme::GOLD),
+        SessionStatus::Failed => Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
     }
 }
 
