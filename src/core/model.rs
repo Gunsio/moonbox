@@ -126,3 +126,29 @@ pub struct DemoData {
     pub branches: Vec<BranchNode>,
     pub compilers: Vec<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CanonicalTimeline {
+    pub version: u16,
+    pub source_cli: CliTool,
+    pub source_session: String,
+    pub events: Vec<TimelineEvent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapsuleCompileRequest {
+    pub version: u16,
+    pub source_cli: CliTool,
+    pub target_cli: CliTool,
+    pub source_session: SessionSummary,
+    pub rewind_event_id: String,
+    pub token_budget: usize,
+    pub compiler: String,
+    pub timeline: CanonicalTimeline,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapsuleCompileOutput {
+    pub version: u16,
+    pub capsule: WorkCapsule,
+}
