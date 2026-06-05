@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::core::{
     config,
-    model::{CliTool, DemoData, SessionSummary},
+    model::{CliTool, DemoData, SessionStatus, SessionSummary},
     workbench,
 };
 
@@ -53,6 +53,50 @@ impl SessionFilter {
             Self::Tool(CliTool::Claude) => Self::Tool(CliTool::Codex),
             Self::Tool(CliTool::Hermes) => Self::Tool(CliTool::Claude),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaunchValidationState {
+    Ready,
+    Warning,
+    Blocked,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LaunchValidation {
+    pub state: LaunchValidationState,
+    pub reasons: Vec<String>,
+}
+
+impl LaunchValidation {
+    pub fn ready() -> Self {
+        Self {
+            state: LaunchValidationState::Ready,
+            reasons: vec!["Ready".into()],
+        }
+    }
+
+    pub fn summary(&self) -> String {
+        self.reasons.join("; ")
+    }
+
+    fn warning(reasons: Vec<String>) -> Self {
+        Self {
+            state: LaunchValidationState::Warning,
+            reasons,
+        }
+    }
+
+    fn blocked(reasons: Vec<String>) -> Self {
+        Self {
+            state: LaunchValidationState::Blocked,
+            reasons,
+        }
+    }
+
+    fn is_blocked(&self) -> bool {
+        self.state == LaunchValidationState::Blocked
     }
 }
 
@@ -628,11 +672,21 @@ impl App {
 
     fn confirm_launch_target(&mut self) {
         let target = self.pending_target;
+        let validation = self.validate_launch_for_target(target);
+        if validation.is_blocked() {
+            self.set_status(format!("Target blocked: {}", validation.summary()));
+            self.pending_g = false;
+            return;
+        }
         self.replace_data_for_target(target);
         let _ = config::save_last_target(target);
         self.show_launch = false;
         self.modal_scroll = 0;
-        self.set_status(format!("Target saved: {target}"));
+        if validation.state == LaunchValidationState::Warning {
+            self.set_status(format!("Target saved: {target} ({})", validation.summary()));
+        } else {
+            self.set_status(format!("Target saved: {target}"));
+        }
         self.pending_g = false;
     }
 
@@ -730,6 +784,11 @@ impl App {
     }
 
     fn copy_launch_command(&mut self) {
+        let validation = self.validate_launch_for_target(self.pending_target);
+        if validation.is_blocked() {
+            self.set_status(format!("Target blocked: {}", validation.summary()));
+            return;
+        }
         self.copy_text("launch", self.launch_command());
     }
 
@@ -764,6 +823,68 @@ impl App {
     pub fn original_resume_command(&self) -> Option<String> {
         self.current_session()
             .map(|session| session.resume_command.clone())
+    }
+
+    pub fn validate_launch_for_target(&self, target: CliTool) -> LaunchValidation {
+        let Some(session) = self.current_session() else {
+            return LaunchValidation::blocked(vec!["No session selected".into()]);
+        };
+
+        let mut blockers = Vec::new();
+        let mut warnings = Vec::new();
+
+        if self.data.capsule.source_session != session.id {
+            blockers.push(format!(
+                "Capsule source {} does not match selected session {}",
+                self.data.capsule.source_session, session.id
+            ));
+        }
+
+        if !self
+            .data
+            .timeline
+            .iter()
+            .any(|event| event.id == self.rewind_event_id)
+        {
+            blockers.push(format!(
+                "Rewind {} is not present in the selected timeline",
+                self.rewind_event_id
+            ));
+        }
+
+        if self.data.capsule.target_cli != target {
+            warnings.push(format!(
+                "Confirm will refresh capsule target from {} to {}",
+                self.data.capsule.target_cli, target
+            ));
+        }
+
+        if target == session.cli {
+            warnings.push("Same-CLI handoff; use o for original resume".into());
+        }
+
+        if session.status == SessionStatus::Failed {
+            let reason = session
+                .health_reason
+                .as_deref()
+                .unwrap_or("source health is failed");
+            warnings.push(format!("Source health: {reason}"));
+        }
+
+        if session.status == SessionStatus::Failed && target == session.cli {
+            blockers.push(format!(
+                "{} raw resume is known failed for this session",
+                target
+            ));
+        }
+
+        if !blockers.is_empty() {
+            LaunchValidation::blocked(blockers)
+        } else if !warnings.is_empty() {
+            LaunchValidation::warning(warnings)
+        } else {
+            LaunchValidation::ready()
+        }
     }
 
     fn apply_rewind_event(&mut self, id: String, title: String) {
@@ -964,7 +1085,7 @@ mod tests {
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
         assert!(!app.show_launch);
         assert_eq!(app.data.target, CliTool::Codex);
-        assert_eq!(app.status_message, "Target saved: Codex");
+        assert!(app.status_message.starts_with("Target saved: Codex"));
         assert_eq!(app.data.source, CliTool::Codex);
         assert_eq!(app.data.capsule.source_cli, CliTool::Codex);
         assert_eq!(app.data.capsule.source_session, "codex-cxcp-design");
@@ -996,6 +1117,40 @@ mod tests {
         assert_eq!(app.pending_target, CliTool::Codex);
         assert_eq!(app.data.target, CliTool::Hermes);
         assert_eq!(app.status_message, "Launch cancelled");
+    }
+
+    #[test]
+    fn launch_validation_warns_for_same_cli_handoff() {
+        let app = App::new(CliTool::Codex, CliTool::Codex);
+
+        let validation = app.validate_launch_for_target(CliTool::Codex);
+
+        assert_eq!(validation.state, LaunchValidationState::Warning);
+        assert!(validation.summary().contains("Same-CLI handoff"));
+    }
+
+    #[test]
+    fn target_picker_blocks_failed_same_cli_resume_path() {
+        let mut app = App::new(CliTool::Hermes, CliTool::Hermes);
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(app.show_launch);
+        assert_eq!(app.data.target, CliTool::Hermes);
+        assert!(app.status_message.starts_with("Target blocked:"));
+        assert!(app.status_message.contains("raw resume is known failed"));
+    }
+
+    #[test]
+    fn blocked_target_cannot_copy_launch_command() {
+        let mut app = App::new(CliTool::Hermes, CliTool::Hermes);
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        app.handle_key(key('y'));
+
+        assert!(app.take_clipboard_text().is_none());
+        assert!(app.status_message.starts_with("Target blocked:"));
     }
 
     #[test]
