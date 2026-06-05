@@ -32,6 +32,7 @@ The first implementation focuses on the product shell:
 - Copyable launch/original commands via `y` with OSC52 clipboard support
 - Serializable core models for future adapters
 - `SourceAdapter` contract and demo adapter fixture layer
+- File-backed adapter fixtures for Codex, Claude, and Hermes session/timeline parsing
 - Canonical Timeline and compiler request/output JSON contract fixtures
 
 ## Run
@@ -134,10 +135,10 @@ Stable interfaces matter more than any single framework:
 - M2: serializable core models, `SourceAdapter`, Canonical Timeline, compiler request/output fixtures.
 - M3: session-driven detail panes with per-source demo fixtures and searchable branch/health metadata.
 - M4: launch validation with target picker READY/WARN/BLOCKED states and blocked command confirmation/copy guards.
+- M5: file-backed adapter fixture snapshots for Codex, Claude, and Hermes session/timeline parsing.
 
 ### Can Build Now
 
-- M5: adapter fixture snapshots for Codex, Claude, and Hermes session discovery/parsing.
 - M6: target launcher dry-run plus verification loop around generated Work Capsule output.
 
 ### Prototype Now, Improve With Real Data
