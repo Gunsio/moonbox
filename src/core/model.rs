@@ -155,3 +155,48 @@ pub struct CapsuleCompileOutput {
     pub version: u16,
     pub capsule: WorkCapsule,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VerificationStatus {
+    Pass,
+    Warn,
+    Fail,
+}
+
+impl Display for VerificationStatus {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VerificationStatus::Pass => f.write_str("PASS"),
+            VerificationStatus::Warn => f.write_str("WARN"),
+            VerificationStatus::Fail => f.write_str("FAIL"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerificationCheck {
+    pub name: String,
+    pub status: VerificationStatus,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerificationReport {
+    pub version: u16,
+    pub status: VerificationStatus,
+    pub ready: bool,
+    pub checks: Vec<VerificationCheck>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LaunchPlan {
+    pub version: u16,
+    pub dry_run: bool,
+    pub source_session: SessionSummary,
+    pub target_cli: CliTool,
+    pub target_branch: String,
+    pub capsule_path: String,
+    pub command: String,
+    pub verification: VerificationReport,
+}

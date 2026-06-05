@@ -34,6 +34,7 @@ The first implementation focuses on the product shell:
 - `SourceAdapter` contract and demo adapter fixture layer
 - File-backed adapter fixtures for Codex, Claude, and Hermes session/timeline parsing
 - Canonical Timeline and compiler request/output JSON contract fixtures
+- Target launch dry-run plans with Work Capsule verification reports
 
 ## Run
 
@@ -59,6 +60,8 @@ cargo run -- open --session codex-cxcp-design
 cargo run -- capsule --json
 cargo run -- compile-request --json
 cargo run -- compile-output --json
+cargo run -- launch --target hermes --session codex-cxcp-design --json
+cargo run -- verify --target hermes --session hermes-cxcp-502 --json
 ```
 
 ## Interaction Model
@@ -136,10 +139,12 @@ Stable interfaces matter more than any single framework:
 - M3: session-driven detail panes with per-source demo fixtures and searchable branch/health metadata.
 - M4: launch validation with target picker READY/WARN/BLOCKED states and blocked command confirmation/copy guards.
 - M5: file-backed adapter fixture snapshots for Codex, Claude, and Hermes session/timeline parsing.
+- M6: target launcher dry-run plus Work Capsule verification loop.
 
 ### Can Build Now
 
-- M6: target launcher dry-run plus verification loop around generated Work Capsule output.
+- Real Codex / Claude / Hermes Source Adapter implementations.
+- Real target launcher execution behind the existing dry-run plan.
 
 ### Prototype Now, Improve With Real Data
 

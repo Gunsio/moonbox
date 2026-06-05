@@ -18,6 +18,8 @@ fn main() -> Result<()> {
         Command::Capsule(args) => print_capsule(args),
         Command::CompileRequest(args) => print_compile_request(args),
         Command::CompileOutput(args) => print_compile_output(args),
+        Command::Launch(args) => print_launch_plan(args),
+        Command::Verify(args) => print_verify_report(args),
     }
 }
 
@@ -103,4 +105,57 @@ fn print_compile_output(args: cli::JsonArgs) -> Result<()> {
         println!("target: {}", output.capsule.target_branch);
     }
     Ok(())
+}
+
+fn print_launch_plan(args: cli::LaunchArgs) -> Result<()> {
+    let target = launch_target(args.target);
+    let plan =
+        core::workbench::launch_plan(args.session.as_deref(), target, args.capsule.as_deref());
+    if let Some(plan) = plan {
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&plan)?);
+        } else {
+            println!("launch: dry-run");
+            println!("session: {}", plan.source_session.id);
+            println!("target: {}", plan.target_cli);
+            println!("branch: {}", plan.target_branch);
+            println!("capsule: {}", plan.capsule_path);
+            println!("ready: {}", plan.verification.ready);
+            println!("status: {}", plan.verification.status);
+            println!("command: {}", plan.command);
+            print_checks(&plan.verification.checks);
+        }
+    } else {
+        println!("No session selected");
+    }
+    Ok(())
+}
+
+fn print_verify_report(args: cli::LaunchArgs) -> Result<()> {
+    let target = launch_target(args.target);
+    let report = core::workbench::verify_launch(args.session.as_deref(), target);
+    if let Some(report) = report {
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else {
+            println!("ready: {}", report.ready);
+            println!("status: {}", report.status);
+            print_checks(&report.checks);
+        }
+    } else {
+        println!("No session selected");
+    }
+    Ok(())
+}
+
+fn launch_target(target: Option<core::model::CliTool>) -> core::model::CliTool {
+    target
+        .or_else(core::config::load_last_target)
+        .unwrap_or(core::model::CliTool::Hermes)
+}
+
+fn print_checks(checks: &[core::model::VerificationCheck]) {
+    for check in checks {
+        println!("- {} {}: {}", check.status, check.name, check.detail);
+    }
 }
