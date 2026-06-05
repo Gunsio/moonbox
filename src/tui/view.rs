@@ -547,19 +547,16 @@ fn render_help(frame: &mut Frame, root: Rect) {
 }
 
 fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
-    let area = centered(root, 72, 64);
+    let area = centered(root, 76, 78);
     frame.render_widget(Clear, area);
-    let capsule = &app.data.capsule;
     let session = app
         .current_session()
         .map(|session| format!("{} / {}", session.cli, session.id))
         .unwrap_or_else(|| "No session selected".into());
-    let mut target_spans = Vec::new();
+    let mut target_lines = Vec::new();
     for target in CliTool::ALL {
-        if !target_spans.is_empty() {
-            target_spans.push(Span::raw("  "));
-        }
-        let style = if target == capsule.target_cli {
+        let selected = target == app.pending_target;
+        let style = if selected {
             Style::default()
                 .fg(ratatui::style::Color::Black)
                 .bg(theme::BLUE)
@@ -567,14 +564,15 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         } else {
             Style::default().fg(theme::TEXT)
         };
-        let label = if target == capsule.target_cli {
-            format!("[ {target} ]")
-        } else {
-            format!("  {target}  ")
-        };
-        target_spans.push(Span::styled(label, style));
+        let cursor = if selected { ">" } else { " " };
+        let mark = if selected { "[x]" } else { "[ ]" };
+        target_lines.push(Line::from(vec![
+            Span::styled(format!("{cursor} {mark} {target:<6}"), style),
+            Span::styled("  handoff target", Style::default().fg(theme::MUTED)),
+        ]));
     }
-    let lines = vec![
+    let target_branch = format!("moonbox/{}-rewind-evt-091", app.pending_target.id());
+    let mut lines = vec![
         Line::from(Span::styled(
             "Choose target CLI",
             Style::default()
@@ -587,30 +585,38 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             Span::raw(session),
         ]),
         Line::raw(""),
-        Line::from(target_spans),
+        Line::from(Span::styled(
+            "Target",
+            Style::default()
+                .fg(theme::BLUE)
+                .add_modifier(Modifier::BOLD),
+        )),
+    ];
+    lines.extend(target_lines);
+    lines.extend([
         Line::raw(""),
         Line::from(vec![
-            Span::styled("Target: ", Style::default().fg(theme::BLUE)),
-            Span::raw(capsule.target_cli.to_string()),
+            Span::styled("Selected: ", Style::default().fg(theme::BLUE)),
+            Span::raw(app.pending_target.to_string()),
         ]),
         Line::from(vec![
             Span::styled("Branch: ", Style::default().fg(theme::BLUE)),
-            Span::raw(&capsule.target_branch),
+            Span::raw(target_branch),
         ]),
         Line::raw(""),
         Line::from(Span::styled(
             format!(
                 "moonbox launch --target {} --capsule ~/.moonbox/capsules/evt-091.json",
-                capsule.target_cli.id()
+                app.pending_target.id()
             ),
             Style::default().fg(theme::CYAN),
         )),
         Line::raw(""),
         Line::from(Span::styled(
-            "j/k choose target   enter confirm   Esc close",
+            "j/k choose target   enter confirm   Esc cancel",
             Style::default().fg(theme::MUTED),
         )),
-    ];
+    ]);
     frame.render_widget(
         Paragraph::new(lines)
             .block(panel_block(" Launch ", true))

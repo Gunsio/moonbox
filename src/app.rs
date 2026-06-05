@@ -70,6 +70,7 @@ pub struct App {
     pub show_diff: bool,
     pub session_filter: SessionFilter,
     pub search_query: String,
+    pub pending_target: CliTool,
     pub verify_passed: bool,
     pub compile_status: &'static str,
     pub pending_g: bool,
@@ -92,6 +93,7 @@ impl App {
             show_diff: false,
             session_filter: SessionFilter::All,
             search_query: String::new(),
+            pending_target: target,
             verify_passed: true,
             compile_status: "ACTIVE",
             pending_g: false,
@@ -148,7 +150,7 @@ impl App {
             KeyCode::Char('v') => self.verify_passed = !self.verify_passed,
             KeyCode::Char('d') => self.show_diff = !self.show_diff,
             KeyCode::Char('s') => self.cycle_compiler(),
-            KeyCode::Enter => self.show_launch = true,
+            KeyCode::Enter => self.open_launch_picker(),
             _ => self.pending_g = false,
         }
     }
@@ -195,7 +197,7 @@ impl App {
                     }
                     "source" | "source next" => self.cycle_session_filter(true),
                     "source prev" | "source previous" => self.cycle_session_filter(false),
-                    "target" | "launch" => self.show_launch = true,
+                    "target" | "launch" => self.open_launch_picker(),
                     _ => {}
                 }
             }
@@ -400,16 +402,23 @@ impl App {
     }
 
     fn cycle_target(&mut self, forward: bool) {
-        let target = if forward {
-            self.data.target.next()
+        self.pending_target = if forward {
+            self.pending_target.next()
         } else {
-            self.data.target.previous()
+            self.pending_target.previous()
         };
-        self.replace_demo_data(self.active_source(), target);
+    }
+
+    fn open_launch_picker(&mut self) {
+        self.pending_target = self.data.target;
+        self.show_launch = true;
+        self.pending_g = false;
     }
 
     fn confirm_launch_target(&mut self) {
-        let _ = config::save_last_target(self.data.target);
+        let target = self.pending_target;
+        self.replace_demo_data(self.active_source(), target);
+        let _ = config::save_last_target(target);
         self.show_launch = false;
         self.pending_g = false;
     }
@@ -508,11 +517,28 @@ mod tests {
         assert!(app.show_launch);
 
         app.handle_key(key('j'));
+        assert_eq!(app.pending_target, CliTool::Codex);
+        assert_eq!(app.data.target, CliTool::Hermes);
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        assert!(!app.show_launch);
         assert_eq!(app.data.target, CliTool::Codex);
         assert_eq!(app.data.source, CliTool::Codex);
         assert_eq!(app.data.capsule.source_cli, CliTool::Codex);
         assert_eq!(app.data.capsule.source_session, "codex-cxcp-design");
         assert!(app.data.capsule.target_branch.contains("codex"));
         assert!(app.data.branches[2].label.contains("codex"));
+    }
+
+    #[test]
+    fn launch_picker_cancel_discards_pending_target() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes);
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        app.handle_key(key('j'));
+        app.handle_key(key('q'));
+
+        assert!(!app.show_launch);
+        assert_eq!(app.pending_target, CliTool::Codex);
+        assert_eq!(app.data.target, CliTool::Hermes);
     }
 }
