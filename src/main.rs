@@ -18,6 +18,7 @@ fn main() -> Result<()> {
         Command::Capsule(args) => print_capsule(args),
         Command::CompileRequest(args) => print_compile_request(args),
         Command::CompileOutput(args) => print_compile_output(args),
+        Command::Compilers(args) => print_compilers(args),
         Command::Launch(args) => print_launch_plan(args),
         Command::Verify(args) => print_verify_report(args),
     }
@@ -142,6 +143,23 @@ fn print_compile_output(args: cli::CompileArgs) -> Result<()> {
         println!("version: {}", output.version);
         println!("goal: {}", output.capsule.goal);
         println!("target: {}", output.capsule.target_branch);
+    }
+    Ok(())
+}
+
+fn print_compilers(args: cli::JsonArgs) -> Result<()> {
+    let compilers = core::compiler::compiler_catalog_entries();
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&compilers)?);
+    } else {
+        for compiler in compilers {
+            let kind = format!("{:?}", compiler.kind);
+            let status = format!("{:?}", compiler.status);
+            println!(
+                "{:<22} {:<11} {:<8} score={:<3} {}",
+                compiler.id, kind, status, compiler.score, compiler.reason
+            );
+        }
     }
     Ok(())
 }

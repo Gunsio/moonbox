@@ -111,6 +111,7 @@ The first implementation focuses on the product shell:
 - File-backed adapter fixtures for Codex, Claude, and Hermes session/timeline parsing
 - `CapsuleCompiler` trait with fixture and process-backed compiler implementations
 - External compiler skill runner via `MOONBOX_COMPILER`, JSON stdin/stdout, structured errors, and timeout handling
+- Configurable compiler skill presets with catalog status and quality scores
 - Canonical Timeline and compiler request/output JSON contract fixtures
 - Target launch dry-run plans with Work Capsule verification reports
 - Single core verifier policy shared by CLI and TUI target validation
@@ -142,6 +143,7 @@ cargo run -- capsule --json
 cargo run -- compile-request --json
 cargo run -- compile-output --json
 cargo run -- compile-output --compiler <compiler-id> --json
+cargo run -- compilers --json
 cargo run -- launch --target hermes --session <session-id> --json
 cargo run -- launch --execute --target hermes --session <session-id>
 cargo run -- verify --target hermes --session <session-id> --capsule ./capsule.json --json
@@ -156,7 +158,36 @@ testing and custom installs.
 
 External compiler skills are optional. When configured, Moonbox sends a
 `CapsuleCompileRequest` JSON object to the process stdin and expects a
-`CapsuleCompileOutput` JSON object on stdout.
+`CapsuleCompileOutput` JSON object on stdout. Durable presets live in
+`~/.config/moonbox/config.json`:
+
+```json
+{
+  "default_compiler": "engineering-handoff",
+  "compiler_presets": [
+    {
+      "id": "engineering-handoff",
+      "command": "/path/to/moonbox-handoff-compiler",
+      "args": ["--mode", "handoff"],
+      "timeout_ms": 30000,
+      "enabled": true
+    }
+  ]
+}
+```
+
+List the current compiler catalog with:
+
+```bash
+moonbox compilers
+moonbox compilers --json
+```
+
+Catalog entries include their source (`Environment`, `Config`, or `Builtin`),
+status (`Ready`, `Warning`, or `Disabled`), score, command, arguments, timeout,
+and the reason behind the quality signal.
+
+Environment variables remain the highest-priority one-off override:
 
 ```bash
 MOONBOX_COMPILER=/path/to/compiler \
@@ -166,7 +197,8 @@ MOONBOX_COMPILER_TIMEOUT_MS=30000 \
 cargo run -- compile-output --compiler engineering-handoff --json
 ```
 
-Without `MOONBOX_COMPILER`, Moonbox uses the built-in fixture compiler.
+Without configured presets or `MOONBOX_COMPILER`, Moonbox uses the built-in
+fixture compiler.
 
 ## Interaction Model
 
@@ -255,10 +287,10 @@ Stable interfaces matter more than any single framework:
 - M13: real Hermes `SourceAdapter` for `~/.hermes/state.db`, optional `sessions.json` enrichment, SQLite message timeline parsing, id-based explicit lookup routing, and lightweight CLI launch/verify artifacts for large real stores.
 - M14: guarded target launcher execution with `launch --execute`, target-specific Codex/Claude/Hermes command generation, structured `target_command` JSON, binary overrides, verification blocking before spawn, and TUI copy commands that execute through Moonbox.
 - M15: guarded original-session execution with `open --execute`, structured original open plan JSON, source-specific Codex/Claude/Hermes resume commands, corrected Hermes resume command generation, binary overrides, and TUI copy commands that execute through Moonbox.
+- M16: configurable compiler skill presets with `default_compiler`, catalog status/score signals, `moonbox compilers`, environment override precedence, and stricter unknown/disabled compiler errors.
 
 ### Can Build Now
 
-- Real compiler skill presets and quality evaluation.
 - Verifier hardening.
 - Replay eval.
 

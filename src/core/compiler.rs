@@ -10,7 +10,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use super::model::{CapsuleCompileOutput, CapsuleCompileRequest, ChecklistItem, WorkCapsule};
+use super::{
+    config::{self, CompilerPresetConfig},
+    model::{
+        CapsuleCompileOutput, CapsuleCompileRequest, ChecklistItem, CompilerPresetInfo,
+        CompilerPresetKind, CompilerPresetStatus, WorkCapsule,
+    },
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompilerError {
@@ -136,6 +142,20 @@ impl ProcessCapsuleCompiler {
         let args = configured_process_compiler_args()?;
         let timeout = configured_process_compiler_timeout()?;
         Ok(Some(Self::new(id, program, args).with_timeout(timeout)))
+    }
+
+    pub fn from_preset(preset: &CompilerPresetConfig) -> Result<Self, CompilerError> {
+        validate_configured_timeout(preset.timeout_ms, &preset.id)?;
+        let timeout = preset
+            .timeout_ms
+            .map(Duration::from_millis)
+            .unwrap_or_else(|| Duration::from_millis(DEFAULT_PROCESS_TIMEOUT_MS));
+        Ok(Self::new(
+            preset.id.clone(),
+            PathBuf::from(&preset.command),
+            preset.args.clone(),
+        )
+        .with_timeout(timeout))
     }
 }
 
@@ -314,18 +334,48 @@ impl CapsuleCompiler for FixtureCapsuleCompiler {
 }
 
 pub fn default_compiler_id() -> String {
-    configured_process_compiler_id().unwrap_or_else(|| DEFAULT_COMPILER_ID.into())
+    configured_process_compiler_id()
+        .or_else(|| {
+            config::load_default_compiler().filter(|id| {
+                compiler_catalog_entries().iter().any(|compiler| {
+                    compiler.id == *id && compiler.status != CompilerPresetStatus::Disabled
+                })
+            })
+        })
+        .unwrap_or_else(|| DEFAULT_COMPILER_ID.into())
 }
 
 pub fn compiler_catalog() -> Vec<String> {
+    compiler_catalog_entries()
+        .into_iter()
+        .map(|entry| entry.id)
+        .collect()
+}
+
+pub fn compiler_catalog_entries() -> Vec<CompilerPresetInfo> {
     let mut compilers = Vec::new();
-    if let Some(id) = configured_process_compiler_id() {
-        compilers.push(id);
+    if let Ok(Some(compiler)) = ProcessCapsuleCompiler::from_environment() {
+        push_unique_compiler(&mut compilers, process_compiler_info(&compiler));
+    } else if let Some(id) = configured_process_compiler_id() {
+        push_unique_compiler(
+            &mut compilers,
+            CompilerPresetInfo {
+                id,
+                kind: CompilerPresetKind::Environment,
+                status: CompilerPresetStatus::Warning,
+                score: 25,
+                command: env::var("MOONBOX_COMPILER").ok(),
+                args: Vec::new(),
+                timeout_ms: None,
+                reason: "environment compiler is configured but invalid".into(),
+            },
+        );
+    }
+    for preset in config::load_compiler_presets() {
+        push_unique_compiler(&mut compilers, preset_info(&preset));
     }
     for id in FIXTURE_COMPILER_IDS {
-        if !compilers.iter().any(|compiler| compiler == id) {
-            compilers.push(id.into());
-        }
+        push_unique_compiler(&mut compilers, builtin_info(id));
     }
     compilers
 }
@@ -333,12 +383,35 @@ pub fn compiler_catalog() -> Vec<String> {
 pub fn compile_with_configured_runner(
     request: &CapsuleCompileRequest,
 ) -> Result<CapsuleCompileOutput, CompilerError> {
-    if let Some(compiler) = ProcessCapsuleCompiler::from_environment()?
-        && request.compiler == compiler.id()
+    if let Some(compiler_id) = configured_process_compiler_id()
+        && request.compiler == compiler_id
     {
+        let compiler = ProcessCapsuleCompiler::from_environment()?.ok_or_else(|| {
+            CompilerError::InvalidConfig {
+                name: request.compiler.clone(),
+                reason: "environment compiler disappeared before compile".into(),
+            }
+        })?;
         return compiler.compile(request);
     }
-    FixtureCapsuleCompiler.compile(request)
+    for preset in config::load_compiler_presets() {
+        if request.compiler == preset.id {
+            if !preset.enabled {
+                return Err(CompilerError::InvalidConfig {
+                    name: preset.id,
+                    reason: "compiler preset is disabled".into(),
+                });
+            }
+            return ProcessCapsuleCompiler::from_preset(&preset)?.compile(request);
+        }
+    }
+    if FIXTURE_COMPILER_IDS.contains(&request.compiler.as_str()) {
+        return FixtureCapsuleCompiler.compile(request);
+    }
+    Err(CompilerError::InvalidConfig {
+        name: request.compiler.clone(),
+        reason: "compiler id is not configured".into(),
+    })
 }
 
 pub fn default_rewind_event_id(session_id: &str) -> &'static str {
@@ -395,13 +468,18 @@ fn configured_process_compiler_timeout() -> Result<Duration, CompilerError> {
             name: "MOONBOX_COMPILER_TIMEOUT_MS".into(),
             reason: error.to_string(),
         })?;
-    if timeout == 0 {
+    validate_configured_timeout(Some(timeout), "MOONBOX_COMPILER_TIMEOUT_MS")?;
+    Ok(Duration::from_millis(timeout))
+}
+
+fn validate_configured_timeout(timeout_ms: Option<u64>, name: &str) -> Result<(), CompilerError> {
+    if timeout_ms == Some(0) {
         return Err(CompilerError::InvalidConfig {
-            name: "MOONBOX_COMPILER_TIMEOUT_MS".into(),
-            reason: "must be greater than zero".into(),
+            name: name.into(),
+            reason: "timeout_ms must be greater than zero".into(),
         });
     }
-    Ok(Duration::from_millis(timeout))
+    Ok(())
 }
 
 fn args_to_string(value: OsString, name: &str) -> Result<String, CompilerError> {
@@ -411,6 +489,131 @@ fn args_to_string(value: OsString, name: &str) -> Result<String, CompilerError> 
             name: name.into(),
             reason: "value is not valid UTF-8".into(),
         })
+}
+
+fn push_unique_compiler(compilers: &mut Vec<CompilerPresetInfo>, compiler: CompilerPresetInfo) {
+    if !compilers.iter().any(|entry| entry.id == compiler.id) {
+        compilers.push(compiler);
+    }
+}
+
+fn process_compiler_info(compiler: &ProcessCapsuleCompiler) -> CompilerPresetInfo {
+    process_info(
+        compiler.id().into(),
+        CompilerPresetKind::Environment,
+        compiler.program.to_string_lossy().into_owned(),
+        compiler.args.clone(),
+        Some(duration_millis(compiler.timeout)),
+        true,
+    )
+}
+
+fn preset_info(preset: &CompilerPresetConfig) -> CompilerPresetInfo {
+    process_info(
+        preset.id.clone(),
+        CompilerPresetKind::Config,
+        preset.command.clone(),
+        preset.args.clone(),
+        preset.timeout_ms,
+        preset.enabled,
+    )
+}
+
+fn process_info(
+    id: String,
+    kind: CompilerPresetKind,
+    command: String,
+    args: Vec<String>,
+    timeout_ms: Option<u64>,
+    enabled: bool,
+) -> CompilerPresetInfo {
+    if !enabled {
+        return CompilerPresetInfo {
+            id,
+            kind,
+            status: CompilerPresetStatus::Disabled,
+            score: 0,
+            command: Some(command),
+            args,
+            timeout_ms,
+            reason: "disabled in config".into(),
+        };
+    }
+    if timeout_ms == Some(0) {
+        return CompilerPresetInfo {
+            id,
+            kind,
+            status: CompilerPresetStatus::Warning,
+            score: 10,
+            command: Some(command),
+            args,
+            timeout_ms,
+            reason: "timeout_ms must be greater than zero".into(),
+        };
+    }
+    if command_available(&command) {
+        CompilerPresetInfo {
+            id,
+            kind,
+            status: CompilerPresetStatus::Ready,
+            score: 85,
+            command: Some(command),
+            args,
+            timeout_ms,
+            reason: "process compiler is available".into(),
+        }
+    } else {
+        CompilerPresetInfo {
+            id,
+            kind,
+            status: CompilerPresetStatus::Warning,
+            score: 35,
+            command: Some(command),
+            args,
+            timeout_ms,
+            reason: "compiler command was not found on disk or PATH".into(),
+        }
+    }
+}
+
+fn builtin_info(id: &str) -> CompilerPresetInfo {
+    CompilerPresetInfo {
+        id: id.into(),
+        kind: CompilerPresetKind::Builtin,
+        status: CompilerPresetStatus::Ready,
+        score: 45,
+        command: None,
+        args: Vec::new(),
+        timeout_ms: None,
+        reason: "built-in deterministic fixture compiler".into(),
+    }
+}
+
+fn command_available(command: &str) -> bool {
+    let path = Path::new(command);
+    if path.components().count() > 1 {
+        return command_is_executable(path);
+    }
+    env::var_os("PATH")
+        .map(|paths| env::split_paths(&paths).any(|dir| command_is_executable(&dir.join(command))))
+        .unwrap_or(false)
+}
+
+fn command_is_executable(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        path.metadata()
+            .map(|metadata| metadata.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false)
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 enum WaitOutcome {
@@ -615,6 +818,144 @@ sleep 1
         let error = compiler.compile(&request).expect_err("timeout");
 
         assert!(matches!(error, CompilerError::Timeout { .. }));
+    }
+
+    #[test]
+    fn built_in_compilers_have_catalog_quality_signal() {
+        let info = builtin_info(DEFAULT_COMPILER_ID);
+
+        assert_eq!(info.id, DEFAULT_COMPILER_ID);
+        assert_eq!(info.kind, CompilerPresetKind::Builtin);
+        assert_eq!(info.status, CompilerPresetStatus::Ready);
+        assert_eq!(info.score, 45);
+        assert_eq!(info.command, None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn available_config_preset_has_ready_quality_signal() {
+        let script = executable_script(
+            "catalog-ready",
+            r#"#!/bin/sh
+cat >/dev/null
+"#,
+        );
+        let preset = CompilerPresetConfig {
+            id: "ready-skill".into(),
+            command: script.to_string_lossy().into_owned(),
+            args: vec!["--mode".into(), "handoff".into()],
+            timeout_ms: Some(12_000),
+            enabled: true,
+        };
+
+        let info = preset_info(&preset);
+
+        assert_eq!(info.kind, CompilerPresetKind::Config);
+        assert_eq!(info.status, CompilerPresetStatus::Ready);
+        assert_eq!(info.score, 85);
+        assert_eq!(info.args, ["--mode", "handoff"]);
+        assert_eq!(info.timeout_ms, Some(12_000));
+    }
+
+    #[test]
+    fn disabled_config_preset_is_not_runnable() {
+        let preset = CompilerPresetConfig {
+            id: "disabled-skill".into(),
+            command: "/bin/moonbox-disabled".into(),
+            args: Vec::new(),
+            timeout_ms: None,
+            enabled: false,
+        };
+
+        let info = preset_info(&preset);
+
+        assert_eq!(info.status, CompilerPresetStatus::Disabled);
+        assert_eq!(info.score, 0);
+        assert!(info.reason.contains("disabled"));
+    }
+
+    #[test]
+    fn missing_config_command_has_warning_quality_signal() {
+        let preset = CompilerPresetConfig {
+            id: "missing-skill".into(),
+            command: format!("/tmp/moonbox-missing-compiler-{}", std::process::id()),
+            args: Vec::new(),
+            timeout_ms: Some(30_000),
+            enabled: true,
+        };
+
+        let info = preset_info(&preset);
+
+        assert_eq!(info.status, CompilerPresetStatus::Warning);
+        assert_eq!(info.score, 35);
+        assert!(info.reason.contains("not found"));
+    }
+
+    #[test]
+    fn preset_compiler_rejects_zero_timeout() {
+        let preset = CompilerPresetConfig {
+            id: "zero-timeout".into(),
+            command: "/bin/moonbox-handoff".into(),
+            args: Vec::new(),
+            timeout_ms: Some(0),
+            enabled: true,
+        };
+
+        let error = ProcessCapsuleCompiler::from_preset(&preset).expect_err("invalid timeout");
+
+        assert!(matches!(error, CompilerError::InvalidConfig { .. }));
+        assert!(error.to_string().contains("timeout_ms"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn preset_compiler_executes_configured_command() {
+        let script = executable_script(
+            "preset-success",
+            r#"#!/bin/sh
+cat >/dev/null
+cat <<'JSON'
+{"version":1,"capsule":{"version":1,"source_cli":"codex","target_cli":"hermes","source_session":"codex-cxcp-design","rewind_point":"evt-091 / preset","compiler":"preset-skill","target_branch":"moonbox/hermes-rewind-evt-091","goal":"preset compiler","state":"compiled","decisions":["preset"],"todo":[{"done":false,"text":"verify"}],"evidence":["stdin read"],"risks":[]}}
+JSON
+"#,
+        );
+        let preset = CompilerPresetConfig {
+            id: "preset-skill".into(),
+            command: script.to_string_lossy().into_owned(),
+            args: Vec::new(),
+            timeout_ms: Some(5_000),
+            enabled: true,
+        };
+        let compiler = ProcessCapsuleCompiler::from_preset(&preset).expect("preset compiler");
+        let request = data::compile_request_with_compiler(
+            CliTool::Codex,
+            CliTool::Hermes,
+            "evt-091",
+            "preset-skill",
+        )
+        .expect("request");
+
+        let output = compiler.compile(&request).expect("output");
+
+        assert_eq!(output.capsule.compiler, "preset-skill");
+        assert_eq!(output.capsule.goal, "preset compiler");
+    }
+
+    #[test]
+    fn configured_runner_rejects_unknown_compiler_id() {
+        let compiler_id = format!("unknown-skill-{}", std::process::id());
+        let request = data::compile_request_with_compiler(
+            CliTool::Codex,
+            CliTool::Hermes,
+            "evt-091",
+            &compiler_id,
+        )
+        .expect("request");
+
+        let error = compile_with_configured_runner(&request).expect_err("unknown compiler");
+
+        assert!(matches!(error, CompilerError::InvalidConfig { .. }));
+        assert!(error.to_string().contains("not configured"));
     }
 
     #[cfg(unix)]
