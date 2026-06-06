@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     env,
     io::BufRead,
     path::{Path, PathBuf},
@@ -6,9 +7,10 @@ use std::{
 
 use serde::Deserialize;
 use serde_json::Value;
+use time::OffsetDateTime;
 
 use super::{
-    adapter::{AdapterError, SourceAdapter, SourceReportMeta},
+    adapter::{AdapterError, SourceAdapter, SourceReportMeta, SourceScanStats},
     local_jsonl::{
         collect_project_jsonl_files, configured_session_limit, configured_session_scan_entry_limit,
         configured_session_summary_line_limit, discover_project_jsonl_files, display_time,
@@ -54,6 +56,25 @@ struct ClaudeRecord {
     message: Value,
     #[serde(rename = "toolUseResult", default)]
     tool_use_result: Value,
+}
+
+#[derive(Debug, Deserialize)]
+struct ClaudeHistoryRecord {
+    display: Option<String>,
+    timestamp: Option<i64>,
+    project: Option<String>,
+    #[serde(rename = "sessionId")]
+    session_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ClaudeHistoryEntry {
+    session_id: String,
+    project: String,
+    path: PathBuf,
+    timestamp_ms: i64,
+    updated_at: String,
+    display_title: Option<String>,
 }
 
 #[derive(Debug)]
@@ -123,16 +144,111 @@ impl ClaudeSourceAdapter {
 
     #[cfg(not(test))]
     pub fn has_session_store(&self) -> bool {
-        self.projects_dir().is_dir()
+        self.history_path().is_file() || self.projects_dir().is_dir()
     }
 
     #[cfg(not(test))]
     pub(crate) fn session_store_path(&self) -> PathBuf {
-        self.projects_dir()
+        if self.history_path().is_file() {
+            self.history_path()
+        } else {
+            self.projects_dir()
+        }
     }
 
     fn projects_dir(&self) -> PathBuf {
         self.root.join("projects")
+    }
+
+    fn history_path(&self) -> PathBuf {
+        self.root.join("history.jsonl")
+    }
+
+    fn has_history_index(&self) -> bool {
+        self.history_path().is_file()
+    }
+
+    fn listed_history_entries(&self) -> Result<Option<Vec<ClaudeHistoryEntry>>, AdapterError> {
+        if !self.has_history_index() {
+            return Ok(None);
+        }
+        let mut entries = self.history_entries()?;
+        entries.sort_by(|left, right| {
+            right
+                .timestamp_ms
+                .cmp(&left.timestamp_ms)
+                .then_with(|| right.session_id.cmp(&left.session_id))
+        });
+        entries.retain(|entry| entry.path.is_file());
+        if let Some(limit) = self.list_limit {
+            entries.truncate(limit);
+        }
+        Ok(Some(entries))
+    }
+
+    fn history_entries(&self) -> Result<Vec<ClaudeHistoryEntry>, AdapterError> {
+        let path = self.history_path();
+        let reader = open_reader(CLAUDE_TOOL, &path)?;
+        let mut entries = HashMap::<String, ClaudeHistoryEntry>::new();
+
+        for line in reader.lines() {
+            let line = line.map_err(|error| read_error(CLAUDE_TOOL, &path, error))?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let Ok(record) = serde_json::from_str::<ClaudeHistoryRecord>(&line) else {
+                continue;
+            };
+            let (Some(session_id), Some(project), Some(timestamp_ms)) =
+                (record.session_id, record.project, record.timestamp)
+            else {
+                continue;
+            };
+            let Some(updated_at) = timestamp_millis_to_rfc3339(timestamp_ms) else {
+                continue;
+            };
+            let display_title = record.display.as_deref().and_then(history_display_title);
+            let path = self.history_session_path(&project, &session_id);
+            entries
+                .entry(session_id.clone())
+                .and_modify(|entry| {
+                    if timestamp_ms >= entry.timestamp_ms {
+                        entry.project = project.clone();
+                        entry.path = path.clone();
+                        entry.timestamp_ms = timestamp_ms;
+                        entry.updated_at = updated_at.clone();
+                    }
+                    if display_title.is_some() {
+                        entry.display_title = display_title.clone();
+                    }
+                })
+                .or_insert(ClaudeHistoryEntry {
+                    session_id,
+                    project,
+                    path,
+                    timestamp_ms,
+                    updated_at,
+                    display_title,
+                });
+        }
+
+        Ok(entries.into_values().collect())
+    }
+
+    fn history_entry(&self, session_id: &str) -> Result<Option<ClaudeHistoryEntry>, AdapterError> {
+        if !self.has_history_index() {
+            return Ok(None);
+        }
+        Ok(self
+            .history_entries()?
+            .into_iter()
+            .find(|entry| entry.session_id == session_id))
+    }
+
+    fn history_session_path(&self, project: &str, session_id: &str) -> PathBuf {
+        self.projects_dir()
+            .join(claude_project_dir_name(project))
+            .join(format!("{session_id}.jsonl"))
     }
 
     fn session_files(&self, limit: Option<usize>) -> Result<Vec<PathBuf>, AdapterError> {
@@ -198,6 +314,15 @@ impl ClaudeSourceAdapter {
     }
 
     fn find_session_path(&self, session_id: &str) -> Result<Option<PathBuf>, AdapterError> {
+        if let Some(entry) = self.history_entry(session_id)?
+            && entry.path.is_file()
+        {
+            return Ok(Some(entry.path));
+        }
+        self.find_project_session_path(session_id)
+    }
+
+    fn find_project_session_path(&self, session_id: &str) -> Result<Option<PathBuf>, AdapterError> {
         for path in self.all_session_files()? {
             if id_from_path(&path) == session_id {
                 return Ok(Some(path));
@@ -208,6 +333,25 @@ impl ClaudeSourceAdapter {
             }
         }
         Ok(None)
+    }
+
+    fn parse_history_summary(
+        &self,
+        entry: &ClaudeHistoryEntry,
+    ) -> Result<SessionSummary, AdapterError> {
+        let mut summary = self.parse_list_summary(&entry.path)?;
+        summary.updated_at = entry.updated_at.clone();
+        summary.updated = human_timestamp(&entry.updated_at);
+        if summary.title.starts_with("Claude session ")
+            && let Some(title) = entry.display_title.as_deref()
+        {
+            summary.title = title.to_owned();
+        }
+        summary.health_reason = Some(match summary.health_reason.take() {
+            Some(reason) => format!("{reason}; indexed by Claude history"),
+            None => "real Claude JSONL session; indexed by Claude history".into(),
+        });
+        Ok(summary)
     }
 
     fn parse_timeline(
@@ -268,10 +412,24 @@ impl SourceAdapter for ClaudeSourceAdapter {
     }
 
     fn store_path(&self) -> Option<String> {
-        Some(self.projects_dir().display().to_string())
+        Some(
+            if self.has_history_index() {
+                self.history_path()
+            } else {
+                self.projects_dir()
+            }
+            .display()
+            .to_string(),
+        )
     }
 
     fn list_sessions(&self) -> Result<Vec<SessionSummary>, AdapterError> {
+        if let Some(entries) = self.listed_history_entries()? {
+            return entries
+                .iter()
+                .map(|entry| self.parse_history_summary(entry))
+                .collect();
+        }
         let mut sessions = Vec::new();
         for path in self.listed_session_files()? {
             sessions.push(self.parse_list_summary(&path)?);
@@ -284,6 +442,30 @@ impl SourceAdapter for ClaudeSourceAdapter {
         filter_status: &str,
         reason: &str,
     ) -> Result<(Vec<SessionSummary>, super::model::SourceAdapterReport), AdapterError> {
+        if let Some(entries) = self.listed_history_entries()? {
+            let sessions = entries
+                .iter()
+                .map(|entry| self.parse_history_summary(entry))
+                .collect::<Result<Vec<_>, _>>()?;
+            let report = super::adapter::report_from_sessions_with_scan(
+                SourceReportMeta {
+                    cli: self.tool(),
+                    provenance: self.provenance(),
+                    active: true,
+                    store_path: self.store_path(),
+                    filter_status: filter_status.into(),
+                    reason: reason.into(),
+                },
+                &sessions,
+                SourceScanStats {
+                    list_limit: self.list_limit,
+                    scan_entry_count: sessions.len(),
+                    summary_line_limit: self.summary_line_limit,
+                    ..SourceScanStats::default()
+                },
+            );
+            return Ok((sessions, report));
+        }
         let discovery = self.listed_session_discovery()?;
         let mut sessions = Vec::new();
         for path in discovery.files {
@@ -344,6 +526,45 @@ impl SourceAdapter for ClaudeSourceAdapter {
             });
         };
         self.parse_timeline(&session.id, &path, event_limit)
+    }
+}
+
+fn timestamp_millis_to_rfc3339(timestamp_ms: i64) -> Option<String> {
+    let seconds = timestamp_ms.div_euclid(1000);
+    let millis = timestamp_ms.rem_euclid(1000);
+    let time = OffsetDateTime::from_unix_timestamp(seconds).ok()?;
+    Some(format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+        time.year(),
+        u8::from(time.month()),
+        time.day(),
+        time.hour(),
+        time.minute(),
+        time.second(),
+        millis,
+    ))
+}
+
+fn claude_project_dir_name(project: &str) -> String {
+    project
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+fn history_display_title(display: &str) -> Option<String> {
+    let title = normalized_text(display)?;
+    let title = title.trim();
+    if title.is_empty() || title.starts_with('/') {
+        None
+    } else {
+        Some(truncate(title, 72))
     }
 }
 
@@ -614,6 +835,42 @@ mod tests {
     }
 
     #[test]
+    fn lists_claude_sessions_from_history_index_when_available() {
+        let root = test_root("history-index");
+        write_session(
+            &root,
+            "-repo-a/session-a.jsonl",
+            r#"{"type":"user","sessionId":"session-a","timestamp":"2026-06-01T09:00:00.000Z","cwd":"/repo/a","message":{"content":"old jsonl"}}
+{"type":"ai-title","sessionId":"session-a","aiTitle":"Session A title"}
+"#,
+        );
+        write_session(
+            &root,
+            "-repo-b/session-b.jsonl",
+            r#"{"type":"user","sessionId":"session-b","timestamp":"2026-06-01T08:00:00.000Z","cwd":"/repo/b","message":{"content":"newer history"}}
+"#,
+        );
+        write_history(
+            &root,
+            r#"{"display":"Session A prompt","timestamp":1780300000000,"project":"/repo/a","sessionId":"session-a"}
+{"display":"Session B prompt","timestamp":1780400000000,"project":"/repo/b","sessionId":"session-b"}
+{"display":"/resume","timestamp":1780500000000,"project":"/repo/current","sessionId":"missing-current"}
+"#,
+        );
+
+        let sessions = ClaudeSourceAdapter::new(&root)
+            .list_sessions()
+            .expect("sessions");
+
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(sessions[0].id, "session-b");
+        assert_eq!(sessions[0].title, "newer history");
+        assert_eq!(sessions[0].updated_at, "2026-06-02T11:33:20.000Z");
+        assert_eq!(sessions[1].id, "session-a");
+        assert_eq!(sessions[1].title, "Session A title");
+    }
+
+    #[test]
     fn loads_canonical_timeline_from_claude_jsonl_store() {
         let root = test_root("timeline");
         write_session(
@@ -762,5 +1019,9 @@ not-json-after-limit"#,
         fs::create_dir_all(path.parent().expect("parent")).expect("dirs");
         let mut file = fs::File::create(path).expect("file");
         file.write_all(contents.as_bytes()).expect("write");
+    }
+
+    fn write_history(root: &Path, contents: &str) {
+        fs::write(root.join("history.jsonl"), contents).expect("history");
     }
 }

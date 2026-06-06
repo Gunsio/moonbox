@@ -1,14 +1,43 @@
+use std::{
+    fmt,
+    sync::mpsc::{self, TryRecvError},
+    thread,
+    time::Instant,
+};
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::core::{
     config, doctor,
     error::CoreError,
+    launcher,
     model::{
-        CliTool, DoctorReport, LaunchValidation, LaunchValidationState, SessionSummary,
-        VerificationReport, WorkCapsule, WorkbenchData,
+        CliTool, DoctorReport, LaunchPlan, LaunchValidation, LaunchValidationState,
+        OriginalSessionPlan, SessionAction, SessionSummary, VerificationReport, WorkCapsule,
+        WorkbenchData,
     },
     verifier, workbench,
 };
+
+type SessionLoadResult = Result<WorkbenchData, CoreError>;
+
+struct PendingSessionLoad {
+    request_id: u64,
+    session_id: String,
+    target: CliTool,
+    started_at: Instant,
+    receiver: mpsc::Receiver<SessionLoadResult>,
+}
+
+impl fmt::Debug for PendingSessionLoad {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PendingSessionLoad")
+            .field("request_id", &self.request_id)
+            .field("session_id", &self.session_id)
+            .field("target", &self.target)
+            .finish_non_exhaustive()
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
@@ -60,6 +89,12 @@ impl SessionFilter {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum TuiExitAction {
+    OriginalResume(OriginalSessionPlan),
+    TargetHandoff(LaunchPlan),
+}
+
 #[derive(Debug)]
 pub struct App {
     pub data: WorkbenchData,
@@ -77,6 +112,7 @@ pub struct App {
     pub show_diff: bool,
     pub session_filter: SessionFilter,
     pub search_query: String,
+    visible_session_indices: Vec<usize>,
     pub pending_target: CliTool,
     pub status_message: String,
     pub rewind_event_id: String,
@@ -86,7 +122,10 @@ pub struct App {
     pub doctor_report: DoctorReport,
     pub compile_status: &'static str,
     pub pending_g: bool,
+    session_load_request_id: u64,
+    pending_session_load: Option<PendingSessionLoad>,
     clipboard_text: Option<String>,
+    exit_action: Option<TuiExitAction>,
     should_quit: bool,
 }
 
@@ -110,7 +149,7 @@ impl App {
             .unwrap_or(0);
         let selected_event = rewind_event_index(&data, &rewind_event_id);
         let doctor_report = doctor::diagnose_with_inventory(&data.sessions, &data.source_adapters);
-        Self {
+        let mut app = Self {
             data,
             focus: Focus::Sessions,
             selected_session,
@@ -135,9 +174,15 @@ impl App {
             doctor_report,
             compile_status: "ACTIVE",
             pending_g: false,
+            session_load_request_id: 0,
+            pending_session_load: None,
             clipboard_text: None,
+            exit_action: None,
             should_quit: false,
-        }
+            visible_session_indices: Vec::new(),
+        };
+        app.refresh_visible_sessions();
+        app
     }
 
     pub fn should_quit(&self) -> bool {
@@ -146,6 +191,36 @@ impl App {
 
     pub fn take_clipboard_text(&mut self) -> Option<String> {
         self.clipboard_text.take()
+    }
+
+    pub fn take_exit_action(&mut self) -> Option<TuiExitAction> {
+        self.exit_action.take()
+    }
+
+    pub fn is_session_load_pending(&self) -> bool {
+        self.pending_session_load.is_some()
+    }
+
+    pub fn poll_background(&mut self) -> bool {
+        let Some(pending) = self.pending_session_load.take() else {
+            return false;
+        };
+
+        match pending.receiver.try_recv() {
+            Ok(result) => {
+                self.apply_session_load_result(pending, result);
+                true
+            }
+            Err(TryRecvError::Empty) => {
+                self.pending_session_load = Some(pending);
+                false
+            }
+            Err(TryRecvError::Disconnected) => {
+                self.compile_status = "FAILED";
+                self.set_status(format!("Session load failed: {}", pending.session_id));
+                true
+            }
+        }
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) {
@@ -289,16 +364,22 @@ impl App {
     fn sync_live_search(&mut self) {
         if let Some(query) = self.command_input.strip_prefix('/') {
             self.search_query = query.trim().to_string();
+            self.refresh_visible_sessions();
             self.clamp_selected_session();
-            self.sync_selected_session_details();
+            self.request_selected_session_details();
         }
     }
 
     fn set_search_status(&mut self) {
-        if self.search_query.is_empty() {
-            self.set_status("Search cleared");
+        let suffix = if self.is_session_load_pending() {
+            " - loading selected session"
         } else {
-            self.set_status(format!("Search: /{}", self.search_query));
+            ""
+        };
+        if self.search_query.is_empty() {
+            self.set_status(format!("Search cleared{suffix}"));
+        } else {
+            self.set_status(format!("Search: /{}{suffix}", self.search_query));
         }
     }
 
@@ -312,7 +393,7 @@ impl App {
                     self.set_status("Launch review closed");
                 }
                 KeyCode::Char('y') => self.copy_launch_command(),
-                KeyCode::Enter => self.set_status("Launch review is copy-only; press y to copy"),
+                KeyCode::Enter => self.queue_target_handoff(),
                 KeyCode::PageDown => self.scroll_modal(true, 6),
                 KeyCode::PageUp => self.scroll_modal(false, 6),
                 KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -365,9 +446,7 @@ impl App {
             KeyCode::Char('r') if self.show_doctor => self.refresh_doctor(),
             KeyCode::Char('y') if self.show_doctor => self.copy_doctor_report(),
             KeyCode::Char('y') => self.copy_focused_command(),
-            KeyCode::Enter if self.show_open_original => {
-                self.set_status("Original preview is copy-only; press y to copy")
-            }
+            KeyCode::Enter if self.show_open_original => self.queue_original_resume(),
             KeyCode::Char('j') | KeyCode::Down => self.scroll_modal(true, 1),
             KeyCode::Char('k') | KeyCode::Up => self.scroll_modal(false, 1),
             KeyCode::PageDown => self.scroll_modal(true, 6),
@@ -455,8 +534,9 @@ impl App {
     fn move_top(&mut self) {
         match self.focus {
             Focus::Sessions => {
-                if let Some(first) = self.visible_session_indices().first() {
-                    self.selected_session = *first;
+                if let Some(first) = self.visible_session_indices.first().copied() {
+                    self.selected_session = first;
+                    self.request_selected_session_details();
                 }
             }
             Focus::Timeline => self.selected_event = 0,
@@ -469,8 +549,9 @@ impl App {
     fn move_bottom(&mut self) {
         match self.focus {
             Focus::Sessions => {
-                if let Some(last) = self.visible_session_indices().last() {
-                    self.selected_session = *last;
+                if let Some(last) = self.visible_session_indices.last().copied() {
+                    self.selected_session = last;
+                    self.request_selected_session_details();
                 }
             }
             Focus::Timeline => self.selected_event = self.data.timeline.len().saturating_sub(1),
@@ -489,6 +570,9 @@ impl App {
     }
 
     fn set_rewind_point(&mut self) {
+        if !self.ensure_session_details_ready("Rewind") {
+            return;
+        }
         if let Some((id, title)) = self
             .data
             .timeline
@@ -504,6 +588,9 @@ impl App {
     }
 
     fn compile_capsule(&mut self) {
+        if !self.ensure_session_details_ready("Compile") {
+            return;
+        }
         let compiler = self.data.compilers[self.selected_compiler].clone();
         let Some(session_id) = self.current_session().map(|session| session.id.clone()) else {
             self.compile_status = "FAILED";
@@ -552,6 +639,9 @@ impl App {
     }
 
     fn run_verification(&mut self) {
+        if !self.ensure_session_details_ready("Verify") {
+            return;
+        }
         let session_id = self.current_session().map(|session| session.id.clone());
         let report = match workbench::verify_launch(session_id.as_deref(), self.data.target, None) {
             Ok(Some(report)) => report,
@@ -609,6 +699,9 @@ impl App {
     }
 
     fn open_original(&mut self) {
+        if !self.ensure_session_details_ready("Original") {
+            return;
+        }
         self.show_open_original = true;
         self.modal_scroll = 0;
         if let Some(session) = self.current_session() {
@@ -619,58 +712,66 @@ impl App {
         self.pending_g = false;
     }
 
+    fn queue_original_resume(&mut self) {
+        if !self.ensure_session_details_ready("Original") {
+            return;
+        }
+        let Some(session) = self.current_session().cloned() else {
+            self.set_status("No session selected");
+            return;
+        };
+        let command = launcher::original_command(&session);
+        self.exit_action = Some(TuiExitAction::OriginalResume(OriginalSessionPlan {
+            version: 1,
+            action: SessionAction::OriginalResume,
+            dry_run: true,
+            source_session: session.clone(),
+            command,
+        }));
+        self.should_quit = true;
+        self.set_status(format!("Opening original: {} {}", session.cli, session.id));
+    }
+
     pub fn current_session(&self) -> Option<&SessionSummary> {
-        self.visible_session_indices()
+        self.visible_session_indices
             .contains(&self.selected_session)
             .then(|| self.data.sessions.get(self.selected_session))
             .flatten()
     }
 
-    pub fn visible_session_indices(&self) -> Vec<usize> {
+    pub fn visible_session_indices(&self) -> &[usize] {
+        &self.visible_session_indices
+    }
+
+    fn refresh_visible_sessions(&mut self) {
         let query = self.search_query.trim().to_ascii_lowercase();
-        self.data
+        self.visible_session_indices = self
+            .data
             .sessions
             .iter()
             .enumerate()
             .filter(|(_, session)| self.session_filter.matches(session))
-            .filter(|(_, session)| {
-                query.is_empty()
-                    || session.id.to_ascii_lowercase().contains(&query)
-                    || session.title.to_ascii_lowercase().contains(&query)
-                    || session.cwd.to_ascii_lowercase().contains(&query)
-                    || session.cli.id().contains(&query)
-                    || session
-                        .branch
-                        .as_ref()
-                        .is_some_and(|branch| branch.to_ascii_lowercase().contains(&query))
-                    || session
-                        .health_reason
-                        .as_ref()
-                        .is_some_and(|reason| reason.to_ascii_lowercase().contains(&query))
-            })
+            .filter(|(_, session)| session_matches_query(session, &query))
             .map(|(index, _)| index)
-            .collect()
+            .collect();
     }
 
     fn move_session(&mut self, forward: bool) {
-        let visible = self.visible_session_indices();
-        if visible.is_empty() {
+        if self.visible_session_indices.is_empty() {
             return;
         }
-        let current = visible
+        let current = self
+            .visible_session_indices
             .iter()
             .position(|index| *index == self.selected_session)
             .unwrap_or(0);
         let next = if forward {
-            (current + 1).min(visible.len().saturating_sub(1))
+            (current + 1).min(self.visible_session_indices.len().saturating_sub(1))
         } else {
             current.saturating_sub(1)
         };
-        self.selected_session = visible[next];
-        self.sync_selected_session_details();
-        if let Some(session) = self.current_session() {
-            self.set_status(format!("Session: {} {}", session.cli, session.title));
-        }
+        self.selected_session = self.visible_session_indices[next];
+        self.request_selected_session_details();
     }
 
     fn cycle_session_filter(&mut self, forward: bool) {
@@ -684,27 +785,42 @@ impl App {
 
     pub fn apply_session_filter(&mut self, filter: SessionFilter) {
         self.session_filter = filter;
+        self.refresh_visible_sessions();
         self.clamp_selected_session();
-        self.sync_selected_session_details();
-        self.set_status(format!("Filter: {}", self.session_filter.label()));
+        self.request_selected_session_details();
+        if self.is_session_load_pending() {
+            self.set_status(format!(
+                "Filter: {} - loading selected session",
+                self.session_filter.label()
+            ));
+        } else {
+            self.set_status(format!("Filter: {}", self.session_filter.label()));
+        }
         self.pending_g = false;
     }
 
     fn clear_session_filters(&mut self) {
         self.session_filter = SessionFilter::All;
         self.search_query.clear();
+        self.refresh_visible_sessions();
         self.clamp_selected_session();
-        self.sync_selected_session_details();
-        self.set_status("Filters cleared");
+        self.request_selected_session_details();
+        if self.is_session_load_pending() {
+            self.set_status("Filters cleared - loading selected session");
+        } else {
+            self.set_status("Filters cleared");
+        }
         self.pending_g = false;
     }
 
     fn clamp_selected_session(&mut self) {
-        let visible = self.visible_session_indices();
-        if visible.is_empty() {
+        if self.visible_session_indices.is_empty() {
             self.selected_session = 0;
-        } else if !visible.contains(&self.selected_session) {
-            self.selected_session = visible[0];
+        } else if !self
+            .visible_session_indices
+            .contains(&self.selected_session)
+        {
+            self.selected_session = self.visible_session_indices[0];
         }
     }
 
@@ -722,6 +838,9 @@ impl App {
     }
 
     fn open_launch_picker(&mut self) {
+        if !self.ensure_session_details_ready("Launch") {
+            return;
+        }
         if self.current_session().is_none() {
             self.show_launch = false;
             self.set_status("No session selected");
@@ -734,6 +853,15 @@ impl App {
         self.modal_scroll = 0;
         self.set_status("Choose target CLI");
         self.pending_g = false;
+    }
+
+    fn ensure_session_details_ready(&mut self, action: &str) -> bool {
+        if self.is_session_load_pending() {
+            self.set_status(format!("{action} waits for selected session to load"));
+            self.pending_g = false;
+            return false;
+        }
+        true
     }
 
     fn confirm_launch_target(&mut self) {
@@ -771,9 +899,11 @@ impl App {
         if let Some(session_id) = session_id {
             if let Some(data) = workbench::load_workbench_for_session(&session_id, target)? {
                 self.data = data;
+                self.refresh_visible_sessions();
             }
         } else {
             self.data = workbench::load_workbench(self.data.source, target)?;
+            self.refresh_visible_sessions();
         }
         self.selected_session = self
             .selected_session
@@ -795,34 +925,113 @@ impl App {
         Ok(())
     }
 
-    fn sync_selected_session_details(&mut self) {
-        let Some(session_id) = self
-            .data
-            .sessions
-            .get(self.selected_session)
-            .map(|session| session.id.clone())
-        else {
+    fn request_selected_session_details(&mut self) {
+        let Some(session) = self.data.sessions.get(self.selected_session).cloned() else {
+            self.pending_session_load = None;
             return;
         };
         let target = self.data.target;
+        if self.data.capsule.source_session == session.id
+            && self.data.target == target
+            && self.pending_session_load.is_none()
+        {
+            return;
+        }
+
+        self.session_load_request_id = self.session_load_request_id.wrapping_add(1);
+        let request_id = self.session_load_request_id;
         let selected_session = self.selected_session;
         let selected_compiler = self.selected_compiler;
-        match workbench::load_workbench_for_session(&session_id, target) {
-            Ok(Some(data)) => {
+        let sessions = self.data.sessions.clone();
+        let source_adapters = self.data.source_adapters.clone();
+        let worker_session = session.clone();
+        let worker_session_id = session.id.clone();
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let result = workbench::load_workbench_from_session_snapshot(
+                worker_session,
+                sessions,
+                source_adapters,
+                target,
+            );
+            let _ = sender.send(result);
+        });
+
+        self.pending_session_load = Some(PendingSessionLoad {
+            request_id,
+            session_id: worker_session_id,
+            target,
+            started_at: Instant::now(),
+            receiver,
+        });
+        self.selected_session = selected_session.min(self.data.sessions.len().saturating_sub(1));
+        self.selected_compiler = selected_compiler.min(self.data.compilers.len().saturating_sub(1));
+        self.compile_status = "LOADING";
+        self.verify_passed = false;
+        self.set_status(format!(
+            "Loading session: {} {}",
+            session.cli, session.title
+        ));
+    }
+
+    fn apply_session_load_result(
+        &mut self,
+        pending: PendingSessionLoad,
+        result: SessionLoadResult,
+    ) {
+        if self.session_load_request_id != pending.request_id
+            || self
+                .data
+                .sessions
+                .get(self.selected_session)
+                .is_none_or(|session| session.id != pending.session_id)
+            || self.data.target != pending.target
+        {
+            return;
+        }
+
+        let elapsed = pending.started_at.elapsed();
+        let selected_compiler = self.selected_compiler;
+        match result {
+            Ok(data) => {
                 let rewind_event_id = initial_rewind_event_id(&data);
                 let selected_event = rewind_event_index(&data, &rewind_event_id);
                 self.data = data;
-                self.selected_session =
-                    selected_session.min(self.data.sessions.len().saturating_sub(1));
+                self.refresh_visible_sessions();
+                self.selected_session = self
+                    .data
+                    .sessions
+                    .iter()
+                    .position(|session| session.id == pending.session_id)
+                    .unwrap_or(self.selected_session)
+                    .min(self.data.sessions.len().saturating_sub(1));
                 self.selected_event = selected_event;
                 self.selected_compiler =
                     selected_compiler.min(self.data.compilers.len().saturating_sub(1));
                 self.data.capsule.compiler = self.data.compilers[self.selected_compiler].clone();
                 self.rewind_event_id = rewind_event_id;
                 self.capsule_scroll = 0;
+                self.compile_status = "ACTIVE";
+                self.verify_passed = true;
+                if let Some(session) = self.current_session() {
+                    self.set_status(format!(
+                        "Session: {} {} ({} events, {} ms)",
+                        session.cli,
+                        session.title,
+                        self.data.timeline.len(),
+                        elapsed.as_millis()
+                    ));
+                } else {
+                    self.set_status(format!("Session loaded ({} ms)", elapsed.as_millis()));
+                }
             }
-            Ok(None) => {}
-            Err(error) => self.set_status(format!("Session reload failed: {error}")),
+            Err(error) => {
+                self.compile_status = "FAILED";
+                self.set_status(format!(
+                    "Session reload failed: {error} ({} ms)",
+                    elapsed.as_millis()
+                ));
+            }
         }
     }
 
@@ -883,6 +1092,45 @@ impl App {
         }
     }
 
+    fn queue_target_handoff(&mut self) {
+        let validation = self.validate_launch_for_target(self.pending_target);
+        if validation.is_blocked() {
+            self.set_status(format!("Target blocked: {}", validation.summary()));
+            return;
+        }
+        let Some(session) = self.current_session().cloned() else {
+            self.set_status("No session selected");
+            return;
+        };
+        let capsule = self.launch_capsule_for_target(self.pending_target);
+        let target_command = match launcher::target_command(self.pending_target, &session, &capsule)
+        {
+            Ok(command) => command,
+            Err(error) => {
+                self.set_status(format!("Target failed: {error}"));
+                return;
+            }
+        };
+        let verification =
+            verifier::verify_capsule(&capsule, &session, &self.data.timeline, self.pending_target);
+        let command = target_command.display.clone();
+        let target_branch = capsule.target_branch;
+        self.exit_action = Some(TuiExitAction::TargetHandoff(LaunchPlan {
+            version: 1,
+            action: SessionAction::TargetHandoff,
+            dry_run: true,
+            source_session: session,
+            target_cli: self.pending_target,
+            target_branch,
+            capsule_path: None,
+            command,
+            target_command,
+            verification,
+        }));
+        self.should_quit = true;
+        self.set_status(format!("Launching target: {}", self.pending_target));
+    }
+
     fn copy_doctor_report(&mut self) {
         match serde_json::to_string_pretty(&self.doctor_report) {
             Ok(report) => {
@@ -912,6 +1160,11 @@ impl App {
     pub fn original_open_command(&self) -> Option<String> {
         self.current_session()
             .map(|session| workbench::moonbox_open_execute_command(&session.id))
+    }
+
+    pub fn original_resume_display_command(&self) -> Option<String> {
+        self.current_session()
+            .map(|session| launcher::original_command(session).display)
     }
 
     pub fn validate_launch_for_target(&self, target: CliTool) -> LaunchValidation {
@@ -970,6 +1223,22 @@ fn rewind_event_index(data: &WorkbenchData, rewind_event_id: &str) -> usize {
         .unwrap_or_else(|| data.timeline.len().saturating_sub(1))
 }
 
+fn session_matches_query(session: &SessionSummary, query: &str) -> bool {
+    query.is_empty()
+        || session.id.to_ascii_lowercase().contains(query)
+        || session.title.to_ascii_lowercase().contains(query)
+        || session.cwd.to_ascii_lowercase().contains(query)
+        || session.cli.id().contains(query)
+        || session
+            .branch
+            .as_ref()
+            .is_some_and(|branch| branch.to_ascii_lowercase().contains(query))
+        || session
+            .health_reason
+            .as_ref()
+            .is_some_and(|reason| reason.to_ascii_lowercase().contains(query))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -980,6 +1249,21 @@ mod tests {
 
     fn new_app(source: CliTool, target: CliTool) -> App {
         App::new(source, target).expect("app")
+    }
+
+    fn settle_session_load(app: &mut App) {
+        for _ in 0..100 {
+            app.poll_background();
+            if !app.is_session_load_pending() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        app.poll_background();
+        assert!(
+            !app.is_session_load_pending(),
+            "session load did not finish"
+        );
     }
 
     #[test]
@@ -1041,6 +1325,7 @@ mod tests {
     fn current_session_respects_empty_filter_results() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.search_query = "no-match".into();
+        app.refresh_visible_sessions();
         app.clamp_selected_session();
 
         assert!(app.visible_session_indices().is_empty());
@@ -1061,6 +1346,9 @@ mod tests {
             app.current_session().map(|session| session.id.as_str()),
             Some("hermes-cxcp-502")
         );
+        assert!(app.is_session_load_pending());
+        assert_eq!(app.rewind_event_id, "evt-091");
+        settle_session_load(&mut app);
         assert_eq!(app.data.source, CliTool::Hermes);
         assert_eq!(app.data.capsule.source_session, "hermes-cxcp-502");
         assert_eq!(app.rewind_event_id, "evt-052");
@@ -1092,7 +1380,11 @@ mod tests {
         assert_eq!(app.session_filter, SessionFilter::All);
         assert!(app.search_query.is_empty());
         assert_eq!(app.visible_session_indices().len(), 3);
-        assert_eq!(app.status_message, "Filters cleared");
+        assert_eq!(
+            app.status_message,
+            "Filters cleared - loading selected session"
+        );
+        settle_session_load(&mut app);
     }
 
     #[test]
@@ -1103,6 +1395,9 @@ mod tests {
 
         app.handle_key(key(']'));
         assert_eq!(app.session_filter, SessionFilter::Tool(CliTool::Claude));
+        assert!(app.is_session_load_pending());
+        assert_eq!(app.rewind_event_id, "evt-091");
+        settle_session_load(&mut app);
         assert_eq!(app.data.source, CliTool::Claude);
         assert_eq!(app.data.capsule.source_session, "claude-qc-platform");
         assert_eq!(app.rewind_event_id, "evt-074");
@@ -1126,6 +1421,12 @@ mod tests {
             app.current_session().map(|session| session.id.as_str()),
             Some("claude-qc-platform")
         );
+        assert!(app.is_session_load_pending());
+        assert_eq!(app.data.source, CliTool::Codex);
+        assert_eq!(app.data.capsule.source_session, "codex-cxcp-design");
+        assert_eq!(app.rewind_event_id, "evt-091");
+        assert_eq!(app.compile_status, "LOADING");
+        settle_session_load(&mut app);
         assert_eq!(app.data.source, CliTool::Claude);
         assert_eq!(app.data.capsule.source_cli, CliTool::Claude);
         assert_eq!(app.data.capsule.source_session, "claude-qc-platform");
@@ -1133,10 +1434,47 @@ mod tests {
         assert_eq!(app.selected_event, 4);
         assert!(app.data.timeline[0].detail.contains("QC platform"));
         assert!(app.data.branches[1].label.contains("evt-074"));
+        assert!(
+            app.status_message
+                .starts_with("Session: Claude QC platform trace repair (5 events, ")
+        );
+    }
+
+    #[test]
+    fn rapid_session_moves_ignore_stale_background_loads() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+
+        app.handle_key(key('j'));
+        app.handle_key(key('k'));
+
+        assert!(app.is_session_load_pending());
+        assert_eq!(
+            app.current_session().map(|session| session.id.as_str()),
+            Some("codex-cxcp-design")
+        );
+        settle_session_load(&mut app);
+        assert_eq!(app.data.source, CliTool::Codex);
+        assert_eq!(app.data.capsule.source_session, "codex-cxcp-design");
+        assert_eq!(app.rewind_event_id, "evt-091");
+    }
+
+    #[test]
+    fn launch_waits_for_selected_session_details() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+
+        app.handle_key(key('j'));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(app.is_session_load_pending());
+        assert!(!app.show_launch);
         assert_eq!(
             app.status_message,
-            "Session: Claude QC platform trace repair"
+            "Launch waits for selected session to load"
         );
+        settle_session_load(&mut app);
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        assert!(app.show_launch);
+        assert_eq!(app.status_message, "Choose target CLI");
     }
 
     #[test]
@@ -1234,6 +1572,7 @@ mod tests {
     fn launch_picker_requires_visible_session() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.search_query = "no-match".into();
+        app.refresh_visible_sessions();
         app.clamp_selected_session();
 
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
@@ -1274,14 +1613,25 @@ mod tests {
     }
 
     #[test]
-    fn original_copy_queues_execute_command() {
+    fn launch_review_enter_queues_target_handoff_without_executing_in_tests() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(app.should_quit());
+        let Some(TuiExitAction::TargetHandoff(plan)) = app.take_exit_action() else {
+            panic!("expected target handoff action");
+        };
+        assert_eq!(plan.source_session.id, "codex-cxcp-design");
+        assert_eq!(plan.target_cli, CliTool::Hermes);
+        assert!(plan.dry_run);
+    }
+
+    #[test]
+    fn original_copy_and_enter_queue_distinct_actions() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.handle_key(key('o'));
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
-        assert_eq!(
-            app.status_message,
-            "Original preview is copy-only; press y to copy"
-        );
         app.handle_key(key('y'));
 
         assert_eq!(
@@ -1289,6 +1639,15 @@ mod tests {
             Some("moonbox open --execute --session codex-cxcp-design")
         );
         assert_eq!(app.status_message, "Copied original command");
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        assert!(app.should_quit());
+        let Some(TuiExitAction::OriginalResume(plan)) = app.take_exit_action() else {
+            panic!("expected original resume action");
+        };
+        assert_eq!(plan.source_session.id, "codex-cxcp-design");
+        assert_eq!(plan.command.display, "codex resume codex-cxcp-design");
+        assert!(plan.dry_run);
     }
 
     #[test]

@@ -30,6 +30,15 @@ pub fn load_workbench_for_session(
     data::workbench_data_for_session(session_id, target)
 }
 
+pub fn load_workbench_from_session_snapshot(
+    source_session: SessionSummary,
+    sessions: Vec<SessionSummary>,
+    source_adapters: Vec<super::model::SourceAdapterReport>,
+    target: CliTool,
+) -> Result<WorkbenchData, CoreError> {
+    data::workbench_data_from_session_snapshot(source_session, sessions, source_adapters, target)
+}
+
 pub fn list_sessions() -> Result<Vec<SessionSummary>, CoreError> {
     data::sessions()
 }

@@ -53,6 +53,7 @@ struct HermesSessionRow {
     rewind_count: usize,
     archived: bool,
     active_message_count: usize,
+    preview: String,
 }
 
 #[derive(Debug, Clone)]
@@ -161,8 +162,9 @@ impl HermesSourceAdapter {
             "{} {}",
             SESSION_SELECT,
             match limit {
-                Some(_) => "order by updated_at desc limit :limit",
-                None => "order by updated_at desc",
+                Some(_) =>
+                    "where s.source = 'cli' and s.archived = 0 order by s.started_at desc limit :limit",
+                None => "where s.source = 'cli' and s.archived = 0 order by s.started_at desc",
             }
         );
         let mut statement = db
@@ -253,6 +255,10 @@ impl HermesSourceAdapter {
             .title
             .clone()
             .or_else(|| supplement.and_then(display_name))
+            .or_else(|| {
+                let preview = row.preview.trim();
+                (!preview.is_empty()).then(|| truncate(preview, 72))
+            })
             .unwrap_or_else(|| format!("Hermes {} session {}", row.source, short_id(&row.id)));
 
         SessionSummary {
@@ -409,7 +415,17 @@ const SESSION_SELECT: &str = r#"
         s.handoff_error,
         coalesce(s.rewind_count, 0) as rewind_count,
         s.archived != 0 as archived,
-        coalesce((select count(*) from messages where session_id = s.id and active = 1), 0) as active_message_count
+        coalesce((select count(*) from messages where session_id = s.id and active = 1), 0) as active_message_count,
+        coalesce(
+            (
+                select substr(replace(replace(m.content, char(10), ' '), char(13), ' '), 1, 63)
+                from messages m
+                where m.session_id = s.id and m.role = 'user' and m.content is not null
+                order by m.timestamp asc, m.id asc
+                limit 1
+            ),
+            ''
+        ) as preview
     from sessions s
 "#;
 
@@ -435,6 +451,7 @@ fn session_row(row: &Row<'_>) -> rusqlite::Result<HermesSessionRow> {
         rewind_count: integer(row, 17)?,
         archived: row.get(18)?,
         active_message_count: integer(row, 19)?,
+        preview: row.get(20)?,
     })
 }
 
@@ -697,14 +714,11 @@ mod tests {
             .list_sessions()
             .expect("sessions");
 
-        assert_eq!(sessions.len(), 2);
-        assert_eq!(sessions[0].id, "hermes-feishu");
-        assert_eq!(sessions[0].title, "Ops Room");
-        assert_eq!(sessions[0].cwd, "feishu/dm agent:main:feishu:dm:chat");
-        assert_eq!(sessions[0].token_count, Some(88));
-        assert_eq!(sessions[0].resume_command, "hermes --resume hermes-feishu");
-        assert_eq!(sessions[1].id, "hermes-cli");
-        assert_eq!(sessions[1].title, "CLI bugfix");
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "hermes-cli");
+        assert_eq!(sessions[0].title, "CLI bugfix");
+        assert_eq!(sessions[0].token_count, Some(15));
+        assert_eq!(sessions[0].resume_command, "hermes --resume hermes-cli");
     }
 
     #[test]
@@ -734,16 +748,18 @@ mod tests {
 
         let listed = adapter.list_sessions().expect("sessions");
         let found = adapter
-            .find_session("hermes-cli")
+            .find_session("hermes-feishu")
             .expect("find session")
             .expect("old session");
-        let timeline = adapter.load_timeline("hermes-cli").expect("old timeline");
+        let timeline = adapter
+            .load_timeline("hermes-feishu")
+            .expect("old timeline");
 
         assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].id, "hermes-feishu");
-        assert_eq!(found.id, "hermes-cli");
-        assert_eq!(timeline.source_session, "hermes-cli");
-        assert_eq!(timeline.events[0].detail, "Fix CLI state");
+        assert_eq!(listed[0].id, "hermes-cli");
+        assert_eq!(found.id, "hermes-feishu");
+        assert_eq!(timeline.source_session, "hermes-feishu");
+        assert_eq!(timeline.events[1].detail, "Investigate handoff");
     }
 
     fn test_root(name: &str) -> PathBuf {

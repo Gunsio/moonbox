@@ -39,7 +39,20 @@ fn run_tui(args: cli::TuiArgs) -> Result<()> {
     let mut terminal = ratatui::init();
     let result = tui::run_with_loading(&mut terminal, source, target, filter);
     ratatui::restore();
-    result
+    execute_tui_exit_action(result?)
+}
+
+fn execute_tui_exit_action(action: Option<app::TuiExitAction>) -> Result<()> {
+    match action {
+        Some(app::TuiExitAction::OriginalResume(plan)) => {
+            core::launcher::execute_original_plan(plan)?;
+        }
+        Some(app::TuiExitAction::TargetHandoff(plan)) => {
+            core::launcher::execute_plan(plan)?;
+        }
+        None => {}
+    }
+    Ok(())
 }
 
 fn print_sessions(args: cli::SessionListArgs) -> Result<()> {

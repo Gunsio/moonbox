@@ -15,10 +15,13 @@ and this project uses semantic versioning once tagged releases start.
 - Canonical Timeline, Work Capsule, compile request, compile output, launch
   plan, and verification report models.
 - File-backed fixture adapters for Codex, Claude, and Hermes.
-- Real read-only Codex adapter for `~/.codex/sessions`.
-- Real read-only Claude adapter for `~/.claude/projects`.
-- Real read-only Hermes adapter for `~/.hermes/state.db`, with optional
-  metadata enrichment from `~/.hermes/sessions/sessions.json`.
+- Real read-only Codex adapter for the `~/.codex/state_5.sqlite` resume thread
+  index, with rollout fallback from `~/.codex/sessions`.
+- Real read-only Claude adapter for the `~/.claude/history.jsonl` resume index,
+  with timeline and detail hydration from `~/.claude/projects`.
+- Real read-only Hermes adapter for `~/.hermes/state.db`, with default
+  `source = cli` listing to mirror Hermes `/resume` and explicit ID lookup
+  across the wider Hermes store.
 - Fallible `SourceAdapter` discovery.
 - Replaceable `CapsuleCompiler` trait with fixture and process-backed compilers.
 - External compiler runner using JSON stdin/stdout, timeout handling, and
@@ -92,6 +95,12 @@ and this project uses semantic versioning once tagged releases start.
   visible truncation marker for large sessions.
 - Animated TUI loading screen while source sessions are indexed before the
   workbench becomes interactive.
+- Async selected-session preview hydration in the TUI, with stale-result
+  protection for rapid navigation and loading guards before launch, verify,
+  compile, rewind, or original-resume preview actions.
+- Cached TUI session filters plus windowed session-list rendering, so large
+  real indexes do not require re-filtering and re-formatting every row on every
+  frame.
 - Shared verifier policy for CLI and TUI launch validation.
 - Real `--capsule` file parsing and target mismatch verification.
 - README screenshot, installation notes, and Homebrew release planning docs.
@@ -103,6 +112,10 @@ and this project uses semantic versioning once tagged releases start.
 - Codex, Claude, and Hermes source discovery use real local stores when any
   real store is present; fixture fallback is reserved for the no-real-store
   demo/CI case or explicit fixture mode.
+- Codex, Claude, and Hermes default session lists now mirror each source CLI's
+  own resume surface: Codex thread titles from `state_5.sqlite`, Claude order
+  and membership from `history.jsonl`, and Hermes CLI sessions from
+  `source = cli` rows.
 - Explicit session lookup routes obvious Hermes/Codex/Claude ids to the likely
   adapter before expensive full-store fallback.
 - CLI launch/verify uses lightweight session artifacts instead of constructing
@@ -115,11 +128,13 @@ and this project uses semantic versioning once tagged releases start.
   `y` is shown as unavailable until review.
 - TUI launch copy now points at `moonbox launch --execute`, keeping long
   handoff prompts out of the modal while preserving guarded execution.
+- TUI Launch Review `enter` now restores the terminal and then launches the
+  verified target CLI, while `y` still copies the guarded wrapper command.
 - Original-session execution is opt-in and uses source-specific resume
   entrypoints; Hermes resume commands now use `hermes --resume <session>`.
 - TUI original-session copy now points at `moonbox open --execute`.
-- TUI original-session preview is copy-only; `enter` is disabled there to keep
-  original resume distinct from target handoff.
+- TUI original-session review `enter` now restores the terminal and then runs
+  the original CLI resume command; `y` still copies the guarded Moonbox wrapper.
 - Compiler execution precedence is now explicit: environment override, config
   preset, then built-in fixture compiler.
 - Unknown compiler ids and disabled compiler presets now return structured
@@ -127,6 +142,16 @@ and this project uses semantic versioning once tagged releases start.
 - Saving the last selected target now preserves compiler presets and
   `default_compiler` in the user config file.
 - TUI verify status no longer hard-codes the verifier check count.
+- TUI session movement, source filtering, `/` search, `gg`, and `G` now update
+  the selected row immediately, keep the left list compact with source-colored
+  `Cdx` / `Clu` / `Hms` badges while preserving original source titles, hide
+  healthy source markers in the left rail, show selected session metadata with
+  Raw Title and Source Health in the right Session Details panel, and hydrate
+  the timeline/capsule preview in the background from the current session index
+  snapshot.
+- Resume-index rows whose event count is unknown now still hydrate their real
+  timeline from `source_path`; truly empty timelines build a pending capsule
+  instead of crashing the TUI by compiling a missing rewind id.
 - CLI runtime now lives behind a shared library entrypoint used by both
   `moonbox` and `moon`.
 - Replay eval JSON now separates matrix and synthetic case counts, labels each
