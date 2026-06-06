@@ -45,6 +45,8 @@ and this project uses semantic versioning once tagged releases start.
 - Fixture-safe install smoke script that verifies `cargo install --path`
   produces working `moonbox` and `moon` executables, with source homes
   redirected away from real local session stores.
+- Fixture-safe integration tests for public CLI contracts across `moonbox` and
+  `moon` binaries.
 - Shared verifier policy for CLI and TUI launch validation.
 - Real `--capsule` file parsing and target mismatch verification.
 - README screenshot, installation notes, and Homebrew release planning docs.
