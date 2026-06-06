@@ -94,6 +94,40 @@ fn moonbox_and_moon_expose_the_same_version_contract() {
 }
 
 #[test]
+fn completion_generation_uses_requested_or_invoked_binary_name() {
+    let bash = output_text(
+        moonbox_command("completion-moonbox-bash")
+            .args(["completions", "bash"])
+            .output()
+            .expect("moonbox bash completions"),
+    );
+    assert!(bash.contains("_moonbox"));
+    assert!(bash.contains("moonbox"));
+    assert!(bash.contains("replay-eval"));
+    assert!(bash.contains("completions"));
+
+    let fish = output_text(
+        moon_command("completion-moon-fish")
+            .args(["completions", "fish"])
+            .output()
+            .expect("moon fish completions"),
+    );
+    assert!(fish.contains("complete -c moon"));
+    assert!(fish.contains("replay-eval"));
+    assert!(fish.contains("completions"));
+
+    let zsh = output_text(
+        moonbox_command("completion-explicit-moon-zsh")
+            .args(["completions", "--bin", "moon", "zsh"])
+            .output()
+            .expect("explicit moon zsh completions"),
+    );
+    assert!(zsh.contains("#compdef moon"));
+    assert!(zsh.contains("replay-eval"));
+    assert!(zsh.contains("completions"));
+}
+
+#[test]
 fn replay_eval_cli_contract_is_fixture_only() {
     let report = output_json(
         moonbox_command("replay-eval")

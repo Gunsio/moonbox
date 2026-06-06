@@ -3,9 +3,10 @@ mod cli;
 pub mod core;
 mod tui;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use cli::{Cli, Command};
 use color_eyre::Result;
+use std::{io, path::Path};
 
 pub fn run() -> Result<()> {
     color_eyre::install()?;
@@ -19,6 +20,7 @@ pub fn run() -> Result<()> {
         Command::CompileRequest(args) => print_compile_request(args),
         Command::CompileOutput(args) => print_compile_output(args),
         Command::Compilers(args) => print_compilers(args),
+        Command::Completions(args) => print_completions(args),
         Command::Launch(args) => print_launch_plan(args),
         Command::Verify(args) => print_verify_report(args),
         Command::ReplayEval(args) => print_replay_eval(args),
@@ -163,6 +165,31 @@ fn print_compilers(args: cli::JsonArgs) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn print_completions(args: cli::CompletionsArgs) -> Result<()> {
+    let bin_name = completion_bin_name(args.binary);
+    let mut command = Cli::command();
+    command.set_bin_name(bin_name.clone());
+    clap_complete::generate(args.shell, &mut command, bin_name, &mut io::stdout().lock());
+    Ok(())
+}
+
+fn completion_bin_name(binary: Option<cli::CompletionBinary>) -> String {
+    if let Some(binary) = binary {
+        return binary.as_str().to_owned();
+    }
+
+    std::env::args()
+        .next()
+        .and_then(|arg| {
+            Path::new(&arg)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_owned)
+        })
+        .filter(|name| name == "moon")
+        .unwrap_or_else(|| "moonbox".to_owned())
 }
 
 fn print_launch_plan(args: cli::LaunchArgs) -> Result<()> {

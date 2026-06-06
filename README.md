@@ -133,6 +133,7 @@ The first implementation focuses on the product shell:
 - `--capsule` reads a real Work Capsule JSON file when provided; generated dry-run capsules do not pretend to have a file path
 - Hardened verifier checks for Work Capsule version, required fields, handoff context, risk context, capsule size, target branch markers, and execution command preflight
 - First-class `moon` binary alias installed alongside `moonbox`
+- Shell completion generation for `moonbox` and `moon`
 - Deterministic fixture-only replay eval for the Codex/Claude/Hermes source-target matrix
 - Fixture-safe public CLI contract tests for the installed `moonbox` and `moon` command surfaces
 - Full local quality gate through `scripts/ci/full-gate.sh`
@@ -165,6 +166,8 @@ cargo run -- compile-request --json
 cargo run -- compile-output --json
 cargo run -- compile-output --compiler <compiler-id> --json
 cargo run -- compilers --json
+cargo run -- completions bash
+cargo run -- completions zsh --bin moon
 cargo run -- replay-eval --json
 cargo run -- launch --target hermes --session <session-id> --json
 cargo run -- launch --execute --target hermes --session <session-id>
@@ -225,6 +228,18 @@ cargo run -- compile-output --compiler engineering-handoff --json
 
 Without configured presets or `MOONBOX_COMPILER`, Moonbox uses the built-in
 fixture compiler.
+
+Generate shell completions with:
+
+```bash
+moonbox completions bash > moonbox.bash
+moonbox completions zsh --bin moon > _moon
+moon completions fish > moon.fish
+```
+
+Supported shells are Bash, Zsh, Fish, PowerShell, and Elvish. The generated
+binary name defaults to the executable you invoked (`moonbox` or `moon`) and can
+be overridden with `--bin moonbox` or `--bin moon`.
 
 ## Interaction Model
 
@@ -324,6 +339,7 @@ Stable interfaces matter more than any single framework:
 - M24: documentation build gate with `RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps` in CI, PR checklist, README, and contributor docs.
 - M25: full local quality gate script that runs patch hygiene plus CI/release checks, with dirty-worktree package verification available during pre-commit iteration.
 - M26: cargo-deny supply-chain gate for RustSec advisories, yanked crates, duplicate-version policy, license allowlists, and trusted crate sources.
+- M27: shell completion generation for Bash, Zsh, Fish, PowerShell, and Elvish, with fixture-safe CLI contract and smoke coverage for both `moonbox` and `moon`.
 
 ### Can Build Now
 
