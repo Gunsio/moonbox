@@ -13,6 +13,7 @@ export MOONBOX_CODEX_HOME="$smoke_home/codex"
 export MOONBOX_CLAUDE_HOME="$smoke_home/claude"
 export MOONBOX_HERMES_HOME="$smoke_home/hermes"
 export MOONBOX_CONFIG="$smoke_home/config.json"
+export MOONBOX_SESSION_MODE=fixture
 export MOONBOX_SESSION_LIMIT=50
 
 run() {

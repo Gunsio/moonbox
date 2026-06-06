@@ -59,8 +59,9 @@ licenses, and crate sources against `deny.toml`.
 
 `scripts/ci/homebrew-docs-smoke.sh` validates the draft Homebrew formula syntax
 and the exact completion-generation commands the formula will use. It redirects
-source homes into `target/moonbox-homebrew-smoke-home` and must not scan, open,
-or resume real sessions.
+source homes into `target/moonbox-homebrew-smoke-home`, sets
+`MOONBOX_SESSION_MODE=fixture`, and must not scan, open, or resume real
+sessions.
 
 For README screenshot changes:
 
@@ -81,7 +82,8 @@ xmllint --noout docs/assets/moonbox-tui.svg
 - Keep fixture data deterministic and representative enough to protect future
   real adapters.
 - Keep tests and smoke scripts from opening or resuming recent active sessions.
-  Use explicit fixture homes or embedded fixtures for automated checks.
+  Use `MOONBOX_SESSION_MODE=fixture`, explicit fixture homes, or embedded
+  fixtures for automated checks.
 - Update README and the Feishu plan whenever public behavior, install commands,
   release state, or architecture milestones change.
 

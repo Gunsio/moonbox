@@ -42,6 +42,7 @@ fn fixture_safe_command(binary: &str, test_name: &str) -> Command {
         "MOONBOX_CODEX_BIN",
         "MOONBOX_CLAUDE_BIN",
         "MOONBOX_HERMES_BIN",
+        "MOONBOX_SESSION_MODE",
     ] {
         command.env_remove(key);
     }
@@ -196,6 +197,35 @@ fn session_listing_uses_fixture_fallback_when_source_homes_are_isolated() {
         ids,
         ["codex-cxcp-design", "claude-qc-platform", "hermes-cxcp-502"]
     );
+}
+
+#[test]
+fn fixture_session_mode_ignores_real_shaped_source_homes() {
+    let test_name = "fixture-session-mode";
+    let home = fixture_home(test_name);
+    let codex_store = home.join("codex").join("sessions").join("2026");
+    fs::create_dir_all(&codex_store).expect("codex store");
+    fs::write(codex_store.join("recent-active.jsonl"), "{not-json\n").expect("codex jsonl");
+
+    let sessions = output_json(
+        moonbox_command(test_name)
+            .args(["sessions", "--json"])
+            .env("MOONBOX_SESSION_MODE", "fixture")
+            .output()
+            .expect("fixture mode sessions"),
+    );
+    let ids = sessions
+        .as_array()
+        .expect("session array")
+        .iter()
+        .map(|session| session["id"].as_str().expect("session id"))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        ids,
+        ["codex-cxcp-design", "claude-qc-platform", "hermes-cxcp-502"]
+    );
+    assert!(!ids.contains(&"recent-active"));
 }
 
 #[test]
