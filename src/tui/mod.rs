@@ -12,7 +12,7 @@ use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use ratatui::DefaultTerminal;
 
 use crate::{
-    app::{App, SessionFilter},
+    app::{App, SessionFilter, TuiExitAction},
     core::model::CliTool,
 };
 
@@ -20,19 +20,21 @@ pub fn docs_screenshot_svg(width: u16, height: u16) -> Result<String> {
     snapshot::docs_screenshot_svg(width, height)
 }
 
-pub fn run(terminal: &mut DefaultTerminal, mut app: App) -> Result<()> {
+pub fn run(terminal: &mut DefaultTerminal, mut app: App) -> Result<Option<TuiExitAction>> {
     while !app.should_quit() {
+        app.poll_background();
         terminal.draw(|frame| view::render(frame, &app))?;
         if event::poll(Duration::from_millis(120))?
             && let Event::Key(key) = event::read()?
         {
             app.handle_key(key);
+            app.poll_background();
             if let Some(text) = app.take_clipboard_text() {
                 copy_to_terminal_clipboard(&text)?;
             }
         }
     }
-    Ok(())
+    Ok(app.take_exit_action())
 }
 
 pub fn run_with_loading(
@@ -40,7 +42,7 @@ pub fn run_with_loading(
     source: CliTool,
     target: CliTool,
     filter: Option<CliTool>,
-) -> Result<()> {
+) -> Result<Option<TuiExitAction>> {
     let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
         let mut result = App::new(source, target);
@@ -64,7 +66,7 @@ pub fn run_with_loading(
                 || key.modifiers.contains(KeyModifiers::CONTROL)
                     && matches!(key.code, KeyCode::Char('c')))
         {
-            return Ok(());
+            return Ok(None);
         }
         tick = tick.wrapping_add(1);
     }

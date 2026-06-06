@@ -25,20 +25,11 @@ pub fn workbench_data(source: CliTool, target: CliTool) -> Result<WorkbenchData,
         .cloned()
         .unwrap_or_else(|| fallback_session(source));
     let source_session_id = source_session.id.clone();
-    let timeline = if source_session.event_count == 0 {
-        CanonicalTimeline {
-            version: 1,
-            source_cli: source,
-            source_session: source_session_id.clone(),
-            events: Vec::new(),
-        }
-    } else {
-        preview_timeline_for_session(&source_session)?
-    };
+    let timeline = preview_timeline_for_workbench(&source_session)?;
 
     let rewind_event_id = rewind_event_id_for_timeline(&source_session_id, &timeline);
     let compiler = default_compiler_id();
-    let capsule = compile_capsule_for_session(
+    let capsule = workbench_capsule_for_session(
         &source_session,
         target,
         &timeline,
@@ -75,19 +66,29 @@ pub fn workbench_data_for_session(
     let Some(source_session) = source_session else {
         return Ok(None);
     };
+    workbench_data_from_session_snapshot(source_session, sessions, source_adapters, target)
+        .map(Some)
+}
+
+pub fn workbench_data_from_session_snapshot(
+    source_session: SessionSummary,
+    sessions: Vec<SessionSummary>,
+    source_adapters: Vec<SourceAdapterReport>,
+    target: CliTool,
+) -> Result<WorkbenchData, CoreError> {
     let sessions = include_source_session(sessions, &source_session);
     let source_session_id = source_session.id.clone();
-    let timeline = preview_timeline_for_session(&source_session)?;
+    let timeline = preview_timeline_for_workbench(&source_session)?;
     let rewind_event_id = rewind_event_id_for_timeline(&source_session_id, &timeline);
     let compiler = default_compiler_id();
-    let capsule = compile_capsule_for_session(
+    let capsule = workbench_capsule_for_session(
         &source_session,
         target,
         &timeline,
         &rewind_event_id,
         &compiler,
     )?;
-    Ok(Some(build_workbench_data(
+    Ok(build_workbench_data(
         source_session.cli,
         target,
         source_adapters,
@@ -95,7 +96,7 @@ pub fn workbench_data_for_session(
         timeline.events,
         capsule,
         &source_session_id,
-    )))
+    ))
 }
 
 pub fn fixture_workbench_data(
@@ -160,7 +161,11 @@ fn build_workbench_data(
         BranchNode {
             id: "target".into(),
             label: capsule.target_branch.clone(),
-            detail: "compiled by engineering-handoff".into(),
+            detail: if capsule.state == "compiled" {
+                format!("compiled by {}", capsule.compiler)
+            } else {
+                format!("{} by {}", capsule.state, capsule.compiler)
+            },
             active: true,
         },
     ];
@@ -211,6 +216,15 @@ pub fn preview_timeline_for_session(
     session: &SessionSummary,
 ) -> Result<CanonicalTimeline, CoreError> {
     sources::load_timeline_preview(session)
+}
+
+fn preview_timeline_for_workbench(
+    source_session: &SessionSummary,
+) -> Result<CanonicalTimeline, CoreError> {
+    if should_skip_timeline_load(source_session) {
+        return Ok(empty_timeline(source_session));
+    }
+    preview_timeline_for_session(source_session)
 }
 
 pub fn compile_request(
@@ -331,6 +345,61 @@ fn compile_capsule_for_session(
     Ok(compile_with_configured_runner(&request)?.capsule)
 }
 
+fn workbench_capsule_for_session(
+    session: &SessionSummary,
+    target: CliTool,
+    timeline: &CanonicalTimeline,
+    rewind_event_id: &str,
+    compiler: &str,
+) -> Result<WorkCapsule, CoreError> {
+    if timeline
+        .events
+        .iter()
+        .any(|event| event.id == rewind_event_id)
+    {
+        return compile_capsule_for_session(session, target, timeline, rewind_event_id, compiler);
+    }
+    Ok(pending_work_capsule(
+        session,
+        target,
+        rewind_event_id,
+        compiler,
+    ))
+}
+
+fn pending_work_capsule(
+    session: &SessionSummary,
+    target: CliTool,
+    rewind_event_id: &str,
+    compiler: &str,
+) -> WorkCapsule {
+    let rewind_event_id = if rewind_event_id.trim().is_empty() {
+        "pending"
+    } else {
+        rewind_event_id
+    };
+    WorkCapsule {
+        version: 1,
+        source_cli: session.cli,
+        target_cli: target,
+        source_session: session.id.clone(),
+        rewind_point: format!("{rewind_event_id} / choose a rewind point"),
+        compiler: compiler.into(),
+        target_branch: format!("moonbox/{}-rewind-{rewind_event_id}", target.id()),
+        goal: format!("Resume or hand off {}", session.title),
+        state: "pending_rewind".into(),
+        decisions: vec!["Timeline has no loaded rewind event yet.".into()],
+        todo: vec![super::model::ChecklistItem {
+            done: false,
+            text: "Load session details and select a rewind point.".into(),
+        }],
+        evidence: vec![format!("session: {} ({})", session.id, session.cli.id())],
+        risks: vec![
+            "Launch and verify remain blocked until a real rewind event is selected.".into(),
+        ],
+    }
+}
+
 fn compile_capsule_for_session_with_fixture_compiler(
     session: &SessionSummary,
     target: CliTool,
@@ -395,7 +464,7 @@ fn rewind_event_id_for_timeline(session_id: &str, timeline: &CanonicalTimeline) 
         .events
         .last()
         .map(|event| event.id.clone())
-        .unwrap_or_else(|| preferred.into())
+        .unwrap_or_default()
 }
 
 fn default_source_session(source: CliTool) -> Result<SessionSummary, CoreError> {
@@ -408,15 +477,23 @@ fn default_source_session(source: CliTool) -> Result<SessionSummary, CoreError> 
 fn timeline_for_compile_request(
     source_session: &SessionSummary,
 ) -> Result<CanonicalTimeline, CoreError> {
-    if source_session.event_count == 0 {
-        return Ok(CanonicalTimeline {
-            version: 1,
-            source_cli: source_session.cli,
-            source_session: source_session.id.clone(),
-            events: Vec::new(),
-        });
+    if should_skip_timeline_load(source_session) {
+        return Ok(empty_timeline(source_session));
     }
     canonical_timeline_for_session(source_session)
+}
+
+fn should_skip_timeline_load(source_session: &SessionSummary) -> bool {
+    source_session.event_count == 0 && source_session.source_path.is_none()
+}
+
+fn empty_timeline(source_session: &SessionSummary) -> CanonicalTimeline {
+    CanonicalTimeline {
+        version: 1,
+        source_cli: source_session.cli,
+        source_session: source_session.id.clone(),
+        events: Vec::new(),
+    }
 }
 
 fn fallback_session(source: CliTool) -> SessionSummary {
@@ -499,5 +576,46 @@ mod tests {
         .expect("request");
 
         assert_eq!(request.compiler, "custom-skill");
+    }
+
+    #[test]
+    fn zero_event_index_session_with_source_path_still_hydrates_timeline() {
+        let mut session = sessions()
+            .expect("sessions")
+            .into_iter()
+            .find(|session| session.id == "codex-cxcp-design")
+            .expect("codex session");
+        session.event_count = 0;
+        session.source_path = Some("indexed-by-external-store".into());
+
+        let timeline = preview_timeline_for_workbench(&session).expect("timeline");
+
+        assert!(!timeline.events.is_empty());
+    }
+
+    #[test]
+    fn empty_timeline_builds_pending_capsule_without_compiling_missing_rewind() {
+        let mut session = sessions()
+            .expect("sessions")
+            .into_iter()
+            .find(|session| session.id == "codex-cxcp-design")
+            .expect("codex session");
+        session.event_count = 0;
+        session.source_path = None;
+        let timeline = preview_timeline_for_workbench(&session).expect("empty timeline");
+        let rewind_event_id = rewind_event_id_for_timeline(&session.id, &timeline);
+
+        let capsule = workbench_capsule_for_session(
+            &session,
+            CliTool::Hermes,
+            &timeline,
+            &rewind_event_id,
+            DEFAULT_COMPILER_ID,
+        )
+        .expect("pending capsule");
+
+        assert!(timeline.events.is_empty());
+        assert_eq!(capsule.state, "pending_rewind");
+        assert!(capsule.rewind_point.starts_with("pending /"));
     }
 }

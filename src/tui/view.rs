@@ -214,6 +214,10 @@ fn render_body(frame: &mut Frame, area: Rect, app: &App) {
 
 fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
     let visible = app.visible_session_indices();
+    let selected = visible
+        .iter()
+        .position(|index| *index == app.selected_session)
+        .unwrap_or(0);
     let items: Vec<ListItem> = if visible.is_empty() {
         let mut lines = vec![
             Line::from(Span::styled(
@@ -240,12 +244,13 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
         )));
         vec![ListItem::new(lines)]
     } else {
-        visible
+        let (start, end) = session_list_window(visible.len(), selected, area.height);
+        visible[start..end]
             .iter()
             .map(|index| {
                 let session = &app.data.sessions[*index];
                 let status = match session.status {
-                    SessionStatus::Healthy => Span::styled("●", Style::default().fg(theme::GREEN)),
+                    SessionStatus::Healthy => Span::raw(" "),
                     SessionStatus::Warning => Span::styled("▲", Style::default().fg(theme::GOLD)),
                     SessionStatus::Failed => Span::styled(
                         "!",
@@ -256,77 +261,43 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
                     Line::from(vec![
                         status,
                         Span::raw(" "),
+                        Span::styled(source_pill(session.cli), source_tool_style(session.cli)),
                         Span::styled(
-                            format!("[{} ", session.cli),
-                            Style::default()
-                                .fg(theme::CYAN)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled(
-                            source_provenance_label(session.source_provenance),
+                            format!(" {}", source_provenance_label(session.source_provenance)),
                             source_provenance_style(session.source_provenance),
                         ),
-                        Span::styled(
-                            "] ",
-                            Style::default()
-                                .fg(theme::CYAN)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled(
-                            &session.title,
-                            Style::default()
-                                .fg(theme::TEXT)
-                                .add_modifier(Modifier::BOLD),
-                        ),
+                        Span::raw("  "),
+                        Span::styled(&session.title, Style::default().fg(theme::TEXT)),
                     ]),
                     Line::from(vec![Span::styled(
-                        format!("  {}", session.cwd),
+                        session_list_secondary(session),
                         Style::default().fg(theme::MUTED),
                     )]),
-                    Line::from(vec![
-                        Span::styled(
-                            format!("  {}  ", session.updated),
-                            Style::default().fg(theme::BLUE),
-                        ),
-                        Span::styled(
-                            format!("{} events  ", session.event_count),
-                            Style::default().fg(theme::MUTED),
-                        ),
-                        Span::styled(
-                            format_token_count(session.token_count),
-                            Style::default().fg(theme::GOLD),
-                        ),
-                    ]),
-                    Line::from(vec![
-                        Span::styled("  branch ", Style::default().fg(theme::MUTED)),
-                        Span::styled(
-                            session.branch.as_deref().unwrap_or("-"),
-                            Style::default().fg(theme::CYAN),
-                        ),
-                        Span::styled("  ·  ", Style::default().fg(theme::MUTED)),
-                        Span::styled(
-                            session_health_detail(session),
-                            session_health_style(session.status),
-                        ),
-                    ]),
                 ])
             })
             .collect()
     };
 
     let mut state = ListState::default();
-    let selected = visible
-        .iter()
-        .position(|index| *index == app.selected_session)
-        .unwrap_or(0);
-    state.select((!visible.is_empty()).then_some(selected));
+    if !visible.is_empty() {
+        let (start, _) = session_list_window(visible.len(), selected, area.height);
+        state.select(Some(selected.saturating_sub(start)));
+    }
 
     let title = if app.search_query.is_empty() {
-        format!(" Sessions · {} ", app.session_filter.label())
+        format!(
+            " Sessions · {} {} ",
+            app.session_filter.label(),
+            session_position_label(visible.len(), selected)
+        )
     } else if area.width < 28 {
         format!(" Sessions /{} ", app.search_query)
     } else {
-        format!(" Sessions · {} ", filter_label(app))
+        format!(
+            " Sessions · {} {} ",
+            filter_label(app),
+            session_position_label(visible.len(), selected)
+        )
     };
 
     let list = List::new(items)
@@ -338,6 +309,55 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         );
     frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn session_list_window(total: usize, selected: usize, area_height: u16) -> (usize, usize) {
+    if total == 0 {
+        return (0, 0);
+    }
+    let inner_height = usize::from(area_height.saturating_sub(2)).max(1);
+    let visible_items = (inner_height / 2).max(1);
+    let capacity = (visible_items + 4).min(total);
+    let mut start = selected.saturating_sub(capacity / 2);
+    let end = (start + capacity).min(total);
+    start = end.saturating_sub(capacity);
+    (start, end)
+}
+
+fn session_list_secondary(session: &crate::core::model::SessionSummary) -> String {
+    match session
+        .branch
+        .as_deref()
+        .filter(|branch| !branch.is_empty())
+    {
+        Some(branch) => format!("      {}  ·  {}", session.updated, branch),
+        None => format!("      {}", session.updated),
+    }
+}
+
+fn source_pill(tool: CliTool) -> &'static str {
+    match tool {
+        CliTool::Codex => "Cdx",
+        CliTool::Claude => "Clu",
+        CliTool::Hermes => "Hms",
+    }
+}
+
+fn source_tool_style(tool: CliTool) -> Style {
+    let color = match tool {
+        CliTool::Codex => theme::BLUE,
+        CliTool::Claude => theme::PURPLE,
+        CliTool::Hermes => theme::ORANGE,
+    };
+    Style::default().fg(color).add_modifier(Modifier::BOLD)
+}
+
+fn session_position_label(total: usize, selected: usize) -> String {
+    if total == 0 {
+        "(0)".into()
+    } else {
+        format!("({}/{total})", selected + 1)
+    }
 }
 
 fn filter_label(app: &App) -> String {
@@ -384,14 +404,15 @@ fn source_provenance_style(provenance: SourceProvenance) -> Style {
 
 fn session_health_detail(session: &crate::core::model::SessionSummary) -> String {
     let reason = session.health_reason.as_deref().unwrap_or("ready");
-    let provenance = session.source_provenance.to_string();
+    let status = match session.status {
+        SessionStatus::Healthy => "healthy",
+        SessionStatus::Warning => "warning",
+        SessionStatus::Failed => "failed",
+    };
     if session.parse_skip_count == 0 {
-        format!("{provenance} · {reason}")
+        format!("{status} · {reason}")
     } else {
-        format!(
-            "{provenance} · skipped {} · {reason}",
-            session.parse_skip_count
-        )
+        format!("{status} · skipped {} · {reason}", session.parse_skip_count)
     }
 }
 
@@ -491,7 +512,50 @@ fn timeline_scroll(app: &App, area: Rect) -> u16 {
 
 fn render_capsule(frame: &mut Frame, area: Rect, app: &App) {
     let capsule = &app.data.capsule;
-    let mut lines = vec![
+    let mut lines = session_detail_lines(app);
+
+    if app.is_session_load_pending() {
+        lines.push(Line::raw(""));
+        lines.push(Line::from(Span::styled(
+            "Loading",
+            Style::default()
+                .fg(theme::GOLD)
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(Span::styled(
+            "  Hydrating timeline and capsule preview for the selected session.",
+            Style::default().fg(theme::TEXT),
+        )));
+        lines.push(Line::from(Span::styled(
+            "  Launch, verify, compile, and rewind wait until this completes.",
+            Style::default().fg(theme::MUTED),
+        )));
+        frame.render_widget(
+            Paragraph::new(lines)
+                .block(panel_block(
+                    " Session Details ",
+                    app.focus == Focus::Capsule,
+                ))
+                .scroll((app.capsule_scroll, 0))
+                .wrap(Wrap { trim: true }),
+            area,
+        );
+        return;
+    }
+
+    lines.extend([
+        Line::raw(""),
+        Line::from(Span::styled(
+            "Work Capsule Preview",
+            Style::default()
+                .fg(theme::BLUE)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "  Compiler-generated handoff context. Verify before launch.",
+            Style::default().fg(theme::MUTED),
+        )),
+        Line::raw(""),
         label_line("Goal", &capsule.goal, theme::BLUE),
         Line::raw(""),
         label_line("State", &capsule.state, theme::GOLD),
@@ -504,7 +568,7 @@ fn render_capsule(frame: &mut Frame, area: Rect, app: &App) {
                 .fg(theme::BLUE)
                 .add_modifier(Modifier::BOLD),
         )),
-    ];
+    ]);
 
     for decision in &capsule.decisions {
         lines.push(Line::from(vec![
@@ -558,13 +622,90 @@ fn render_capsule(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(
         Paragraph::new(lines)
             .block(panel_block(
-                " Work Capsule Preview ",
+                " Session Details ",
                 app.focus == Focus::Capsule,
             ))
             .scroll((app.capsule_scroll, 0))
             .wrap(Wrap { trim: true }),
         area,
     );
+}
+
+fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
+    let Some(session) = app.current_session() else {
+        return vec![
+            Line::from(Span::styled(
+                "Session Metadata",
+                Style::default()
+                    .fg(theme::BLUE)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(
+                "  No session selected",
+                Style::default().fg(theme::MUTED),
+            )),
+        ];
+    };
+
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "Session Metadata",
+            Style::default()
+                .fg(theme::BLUE)
+                .add_modifier(Modifier::BOLD),
+        )),
+        metadata_line(
+            "Raw Title",
+            &session.title,
+            Style::default().fg(theme::TEXT),
+        ),
+        metadata_line(
+            "Source",
+            &format!("{} · {}", session.cli, session.source_provenance),
+            source_provenance_style(session.source_provenance),
+        ),
+        metadata_line(
+            "Updated",
+            &session.updated,
+            Style::default().fg(theme::BLUE),
+        ),
+        metadata_line("Cwd", &session.cwd, Style::default().fg(theme::TEXT)),
+        metadata_line(
+            "Branch",
+            session.branch.as_deref().unwrap_or("-"),
+            Style::default().fg(theme::CYAN),
+        ),
+        metadata_line(
+            "Events",
+            &session.event_count.to_string(),
+            Style::default().fg(theme::MUTED),
+        ),
+        metadata_line(
+            "Tokens",
+            &format_token_count(session.token_count),
+            Style::default().fg(theme::GOLD),
+        ),
+        metadata_line(
+            "Source Health",
+            &session_health_detail(session),
+            session_health_style(session.status),
+        ),
+    ];
+    if let Some(path) = &session.source_path {
+        lines.push(metadata_line(
+            "Path",
+            path,
+            Style::default().fg(theme::MUTED),
+        ));
+    }
+    lines
+}
+
+fn metadata_line(label: &'static str, value: &str, style: Style) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!("{label}: "), Style::default().fg(theme::MUTED)),
+        Span::styled(value.to_owned(), style),
+    ])
 }
 
 fn render_branch_tree(frame: &mut Frame, area: Rect, app: &App) {
@@ -985,7 +1126,7 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             )),
             Line::raw(""),
             Line::from(Span::styled(
-                "y copy execute command   enter disabled   Esc close",
+                "enter launch after restore   y copy execute command   Esc close",
                 Style::default().fg(theme::MUTED),
             )),
         ]);
@@ -1232,16 +1373,33 @@ fn render_open_original(frame: &mut Frame, root: Rect, app: &App) {
             ]),
             Line::raw(""),
             Line::from(Span::styled(
-                app.original_open_command().unwrap_or_default(),
+                "Will run",
+                Style::default()
+                    .fg(theme::BLUE)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(
+                app.original_resume_display_command().unwrap_or_default(),
                 Style::default().fg(theme::CYAN),
             )),
             Line::raw(""),
             Line::from(Span::styled(
-                "Action: original resume only. Handoff uses Launch.",
+                "Copy wrapper",
+                Style::default()
+                    .fg(theme::BLUE)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(
+                app.original_open_command().unwrap_or_default(),
+                Style::default().fg(theme::MUTED),
+            )),
+            Line::raw(""),
+            Line::from(Span::styled(
+                "Action: Moonbox closes first, then resumes the original CLI.",
                 Style::default().fg(theme::MUTED),
             )),
             Line::from(Span::styled(
-                "y copy execute command   enter disabled   Esc close",
+                "enter resume   y copy wrapper command   Esc close",
                 Style::default().fg(theme::MUTED),
             )),
         ]
@@ -1425,7 +1583,7 @@ mod tests {
             assert_screen_contains(&screen, "MOONBOX");
             assert_screen_contains(&screen, "Sessions");
             assert_screen_contains(&screen, "Timeline");
-            assert_screen_contains(&screen, "Work Capsule");
+            assert_screen_contains(&screen, "Session Details");
             assert_screen_contains(&screen, "Status");
             assert!(screen.chars().any(|ch| !ch.is_whitespace()));
         }
@@ -1440,6 +1598,20 @@ mod tests {
         assert_screen_contains(&first, "indexing source sessions");
         assert_screen_contains(&first, "bounded scan");
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn session_list_window_keeps_render_work_bounded() {
+        assert_eq!(session_list_window(0, 0, 20), (0, 0));
+        assert_eq!(session_list_window(3, 1, 20), (0, 3));
+
+        let (start, end) = session_list_window(5_000, 2_500, 22);
+        assert!(start <= 2_500 && end > 2_500);
+        assert!(end - start <= 14);
+
+        let (start, end) = session_list_window(5_000, 4_999, 22);
+        assert!(start <= 4_999 && end == 5_000);
+        assert!(end - start <= 14);
     }
 
     #[test]
@@ -1487,7 +1659,7 @@ mod tests {
         assert_screen_contains(&screen, "PASS");
         assert_screen_contains(&screen, "target_cli");
         assert_screen_contains(&screen, "moonbox launch --execute");
-        assert_screen_contains(&screen, "enter disabled");
+        assert_screen_contains(&screen, "enter launch after restore");
     }
 
     #[test]

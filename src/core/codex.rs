@@ -4,11 +4,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use rusqlite::{Connection, MappedRows, OpenFlags, OptionalExtension, Row, named_params, params};
 use serde::Deserialize;
 use serde_json::Value;
 
 use super::{
-    adapter::{AdapterError, SourceAdapter, SourceReportMeta},
+    adapter::{AdapterError, SourceAdapter, SourceReportMeta, SourceScanStats},
     local_jsonl::{
         DiscoveryOrder, collect_jsonl_files, configured_session_limit,
         configured_session_scan_entry_limit, configured_session_summary_line_limit,
@@ -54,6 +55,20 @@ struct SummaryBuilder {
     malformed_lines: usize,
     summary_truncated: bool,
     has_error: bool,
+}
+
+#[derive(Debug, Clone)]
+struct CodexThreadRow {
+    id: String,
+    rollout_path: String,
+    updated_at: String,
+    cwd: String,
+    title: String,
+    preview: String,
+    first_user_message: String,
+    branch: Option<String>,
+    token_count: usize,
+    archived: bool,
 }
 
 impl CodexSourceAdapter {
@@ -108,16 +123,118 @@ impl CodexSourceAdapter {
 
     #[cfg(not(test))]
     pub fn has_session_store(&self) -> bool {
-        self.sessions_dir().is_dir()
+        self.state_db_path().is_file() || self.sessions_dir().is_dir()
     }
 
     #[cfg(not(test))]
     pub(crate) fn session_store_path(&self) -> PathBuf {
-        self.sessions_dir()
+        if self.state_db_path().is_file() {
+            self.state_db_path()
+        } else {
+            self.sessions_dir()
+        }
     }
 
     fn sessions_dir(&self) -> PathBuf {
         self.root.join("sessions")
+    }
+
+    fn state_db_path(&self) -> PathBuf {
+        self.root.join("state_5.sqlite")
+    }
+
+    fn has_state_index(&self) -> bool {
+        self.state_db_path().is_file()
+    }
+
+    fn open_connection(&self) -> Result<Connection, AdapterError> {
+        Connection::open_with_flags(
+            self.state_db_path(),
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(|error| read_error(CODEX_TOOL, &self.state_db_path(), error))
+    }
+
+    fn list_thread_rows(&self, limit: Option<usize>) -> Result<Vec<CodexThreadRow>, AdapterError> {
+        let db = self.open_connection()?;
+        let query = format!(
+            "{} {}",
+            THREAD_SELECT,
+            match limit {
+                Some(_) =>
+                    "where archived = 0 order by updated_at_ms_sort desc, id desc limit :limit",
+                None => "where archived = 0 order by updated_at_ms_sort desc, id desc",
+            }
+        );
+        let mut statement = db
+            .prepare(&query)
+            .map_err(|error| read_error(CODEX_TOOL, &self.state_db_path(), error))?;
+        let rows = if let Some(limit) = limit {
+            let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+            statement
+                .query_map(named_params! {":limit": limit}, thread_row)
+                .map_err(|error| read_error(CODEX_TOOL, &self.state_db_path(), error))?
+        } else {
+            statement
+                .query_map([], thread_row)
+                .map_err(|error| read_error(CODEX_TOOL, &self.state_db_path(), error))?
+        };
+        collect_rows(rows, &self.state_db_path())
+    }
+
+    fn find_thread_row(&self, session_id: &str) -> Result<Option<CodexThreadRow>, AdapterError> {
+        if !self.has_state_index() {
+            return Ok(None);
+        }
+        let db = self.open_connection()?;
+        let mut statement = db
+            .prepare(&format!("{THREAD_SELECT} where id = ?1"))
+            .map_err(|error| read_error(CODEX_TOOL, &self.state_db_path(), error))?;
+        statement
+            .query_row(params![session_id], thread_row)
+            .optional()
+            .map_err(|error| read_error(CODEX_TOOL, &self.state_db_path(), error))
+    }
+
+    fn summary_for_thread(&self, row: CodexThreadRow) -> SessionSummary {
+        let source_path = row.rollout_path.trim();
+        let rollout_exists = !source_path.is_empty() && Path::new(source_path).is_file();
+        let title = first_non_empty([&row.title, &row.preview, &row.first_user_message])
+            .map(truncate_thread_title)
+            .unwrap_or_else(|| format!("Codex session {}", short_id(&row.id)));
+        let status = if !rollout_exists || row.archived {
+            SessionStatus::Warning
+        } else {
+            SessionStatus::Healthy
+        };
+        let health_reason = if !rollout_exists {
+            "real Codex SQLite thread index; rollout JSONL missing".into()
+        } else if row.archived {
+            "real Codex SQLite thread index; archived thread".into()
+        } else {
+            "real Codex SQLite thread index".into()
+        };
+        SessionSummary {
+            id: row.id.clone(),
+            cli: CODEX_TOOL,
+            title,
+            cwd: if row.cwd.trim().is_empty() {
+                "~".into()
+            } else {
+                row.cwd
+            },
+            updated: human_timestamp(&row.updated_at),
+            updated_at: row.updated_at,
+            status,
+            branch: row.branch,
+            token_count: normalized_token_count(row.token_count),
+            health_reason: Some(health_reason),
+            event_count: 0,
+            resume_command: format!("codex resume {}", row.id),
+            source_provenance: SourceProvenance::Real,
+            source_path: rollout_exists.then(|| source_path.to_owned()),
+            parse_skip_count: 0,
+        }
     }
 
     fn session_files(&self, limit: Option<usize>) -> Result<Vec<PathBuf>, AdapterError> {
@@ -190,6 +307,12 @@ impl CodexSourceAdapter {
     }
 
     fn find_session_path(&self, session_id: &str) -> Result<Option<PathBuf>, AdapterError> {
+        if let Some(row) = self.find_thread_row(session_id)? {
+            let path = PathBuf::from(row.rollout_path);
+            if path.is_file() {
+                return Ok(Some(path));
+            }
+        }
         for path in self.all_session_files()? {
             let summary = self.parse_summary(&path)?;
             if summary.id == session_id {
@@ -257,10 +380,25 @@ impl SourceAdapter for CodexSourceAdapter {
     }
 
     fn store_path(&self) -> Option<String> {
-        Some(self.sessions_dir().display().to_string())
+        Some(
+            if self.has_state_index() {
+                self.state_db_path()
+            } else {
+                self.sessions_dir()
+            }
+            .display()
+            .to_string(),
+        )
     }
 
     fn list_sessions(&self) -> Result<Vec<SessionSummary>, AdapterError> {
+        if self.has_state_index() {
+            return Ok(self
+                .list_thread_rows(self.list_limit)?
+                .into_iter()
+                .map(|row| self.summary_for_thread(row))
+                .collect());
+        }
         let mut sessions = Vec::new();
         for path in self.listed_session_files()? {
             sessions.push(self.parse_list_summary(&path)?);
@@ -273,6 +411,26 @@ impl SourceAdapter for CodexSourceAdapter {
         filter_status: &str,
         reason: &str,
     ) -> Result<(Vec<SessionSummary>, super::model::SourceAdapterReport), AdapterError> {
+        if self.has_state_index() {
+            let sessions = self.list_sessions()?;
+            let report = super::adapter::report_from_sessions_with_scan(
+                SourceReportMeta {
+                    cli: self.tool(),
+                    provenance: self.provenance(),
+                    active: true,
+                    store_path: self.store_path(),
+                    filter_status: filter_status.into(),
+                    reason: reason.into(),
+                },
+                &sessions,
+                SourceScanStats {
+                    list_limit: self.list_limit,
+                    scan_entry_count: sessions.len(),
+                    ..SourceScanStats::default()
+                },
+            );
+            return Ok((sessions, report));
+        }
         let discovery = self.listed_session_discovery()?;
         let mut sessions = Vec::new();
         for path in discovery.files {
@@ -297,6 +455,9 @@ impl SourceAdapter for CodexSourceAdapter {
     }
 
     fn find_session(&self, session_id: &str) -> Result<Option<SessionSummary>, AdapterError> {
+        if let Some(row) = self.find_thread_row(session_id)? {
+            return Ok(Some(self.summary_for_thread(row)));
+        }
         let Some(path) = self.find_session_path(session_id)? else {
             return Ok(None);
         };
@@ -549,6 +710,66 @@ fn timeline_detail(payload: &Value, record_type: &str, payload_type: &str) -> St
         .unwrap_or_default()
 }
 
+const THREAD_SELECT: &str = r#"
+    select
+        id,
+        rollout_path,
+        strftime(
+            '%Y-%m-%dT%H:%M:%fZ',
+            coalesce(updated_at_ms, updated_at * 1000, created_at_ms, created_at * 1000) / 1000.0,
+            'unixepoch'
+        ) as updated_at,
+        cwd,
+        title,
+        preview,
+        first_user_message,
+        git_branch,
+        coalesce(tokens_used, 0) as tokens_used,
+        archived != 0 as archived,
+        coalesce(updated_at_ms, updated_at * 1000, created_at_ms, created_at * 1000) as updated_at_ms_sort
+    from threads
+"#;
+
+fn thread_row(row: &Row<'_>) -> rusqlite::Result<CodexThreadRow> {
+    Ok(CodexThreadRow {
+        id: row.get(0)?,
+        rollout_path: row.get(1)?,
+        updated_at: row.get(2)?,
+        cwd: row.get(3)?,
+        title: row.get(4)?,
+        preview: row.get(5)?,
+        first_user_message: row.get(6)?,
+        branch: row.get(7)?,
+        token_count: row.get::<_, i64>(8).unwrap_or_default().max(0) as usize,
+        archived: row.get(9)?,
+    })
+}
+
+fn collect_rows<T>(
+    rows: MappedRows<'_, impl FnMut(&Row<'_>) -> rusqlite::Result<T>>,
+    path: &Path,
+) -> Result<Vec<T>, AdapterError> {
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|error| read_error(CODEX_TOOL, path, error))
+}
+
+fn first_non_empty<'a>(values: impl IntoIterator<Item = &'a String>) -> Option<&'a str> {
+    values
+        .into_iter()
+        .map(|value| value.trim())
+        .find(|value| !value.is_empty() && *value != "-")
+}
+
+fn truncate_thread_title(title: &str) -> String {
+    truncate(&title.split_whitespace().collect::<Vec<_>>().join(" "), 72)
+}
+
+fn normalized_token_count(token_count: usize) -> Option<usize> {
+    (1..=1_000_000)
+        .contains(&token_count)
+        .then_some(token_count)
+}
+
 fn is_error_record(record_type: &str, payload_type: &str) -> bool {
     record_type.contains("error") || payload_type.contains("error")
 }
@@ -598,6 +819,40 @@ mod tests {
         assert_eq!(sessions[0].branch.as_deref(), Some("main"));
         assert_eq!(sessions[0].token_count, Some(42));
         assert_eq!(sessions[0].resume_command, "codex resume codex-real-1");
+    }
+
+    #[test]
+    fn lists_codex_sessions_from_state_thread_index_when_available() {
+        let root = test_root("state-index");
+        let rollout_path = write_session(
+            &root,
+            "2026/06/06/rollout-2026-06-06T08-00-00-indexed.jsonl",
+            r#"{"timestamp":"2026-06-06T08:00:00.000Z","type":"session_meta","payload":{"id":"codex-indexed","cwd":"/jsonl","git":{"branch":"jsonl-branch"}}}
+{"timestamp":"2026-06-06T08:01:00.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Wrong JSONL title"}]}}
+"#,
+        );
+        write_state_db(
+            &root,
+            &rollout_path,
+            "codex-indexed",
+            "Renamed from Codex resume",
+        );
+
+        let sessions = CodexSourceAdapter::new(&root)
+            .list_sessions()
+            .expect("sessions");
+        let timeline = CodexSourceAdapter::new(&root)
+            .load_timeline("codex-indexed")
+            .expect("timeline");
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "codex-indexed");
+        assert_eq!(sessions[0].title, "Renamed from Codex resume");
+        assert_eq!(sessions[0].cwd, "/sqlite");
+        assert_eq!(sessions[0].branch.as_deref(), Some("sqlite-branch"));
+        assert_eq!(sessions[0].token_count, Some(42));
+        assert_eq!(sessions[0].updated_at, "2026-06-06T09:00:00.000Z");
+        assert_eq!(timeline.source_session, "codex-indexed");
     }
 
     #[test]
@@ -747,10 +1002,62 @@ not-json-after-limit"#,
         root
     }
 
-    fn write_session(root: &Path, relative_path: &str, contents: &str) {
+    fn write_session(root: &Path, relative_path: &str, contents: &str) -> PathBuf {
         let path = root.join("sessions").join(relative_path);
         fs::create_dir_all(path.parent().expect("parent")).expect("dirs");
-        let mut file = fs::File::create(path).expect("file");
+        let mut file = fs::File::create(&path).expect("file");
         file.write_all(contents.as_bytes()).expect("write");
+        path
+    }
+
+    fn write_state_db(root: &Path, rollout_path: &Path, id: &str, title: &str) {
+        let db = Connection::open(root.join("state_5.sqlite")).expect("db");
+        db.execute_batch(
+            r#"
+            create table threads (
+                id text primary key,
+                rollout_path text not null,
+                created_at integer not null,
+                updated_at integer not null,
+                created_at_ms integer,
+                updated_at_ms integer,
+                cwd text not null,
+                title text not null,
+                preview text not null default '',
+                first_user_message text not null default '',
+                git_branch text,
+                tokens_used integer not null default 0,
+                archived integer not null default 0
+            );
+            "#,
+        )
+        .expect("schema");
+        db.execute(
+            r#"
+            insert into threads (
+                id,
+                rollout_path,
+                created_at,
+                updated_at,
+                created_at_ms,
+                updated_at_ms,
+                cwd,
+                title,
+                preview,
+                first_user_message,
+                git_branch,
+                tokens_used,
+                archived
+            ) values (?1, ?2, 0, 0, 1780736400000, 1780736400000, ?3, ?4, '', '', ?5, 42, 0)
+            "#,
+            params![
+                id,
+                rollout_path.display().to_string(),
+                "/sqlite",
+                title,
+                "sqlite-branch"
+            ],
+        )
+        .expect("insert thread");
     }
 }

@@ -95,8 +95,9 @@ semantics.
   path, skipped record count, indexed-session counts, list limits, scan limits,
   visited scan entries, and truncation state belong in structured diagnostics,
   not only in prose or debug logs.
-- Keep TUI interaction paths bounded. Startup, session switching, filtering, and
-  modal refreshes must not synchronously parse unbounded local session history.
+- Keep TUI interaction paths bounded. Startup, session switching, filtering,
+  list rendering, and modal refreshes must not synchronously parse unbounded
+  local session history or format every indexed row on every frame.
 - Prefer stable core contracts over UI-only behavior.
 - Do not duplicate business policy between CLI and TUI. Shared rules belong in
   `src/core`.

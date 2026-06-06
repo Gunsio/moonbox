@@ -33,104 +33,91 @@
   <text x="1234" y="78" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
   <text x="1441" y="78" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="96" class="mono" font-size="14" font-weight="500" fill="#374452">╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
-  <text x="46" y="114" class="mono" font-size="14" font-weight="500" fill="#e6be53">╭ Sessions · All ─────────────────────╮</text>
-  <text x="397" y="114" class="mono" font-size="14" font-weight="500" fill="#374452">╭ Timeline ──────────────────────────────────────────────────────────╮╭ Work Capsule Preview ───────────────────────╮</text>
+  <text x="46" y="114" class="mono" font-size="14" font-weight="500" fill="#e6be53">╭ Sessions · All (1/3) ───────────────╮</text>
+  <text x="397" y="114" class="mono" font-size="14" font-weight="500" fill="#374452">╭ Timeline ──────────────────────────────────────────────────────────╮╭ Session Details ────────────────────────────╮</text>
   <text x="46" y="132" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="64" y="132" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">▸ ● [Codex F] Moonbox session rewin</text>
+  <text x="64" y="132" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">▸   Cdx F  Moonbox session rewind d</text>
   <text x="388" y="132" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="397" y="132" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="415" y="132" class="mono" font-size="14" font-weight="500" fill="#8b949e">│  16:04</text>
   <text x="505" y="132" class="mono" font-size="14" font-weight="800" fill="#8b949e">TOOL</text>
   <text x="559" y="132" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Tool: rg</text>
   <text x="1018" y="132" class="mono" font-size="14" font-weight="500" fill="#374452">││</text>
-  <text x="1045" y="132" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Goal:</text>
-  <text x="1099" y="132" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Build Moonbox as a cross-CLI session</text>
+  <text x="1045" y="132" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Session Metadata</text>
   <text x="1441" y="132" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="150" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="100" y="150" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">~/coding/moon</text>
+  <text x="136" y="150" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">updated 1</text>
   <text x="217" y="150" class="mono" font-size="14" font-weight="500" fill="#e6be53">╭ Launch Review ─────────────────────────────────────────────────────────────────────────────────────────────────────╮</text>
+  <text x="1288" y="150" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">rewind design</text>
   <text x="1441" y="150" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="168" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="100" y="168" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">updated 10 mi</text>
+  <text x="82" y="168" class="mono" font-size="14" font-weight="500" fill="#e6be53">▲</text>
+  <text x="100" y="168" class="mono" font-size="14" font-weight="800" fill="#b284ff">Clu</text>
+  <text x="136" y="168" class="mono" font-size="14" font-weight="500" fill="#5c91f5">F</text>
+  <text x="163" y="168" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">QC pla</text>
   <text x="217" y="168" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="235" y="168" class="mono" font-size="14" font-weight="800" fill="#e6be53">Review target handoff</text>
   <text x="1270" y="168" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1441" y="168" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="186" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="100" y="186" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">branch main</text>
+  <text x="136" y="186" class="mono" font-size="14" font-weight="500" fill="#8b949e">updated 2</text>
   <text x="217" y="186" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1270" y="186" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="1279" y="186" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">ted. The target</text>
+  <text x="1279" y="186" class="mono" font-size="14" font-weight="500" fill="#5c91f5">o</text>
   <text x="1441" y="186" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="204" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="82" y="204" class="mono" font-size="14" font-weight="500" fill="#e6be53">▲</text>
-  <text x="100" y="204" class="mono" font-size="14" font-weight="800" fill="#47c9da">[Claude</text>
-  <text x="172" y="204" class="mono" font-size="14" font-weight="500" fill="#5c91f5">F</text>
-  <text x="181" y="204" class="mono" font-size="14" font-weight="800" fill="#47c9da">]</text>
-  <text x="199" y="204" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">QC</text>
+  <text x="82" y="204" class="mono" font-size="14" font-weight="800" fill="#f16565">!</text>
+  <text x="100" y="204" class="mono" font-size="14" font-weight="800" fill="#f59756">Hms</text>
+  <text x="136" y="204" class="mono" font-size="14" font-weight="500" fill="#5c91f5">F</text>
+  <text x="163" y="204" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">cxcp 5</text>
   <text x="217" y="204" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="235" y="204" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Action:</text>
   <text x="307" y="204" class="mono" font-size="14" font-weight="800" fill="#47c9da">target handoff</text>
   <text x="1270" y="204" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="1279" y="204" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Capsule.</text>
   <text x="1441" y="204" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="222" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="100" y="222" class="mono" font-size="14" font-weight="500" fill="#8b949e">~/coding/qc-p</text>
+  <text x="136" y="222" class="mono" font-size="14" font-weight="500" fill="#8b949e">failed ye</text>
   <text x="217" y="222" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="235" y="222" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Session:</text>
   <text x="316" y="222" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Codex / codex-cxcp-design</text>
   <text x="1270" y="222" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1441" y="222" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="240" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="100" y="240" class="mono" font-size="14" font-weight="500" fill="#5c91f5">updated 2 hou</text>
   <text x="217" y="240" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="235" y="240" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Target:</text>
   <text x="307" y="240" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Hermes</text>
   <text x="1270" y="240" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="1279" y="240" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">aw resume.</text>
   <text x="1441" y="240" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="258" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="100" y="258" class="mono" font-size="14" font-weight="500" fill="#8b949e">branch</text>
-  <text x="163" y="258" class="mono" font-size="14" font-weight="500" fill="#47c9da">fix/tr</text>
   <text x="217" y="258" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="235" y="258" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Branch:</text>
   <text x="307" y="258" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">moonbox/hermes-rewind-evt-091</text>
   <text x="1270" y="258" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="1279" y="258" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">or Hermes.</text>
   <text x="1441" y="258" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="276" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="82" y="276" class="mono" font-size="14" font-weight="800" fill="#f16565">!</text>
-  <text x="100" y="276" class="mono" font-size="14" font-weight="800" fill="#47c9da">[Hermes</text>
-  <text x="172" y="276" class="mono" font-size="14" font-weight="500" fill="#5c91f5">F</text>
-  <text x="181" y="276" class="mono" font-size="14" font-weight="800" fill="#47c9da">]</text>
-  <text x="199" y="276" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">cx</text>
   <text x="217" y="276" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="235" y="276" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Validation:</text>
   <text x="343" y="276" class="mono" font-size="14" font-weight="800" fill="#5cd689">READY</text>
   <text x="406" y="276" class="mono" font-size="14" font-weight="500" fill="#8b949e">Ready</text>
   <text x="1270" y="276" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1279" y="276" class="mono" font-size="14" font-weight="500" fill="#5cd689">eady</text>
   <text x="1441" y="276" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="294" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="100" y="294" class="mono" font-size="14" font-weight="500" fill="#8b949e">~/.codex</text>
   <text x="217" y="294" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1270" y="294" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1279" y="294" class="mono" font-size="14" font-weight="500" fill="#8b949e">dex/sessions.json</text>
   <text x="1441" y="294" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="312" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="100" y="312" class="mono" font-size="14" font-weight="500" fill="#5c91f5">failed yester</text>
   <text x="217" y="312" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="235" y="312" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Readiness details</text>
   <text x="1270" y="312" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="1279" y="312" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">-only.</text>
   <text x="1441" y="312" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="330" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="100" y="330" class="mono" font-size="14" font-weight="500" fill="#8b949e">branch</text>
-  <text x="163" y="330" class="mono" font-size="14" font-weight="500" fill="#47c9da">cxcp/r</text>
   <text x="217" y="330" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="235" y="330" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
   <text x="280" y="330" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">capsule_source</text>
   <text x="424" y="330" class="mono" font-size="14" font-weight="500" fill="#8b949e">capsule source Codex / codex-cxcp-design vs selected Codex / codex-cxcp-design</text>
   <text x="1270" y="330" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="1279" y="330" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">ility live in</text>
   <text x="1441" y="330" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="348" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="348" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
@@ -138,7 +125,7 @@
   <text x="280" y="348" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">target_cli</text>
   <text x="388" y="348" class="mono" font-size="14" font-weight="500" fill="#8b949e">capsule target Hermes vs requested Hermes</text>
   <text x="1270" y="348" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="1279" y="348" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">s.</text>
+  <text x="1288" y="348" class="mono" font-size="14" font-weight="500" fill="#8b949e">context. Verify</text>
   <text x="1441" y="348" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="366" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="366" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
@@ -146,7 +133,6 @@
   <text x="280" y="366" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">rewind_exists</text>
   <text x="415" y="366" class="mono" font-size="14" font-weight="500" fill="#8b949e">rewind evt-091 in selected timeline</text>
   <text x="1270" y="366" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="1279" y="366" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">kbench, not an</text>
   <text x="1441" y="366" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="384" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="384" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
@@ -161,6 +147,7 @@
   <text x="280" y="402" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">target_support</text>
   <text x="424" y="402" class="mono" font-size="14" font-weight="500" fill="#8b949e">Hermes handoff dry-run supported</text>
   <text x="1270" y="402" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1279" y="402" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">ross-CLI session</text>
   <text x="1441" y="402" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="420" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="420" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
@@ -170,17 +157,17 @@
   <text x="217" y="438" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="235" y="438" class="mono" font-size="14" font-weight="500" fill="#47c9da">moonbox launch --execute --target hermes --session codex-cxcp-design</text>
   <text x="1270" y="438" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="1279" y="438" class="mono" font-size="14" font-weight="500" fill="#5cd689">ine and capsule</text>
   <text x="1441" y="438" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="456" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="456" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1270" y="456" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1279" y="456" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">ted. The target</text>
   <text x="1441" y="456" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="474" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="474" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="474" class="mono" font-size="14" font-weight="500" fill="#8b949e">y copy execute command   enter disabled   Esc close</text>
+  <text x="235" y="474" class="mono" font-size="14" font-weight="500" fill="#8b949e">enter launch after restore   y copy execute command   Esc close</text>
   <text x="1270" y="474" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="1279" y="474" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">ers for Codex,</text>
+  <text x="1279" y="474" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Capsule.</text>
   <text x="1441" y="474" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="492" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="492" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
@@ -189,11 +176,12 @@
   <text x="46" y="510" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="510" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1270" y="510" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="1279" y="510" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">her and</text>
+  <text x="1279" y="510" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">aw resume.</text>
   <text x="1441" y="510" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="528" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="528" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1270" y="528" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1279" y="528" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">or Hermes.</text>
   <text x="1441" y="528" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="546" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="546" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
@@ -206,19 +194,22 @@
   <text x="46" y="582" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="582" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1270" y="582" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="1279" y="582" class="mono" font-size="14" font-weight="500" fill="#8b949e">gn (Codex)</text>
+  <text x="1279" y="582" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">-only.</text>
   <text x="1441" y="582" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="600" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="600" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1270" y="600" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1279" y="600" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">ility live in</text>
   <text x="1441" y="600" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="618" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="618" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1270" y="618" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1279" y="618" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">s.</text>
   <text x="1441" y="618" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="636" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="636" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1270" y="636" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1279" y="636" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">kbench, not an</text>
   <text x="1441" y="636" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="654" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="654" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>

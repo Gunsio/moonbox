@@ -130,20 +130,28 @@ The first implementation focuses on the product shell:
 - High-density TUI workbench
 - Vim-style keyboard navigation
 - Time-sorted global session list with source tags
-- Real Codex session discovery from `~/.codex/sessions`
+- Real Codex resume-index discovery from `~/.codex/state_5.sqlite`,
+  with rollout fallback from `~/.codex/sessions`
 - Runtime Codex home override via `MOONBOX_CODEX_HOME` or `CODEX_HOME`
-- Real Claude session discovery from `~/.claude/projects`
+- Real Claude resume-index discovery from `~/.claude/history.jsonl`,
+  with timeline/details hydrated from `~/.claude/projects`
 - Runtime Claude home override via `MOONBOX_CLAUDE_HOME` or `CLAUDE_HOME`
-- Real Hermes session discovery from `~/.hermes/state.db`, with optional metadata from `~/.hermes/sessions/sessions.json`
+- Real Hermes CLI-resume discovery from `~/.hermes/state.db`
+  `source = cli` sessions, with explicit ID lookup still available across
+  the Hermes store
 - Runtime Hermes home override via `MOONBOX_HERMES_HOME` or `HERMES_HOME`
 - Runtime list limit defaults to the newest 200 sessions per real adapter; explicit session lookup still searches the full store
 - Set `MOONBOX_SESSION_LIMIT=0` for unlimited real-session list discovery
-- Runtime scan entry limit defaults to 5000 filesystem entries per JSONL-backed real adapter, so list and Doctor discovery stay bounded on large local stores
-- Set `MOONBOX_SESSION_SCAN_LIMIT=0` for unlimited JSONL scan discovery, or a positive integer to tune the guardrail
+- Runtime scan entry limit defaults to 5000 filesystem entries for
+  JSONL-backed fallback/detail scans, so list and Doctor discovery stay bounded
+  on large local stores
+- Set `MOONBOX_SESSION_SCAN_LIMIT=0` for unlimited JSONL fallback/detail scans,
+  or a positive integer to tune the guardrail
 - Runtime summary parsing defaults to the first 800 lines per listed JSONL session, so a few very large sessions cannot stall the global index
 - Set `MOONBOX_SESSION_SUMMARY_LINE_LIMIT=0` for full summary parsing, or a positive integer to tune index latency
 - TUI timeline preview defaults to the first 300 events per selected session, with a visible truncation marker for large sessions
 - Set `MOONBOX_TIMELINE_EVENT_LIMIT=0` for full TUI timeline previews, or a positive integer to tune switching latency
+- TUI session filtering is cached and the session list renders only the visible window, so large real indexes do not require formatting every row on every frame
 - Set `MOONBOX_SESSION_MODE=fixture` to disable real source stores and force embedded fixture sessions
 - Auto discovery only falls back to fixture sessions when no real source stores are present; real and fixture sources are not mixed
 - Source filter defaults to `All`; `Source` is a session-list filter, not a global handoff mode
@@ -154,19 +162,26 @@ The first implementation focuses on the product shell:
 - Target selection lives inside the launch flow, with explicit `> [x]` radio-list selection
 - Target picker validates each target as `READY`, `WARN`, or `BLOCKED`; blocked targets cannot confirm or copy launch commands
 - Target picker and Launch Review show verifier-backed readiness rows so users can see the exact PASS/WARN/FAIL signal behind each target state
-- Target handoff uses a two-stage TUI flow: choose target, review the execute command, then press `y` to copy it
+- Target handoff uses a three-stage TUI flow: choose target, review the command,
+  then press `enter` to restore the terminal and launch, or `y` to copy it
 - Last confirmed target is persisted in `~/.config/moonbox/config.json`
-- Real Codex, Claude, and Hermes timeline parsing
+- Real Codex, Claude, and Hermes resume-surface listing plus timeline parsing
 - Original-session open command, Work Capsule, and branch tree previews
 - Live `/` session search, combined filter display, and one-key clear with `a`
 - Selected/filtered session drives timeline, Work Capsule, branch preview, token budget, and default rewind point
 - Animated TUI loading screen while source sessions are indexed in the background
+- Session movement, source filtering, and search keep the list responsive while the selected session preview hydrates in the background
+- Resume-index rows with unknown event counts still hydrate their real timeline
+  from `source_path`; sessions with no loadable rewind event stay as pending
+  capsules instead of crashing the TUI at startup
 - Fixture fallback with branch, token count, health reason, and session-specific timeline/capsule content
 - Fixed status line for action feedback
 - Context-aware key bar for the current panel or modal
 - Visible rewind marker in the timeline, plus rewind-aware branch and launch preview
 - Timeline auto-scroll, Capsule/modal scroll, and small-terminal modal polish
-- Copyable launch/original commands via `y` with OSC52 clipboard support; target handoff copy is only available from the launch review panel
+- Copyable launch/original wrapper commands via `y` with OSC52 clipboard
+  support; `enter` restores the terminal before handing control to the original
+  or target CLI
 - Serializable core models for future adapters
 - `SourceAdapter` contract and fixture-backed adapter fallback layer
 - Fallible adapter discovery; bad source data returns structured errors instead of panics
@@ -266,8 +281,20 @@ binaries can be overridden with `MOONBOX_CODEX_BIN`,
 installs.
 
 The TUI starts with an animated loading screen while source sessions are
-indexed. Session switching uses a bounded timeline preview by default, so very
-large JSONL sessions do not freeze navigation. When the preview reaches
+indexed. After indexing, session filtering is cached and the session list is
+window-rendered: Moonbox formats only the visible rows around the current
+selection instead of rebuilding every row on every frame. The left session list
+stays compact for scanning with source-colored `Cdx` / `Clu` / `Hms` badges,
+the original source title, and a single secondary line for time and branch.
+Healthy source status is not shown in the left rail; only warning or failed
+source-index states get a marker. The right Session Details panel keeps the raw
+title, cwd, event count, token count, source health, and source path. Session
+movement, source filtering, and `/` search move the selected row immediately
+and keep the UI responsive while the selected timeline/capsule preview hydrates
+in the background from the current session index snapshot.
+
+Session switching uses a bounded timeline preview by default, so very large
+JSONL sessions do not freeze navigation. When the preview reaches
 `MOONBOX_TIMELINE_EVENT_LIMIT`, Moonbox adds a `Timeline preview truncated`
 event to the timeline. Set `MOONBOX_TIMELINE_EVENT_LIMIT=0` only when you
 explicitly want full timeline previews in the TUI.
@@ -358,9 +385,9 @@ be overridden with `--bin moonbox` or `--bin moon`.
 Moonbox has two separate actions for a selected session:
 
 - `o`: preview an `original_resume` command for the selected session's
-  original CLI.
+  original CLI, then press `enter` to close Moonbox and resume it.
 - `enter`: choose a target CLI, then review a `target_handoff` command before
-  copying it.
+  launching or copying it.
 
 The main screen is a global session entry point. Sessions are sorted by time and
 tagged by source CLI. Source filtering is controlled by `f` or `[` / `]` and
@@ -368,23 +395,25 @@ starts at `All`. Target is not shown as a global mode on the main screen; it is
 chosen only in the launch picker. In the target picker, `j/k` moves the pending
 selection, `enter` confirms and persists it, and `Esc` / `q` cancels without
 changing the saved target. Confirming a ready or warning target opens a launch
-review panel; only that panel exposes the copyable execute command. Pressing
-`y` in the target picker does not copy anything. The picker keeps every target
-visible and annotates each option with `READY`, `WARN`, or `BLOCKED`; blocked
-targets keep launch review disabled until validation passes. The picker uses
-the same verifier policy as the CLI, so `moon verify` and the TUI cannot
-disagree on target readiness. The selected target also shows readiness detail
-rows from the verifier report, with blocking failures and warnings prioritized
-over pass checks. Press `D` or run `:doctor` to open the environment Doctor
-panel; `r` refreshes diagnostics and `y` copies the JSON report. The panel shows
-adapter provenance, store path, session count, skipped record count, and last
-indexed timestamp. It is read-only and does not load timelines, resume sessions,
-launch targets, or spawn target binaries.
+review panel. Pressing `enter` in that review restores the terminal first and
+then launches the target CLI; pressing `y` copies the guarded wrapper command.
+Pressing `y` in the target picker does not copy anything. The picker keeps
+every target visible and annotates each option with `READY`, `WARN`, or
+`BLOCKED`; blocked targets keep launch review disabled until validation passes.
+The picker uses the same verifier policy as the CLI, so `moon verify` and the
+TUI cannot disagree on target readiness. The selected target also shows
+readiness detail rows from the verifier report, with blocking failures and
+warnings prioritized over pass checks. Press `D` or run `:doctor` to open the
+environment Doctor panel; `r` refreshes diagnostics and `y` copies the JSON
+report. The panel shows adapter provenance, store path, session count, skipped
+record count, and last indexed timestamp. It is read-only and does not load
+timelines, resume sessions, launch targets, or spawn target binaries.
 
 Session search matches id, title, cwd, source, branch, and health reason. When a
 different session becomes selected by movement, source filter, or search,
-Moonbox reloads that session's timeline, capsule preview, branch preview, and
-recommended rewind point.
+Moonbox immediately marks the selected session as loading, then hydrates that
+session's timeline, capsule preview, branch preview, and recommended rewind
+point in the background.
 
 ## TUI Keys
 
@@ -395,7 +424,7 @@ recommended rewind point.
 | `tab` / `shift-tab` | Switch panel |
 | `/` | Filter sessions by text |
 | `f` | Cycle session source filter |
-| `o` | Preview original resume command |
+| `o` | Review original resume command |
 | `[` / `]` | Previous / next session source filter |
 | `space` | Set rewind point |
 | `c` | Compile capsule |
@@ -421,7 +450,7 @@ recommended rewind point.
 | Key | Action |
 | --- | --- |
 | `y` | Copy guarded `moonbox launch --execute` command |
-| `enter` | Disabled; review is copy-only |
+| `enter` | Restore terminal and launch target CLI |
 | `q` / `Esc` | Close review |
 
 ### Original Preview Keys
@@ -429,7 +458,7 @@ recommended rewind point.
 | Key | Action |
 | --- | --- |
 | `y` | Copy guarded `moonbox open --execute` command |
-| `enter` | Disabled; preview is copy-only |
+| `enter` | Restore terminal and resume original CLI |
 | `q` / `Esc` | Close preview |
 
 ## Architecture Direction
@@ -460,11 +489,19 @@ Stable interfaces matter more than any single framework:
 - M6: target launcher dry-run plus Work Capsule verification loop.
 - M7: core boundary hardening with fallible adapters, shared verifier policy, real `--capsule` file validation, and a `CapsuleCompiler` trait.
 - M8: open-source hygiene with CI, dependency automation, contribution docs, security policy, changelog, and GitHub templates.
-- M9: real Codex `SourceAdapter` for `~/.codex/sessions`, runtime source registry, and bounded real-session discovery.
+- M9: real Codex `SourceAdapter` with runtime source registry, bounded
+  real-session discovery, `~/.codex/state_5.sqlite` resume index support, and
+  rollout fallback from `~/.codex/sessions`.
 - M10: source architecture hardening with `WorkbenchData` naming, non-demo workbench APIs, and unbounded explicit Codex session lookup.
 - M11: process-backed compiler skill runner with JSON stdin/stdout contract, timeout/failure handling, CLI `--compiler`, and real TUI compile action.
-- M12: real Claude `SourceAdapter` for `~/.claude/projects`, shared local JSONL adapter utilities, bounded Claude discovery, unbounded explicit Claude session lookup, and real Claude timeline parsing.
-- M13: real Hermes `SourceAdapter` for `~/.hermes/state.db`, optional `sessions.json` enrichment, SQLite message timeline parsing, id-based explicit lookup routing, and lightweight CLI launch/verify artifacts for large real stores.
+- M12: real Claude `SourceAdapter` with `~/.claude/history.jsonl`
+  resume-index ordering, `~/.claude/projects` detail/timeline hydration,
+  shared local JSONL utilities, bounded Claude discovery, unbounded explicit
+  Claude session lookup, and real Claude timeline parsing.
+- M13: real Hermes `SourceAdapter` for `~/.hermes/state.db`, default
+  CLI-resume listing from `source = cli` sessions, SQLite message timeline
+  parsing, id-based explicit lookup routing across the Hermes store, and
+  lightweight CLI launch/verify artifacts for large real stores.
 - M14: guarded target launcher execution with `launch --execute`, target-specific Codex/Claude/Hermes command generation, structured `target_command` JSON, binary overrides, verification blocking before spawn, and TUI copy commands that execute through Moonbox.
 - M15: guarded original-session execution with `open --execute`, structured original open plan JSON, source-specific Codex/Claude/Hermes resume commands, corrected Hermes resume command generation, binary overrides, and TUI copy commands that execute through Moonbox.
 - M16: configurable compiler skill presets with `default_compiler`, catalog status/score signals, `moonbox compilers`, environment override precedence, and stricter unknown/disabled compiler errors.
@@ -493,6 +530,16 @@ Stable interfaces matter more than any single framework:
 - M39: real-session index hardening with fixture fallback only when no real stores exist, CLI `sessions --filter <source>` support, and execute-time guards requiring explicit `--session` before original resume or target handoff can spawn a process.
 - M40: adapter health reporting with per-session provenance fields, structured `doctor.source_adapters`, TUI source badges, missing-store reports when real adapters are active, and single-scan inventory plumbing to avoid duplicate source discovery during diagnostics.
 - M41: real-store performance guardrails with bounded JSONL scan discovery, Doctor scan-cost fields, animated TUI loading while indexing, and bounded TUI timeline previews so large sessions do not freeze navigation.
+- M42: TUI responsiveness and resume-surface hardening with source-colored short
+  badges, original source titles, hidden healthy markers, terminal-restored
+  original/target launch handoff, compact left session rows, right-side Session
+  Details metadata, cached session filters, windowed session-list rendering,
+  async selected-session preview loading, stale-result protection for rapid
+  navigation, loading guards before launch/verify/compile actions, Codex
+  `state_5.sqlite` resume titles, Claude `history.jsonl` resume ordering, and
+  Hermes `source = cli` default listing; zero-event resume-index rows now
+  hydrate from `source_path`, while truly empty timelines get a pending capsule
+  instead of running a compiler against a missing rewind id.
 
 ### Can Build Now
 
@@ -501,7 +548,9 @@ Stable interfaces matter more than any single framework:
 
 ### Prototype Now, Improve With Real Data
 
-- Session health badges: basic adapter status now, compute from real resume errors and compatibility signals later.
+- Session health signals: left rail now hides healthy adapter status and only
+  calls out warning/failed indexing states; compute richer resume-error and
+  compatibility signals later.
 - Compression strategy previews: show selected compiler, expected capsule
   shape, and budget warnings now; tune thresholds from real handoff outcomes
   later.

@@ -198,7 +198,7 @@ mod tests {
         assert!(svg.contains("Launch Review"));
         assert!(svg.contains("Readiness details"));
         assert!(svg.contains("moonbox launch --execute"));
-        assert!(svg.contains("enter disabled"));
+        assert!(svg.contains("enter launch after restore"));
         assert!(svg.contains("<svg"));
     }
 }

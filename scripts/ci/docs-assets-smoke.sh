@@ -35,9 +35,9 @@ grep -Fq 'Homebrew distribution is planned, but not published yet.' README.md
 
 grep -Fq 'Launch Review' "$svg"
 grep -Fq 'Readiness details' "$svg"
-grep -Fq '[Codex F]' "$svg"
+grep -Fq 'Cdx F' "$svg"
 grep -Fq 'moonbox launch --execute' "$svg"
-grep -Fq 'enter disabled' "$svg"
+grep -Fq 'enter launch after restore' "$svg"
 grep -Fq 'copy execute command' "$svg"
 
 echo "moonbox docs asset smoke passed"
