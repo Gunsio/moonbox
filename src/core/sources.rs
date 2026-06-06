@@ -12,6 +12,38 @@ use super::codex::CodexSourceAdapter;
 #[cfg(not(test))]
 use super::hermes::HermesSourceAdapter;
 
+pub const SESSION_MODE_ENV: &str = "MOONBOX_SESSION_MODE";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionMode {
+    Auto,
+    Fixture,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionModeState {
+    pub mode: SessionMode,
+    pub raw: Option<String>,
+    pub valid: bool,
+}
+
+impl SessionMode {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Fixture => "fixture",
+        }
+    }
+}
+
+pub fn session_mode_state() -> SessionModeState {
+    parse_session_mode(std::env::var(SESSION_MODE_ENV).ok().as_deref())
+}
+
+pub fn session_mode() -> SessionMode {
+    session_mode_state().mode
+}
+
 pub fn list_sessions() -> Result<Vec<SessionSummary>, CoreError> {
     let adapters = runtime_adapters();
     let adapter_refs = adapters
@@ -71,7 +103,6 @@ pub fn load_timeline(session: &SessionSummary) -> Result<CanonicalTimeline, Core
         .map_err(CoreError::from)
 }
 
-#[cfg(test)]
 fn fixture_adapters() -> Vec<Box<dyn SourceAdapter>> {
     CliTool::ALL
         .into_iter()
@@ -86,6 +117,10 @@ fn runtime_adapters() -> Vec<Box<dyn SourceAdapter>> {
 
 #[cfg(not(test))]
 fn runtime_adapters() -> Vec<Box<dyn SourceAdapter>> {
+    if session_mode() == SessionMode::Fixture {
+        return fixture_adapters();
+    }
+
     let mut adapters: Vec<Box<dyn SourceAdapter>> = Vec::new();
     if let Some(codex) =
         CodexSourceAdapter::from_default_home().filter(|adapter| adapter.has_session_store())
@@ -111,6 +146,34 @@ fn runtime_adapters() -> Vec<Box<dyn SourceAdapter>> {
         adapters.push(Box::new(FixtureSourceAdapter::new(CliTool::Hermes)));
     }
     adapters
+}
+
+fn parse_session_mode(raw: Option<&str>) -> SessionModeState {
+    let Some(raw) = raw.map(str::trim).filter(|raw| !raw.is_empty()) else {
+        return SessionModeState {
+            mode: SessionMode::Auto,
+            raw: None,
+            valid: true,
+        };
+    };
+    let normalized = raw.to_ascii_lowercase();
+    match normalized.as_str() {
+        "auto" | "real" => SessionModeState {
+            mode: SessionMode::Auto,
+            raw: Some(raw.into()),
+            valid: true,
+        },
+        "fixture" | "fixtures" | "demo" => SessionModeState {
+            mode: SessionMode::Fixture,
+            raw: Some(raw.into()),
+            valid: true,
+        },
+        _ => SessionModeState {
+            mode: SessionMode::Auto,
+            raw: Some(raw.into()),
+            valid: false,
+        },
+    }
 }
 
 fn preferred_tool_for_session_id(session_id: &str) -> Option<CliTool> {
@@ -206,5 +269,25 @@ mod tests {
             preferred_tool_for_session_id("codex-cxcp-design"),
             Some(CliTool::Codex)
         );
+    }
+
+    #[test]
+    fn session_mode_parser_accepts_fixture_aliases_and_warns_on_invalid_values() {
+        assert_eq!(parse_session_mode(None).mode, SessionMode::Auto);
+        assert_eq!(parse_session_mode(Some("auto")).mode, SessionMode::Auto);
+        assert_eq!(parse_session_mode(Some("real")).mode, SessionMode::Auto);
+        assert_eq!(
+            parse_session_mode(Some("fixture")).mode,
+            SessionMode::Fixture
+        );
+        assert_eq!(
+            parse_session_mode(Some("fixtures")).mode,
+            SessionMode::Fixture
+        );
+        assert_eq!(parse_session_mode(Some("demo")).mode, SessionMode::Fixture);
+
+        let invalid = parse_session_mode(Some("recent"));
+        assert_eq!(invalid.mode, SessionMode::Auto);
+        assert!(!invalid.valid);
     }
 }

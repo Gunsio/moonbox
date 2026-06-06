@@ -6,12 +6,13 @@ use super::{
         CliTool, CompilerPresetStatus, DoctorReport, SessionSummary, VerificationCheck,
         VerificationStatus,
     },
-    workbench,
+    sources, workbench,
 };
 
 pub fn diagnose() -> DoctorReport {
     let mut checks = Vec::new();
     checks.push(config_check());
+    checks.push(session_mode_check());
     checks.push(session_discovery_check());
     checks.extend(CliTool::ALL.into_iter().map(target_binary_check));
     checks.push(compiler_catalog_check());
@@ -22,6 +23,7 @@ pub fn diagnose() -> DoctorReport {
 pub fn diagnose_with_session_summaries(sessions: &[SessionSummary]) -> DoctorReport {
     let mut checks = Vec::new();
     checks.push(config_check());
+    checks.push(session_mode_check());
     checks.push(session_summaries_check(sessions));
     checks.extend(CliTool::ALL.into_iter().map(target_binary_check));
     checks.push(compiler_catalog_check());
@@ -36,6 +38,40 @@ fn report(checks: Vec<VerificationCheck>) -> DoctorReport {
         status,
         ready: status != VerificationStatus::Fail,
         checks,
+    }
+}
+
+fn session_mode_check() -> VerificationCheck {
+    let state = sources::session_mode_state();
+    if !state.valid {
+        return check(
+            "session_mode",
+            VerificationStatus::Warn,
+            format!(
+                "{}={} is invalid; falling back to auto real-session discovery",
+                sources::SESSION_MODE_ENV,
+                state.raw.unwrap_or_default()
+            ),
+        );
+    }
+
+    match state.mode {
+        sources::SessionMode::Auto => check(
+            "session_mode",
+            VerificationStatus::Pass,
+            format!(
+                "{}=auto; real source stores are used when present",
+                sources::SESSION_MODE_ENV
+            ),
+        ),
+        sources::SessionMode::Fixture => check(
+            "session_mode",
+            VerificationStatus::Pass,
+            format!(
+                "{}=fixture; real source stores are disabled",
+                sources::SESSION_MODE_ENV
+            ),
+        ),
     }
 }
 

@@ -101,8 +101,8 @@ Pull requests are expected to pass formatting, check, test, fixture replay
 eval, documentation build, fixture-safe CLI smoke, Homebrew docs smoke, clippy,
 release build, package verification, install smoke, and cargo-deny supply-chain
 gates. GitHub Actions runs the same Rust quality gates and validates the README
-screenshot asset. Smoke gates redirect source homes to `target/` and never open
-or resume real local sessions.
+screenshot asset. Smoke gates set `MOONBOX_SESSION_MODE=fixture`, redirect
+source homes to `target/`, and never open or resume real local sessions.
 
 ## Current State
 
@@ -120,6 +120,7 @@ The first implementation focuses on the product shell:
 - Runtime Hermes home override via `MOONBOX_HERMES_HOME` or `HERMES_HOME`
 - Runtime list limit defaults to the newest 200 sessions per real adapter; explicit session lookup still searches the full store
 - Set `MOONBOX_SESSION_LIMIT=0` for unlimited real-session list discovery
+- Set `MOONBOX_SESSION_MODE=fixture` to disable real source stores and force embedded fixture sessions
 - Source filter defaults to `All`; `Source` is a session-list filter, not a global handoff mode
 - Target selection lives inside the launch flow, with explicit `> [x]` radio-list selection
 - Target picker validates each target as `READY`, `WARN`, or `BLOCKED`; blocked targets cannot confirm or copy launch commands
@@ -152,13 +153,15 @@ The first implementation focuses on the product shell:
   binaries, and compiler catalog readiness
 - TUI Doctor panel with refresh and JSON copy for the same non-executing
   diagnostics
+- Fixture session mode for demos, CI, release smoke, and other environments
+  that must not read real local session stores
 - Fixture-safe TUI render regression tests for main, Doctor, and Launch views
 - Deterministic fixture-only replay eval for the Codex/Claude/Hermes source-target matrix
 - Fixture-safe public CLI contract tests for the installed `moonbox` and `moon` command surfaces
 - Full local quality gate through `scripts/ci/full-gate.sh`
 - Cargo-deny supply-chain policy for advisories, duplicate versions, licenses, and crate sources
 - Draft Homebrew formula template plus fixture-safe Homebrew docs smoke coverage
-- GitHub Actions CI for Rust quality gates, documentation build, fixture replay eval, fixture-safe CLI smoke, package verification, install smoke, and README screenshot validation
+- GitHub Actions CI for Rust quality gates, documentation build, fixture replay eval, fixture-safe CLI smoke, Homebrew docs smoke, package verification, install smoke, and README screenshot validation
 - Dependabot configuration for Cargo and GitHub Actions updates
 - Contributing, security, changelog, issue template, and PR template docs
 
@@ -173,6 +176,7 @@ Useful commands:
 
 ```bash
 cargo run -- tui
+MOONBOX_SESSION_MODE=fixture cargo run -- sessions --json
 moon tui
 cargo run -- tui --filter claude
 cargo run -- tui --target codex
@@ -208,6 +212,19 @@ installs.
 `replay-eval` is also non-executing. It uses only embedded fixtures, does not
 scan local session stores, and reports verifier signals across every
 source-target pair.
+
+For demos, release smoke, or any automation that must not touch real local
+session stores, force fixture mode:
+
+```bash
+MOONBOX_SESSION_MODE=fixture moonbox sessions --json
+MOONBOX_SESSION_MODE=fixture moonbox doctor --json
+```
+
+Fixture mode disables real Codex, Claude, and Hermes source adapters even if
+their default stores or `MOONBOX_*_HOME` overrides exist. Supported values are
+`auto` and `fixture`; `real` is accepted as an alias for `auto`, and `demo` /
+`fixtures` are accepted as aliases for `fixture`.
 
 External compiler skills are optional. When configured, Moonbox sends a
 `CapsuleCompileRequest` JSON object to the process stdin and expects a
@@ -373,6 +390,7 @@ Stable interfaces matter more than any single framework:
 - M29: TUI Doctor panel with status header, refresh, JSON copy, and shared non-executing diagnostics.
 - M30: fixture-safe Ratatui render regression tests for the main workbench, Doctor overlay, and Launch overlay.
 - M31: release docs hardening with local install commands, a draft Homebrew formula template, and a fixture-safe Homebrew docs smoke gate.
+- M32: explicit fixture session mode through `MOONBOX_SESSION_MODE=fixture`, surfaced in Doctor diagnostics and wired into smoke scripts to prevent accidental real-session discovery.
 
 ### Can Build Now
 

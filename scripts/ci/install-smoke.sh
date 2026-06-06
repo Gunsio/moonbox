@@ -13,6 +13,7 @@ mkdir -p "$source_home/codex" "$source_home/claude" "$source_home/hermes"
 export MOONBOX_CODEX_HOME="$source_home/codex"
 export MOONBOX_CLAUDE_HOME="$source_home/claude"
 export MOONBOX_HERMES_HOME="$source_home/hermes"
+export MOONBOX_SESSION_MODE=fixture
 
 cargo install --path . --root "$install_root" --locked --offline --force
 

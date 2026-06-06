@@ -54,6 +54,8 @@ and this project uses semantic versioning once tagged releases start.
 - Shell completion generation for Bash, Zsh, Fish, PowerShell, and Elvish.
 - Non-executing `moonbox doctor` diagnostics for config, session discovery,
   target binaries, and compiler catalog readiness.
+- `MOONBOX_SESSION_MODE=fixture` to force embedded fixture sessions and disable
+  real source-store discovery in demos, CI, and release smoke.
 - TUI Doctor panel with `D` / `:doctor`, refresh, and JSON copy support for
   the same non-executing diagnostics.
 - Fixture-safe TUI render regression tests for main, Doctor, and Launch views.

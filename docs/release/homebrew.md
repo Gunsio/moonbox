@@ -49,8 +49,9 @@ scripts/ci/homebrew-docs-smoke.sh
 The smoke checks the draft formula syntax, verifies that it still uses the
 expected Cargo and completion helpers, and runs the same completion-generation
 commands against the built `moonbox` and `moon` binaries. It redirects source
-homes into `target/moonbox-homebrew-smoke-home` and does not open or resume
-real sessions.
+homes into `target/moonbox-homebrew-smoke-home`, sets
+`MOONBOX_SESSION_MODE=fixture`, and does not open, resume, or discover real
+sessions.
 
 ## Formula Shape
 
