@@ -10,7 +10,9 @@ use ratatui::{
 
 use crate::{
     app::{App, Focus},
-    core::model::{CliTool, LaunchValidationState, SessionStatus, TimelineKind},
+    core::model::{
+        CliTool, LaunchValidationState, SessionStatus, TimelineKind, VerificationStatus,
+    },
 };
 
 use super::theme;
@@ -50,6 +52,9 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
     if app.show_open_original {
         render_open_original(frame, root, app);
+    }
+    if app.show_doctor {
+        render_doctor(frame, root, app);
     }
     if app.show_diff {
         render_diff(frame, root, app);
@@ -107,6 +112,13 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
             token_budget,
             Style::default()
                 .fg(theme::GOLD)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("   Doctor: "),
+        Span::styled(
+            app.doctor_report.status.to_string(),
+            Style::default()
+                .fg(verification_color(app.doctor_report.status))
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw("   Verify: "),
@@ -601,6 +613,14 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("Esc", "Close"),
         ];
     }
+    if app.show_doctor {
+        return vec![
+            ("r", "Refresh"),
+            ("y", "Copy JSON"),
+            ("j/k", "Scroll"),
+            ("Esc", "Close"),
+        ];
+    }
     if app.show_diff || app.show_help {
         return vec![
             ("j/k", "Scroll"),
@@ -646,6 +666,7 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("enter", "Target"),
             ("o", "Original"),
             ("space", "Rewind"),
+            ("D", "Doctor"),
             ("tab", "Next"),
             (":", "Cmd"),
             ("?", "Help"),
@@ -707,6 +728,7 @@ fn render_help(frame: &mut Frame, root: Rect, app: &App) {
         Line::raw("a               clear source and text filters"),
         Line::raw("/text           filter sessions by text"),
         Line::raw("o               open original session with original CLI"),
+        Line::raw("D               open environment doctor"),
         Line::raw("[ / ]           previous / next session source filter"),
         Line::raw("space           set rewind point"),
         Line::raw("c, v, d, s      compile, verify, diff, switch skill"),
@@ -717,6 +739,82 @@ fn render_help(frame: &mut Frame, root: Rect, app: &App) {
     frame.render_widget(
         Paragraph::new(lines)
             .block(panel_block(" Help ", true))
+            .scroll((app.modal_scroll, 0))
+            .wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
+fn render_doctor(frame: &mut Frame, root: Rect, app: &App) {
+    let area = modal_area(root, 72, 72);
+    frame.render_widget(Clear, area);
+
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled(
+                "Environment doctor",
+                Style::default()
+                    .fg(theme::GOLD)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                app.doctor_report.status.to_string(),
+                Style::default()
+                    .fg(verification_color(app.doctor_report.status))
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Ready: ", Style::default().fg(theme::BLUE)),
+            Span::styled(
+                app.doctor_report.ready.to_string(),
+                Style::default().fg(if app.doctor_report.ready {
+                    theme::GREEN
+                } else {
+                    theme::RED
+                }),
+            ),
+        ]),
+        Line::raw(""),
+    ];
+
+    for check in &app.doctor_report.checks {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} ", check.status),
+                Style::default()
+                    .fg(verification_color(check.status))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                &check.name,
+                Style::default()
+                    .fg(theme::TEXT)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("  ", Style::default().fg(theme::MUTED)),
+            Span::styled(&check.detail, Style::default().fg(theme::MUTED)),
+        ]));
+        lines.push(Line::raw(""));
+    }
+
+    lines.extend([
+        Line::from(Span::styled(
+            "Read-only diagnostics. No timeline load, resume, launch, or target spawn.",
+            Style::default().fg(theme::MUTED),
+        )),
+        Line::from(Span::styled(
+            "r refresh   y copy JSON   Esc close",
+            Style::default().fg(theme::MUTED),
+        )),
+    ]);
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(panel_block(" Doctor ", true))
             .scroll((app.modal_scroll, 0))
             .wrap(Wrap { trim: true }),
         area,
@@ -851,6 +949,14 @@ fn validation_color(state: LaunchValidationState) -> Color {
         LaunchValidationState::Ready => theme::GREEN,
         LaunchValidationState::Warning => theme::GOLD,
         LaunchValidationState::Blocked => theme::RED,
+    }
+}
+
+fn verification_color(status: VerificationStatus) -> Color {
+    match status {
+        VerificationStatus::Pass => theme::GREEN,
+        VerificationStatus::Warn => theme::GOLD,
+        VerificationStatus::Fail => theme::RED,
     }
 }
 

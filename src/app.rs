@@ -1,9 +1,12 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::core::{
-    config,
+    config, doctor,
     error::CoreError,
-    model::{CliTool, LaunchValidation, LaunchValidationState, SessionSummary, WorkbenchData},
+    model::{
+        CliTool, DoctorReport, LaunchValidation, LaunchValidationState, SessionSummary,
+        WorkbenchData,
+    },
     verifier, workbench,
 };
 
@@ -69,6 +72,7 @@ pub struct App {
     pub show_help: bool,
     pub show_launch: bool,
     pub show_open_original: bool,
+    pub show_doctor: bool,
     pub show_diff: bool,
     pub session_filter: SessionFilter,
     pub search_query: String,
@@ -78,6 +82,7 @@ pub struct App {
     pub capsule_scroll: u16,
     pub modal_scroll: u16,
     pub verify_passed: bool,
+    pub doctor_report: DoctorReport,
     pub compile_status: &'static str,
     pub pending_g: bool,
     clipboard_text: Option<String>,
@@ -94,6 +99,7 @@ impl App {
             .position(|session| session.id == data.capsule.source_session)
             .unwrap_or(0);
         let selected_event = rewind_event_index(&data, &rewind_event_id);
+        let doctor_report = doctor::diagnose_with_session_summaries(&data.sessions);
         Ok(Self {
             data,
             focus: Focus::Sessions,
@@ -105,6 +111,7 @@ impl App {
             show_help: false,
             show_launch: false,
             show_open_original: false,
+            show_doctor: false,
             show_diff: false,
             session_filter: SessionFilter::All,
             search_query: String::new(),
@@ -114,6 +121,7 @@ impl App {
             capsule_scroll: 0,
             modal_scroll: 0,
             verify_passed: true,
+            doctor_report,
             compile_status: "ACTIVE",
             pending_g: false,
             clipboard_text: None,
@@ -158,6 +166,7 @@ impl App {
             KeyCode::Char('f') => self.cycle_session_filter(true),
             KeyCode::Char('a') => self.clear_session_filters(),
             KeyCode::Char('o') => self.open_original(),
+            KeyCode::Char('D') => self.open_doctor(),
             KeyCode::Char(':') => {
                 self.command_mode = true;
                 self.command_input.clear();
@@ -216,6 +225,7 @@ impl App {
                     "compile" | "c" => self.compile_capsule(),
                     "verify" | "v" => self.mark_verify_passed(),
                     "help" | "?" => self.open_help(),
+                    "doctor" | "diag" | "health" => self.open_doctor(),
                     "diff" | "d" => self.toggle_diff(),
                     "filter" | "filter next" => self.cycle_session_filter(true),
                     "filter prev" | "filter previous" => self.cycle_session_filter(false),
@@ -315,6 +325,8 @@ impl App {
     fn handle_overlay_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => self.back_or_quit(),
+            KeyCode::Char('r') if self.show_doctor => self.refresh_doctor(),
+            KeyCode::Char('y') if self.show_doctor => self.copy_doctor_report(),
             KeyCode::Char('y') => self.copy_focused_command(),
             KeyCode::Char('j') | KeyCode::Down => self.scroll_modal(true, 1),
             KeyCode::Char('k') | KeyCode::Up => self.scroll_modal(false, 1),
@@ -335,6 +347,10 @@ impl App {
             self.show_diff = false;
             self.modal_scroll = 0;
             self.set_status("Diff closed");
+        } else if self.show_doctor {
+            self.show_doctor = false;
+            self.modal_scroll = 0;
+            self.set_status("Doctor closed");
         } else if self.show_open_original {
             self.show_open_original = false;
             self.modal_scroll = 0;
@@ -535,6 +551,22 @@ impl App {
         self.pending_g = false;
     }
 
+    fn open_doctor(&mut self) {
+        self.refresh_doctor();
+        self.show_doctor = true;
+        self.modal_scroll = 0;
+        self.pending_g = false;
+    }
+
+    fn refresh_doctor(&mut self) {
+        self.doctor_report = doctor::diagnose();
+        self.set_status(format!(
+            "Doctor: {} ({} checks)",
+            self.doctor_report.status,
+            self.doctor_report.checks.len()
+        ));
+    }
+
     fn open_original(&mut self) {
         self.show_open_original = true;
         self.modal_scroll = 0;
@@ -636,7 +668,7 @@ impl App {
     }
 
     fn has_overlay(&self) -> bool {
-        self.show_help || self.show_open_original || self.show_diff
+        self.show_help || self.show_open_original || self.show_doctor || self.show_diff
     }
 
     fn cycle_target(&mut self, forward: bool) {
@@ -798,6 +830,16 @@ impl App {
             self.copy_text("original", command);
         } else {
             self.set_status("No session selected");
+        }
+    }
+
+    fn copy_doctor_report(&mut self) {
+        match serde_json::to_string_pretty(&self.doctor_report) {
+            Ok(report) => {
+                self.clipboard_text = Some(report);
+                self.set_status("Copied doctor report");
+            }
+            Err(error) => self.set_status(format!("Doctor copy failed: {error}")),
         }
     }
 
@@ -1175,6 +1217,51 @@ mod tests {
 
         assert_eq!(app.selected_event, 3);
         assert_eq!(app.modal_scroll, 1);
+    }
+
+    #[test]
+    fn doctor_overlay_reports_and_copies_json_without_moving_selection() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.focus = Focus::Timeline;
+        app.selected_event = 3;
+
+        app.handle_key(key('D'));
+
+        assert!(app.show_doctor);
+        assert_eq!(app.selected_event, 3);
+        assert!(app.status_message.starts_with("Doctor: "));
+        assert!(
+            app.doctor_report
+                .checks
+                .iter()
+                .any(|check| check.name == "session_discovery")
+        );
+
+        app.handle_key(key('y'));
+        let copied = app.take_clipboard_text().expect("doctor json");
+        let json: serde_json::Value = serde_json::from_str(&copied).expect("valid json");
+        assert_eq!(json["version"], 1);
+        assert!(json["checks"].as_array().is_some_and(|checks| {
+            checks
+                .iter()
+                .any(|check| check["name"] == "session_discovery")
+        }));
+        assert_eq!(app.status_message, "Copied doctor report");
+    }
+
+    #[test]
+    fn command_mode_opens_doctor_overlay() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+
+        app.handle_key(key(':'));
+        for ch in "doctor".chars() {
+            app.handle_key(key(ch));
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(app.show_doctor);
+        assert!(!app.command_mode);
+        assert!(app.status_message.starts_with("Doctor: "));
     }
 
     #[test]

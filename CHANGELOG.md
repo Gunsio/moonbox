@@ -54,6 +54,8 @@ and this project uses semantic versioning once tagged releases start.
 - Shell completion generation for Bash, Zsh, Fish, PowerShell, and Elvish.
 - Non-executing `moonbox doctor` diagnostics for config, session discovery,
   target binaries, and compiler catalog readiness.
+- TUI Doctor panel with `D` / `:doctor`, refresh, and JSON copy support for
+  the same non-executing diagnostics.
 - Shared verifier policy for CLI and TUI launch validation.
 - Real `--capsule` file parsing and target mismatch verification.
 - README screenshot, installation notes, and Homebrew release planning docs.
