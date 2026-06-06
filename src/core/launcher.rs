@@ -178,7 +178,7 @@ Work Capsule JSON:
     ))
 }
 
-fn configured_target_binary(target: CliTool) -> String {
+pub(crate) fn configured_target_binary(target: CliTool) -> String {
     let env_key = format!("MOONBOX_{}_BIN", target.id().to_ascii_uppercase());
     env::var(env_key).unwrap_or_else(|_| target.id().into())
 }

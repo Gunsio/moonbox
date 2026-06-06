@@ -56,6 +56,7 @@ class Moonbox < Formula
   test do
     assert_match "moonbox", shell_output("#{bin}/moonbox --version")
     assert_match "moonbox", shell_output("#{bin}/moon --version")
+    assert_match "ready", shell_output("#{bin}/moonbox doctor --json")
     assert_match "replay-eval", shell_output("#{bin}/moonbox completions bash")
     assert_match "complete -c moon", shell_output("#{bin}/moon completions fish")
   end

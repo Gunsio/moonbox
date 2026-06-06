@@ -189,6 +189,14 @@ pub struct VerificationReport {
     pub checks: Vec<VerificationCheck>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DoctorReport {
+    pub version: u16,
+    pub status: VerificationStatus,
+    pub ready: bool,
+    pub checks: Vec<VerificationCheck>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LaunchValidationState {

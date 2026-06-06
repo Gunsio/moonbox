@@ -30,6 +30,8 @@ pub enum Command {
     CompileOutput(CompileArgs),
     /// List configured compiler skill presets.
     Compilers(JsonArgs),
+    /// Diagnose Moonbox configuration without opening sessions.
+    Doctor(JsonArgs),
     /// Generate shell completion scripts.
     Completions(CompletionsArgs),
     /// Dry-run a target launch plan and verification report.
