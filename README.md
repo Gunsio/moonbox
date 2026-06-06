@@ -15,12 +15,19 @@ compiler skills.
 
 ### Cargo
 
-Install the current repository version:
+Install the current repository version from Git:
 
 ```bash
 cargo install --git https://github.com/Gunsio/moonbox
 moonbox --version
 moon --version
+```
+
+The package installs both `moonbox` and the short `moon` alias. From a local
+checkout, install the same two binaries with:
+
+```bash
+cargo install --path . --locked
 ```
 
 ### Source Checkout
@@ -57,6 +64,7 @@ cargo test --locked
 RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps
 cargo run --locked -- replay-eval --json
 scripts/ci/cli-smoke.sh
+scripts/ci/homebrew-docs-smoke.sh
 cargo clippy --locked -- -D warnings
 cargo build --release --locked
 cargo package --locked
@@ -74,7 +82,13 @@ brew install moonbox
 ```
 
 See [docs/release/homebrew.md](docs/release/homebrew.md) for the release
-checklist and formula shape.
+checklist and formula shape. The draft formula lives at
+[docs/release/homebrew/moonbox.rb](docs/release/homebrew/moonbox.rb), and its
+syntax plus completion-generation behavior are covered by:
+
+```bash
+scripts/ci/homebrew-docs-smoke.sh
+```
 
 ## Project Standards
 
@@ -84,11 +98,11 @@ checklist and formula shape.
 - [Homebrew release notes](docs/release/homebrew.md)
 
 Pull requests are expected to pass formatting, check, test, fixture replay
-eval, documentation build, fixture-safe CLI smoke, clippy, release build,
-package verification, install smoke, and cargo-deny supply-chain gates. GitHub
-Actions runs the same Rust quality gates and validates the README screenshot
-asset. Smoke gates redirect source homes to `target/` and never open or resume
-real local sessions.
+eval, documentation build, fixture-safe CLI smoke, Homebrew docs smoke, clippy,
+release build, package verification, install smoke, and cargo-deny supply-chain
+gates. GitHub Actions runs the same Rust quality gates and validates the README
+screenshot asset. Smoke gates redirect source homes to `target/` and never open
+or resume real local sessions.
 
 ## Current State
 
@@ -143,6 +157,7 @@ The first implementation focuses on the product shell:
 - Fixture-safe public CLI contract tests for the installed `moonbox` and `moon` command surfaces
 - Full local quality gate through `scripts/ci/full-gate.sh`
 - Cargo-deny supply-chain policy for advisories, duplicate versions, licenses, and crate sources
+- Draft Homebrew formula template plus fixture-safe Homebrew docs smoke coverage
 - GitHub Actions CI for Rust quality gates, documentation build, fixture replay eval, fixture-safe CLI smoke, package verification, install smoke, and README screenshot validation
 - Dependabot configuration for Cargo and GitHub Actions updates
 - Contributing, security, changelog, issue template, and PR template docs
@@ -244,6 +259,8 @@ Generate shell completions with:
 moonbox completions bash > moonbox.bash
 moonbox completions zsh --bin moon > _moon
 moon completions fish > moon.fish
+moon completions powershell > _moon.ps1
+moonbox completions elvish > moonbox.elv
 ```
 
 Supported shells are Bash, Zsh, Fish, PowerShell, and Elvish. The generated
@@ -352,6 +369,10 @@ Stable interfaces matter more than any single framework:
 - M25: full local quality gate script that runs patch hygiene plus CI/release checks, with dirty-worktree package verification available during pre-commit iteration.
 - M26: cargo-deny supply-chain gate for RustSec advisories, yanked crates, duplicate-version policy, license allowlists, and trusted crate sources.
 - M27: shell completion generation for Bash, Zsh, Fish, PowerShell, and Elvish, with fixture-safe CLI contract and smoke coverage for both `moonbox` and `moon`.
+- M28: non-executing `doctor` diagnostics for config readiness, session discovery, target binaries, and compiler catalog health.
+- M29: TUI Doctor panel with status header, refresh, JSON copy, and shared non-executing diagnostics.
+- M30: fixture-safe Ratatui render regression tests for the main workbench, Doctor overlay, and Launch overlay.
+- M31: release docs hardening with local install commands, a draft Homebrew formula template, and a fixture-safe Homebrew docs smoke gate.
 
 ### Can Build Now
 

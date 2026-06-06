@@ -64,6 +64,9 @@ jobs:
       - name: Run fixture-safe CLI smoke
         run: scripts/ci/cli-smoke.sh
 
+      - name: Run Homebrew docs smoke
+        run: scripts/ci/homebrew-docs-smoke.sh
+
       - name: Run clippy
         run: cargo clippy --locked -- -D warnings
 

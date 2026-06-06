@@ -17,6 +17,7 @@ Describe the change and why it matters.
 - [ ] `RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps`
 - [ ] `cargo run --locked -- replay-eval --json`
 - [ ] `scripts/ci/cli-smoke.sh`
+- [ ] `scripts/ci/homebrew-docs-smoke.sh`
 - [ ] `cargo clippy --locked -- -D warnings`
 - [ ] `cargo build --release --locked`
 - [ ] `cargo package --locked`

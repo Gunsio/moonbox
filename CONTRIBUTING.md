@@ -38,6 +38,7 @@ cargo test --locked
 RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps
 cargo run --locked -- replay-eval --json
 scripts/ci/cli-smoke.sh
+scripts/ci/homebrew-docs-smoke.sh
 cargo clippy --locked -- -D warnings
 cargo build --release --locked
 cargo package --locked
@@ -55,6 +56,11 @@ public Rust documentation stays buildable as the library surface evolves.
 `cargo install --locked cargo-deny`, or set `CARGO_DENY=/path/to/cargo-deny`
 when using a downloaded binary. It checks advisories, duplicate-version policy,
 licenses, and crate sources against `deny.toml`.
+
+`scripts/ci/homebrew-docs-smoke.sh` validates the draft Homebrew formula syntax
+and the exact completion-generation commands the formula will use. It redirects
+source homes into `target/moonbox-homebrew-smoke-home` and must not scan, open,
+or resume real sessions.
 
 For README screenshot changes:
 
