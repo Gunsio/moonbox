@@ -53,6 +53,14 @@ grep -q '"target_branch": "moonbox/hermes-rewind-evt-091"' "$output_dir/compile-
 "$moonbox" compilers --json > "$output_dir/compilers.json"
 grep -q '"id": "engineering-handoff"' "$output_dir/compilers.json"
 
+MOONBOX_CODEX_BIN="$moonbox" \
+  MOONBOX_CLAUDE_BIN="$moonbox" \
+  MOONBOX_HERMES_BIN="$moonbox" \
+  "$moonbox" doctor --json > "$output_dir/doctor.json"
+grep -q '"ready": true' "$output_dir/doctor.json"
+grep -q '"name": "session_discovery"' "$output_dir/doctor.json"
+grep -q '"name": "target_codex_binary"' "$output_dir/doctor.json"
+
 "$moonbox" open --session codex-cxcp-design --json > "$output_dir/open.json"
 grep -q '"dry_run": true' "$output_dir/open.json"
 grep -q '"program": "codex"' "$output_dir/open.json"

@@ -134,6 +134,8 @@ The first implementation focuses on the product shell:
 - Hardened verifier checks for Work Capsule version, required fields, handoff context, risk context, capsule size, target branch markers, and execution command preflight
 - First-class `moon` binary alias installed alongside `moonbox`
 - Shell completion generation for `moonbox` and `moon`
+- Non-executing `doctor` diagnostics for config, session discovery, target
+  binaries, and compiler catalog readiness
 - Deterministic fixture-only replay eval for the Codex/Claude/Hermes source-target matrix
 - Fixture-safe public CLI contract tests for the installed `moonbox` and `moon` command surfaces
 - Full local quality gate through `scripts/ci/full-gate.sh`
@@ -166,6 +168,7 @@ cargo run -- compile-request --json
 cargo run -- compile-output --json
 cargo run -- compile-output --compiler <compiler-id> --json
 cargo run -- compilers --json
+cargo run -- doctor --json
 cargo run -- completions bash
 cargo run -- completions zsh --bin moon
 cargo run -- replay-eval --json
@@ -177,9 +180,12 @@ cargo run -- verify --target hermes --session hermes-cxcp-502 --json
 
 `open` and `launch` are dry-run by default. Passing `--execute` runs the
 original CLI resume command or verified target command. `verify` never resumes
-or launches a real process. Target binaries can be overridden with
-`MOONBOX_CODEX_BIN`, `MOONBOX_CLAUDE_BIN`, or `MOONBOX_HERMES_BIN` for local
-testing and custom installs.
+or launches a real process. `doctor` is also non-executing: it checks config
+resolution, session summary discovery, target binary availability, and compiler
+catalog readiness without loading timelines, resuming sessions, or spawning
+targets. Target binaries can be overridden with `MOONBOX_CODEX_BIN`,
+`MOONBOX_CLAUDE_BIN`, or `MOONBOX_HERMES_BIN` for local testing and custom
+installs.
 
 `replay-eval` is also non-executing. It uses only embedded fixtures, does not
 scan local session stores, and reports verifier signals across every

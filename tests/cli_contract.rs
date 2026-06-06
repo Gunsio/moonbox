@@ -144,6 +144,40 @@ fn replay_eval_cli_contract_is_fixture_only() {
 }
 
 #[test]
+fn doctor_cli_contract_is_non_executing_and_fixture_safe() {
+    let binary = env!("CARGO_BIN_EXE_moonbox");
+    let report = output_json(
+        moonbox_command("doctor")
+            .arg("doctor")
+            .arg("--json")
+            .env("MOONBOX_CODEX_BIN", binary)
+            .env("MOONBOX_CLAUDE_BIN", binary)
+            .env("MOONBOX_HERMES_BIN", binary)
+            .output()
+            .expect("doctor"),
+    );
+
+    assert_eq!(report["version"], 1);
+    assert_eq!(report["ready"], true);
+    assert_eq!(report["status"], "pass");
+
+    let checks = report["checks"].as_array().expect("checks");
+    for name in [
+        "config_file",
+        "session_discovery",
+        "target_codex_binary",
+        "target_claude_binary",
+        "target_hermes_binary",
+        "compiler_catalog",
+    ] {
+        assert!(
+            checks.iter().any(|check| check["name"] == name),
+            "missing doctor check {name}: {report:#}"
+        );
+    }
+}
+
+#[test]
 fn session_listing_uses_fixture_fallback_when_source_homes_are_isolated() {
     let sessions = output_json(
         moonbox_command("sessions")

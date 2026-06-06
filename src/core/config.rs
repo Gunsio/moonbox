@@ -68,7 +68,13 @@ pub fn load_compiler_presets() -> Vec<CompilerPresetConfig> {
         .collect()
 }
 
-fn config_path() -> Option<PathBuf> {
+pub(crate) fn validate_config_file_at(path: &Path) -> Result<(), String> {
+    load_user_config_from_path(path)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+pub(crate) fn config_path() -> Option<PathBuf> {
     if let Ok(path) = env::var("MOONBOX_CONFIG") {
         return Some(PathBuf::from(path));
     }
@@ -148,5 +154,19 @@ mod tests {
         assert_eq!(saved.default_compiler.as_deref(), Some("handoff"));
         assert_eq!(saved.compiler_presets.len(), 1);
         assert!(!saved.compiler_presets[0].enabled);
+    }
+
+    #[test]
+    fn validate_config_file_rejects_bad_schema() {
+        let path = env::temp_dir().join(format!(
+            "moonbox-config-invalid-{}.json",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        fs::write(&path, r#"{"last_target":"not-a-tool"}"#).expect("write config");
+
+        let error = validate_config_file_at(&path).expect_err("invalid config");
+
+        assert!(error.contains("unknown variant"));
     }
 }

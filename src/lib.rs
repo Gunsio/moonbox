@@ -20,6 +20,7 @@ pub fn run() -> Result<()> {
         Command::CompileRequest(args) => print_compile_request(args),
         Command::CompileOutput(args) => print_compile_output(args),
         Command::Compilers(args) => print_compilers(args),
+        Command::Doctor(args) => print_doctor(args),
         Command::Completions(args) => print_completions(args),
         Command::Launch(args) => print_launch_plan(args),
         Command::Verify(args) => print_verify_report(args),
@@ -163,6 +164,18 @@ fn print_compilers(args: cli::JsonArgs) -> Result<()> {
                 compiler.id, kind, status, compiler.score, compiler.reason
             );
         }
+    }
+    Ok(())
+}
+
+fn print_doctor(args: cli::JsonArgs) -> Result<()> {
+    let report = core::doctor::diagnose();
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("doctor: {}", report.status);
+        println!("ready: {}", report.ready);
+        print_checks(&report.checks);
     }
     Ok(())
 }
