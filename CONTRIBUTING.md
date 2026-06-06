@@ -22,6 +22,7 @@ Run these before opening a pull request:
 cargo fmt --check
 cargo check --locked
 cargo test --locked
+RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps
 cargo run --locked -- replay-eval --json
 scripts/ci/cli-smoke.sh
 cargo clippy --locked -- -D warnings
@@ -33,6 +34,9 @@ scripts/ci/install-smoke.sh
 `cargo test --locked` includes public CLI contract tests for the actual
 `moonbox` and `moon` binaries. Those tests redirect source homes into
 `target/cli-contract-home` and must stay fixture-safe.
+
+`cargo doc --locked --no-deps` must pass with `RUSTDOCFLAGS="-D warnings"` so
+public Rust documentation stays buildable as the library surface evolves.
 
 For README screenshot changes:
 

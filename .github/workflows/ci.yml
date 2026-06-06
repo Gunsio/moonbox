@@ -55,6 +55,9 @@ jobs:
       - name: Run tests
         run: cargo test --locked
 
+      - name: Build crate docs
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps
+
       - name: Run fixture replay evaluation
         run: cargo run --locked -- replay-eval --json
 
