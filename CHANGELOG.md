@@ -56,6 +56,7 @@ and this project uses semantic versioning once tagged releases start.
   target binaries, and compiler catalog readiness.
 - TUI Doctor panel with `D` / `:doctor`, refresh, and JSON copy support for
   the same non-executing diagnostics.
+- Fixture-safe TUI render regression tests for main, Doctor, and Launch views.
 - Shared verifier policy for CLI and TUI launch validation.
 - Real `--capsule` file parsing and target mismatch verification.
 - README screenshot, installation notes, and Homebrew release planning docs.

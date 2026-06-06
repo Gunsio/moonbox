@@ -1136,3 +1136,69 @@ fn centered(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
         .split(vertical[1]);
     horizontal[1]
 }
+
+#[cfg(test)]
+mod tests {
+    use ratatui::{Terminal, backend::TestBackend};
+
+    use super::*;
+    use crate::{
+        app::App,
+        core::model::{CliTool, VerificationStatus},
+    };
+
+    fn render_text(app: &App, width: u16, height: u16) -> String {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal.draw(|frame| render(frame, app)).expect("draw");
+        format!("{}", terminal.backend())
+    }
+
+    fn assert_screen_contains(screen: &str, expected: &str) {
+        assert!(
+            screen.contains(expected),
+            "screen did not contain {expected:?}\n{screen}"
+        );
+    }
+
+    #[test]
+    fn main_screen_renders_core_regions_across_viewports() {
+        for (width, height) in [(140, 40), (80, 24)] {
+            let app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+            let screen = render_text(&app, width, height);
+
+            assert_screen_contains(&screen, "MOONBOX");
+            assert_screen_contains(&screen, "Sessions");
+            assert_screen_contains(&screen, "Timeline");
+            assert_screen_contains(&screen, "Work Capsule");
+            assert_screen_contains(&screen, "Status");
+            assert!(screen.chars().any(|ch| !ch.is_whitespace()));
+        }
+    }
+
+    #[test]
+    fn doctor_overlay_renders_diagnostics_and_actions() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.show_doctor = true;
+        app.doctor_report.status = VerificationStatus::Pass;
+        let screen = render_text(&app, 120, 36);
+
+        assert_screen_contains(&screen, "Doctor");
+        assert_screen_contains(&screen, "Environment doctor");
+        assert_screen_contains(&screen, "session_discovery");
+        assert_screen_contains(&screen, "Copy JSON");
+    }
+
+    #[test]
+    fn launch_overlay_renders_blocked_target_state() {
+        let mut app = App::new(CliTool::Hermes, CliTool::Hermes).expect("app");
+        app.show_launch = true;
+        app.pending_target = CliTool::Hermes;
+        let screen = render_text(&app, 120, 36);
+
+        assert_screen_contains(&screen, "Launch");
+        assert_screen_contains(&screen, "Choose target CLI");
+        assert_screen_contains(&screen, "BLOCKED");
+        assert_screen_contains(&screen, "enter/y blocked");
+    }
+}
