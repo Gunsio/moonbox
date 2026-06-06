@@ -46,12 +46,34 @@ pub fn compile_request(
     source: CliTool,
     target: CliTool,
     rewind_event_id: &str,
+    compiler: Option<&str>,
 ) -> Result<CapsuleCompileRequest, CoreError> {
-    data::compile_request(source, target, rewind_event_id)
+    if let Some(compiler) = compiler {
+        data::compile_request_with_compiler(source, target, rewind_event_id, compiler)
+    } else {
+        data::compile_request(source, target, rewind_event_id)
+    }
 }
 
-pub fn compile_output(source: CliTool, target: CliTool) -> Result<CapsuleCompileOutput, CoreError> {
-    data::compile_output(source, target)
+pub fn compile_output(
+    source: CliTool,
+    target: CliTool,
+    compiler: Option<&str>,
+) -> Result<CapsuleCompileOutput, CoreError> {
+    if let Some(compiler) = compiler {
+        data::compile_output_with_compiler(source, target, compiler)
+    } else {
+        data::compile_output(source, target)
+    }
+}
+
+pub fn compile_capsule(
+    session_id: &str,
+    target: CliTool,
+    rewind_event_id: &str,
+    compiler: &str,
+) -> Result<Option<WorkCapsule>, CoreError> {
+    data::compile_capsule_for_session_id(session_id, target, rewind_event_id, compiler)
 }
 
 pub fn launch_plan(

@@ -1,5 +1,8 @@
 use super::{
-    compiler::{CapsuleCompiler, FixtureCapsuleCompiler, default_rewind_event_id},
+    compiler::{
+        compile_with_configured_runner, compiler_catalog, default_compiler_id,
+        default_rewind_event_id,
+    },
     error::CoreError,
     model::{
         BranchNode, CanonicalTimeline, CapsuleCompileOutput, CapsuleCompileRequest, CliTool,
@@ -30,8 +33,14 @@ pub fn workbench_data(source: CliTool, target: CliTool) -> Result<WorkbenchData,
         events: Vec::new(),
     };
     let rewind_event_id = rewind_event_id_for_timeline(&source_session_id, &timeline);
-    let capsule =
-        compile_capsule_for_session(&source_session, target, &timeline, &rewind_event_id)?;
+    let compiler = default_compiler_id();
+    let capsule = compile_capsule_for_session(
+        &source_session,
+        target,
+        &timeline,
+        &rewind_event_id,
+        &compiler,
+    )?;
     Ok(build_workbench_data(
         source,
         target,
@@ -63,8 +72,14 @@ pub fn workbench_data_for_session(
     let source_session_id = source_session.id.clone();
     let timeline = canonical_timeline_for_session(&source_session)?;
     let rewind_event_id = rewind_event_id_for_timeline(&source_session_id, &timeline);
-    let capsule =
-        compile_capsule_for_session(&source_session, target, &timeline, &rewind_event_id)?;
+    let compiler = default_compiler_id();
+    let capsule = compile_capsule_for_session(
+        &source_session,
+        target,
+        &timeline,
+        &rewind_event_id,
+        &compiler,
+    )?;
     Ok(Some(build_workbench_data(
         source_session.cli,
         target,
@@ -156,13 +171,17 @@ pub fn compile_request(
     target: CliTool,
     rewind_event_id: &str,
 ) -> Result<CapsuleCompileRequest, CoreError> {
-    let data = workbench_data(source, target)?;
-    let source_session = data
-        .sessions
-        .iter()
-        .find(|session| session.id == data.capsule.source_session)
-        .cloned()
-        .unwrap_or_else(|| fallback_session(source));
+    compile_request_with_compiler(source, target, rewind_event_id, &default_compiler_id())
+}
+
+pub fn compile_request_with_compiler(
+    source: CliTool,
+    target: CliTool,
+    rewind_event_id: &str,
+    compiler: &str,
+) -> Result<CapsuleCompileRequest, CoreError> {
+    let source_session = default_source_session(source)?;
+    let timeline = timeline_for_compile_request(&source_session)?;
     Ok(CapsuleCompileRequest {
         version: 1,
         source_cli: source,
@@ -170,22 +189,59 @@ pub fn compile_request(
         source_session,
         rewind_event_id: rewind_event_id.into(),
         token_budget: 100_000,
-        compiler: data.capsule.compiler.clone(),
+        compiler: compiler.into(),
         timeline: CanonicalTimeline {
             version: 1,
             source_cli: source,
-            source_session: data.capsule.source_session.clone(),
-            events: data.timeline,
+            source_session: timeline.source_session,
+            events: timeline.events,
         },
     })
 }
 
 pub fn compile_output(source: CliTool, target: CliTool) -> Result<CapsuleCompileOutput, CoreError> {
-    let data = workbench_data(source, target)?;
-    Ok(CapsuleCompileOutput {
+    compile_output_with_compiler(source, target, &default_compiler_id())
+}
+
+pub fn compile_output_with_compiler(
+    source: CliTool,
+    target: CliTool,
+    compiler: &str,
+) -> Result<CapsuleCompileOutput, CoreError> {
+    let source_session = default_source_session(source)?;
+    let timeline = timeline_for_compile_request(&source_session)?;
+    let rewind_event_id = rewind_event_id_for_timeline(&source_session.id, &timeline);
+    let request = CapsuleCompileRequest {
         version: 1,
-        capsule: data.capsule,
-    })
+        source_cli: source,
+        target_cli: target,
+        source_session,
+        rewind_event_id,
+        token_budget: 100_000,
+        compiler: compiler.into(),
+        timeline,
+    };
+    compile_with_configured_runner(&request).map_err(CoreError::from)
+}
+
+pub fn compile_capsule_for_session_id(
+    session_id: &str,
+    target: CliTool,
+    rewind_event_id: &str,
+    compiler: &str,
+) -> Result<Option<WorkCapsule>, CoreError> {
+    let Some(source_session) = find_session(session_id)? else {
+        return Ok(None);
+    };
+    let timeline = canonical_timeline_for_session(&source_session)?;
+    compile_capsule_for_session(
+        &source_session,
+        target,
+        &timeline,
+        rewind_event_id,
+        compiler,
+    )
+    .map(Some)
 }
 
 fn compile_capsule_for_session(
@@ -193,6 +249,7 @@ fn compile_capsule_for_session(
     target: CliTool,
     timeline: &CanonicalTimeline,
     rewind_event_id: &str,
+    compiler: &str,
 ) -> Result<WorkCapsule, CoreError> {
     let request = CapsuleCompileRequest {
         version: 1,
@@ -201,10 +258,10 @@ fn compile_capsule_for_session(
         source_session: session.clone(),
         rewind_event_id: rewind_event_id.into(),
         token_budget: 100_000,
-        compiler: "engineering-handoff".into(),
+        compiler: compiler.into(),
         timeline: timeline.clone(),
     };
-    Ok(FixtureCapsuleCompiler.compile(&request)?.capsule)
+    Ok(compile_with_configured_runner(&request)?.capsule)
 }
 
 fn rewind_event_id_for_timeline(session_id: &str, timeline: &CanonicalTimeline) -> String {
@@ -217,6 +274,27 @@ fn rewind_event_id_for_timeline(session_id: &str, timeline: &CanonicalTimeline) 
         .last()
         .map(|event| event.id.clone())
         .unwrap_or_else(|| preferred.into())
+}
+
+fn default_source_session(source: CliTool) -> Result<SessionSummary, CoreError> {
+    Ok(sessions()?
+        .into_iter()
+        .find(|session| session.cli == source)
+        .unwrap_or_else(|| fallback_session(source)))
+}
+
+fn timeline_for_compile_request(
+    source_session: &SessionSummary,
+) -> Result<CanonicalTimeline, CoreError> {
+    if source_session.event_count == 0 {
+        return Ok(CanonicalTimeline {
+            version: 1,
+            source_cli: source_session.cli,
+            source_session: source_session.id.clone(),
+            events: Vec::new(),
+        });
+    }
+    canonical_timeline_for_session(source_session)
 }
 
 fn fallback_session(source: CliTool) -> SessionSummary {
@@ -234,14 +312,6 @@ fn fallback_session(source: CliTool) -> SessionSummary {
         event_count: 0,
         resume_command: format!("{} resume {}-session", source.id(), source.id()),
     }
-}
-
-fn compiler_catalog() -> Vec<String> {
-    vec![
-        "engineering-handoff".into(),
-        "bugfix-continuation".into(),
-        "design-review".into(),
-    ]
 }
 
 #[cfg(test)]
@@ -282,5 +352,18 @@ mod tests {
         assert_eq!(request.rewind_event_id, "evt-091");
         assert_eq!(request.timeline.events.len(), 7);
         assert_eq!(request.token_budget, 100_000);
+    }
+
+    #[test]
+    fn compile_request_accepts_explicit_compiler() {
+        let request = compile_request_with_compiler(
+            CliTool::Codex,
+            CliTool::Hermes,
+            "evt-091",
+            "custom-skill",
+        )
+        .expect("request");
+
+        assert_eq!(request.compiler, "custom-skill");
     }
 }
