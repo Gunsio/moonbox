@@ -6,8 +6,8 @@ use super::{
     launcher,
     model::{
         CapsuleCompileOutput, CapsuleCompileRequest, CliTool, LaunchExecution, LaunchPlan,
-        OriginalSessionExecution, OriginalSessionPlan, SessionSummary, VerificationReport,
-        WorkCapsule, WorkbenchData,
+        OriginalSessionExecution, OriginalSessionPlan, SessionAction, SessionSummary,
+        VerificationReport, WorkCapsule, WorkbenchData,
     },
     verifier,
 };
@@ -46,6 +46,7 @@ pub fn open_plan(session_id: Option<&str>) -> Result<Option<OriginalSessionPlan>
     let command = launcher::original_command(&source_session);
     Ok(Some(OriginalSessionPlan {
         version: 1,
+        action: SessionAction::OriginalResume,
         dry_run: true,
         source_session,
         command,
@@ -120,6 +121,7 @@ pub fn launch_plan(
 
     Ok(Some(LaunchPlan {
         version: 1,
+        action: SessionAction::TargetHandoff,
         dry_run: true,
         source_session,
         target_cli: target,

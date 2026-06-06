@@ -122,8 +122,11 @@ The first implementation focuses on the product shell:
 - Set `MOONBOX_SESSION_LIMIT=0` for unlimited real-session list discovery
 - Set `MOONBOX_SESSION_MODE=fixture` to disable real source stores and force embedded fixture sessions
 - Source filter defaults to `All`; `Source` is a session-list filter, not a global handoff mode
+- Original resume and target handoff are explicit action intents:
+  `original_resume` for `open`, `target_handoff` for `launch`
 - Target selection lives inside the launch flow, with explicit `> [x]` radio-list selection
 - Target picker validates each target as `READY`, `WARN`, or `BLOCKED`; blocked targets cannot confirm or copy launch commands
+- Target handoff uses a two-stage TUI flow: choose target, review the execute command, then press `y` to copy it
 - Last confirmed target is persisted in `~/.config/moonbox/config.json`
 - Real Codex, Claude, and Hermes timeline parsing
 - Original-session open command, Work Capsule, and branch tree previews
@@ -134,7 +137,7 @@ The first implementation focuses on the product shell:
 - Context-aware key bar for the current panel or modal
 - Visible rewind marker in the timeline, plus rewind-aware branch and launch preview
 - Timeline auto-scroll, Capsule/modal scroll, and small-terminal modal polish
-- Copyable launch/original commands via `y` with OSC52 clipboard support
+- Copyable launch/original commands via `y` with OSC52 clipboard support; target handoff copy is only available from the launch review panel
 - Serializable core models for future adapters
 - `SourceAdapter` contract and fixture-backed adapter fallback layer
 - Fallible adapter discovery; bad source data returns structured errors instead of panics
@@ -144,6 +147,7 @@ The first implementation focuses on the product shell:
 - Configurable compiler skill presets with catalog status and quality scores
 - Canonical Timeline and compiler request/output JSON contract fixtures
 - Target launch dry-run plans with Work Capsule verification reports
+- `open --json` and `launch --json` include an `action` discriminator so tooling can distinguish original resume from target handoff
 - Single core verifier policy shared by CLI and TUI target validation
 - `--capsule` reads a real Work Capsule JSON file when provided; generated dry-run capsules do not pretend to have a file path
 - Hardened verifier checks for Work Capsule version, required fields, handoff context, risk context, capsule size, target branch markers, and execution command preflight
@@ -288,22 +292,26 @@ be overridden with `--bin moonbox` or `--bin moon`.
 
 Moonbox has two separate actions for a selected session:
 
-- `o`: open the original session with its original CLI.
-- `enter`: choose a target CLI and prepare the handoff launch command.
+- `o`: preview an `original_resume` command for the selected session's
+  original CLI.
+- `enter`: choose a target CLI, then review a `target_handoff` command before
+  copying it.
 
 The main screen is a global session entry point. Sessions are sorted by time and
 tagged by source CLI. Source filtering is controlled by `f` or `[` / `]` and
 starts at `All`. Target is not shown as a global mode on the main screen; it is
 chosen only in the launch picker. In the target picker, `j/k` moves the pending
 selection, `enter` confirms and persists it, and `Esc` / `q` cancels without
-changing the saved target. The picker keeps every target visible and annotates
-each option with `READY`, `WARN`, or `BLOCKED`; blocked targets keep the launch
-command disabled until validation passes. The picker uses the same verifier
-policy as the CLI, so `moon verify` and the TUI cannot disagree on target
-readiness. Press `D` or run `:doctor` to open the environment Doctor panel;
-`r` refreshes diagnostics and `y` copies the JSON report. The panel is
-read-only and does not load timelines, resume sessions, launch targets, or
-spawn target binaries.
+changing the saved target. Confirming a ready or warning target opens a launch
+review panel; only that panel exposes the copyable execute command. Pressing
+`y` in the target picker does not copy anything. The picker keeps every target
+visible and annotates each option with `READY`, `WARN`, or `BLOCKED`; blocked
+targets keep launch review disabled until validation passes. The picker uses
+the same verifier policy as the CLI, so `moon verify` and the TUI cannot
+disagree on target readiness. Press `D` or run `:doctor` to open the
+environment Doctor panel; `r` refreshes diagnostics and `y` copies the JSON
+report. The panel is read-only and does not load timelines, resume sessions,
+launch targets, or spawn target binaries.
 
 Session search matches id, title, cwd, source, branch, and health reason. When a
 different session becomes selected by movement, source filter, or search,
@@ -319,14 +327,14 @@ recommended rewind point.
 | `tab` / `shift-tab` | Switch panel |
 | `/` | Filter sessions by text |
 | `f` | Cycle session source filter |
-| `o` | Open original session with original CLI |
+| `o` | Preview original resume command |
 | `[` / `]` | Previous / next session source filter |
 | `space` | Set rewind point |
 | `c` | Compile capsule |
 | `v` | Verify capsule |
 | `d` | Toggle diff preview |
 | `s` | Cycle compiler skill |
-| `enter` | Choose target and show handoff launch command |
+| `enter` | Choose target for handoff |
 | `:` | Command mode |
 | `?` | Help |
 | `q` / `Esc` | Back / quit |
@@ -336,8 +344,25 @@ recommended rewind point.
 | Key | Action |
 | --- | --- |
 | `j` / `k` | Move target selection |
-| `enter` | Confirm target and remember it |
+| `enter` | Review target handoff command and remember target |
+| `y` | Unavailable before review |
 | `q` / `Esc` | Cancel without changing target |
+
+### Launch Review Keys
+
+| Key | Action |
+| --- | --- |
+| `y` | Copy guarded `moonbox launch --execute` command |
+| `enter` | Disabled; review is copy-only |
+| `q` / `Esc` | Close review |
+
+### Original Preview Keys
+
+| Key | Action |
+| --- | --- |
+| `y` | Copy guarded `moonbox open --execute` command |
+| `enter` | Disabled; preview is copy-only |
+| `q` / `Esc` | Close preview |
 
 ## Architecture Direction
 
@@ -391,17 +416,26 @@ Stable interfaces matter more than any single framework:
 - M30: fixture-safe Ratatui render regression tests for the main workbench, Doctor overlay, and Launch overlay.
 - M31: release docs hardening with local install commands, a draft Homebrew formula template, and a fixture-safe Homebrew docs smoke gate.
 - M32: explicit fixture session mode through `MOONBOX_SESSION_MODE=fixture`, surfaced in Doctor diagnostics and wired into smoke scripts to prevent accidental real-session discovery.
+- M33: action intent hardening with `original_resume` / `target_handoff` dry-run discriminators, two-stage TUI launch review, original-preview copy-only behavior, and contract/render tests for both paths.
 
 ### Can Build Now
 
-- No open implementation item in this phase.
+- Expand fixture replay corpus with safe, synthetic histories that cover
+  successful handoff, failed raw resume, target mismatch, oversized capsule,
+  and missing-tool scenarios.
+- Add target readiness explanation rows in the TUI using existing verifier
+  signals, without reading or launching real sessions.
+- Finalize README screenshots and install docs for the pre-release branch.
 
 ### Prototype Now, Improve With Real Data
 
 - Session health badges: basic adapter status now, compute from real resume errors and compatibility signals later.
+- Compression strategy previews: show selected compiler, expected capsule
+  shape, and budget warnings now; tune thresholds from real handoff outcomes
+  later.
 
 ### Best After Real Session Data
 
-- Target compatibility checks, disabled target options, and human-readable incompatibility reasons.
-- Token budget and compression strategy previews.
+- Token budget thresholds and compression warning calibration from real handoff
+  outcomes.
 - Tool-call, attachment, git diff, and compact-point restoration status.
