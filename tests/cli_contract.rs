@@ -68,6 +68,20 @@ fn output_text(output: Output) -> String {
     String::from_utf8(output.stdout).expect("utf8 stdout")
 }
 
+fn error_text(output: Output) -> String {
+    assert!(
+        !output.status.success(),
+        "command unexpectedly succeeded\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )
+}
+
 fn output_json(output: Output) -> Value {
     let text = output_text(output);
     serde_json::from_str(&text).unwrap_or_else(|error| {
@@ -234,6 +248,52 @@ fn session_listing_uses_fixture_fallback_when_source_homes_are_isolated() {
 }
 
 #[test]
+fn session_listing_source_filter_matches_global_entry_model() {
+    let sessions = output_json(
+        moonbox_command("sessions-filter")
+            .args(["sessions", "--json", "--filter", "hermes"])
+            .output()
+            .expect("sessions"),
+    );
+    let sessions = sessions.as_array().expect("session array");
+
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0]["id"], "hermes-cxcp-502");
+    assert_eq!(sessions[0]["cli"], "hermes");
+}
+
+#[test]
+fn auto_mode_does_not_mix_real_sessions_with_missing_source_fixtures() {
+    let test_name = "real-store-no-fixture-mix";
+    let home = fixture_home(test_name);
+    let codex_store = home.join("codex").join("sessions").join("2026");
+    fs::create_dir_all(&codex_store).expect("codex store");
+    fs::write(
+        codex_store.join("real-codex.jsonl"),
+        r#"{"timestamp":"2026-06-06T10:00:00Z","type":"session_meta","payload":{"id":"codex-real-isolated","cwd":"/tmp/moonbox-real","git":{"branch":"main"}}}
+{"timestamp":"2026-06-06T10:01:00Z","type":"response_item","payload":{"role":"user","content":[{"type":"input_text","text":"Use real Codex store only"}]}}"#,
+    )
+    .expect("codex jsonl");
+
+    let sessions = output_json(
+        moonbox_command(test_name)
+            .args(["sessions", "--json"])
+            .output()
+            .expect("sessions"),
+    );
+    let ids = sessions
+        .as_array()
+        .expect("session array")
+        .iter()
+        .map(|session| session["id"].as_str().expect("session id"))
+        .collect::<Vec<_>>();
+
+    assert_eq!(ids, ["codex-real-isolated"]);
+    assert!(!ids.contains(&"claude-qc-platform"));
+    assert!(!ids.contains(&"hermes-cxcp-502"));
+}
+
+#[test]
 fn fixture_session_mode_ignores_real_shaped_source_homes() {
     let test_name = "fixture-session-mode";
     let home = fixture_home(test_name);
@@ -260,6 +320,27 @@ fn fixture_session_mode_ignores_real_shaped_source_homes() {
         ["codex-cxcp-design", "claude-qc-platform", "hermes-cxcp-502"]
     );
     assert!(!ids.contains(&"recent-active"));
+}
+
+#[test]
+fn execute_commands_require_explicit_session_to_avoid_implicit_latest_resume() {
+    let open_error = error_text(
+        moonbox_command("execute-requires-session")
+            .args(["open", "--execute"])
+            .output()
+            .expect("open execute"),
+    );
+    assert!(open_error.contains("explicit --session"));
+    assert!(open_error.contains("newest active session"));
+
+    let launch_error = error_text(
+        moonbox_command("execute-requires-session")
+            .args(["launch", "--execute", "--target", "hermes"])
+            .output()
+            .expect("launch execute"),
+    );
+    assert!(launch_error.contains("explicit --session"));
+    assert!(launch_error.contains("newest active session"));
 }
 
 #[test]

@@ -75,6 +75,8 @@ and this project uses semantic versioning once tagged releases start.
   `release-manifest.json` without publishing.
 - Fixture-safe release artifact smoke gate that validates staged checksums,
   manifest metadata, and archive contents.
+- Source filtering for the public `moonbox sessions` command through
+  `--filter <source>`.
 - Shared verifier policy for CLI and TUI launch validation.
 - Real `--capsule` file parsing and target mismatch verification.
 - README screenshot, installation notes, and Homebrew release planning docs.
@@ -83,8 +85,9 @@ and this project uses semantic versioning once tagged releases start.
 
 - Generated dry-run launch plans report `capsule_path: null` and do not emit
   fake `--capsule` paths.
-- Codex, Claude, and Hermes source discovery prefer real local stores when
-  present, with fixture fallback when stores are missing.
+- Codex, Claude, and Hermes source discovery use real local stores when any
+  real store is present; fixture fallback is reserved for the no-real-store
+  demo/CI case or explicit fixture mode.
 - Explicit session lookup routes obvious Hermes/Codex/Claude ids to the likely
   adapter before expensive full-store fallback.
 - CLI launch/verify uses lightweight session artifacts instead of constructing
@@ -117,6 +120,10 @@ and this project uses semantic versioning once tagged releases start.
   on a transparent SVG canvas, generated from the real TUI render path.
 - Draft Homebrew formula now points at a staged GitHub release source archive
   instead of a GitHub auto-generated tag archive.
+- Auto session discovery now uses fixture fallback only when no real source
+  stores are present, so real local indexes are not mixed with demo sessions.
+- `open --execute` and `launch --execute` now require an explicit `--session`;
+  dry-runs can still omit `--session` to preview the newest discovered session.
 
 ### Not Yet Released
 

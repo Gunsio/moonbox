@@ -63,6 +63,7 @@ pub fn open_plan(session_id: Option<&str>) -> Result<Option<OriginalSessionPlan>
 pub fn execute_open(
     session_id: Option<&str>,
 ) -> Result<Option<OriginalSessionExecution>, CoreError> {
+    require_explicit_session(session_id, "original resume")?;
     let Some(plan) = open_plan(session_id)? else {
         return Ok(None);
     };
@@ -153,10 +154,21 @@ pub fn execute_launch(
     target: CliTool,
     capsule_path: Option<&str>,
 ) -> Result<Option<LaunchExecution>, CoreError> {
+    require_explicit_session(session_id, "target handoff")?;
     let Some(plan) = launch_plan(session_id, target, capsule_path)? else {
         return Ok(None);
     };
     launcher::execute_plan(plan).map(Some)
+}
+
+fn require_explicit_session(
+    session_id: Option<&str>,
+    action: &'static str,
+) -> Result<(), CoreError> {
+    if session_id.is_some_and(|session_id| !session_id.trim().is_empty()) {
+        return Ok(());
+    }
+    Err(CoreError::ExecuteRequiresSession { action })
 }
 
 fn selected_session(session_id: Option<&str>) -> Result<Option<SessionSummary>, CoreError> {
@@ -237,6 +249,23 @@ mod tests {
         assert_eq!(plan.command.program, "codex");
         assert_eq!(plan.command.args, ["resume", "codex-cxcp-design"]);
         assert_eq!(plan.command.display, "codex resume codex-cxcp-design");
+    }
+
+    #[test]
+    fn execute_open_requires_explicit_session() {
+        let error = execute_open(None).expect_err("implicit execute should be blocked");
+
+        assert!(matches!(error, CoreError::ExecuteRequiresSession { .. }));
+        assert!(error.to_string().contains("explicit --session"));
+    }
+
+    #[test]
+    fn execute_launch_requires_explicit_session() {
+        let error = execute_launch(None, CliTool::Hermes, None)
+            .expect_err("implicit launch execute should be blocked");
+
+        assert!(matches!(error, CoreError::ExecuteRequiresSession { .. }));
+        assert!(error.to_string().contains("newest active session"));
     }
 
     #[test]

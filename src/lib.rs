@@ -46,8 +46,12 @@ fn run_tui(args: cli::TuiArgs) -> Result<()> {
     result
 }
 
-fn print_sessions(args: cli::JsonArgs) -> Result<()> {
-    let sessions = core::workbench::list_sessions()?;
+fn print_sessions(args: cli::SessionListArgs) -> Result<()> {
+    let filter = args.filter.or(args.source);
+    let sessions = core::workbench::list_sessions()?
+        .into_iter()
+        .filter(|session| filter.is_none_or(|filter| session.cli == filter))
+        .collect::<Vec<_>>();
     if args.json {
         println!("{}", serde_json::to_string_pretty(&sessions)?);
     } else {
