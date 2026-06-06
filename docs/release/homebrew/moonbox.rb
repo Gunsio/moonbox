@@ -3,8 +3,8 @@
 class Moonbox < Formula
   desc "Cross-CLI session rewind workbench"
   homepage "https://github.com/Gunsio/moonbox"
-  url "https://github.com/Gunsio/moonbox/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "<release-archive-sha256>"
+  url "https://github.com/Gunsio/moonbox/releases/download/v0.1.0/moonbox-0.1.0-source.tar.gz"
+  sha256 "<release-source-sha256>"
   license "MIT"
 
   depends_on "rust" => :build

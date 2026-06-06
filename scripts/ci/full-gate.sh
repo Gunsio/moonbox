@@ -31,6 +31,7 @@ else
   run cargo package --locked
 fi
 
+run scripts/ci/release-artifacts-smoke.sh
 run scripts/ci/install-smoke.sh
 
 printf '\nmoonbox full local gate passed\n'

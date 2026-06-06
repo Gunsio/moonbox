@@ -70,6 +70,11 @@ and this project uses semantic versioning once tagged releases start.
 - Hidden fixture-only `docs-snapshot` maintenance command that renders the real
   Ratatui Launch Review buffer to SVG for the README screenshot asset.
 - Draft Homebrew formula template plus a fixture-safe Homebrew docs smoke gate.
+- Release artifact staging script that produces source, Cargo crate, and host
+  binary archives, generated shell completions, `SHA256SUMS`, and
+  `release-manifest.json` without publishing.
+- Fixture-safe release artifact smoke gate that validates staged checksums,
+  manifest metadata, and archive contents.
 - Shared verifier policy for CLI and TUI launch validation.
 - Real `--capsule` file parsing and target mismatch verification.
 - README screenshot, installation notes, and Homebrew release planning docs.
@@ -110,7 +115,10 @@ and this project uses semantic versioning once tagged releases start.
   case with `case_kind` and `scenario`, and reports expected scenario coverage.
 - README screenshot now shows the current Launch Review readiness-details flow
   on a transparent SVG canvas, generated from the real TUI render path.
+- Draft Homebrew formula now points at a staged GitHub release source archive
+  instead of a GitHub auto-generated tag archive.
 
 ### Not Yet Released
 
-- Homebrew formula and release archives are planned but not published.
+- Homebrew formula, release archives, and package registry publishing are
+  planned but not published.

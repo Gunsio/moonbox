@@ -69,6 +69,7 @@ scripts/ci/homebrew-docs-smoke.sh
 cargo clippy --locked -- -D warnings
 cargo build --release --locked
 cargo package --locked
+scripts/ci/release-artifacts-smoke.sh
 scripts/ci/install-smoke.sh
 ```
 
@@ -91,6 +92,16 @@ syntax plus completion-generation behavior are covered by:
 scripts/ci/homebrew-docs-smoke.sh
 ```
 
+Release artifact staging is also automated but not published yet:
+
+```bash
+scripts/ci/release-artifacts-smoke.sh
+scripts/release/stage-artifacts.sh --version 0.1.0
+```
+
+The staging script writes source, Cargo crate, and host binary archives plus
+`SHA256SUMS` and `release-manifest.json` under `target/release-artifacts/`.
+
 ## Project Standards
 
 - [Contributing guide](CONTRIBUTING.md)
@@ -100,12 +111,12 @@ scripts/ci/homebrew-docs-smoke.sh
 
 Pull requests are expected to pass formatting, check, test, fixture replay
 eval, documentation build, fixture-safe CLI smoke, docs asset smoke, Homebrew
-docs smoke, clippy, release build, package verification, install smoke, and
-cargo-deny supply-chain gates. GitHub Actions runs the same Rust quality gates
-and validates that the README screenshot, install commands, and Homebrew
-planned-state wording stay in sync. Smoke gates set `MOONBOX_SESSION_MODE=fixture`,
-redirect source homes to `target/`, and never open or resume real local
-sessions.
+docs smoke, clippy, release build, package verification, release artifact
+staging smoke, install smoke, and cargo-deny supply-chain gates. GitHub Actions
+runs the same Rust quality gates and validates that the README screenshot,
+install commands, Homebrew planned-state wording, and release artifact staging
+stay in sync. Smoke gates set `MOONBOX_SESSION_MODE=fixture`, redirect source
+homes to `target/`, and never open or resume real local sessions.
 
 ## Current State
 
@@ -172,7 +183,9 @@ The first implementation focuses on the product shell:
 - Cargo-deny supply-chain policy for advisories, duplicate versions, licenses, and crate sources
 - README screenshot and install-command smoke coverage through `scripts/ci/docs-assets-smoke.sh`
 - Draft Homebrew formula template plus fixture-safe Homebrew docs smoke coverage
-- GitHub Actions CI for Rust quality gates, documentation build, fixture replay eval, fixture-safe CLI smoke, docs asset smoke, Homebrew docs smoke, package verification, and install smoke
+- Release artifact staging with source, Cargo crate, host binary archive,
+  `SHA256SUMS`, and `release-manifest.json`, covered by fixture-safe smoke
+- GitHub Actions CI for Rust quality gates, documentation build, fixture replay eval, fixture-safe CLI smoke, docs asset smoke, Homebrew docs smoke, package verification, release artifact smoke, and install smoke
 - Dependabot configuration for Cargo and GitHub Actions updates
 - Contributing, security, changelog, issue template, and PR template docs
 
@@ -432,10 +445,12 @@ Stable interfaces matter more than any single framework:
 - M35: target readiness explanation rows in the TUI launch picker and Launch Review, backed by verifier report checks with FAIL/WARN priority, READY pass-check context, corrected launch key hints, and render/App tests for blocked, warning, and ready states.
 - M36: README screenshot/install polish with a Launch Review readiness screenshot, transparent SVG canvas, and `docs-assets-smoke` coverage for screenshot semantics, install commands, and unpublished Homebrew wording in both local and GitHub Actions gates.
 - M37: generated docs screenshot pipeline with a hidden fixture-only `docs-snapshot` command that renders the real Ratatui Launch Review buffer to SVG, compares the generated output byte-for-byte in `docs-assets-smoke`, and keeps the command hidden from normal help while covered by CLI contract tests.
+- M38: release artifact staging with source, Cargo crate, and host binary archives, generated shell completions, `SHA256SUMS`, `release-manifest.json`, Homebrew source archive URL/checksum guidance, and CI smoke validation without publishing.
 
 ### Can Build Now
 
-- Define release artifact and checksum automation once the first publish path is accepted.
+- Use the staged release artifacts and generated checksums for a tagged release
+  once publication is accepted.
 
 ### Prototype Now, Improve With Real Data
 
