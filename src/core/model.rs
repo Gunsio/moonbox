@@ -243,5 +243,29 @@ pub struct LaunchPlan {
     pub target_branch: String,
     pub capsule_path: Option<String>,
     pub command: String,
+    pub target_command: TargetLaunchCommand,
     pub verification: VerificationReport,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TargetLaunchCommand {
+    pub program: String,
+    pub args: Vec<String>,
+    pub cwd: Option<String>,
+    pub display: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LaunchExecutionStatus {
+    Success,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LaunchExecution {
+    pub version: u16,
+    pub status: LaunchExecutionStatus,
+    pub exit_code: Option<i32>,
+    pub plan: LaunchPlan,
 }

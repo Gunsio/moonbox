@@ -113,6 +113,33 @@ fn print_compile_output(args: cli::CompileArgs) -> Result<()> {
 
 fn print_launch_plan(args: cli::LaunchArgs) -> Result<()> {
     let target = launch_target(args.target);
+    if args.execute {
+        let execution = core::workbench::execute_launch(
+            args.session.as_deref(),
+            target,
+            args.capsule.as_deref(),
+        )?;
+        if let Some(execution) = execution {
+            if args.json {
+                println!("{}", serde_json::to_string_pretty(&execution)?);
+            } else {
+                println!("launch: execute");
+                println!("status: {}", launch_status(execution.status));
+                println!(
+                    "exit: {}",
+                    execution
+                        .exit_code
+                        .map(|code| code.to_string())
+                        .unwrap_or_else(|| "signal".into())
+                );
+                println!("command: {}", execution.plan.command);
+            }
+        } else {
+            println!("No session selected");
+        }
+        return Ok(());
+    }
+
     let plan =
         core::workbench::launch_plan(args.session.as_deref(), target, args.capsule.as_deref())?;
     if let Some(plan) = plan {
@@ -130,6 +157,7 @@ fn print_launch_plan(args: cli::LaunchArgs) -> Result<()> {
             println!("ready: {}", plan.verification.ready);
             println!("status: {}", plan.verification.status);
             println!("command: {}", plan.command);
+            println!("program: {}", plan.target_command.program);
             print_checks(&plan.verification.checks);
         }
     } else {
@@ -160,6 +188,13 @@ fn launch_target(target: Option<core::model::CliTool>) -> core::model::CliTool {
     target
         .or_else(core::config::load_last_target)
         .unwrap_or(core::model::CliTool::Hermes)
+}
+
+fn launch_status(status: core::model::LaunchExecutionStatus) -> &'static str {
+    match status {
+        core::model::LaunchExecutionStatus::Success => "success",
+        core::model::LaunchExecutionStatus::Failed => "failed",
+    }
 }
 
 fn print_checks(checks: &[core::model::VerificationCheck]) {

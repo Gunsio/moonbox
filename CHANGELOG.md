@@ -23,6 +23,9 @@ and this project uses semantic versioning once tagged releases start.
 - Replaceable `CapsuleCompiler` trait with fixture and process-backed compilers.
 - External compiler runner using JSON stdin/stdout, timeout handling, and
   structured process errors.
+- Guarded target launcher execution through `launch --execute`.
+- Target-specific Codex, Claude, and Hermes command generation with structured
+  `target_command` plan output.
 - Shared verifier policy for CLI and TUI launch validation.
 - Real `--capsule` file parsing and target mismatch verification.
 - README screenshot, installation notes, and Homebrew release planning docs.
@@ -37,8 +40,12 @@ and this project uses semantic versioning once tagged releases start.
   adapter before expensive full-store fallback.
 - CLI launch/verify uses lightweight session artifacts instead of constructing
   a full TUI workbench for explicit session ids.
+- Target launch execution is opt-in and refuses to spawn a target command when
+  verification fails.
+- TUI launch copy now points at `moonbox launch --execute`, keeping long
+  handoff prompts out of the modal while preserving guarded execution.
 
 ### Not Yet Released
 
 - Homebrew formula and release archives are planned but not published.
-- Real target launcher execution is not implemented yet.
+- Real original-session launching is not implemented yet.

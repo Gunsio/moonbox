@@ -8,6 +8,9 @@ pub enum CoreError {
     Compiler(CompilerError),
     CapsuleRead { path: String, reason: String },
     CapsuleParse { path: String, reason: String },
+    LaunchPrepare { reason: String },
+    LaunchBlocked { reason: String },
+    LaunchStart { command: String, reason: String },
 }
 
 impl fmt::Display for CoreError {
@@ -20,6 +23,13 @@ impl fmt::Display for CoreError {
             }
             Self::CapsuleParse { path, reason } => {
                 write!(f, "cannot parse Work Capsule {path}: {reason}")
+            }
+            Self::LaunchPrepare { reason } => {
+                write!(f, "cannot prepare target launch: {reason}")
+            }
+            Self::LaunchBlocked { reason } => write!(f, "target launch blocked: {reason}"),
+            Self::LaunchStart { command, reason } => {
+                write!(f, "cannot start target launch `{command}`: {reason}")
             }
         }
     }

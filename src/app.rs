@@ -806,11 +806,7 @@ impl App {
             .current_session()
             .map(|session| session.id.as_str())
             .unwrap_or("no-session");
-        format!(
-            "moonbox launch --target {} --session {}",
-            self.pending_target.id(),
-            session
-        )
+        workbench::moonbox_execute_command(self.pending_target, session, None)
     }
 
     pub fn launch_branch(&self) -> String {
@@ -1149,7 +1145,7 @@ mod tests {
         app.handle_key(key('y'));
 
         let copied = app.take_clipboard_text().expect("clipboard text");
-        assert!(copied.starts_with("moonbox launch --target"));
+        assert!(copied.starts_with("moonbox launch --execute --target"));
         assert!(copied.contains("--session codex-cxcp-design"));
         assert!(!copied.contains("--capsule"));
         assert_eq!(app.status_message, "Copied launch command");

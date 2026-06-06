@@ -85,6 +85,9 @@ pub struct LaunchArgs {
     /// Work Capsule JSON file to read and validate. Defaults to a generated dry-run capsule.
     #[arg(long)]
     pub capsule: Option<String>,
+    /// Execute the verified target command instead of printing a dry-run plan.
+    #[arg(long)]
+    pub execute: bool,
     /// Print JSON output.
     #[arg(long)]
     pub json: bool,
