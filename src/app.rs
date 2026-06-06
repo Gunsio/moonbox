@@ -3,7 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::core::{
     config,
     error::CoreError,
-    model::{CliTool, DemoData, LaunchValidation, LaunchValidationState, SessionSummary},
+    model::{CliTool, LaunchValidation, LaunchValidationState, SessionSummary, WorkbenchData},
     verifier, workbench,
 };
 
@@ -59,7 +59,7 @@ impl SessionFilter {
 
 #[derive(Debug)]
 pub struct App {
-    pub data: DemoData,
+    pub data: WorkbenchData,
     pub focus: Focus,
     pub selected_session: usize,
     pub selected_event: usize,
@@ -86,7 +86,7 @@ pub struct App {
 
 impl App {
     pub fn new(source: CliTool, target: CliTool) -> Result<Self, CoreError> {
-        let data = workbench::load_demo_workbench(source, target)?;
+        let data = workbench::load_workbench(source, target)?;
         let rewind_event_id = initial_rewind_event_id(&data);
         let selected_session = data
             .sessions
@@ -668,11 +668,11 @@ impl App {
         let rewind_event_id = self.rewind_event_id.clone();
         let session_id = self.current_session().map(|session| session.id.clone());
         if let Some(session_id) = session_id {
-            if let Some(data) = workbench::load_demo_workbench_for_session(&session_id, target)? {
+            if let Some(data) = workbench::load_workbench_for_session(&session_id, target)? {
                 self.data = data;
             }
         } else {
-            self.data = workbench::load_demo_workbench(self.data.source, target)?;
+            self.data = workbench::load_workbench(self.data.source, target)?;
         }
         self.selected_session = self
             .selected_session
@@ -706,7 +706,7 @@ impl App {
         let target = self.data.target;
         let selected_session = self.selected_session;
         let selected_compiler = self.selected_compiler;
-        match workbench::load_demo_workbench_for_session(&session_id, target) {
+        match workbench::load_workbench_for_session(&session_id, target) {
             Ok(Some(data)) => {
                 let rewind_event_id = initial_rewind_event_id(&data);
                 let selected_event = rewind_event_index(&data, &rewind_event_id);
@@ -829,7 +829,7 @@ impl App {
     }
 }
 
-fn initial_rewind_event_id(data: &DemoData) -> String {
+fn initial_rewind_event_id(data: &WorkbenchData) -> String {
     data.capsule
         .rewind_point
         .split_whitespace()
@@ -838,7 +838,7 @@ fn initial_rewind_event_id(data: &DemoData) -> String {
         .to_string()
 }
 
-fn rewind_event_index(data: &DemoData, rewind_event_id: &str) -> usize {
+fn rewind_event_index(data: &WorkbenchData, rewind_event_id: &str) -> usize {
     data.timeline
         .iter()
         .position(|event| event.id == rewind_event_id)

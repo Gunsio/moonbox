@@ -20,6 +20,7 @@ const DEFAULT_SESSION_LIMIT: usize = 200;
 #[derive(Debug, Clone)]
 pub struct CodexSourceAdapter {
     root: PathBuf,
+    list_limit: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -47,7 +48,18 @@ struct SummaryBuilder {
 
 impl CodexSourceAdapter {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            list_limit: session_limit(),
+        }
+    }
+
+    #[cfg(test)]
+    fn with_session_limit(root: impl Into<PathBuf>, list_limit: Option<usize>) -> Self {
+        Self {
+            root: root.into(),
+            list_limit,
+        }
     }
 
     #[cfg(not(test))]
@@ -70,7 +82,7 @@ impl CodexSourceAdapter {
         self.root.join("sessions")
     }
 
-    fn session_files(&self) -> Result<Vec<PathBuf>, AdapterError> {
+    fn session_files(&self, limit: Option<usize>) -> Result<Vec<PathBuf>, AdapterError> {
         let sessions_dir = self.sessions_dir();
         if !sessions_dir.exists() {
             return Ok(Vec::new());
@@ -79,10 +91,18 @@ impl CodexSourceAdapter {
         let mut files = Vec::new();
         collect_jsonl_files(&sessions_dir, &mut files)?;
         files.sort_by(|left, right| right.cmp(left));
-        if let Some(limit) = session_limit() {
+        if let Some(limit) = limit {
             files.truncate(limit);
         }
         Ok(files)
+    }
+
+    fn listed_session_files(&self) -> Result<Vec<PathBuf>, AdapterError> {
+        self.session_files(self.list_limit)
+    }
+
+    fn all_session_files(&self) -> Result<Vec<PathBuf>, AdapterError> {
+        self.session_files(None)
     }
 
     fn parse_summary(&self, path: &Path) -> Result<SessionSummary, AdapterError> {
@@ -104,7 +124,7 @@ impl CodexSourceAdapter {
     }
 
     fn find_session_path(&self, session_id: &str) -> Result<Option<PathBuf>, AdapterError> {
-        for path in self.session_files()? {
+        for path in self.all_session_files()? {
             let summary = self.parse_summary(&path)?;
             if summary.id == session_id {
                 return Ok(Some(path));
@@ -162,10 +182,17 @@ impl SourceAdapter for CodexSourceAdapter {
 
     fn list_sessions(&self) -> Result<Vec<SessionSummary>, AdapterError> {
         let mut sessions = Vec::new();
-        for path in self.session_files()? {
+        for path in self.listed_session_files()? {
             sessions.push(self.parse_summary(&path)?);
         }
         Ok(sessions)
+    }
+
+    fn find_session(&self, session_id: &str) -> Result<Option<SessionSummary>, AdapterError> {
+        let Some(path) = self.find_session_path(session_id)? else {
+            return Ok(None);
+        };
+        self.parse_summary(&path).map(Some)
     }
 
     fn load_timeline(&self, session_id: &str) -> Result<CanonicalTimeline, AdapterError> {
@@ -640,6 +667,39 @@ mod tests {
         assert_eq!(timeline.events[1].kind, TimelineKind::User);
         assert_eq!(timeline.events[2].kind, TimelineKind::Assistant);
         assert_eq!(timeline.events[3].kind, TimelineKind::Error);
+    }
+
+    #[test]
+    fn loads_explicit_session_outside_list_limit() {
+        let root = test_root("explicit-outside-limit");
+        write_session(
+            &root,
+            "2026/06/06/rollout-2026-06-06T09-00-00-new.jsonl",
+            r#"{"timestamp":"2026-06-06T09:00:00.000Z","type":"session_meta","payload":{"id":"codex-new","cwd":"/repo"}}
+{"timestamp":"2026-06-06T09:01:00.000Z","type":"event_msg","payload":{"type":"user_message","message":"new"}}
+"#,
+        );
+        write_session(
+            &root,
+            "2026/06/05/rollout-2026-06-05T09-00-00-old.jsonl",
+            r#"{"timestamp":"2026-06-05T09:00:00.000Z","type":"session_meta","payload":{"id":"codex-old","cwd":"/repo"}}
+{"timestamp":"2026-06-05T09:01:00.000Z","type":"event_msg","payload":{"type":"user_message","message":"old"}}
+"#,
+        );
+        let adapter = CodexSourceAdapter::with_session_limit(&root, Some(1));
+
+        let listed = adapter.list_sessions().expect("sessions");
+        let found = adapter
+            .find_session("codex-old")
+            .expect("find session")
+            .expect("old session");
+        let timeline = adapter.load_timeline("codex-old").expect("old timeline");
+
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, "codex-new");
+        assert_eq!(found.id, "codex-old");
+        assert_eq!(timeline.source_session, "codex-old");
+        assert_eq!(timeline.events[1].detail, "old");
     }
 
     fn test_root(name: &str) -> PathBuf {

@@ -1,9 +1,9 @@
 use super::{
-    compiler::{CapsuleCompiler, DemoCapsuleCompiler, default_rewind_event_id},
+    compiler::{CapsuleCompiler, FixtureCapsuleCompiler, default_rewind_event_id},
     error::CoreError,
     model::{
         BranchNode, CanonicalTimeline, CapsuleCompileOutput, CapsuleCompileRequest, CliTool,
-        DemoData, SessionStatus, SessionSummary, TimelineEvent, WorkCapsule,
+        SessionStatus, SessionSummary, TimelineEvent, WorkCapsule, WorkbenchData,
     },
     sources,
 };
@@ -11,15 +11,15 @@ use super::{
 #[cfg(test)]
 use super::fixture::FixtureSourceAdapter;
 
-pub fn demo_data(source: CliTool, target: CliTool) -> Result<DemoData, CoreError> {
-    let sessions = demo_sessions()?;
+pub fn workbench_data(source: CliTool, target: CliTool) -> Result<WorkbenchData, CoreError> {
+    let sessions = sessions()?;
     let source_session = sessions
         .iter()
         .find(|session| session.cli == source)
         .cloned()
         .unwrap_or_else(|| fallback_session(source));
     let source_session_id = source_session.id.clone();
-    if let Some(data) = demo_data_for_session(&source_session_id, target)? {
+    if let Some(data) = workbench_data_for_session(&source_session_id, target)? {
         return Ok(data);
     }
 
@@ -32,7 +32,7 @@ pub fn demo_data(source: CliTool, target: CliTool) -> Result<DemoData, CoreError
     let rewind_event_id = rewind_event_id_for_timeline(&source_session_id, &timeline);
     let capsule =
         compile_capsule_for_session(&source_session, target, &timeline, &rewind_event_id)?;
-    Ok(build_demo_data(
+    Ok(build_workbench_data(
         source,
         target,
         sessions,
@@ -42,24 +42,30 @@ pub fn demo_data(source: CliTool, target: CliTool) -> Result<DemoData, CoreError
     ))
 }
 
-pub fn demo_data_for_session(
+pub fn workbench_data_for_session(
     session_id: &str,
     target: CliTool,
-) -> Result<Option<DemoData>, CoreError> {
-    let sessions = demo_sessions()?;
-    let source_session = sessions
+) -> Result<Option<WorkbenchData>, CoreError> {
+    let sessions = sessions()?;
+    let source_session = if let Some(session) = sessions
         .iter()
         .find(|session| session.id == session_id)
-        .cloned();
+        .cloned()
+    {
+        Some(session)
+    } else {
+        find_session(session_id)?
+    };
     let Some(source_session) = source_session else {
         return Ok(None);
     };
+    let sessions = include_source_session(sessions, &source_session);
     let source_session_id = source_session.id.clone();
-    let timeline = demo_canonical_timeline_for_session(&source_session)?;
+    let timeline = canonical_timeline_for_session(&source_session)?;
     let rewind_event_id = rewind_event_id_for_timeline(&source_session_id, &timeline);
     let capsule =
         compile_capsule_for_session(&source_session, target, &timeline, &rewind_event_id)?;
-    Ok(Some(build_demo_data(
+    Ok(Some(build_workbench_data(
         source_session.cli,
         target,
         sessions,
@@ -69,14 +75,14 @@ pub fn demo_data_for_session(
     )))
 }
 
-fn build_demo_data(
+fn build_workbench_data(
     source: CliTool,
     target: CliTool,
     sessions: Vec<SessionSummary>,
     timeline: Vec<TimelineEvent>,
     capsule: WorkCapsule,
     source_session_id: &str,
-) -> DemoData {
+) -> WorkbenchData {
     let rewind_id = capsule
         .rewind_point
         .split_whitespace()
@@ -104,36 +110,53 @@ fn build_demo_data(
         },
     ];
 
-    DemoData {
+    WorkbenchData {
         source,
         target,
         sessions,
         timeline,
         capsule,
         branches,
-        compilers: demo_compilers(),
+        compilers: compiler_catalog(),
     }
 }
 
-#[cfg(test)]
-pub type DemoSourceAdapter = FixtureSourceAdapter;
+fn include_source_session(
+    mut sessions: Vec<SessionSummary>,
+    source_session: &SessionSummary,
+) -> Vec<SessionSummary> {
+    if !sessions
+        .iter()
+        .any(|session| session.id == source_session.id)
+    {
+        sessions.insert(0, source_session.clone());
+    }
+    sessions
+}
 
-pub fn demo_sessions() -> Result<Vec<SessionSummary>, CoreError> {
+#[cfg(test)]
+pub type FixtureTestSourceAdapter = FixtureSourceAdapter;
+
+pub fn sessions() -> Result<Vec<SessionSummary>, CoreError> {
     sources::list_sessions()
 }
 
-pub fn demo_canonical_timeline_for_session(
+pub fn find_session(session_id: &str) -> Result<Option<SessionSummary>, CoreError> {
+    sources::find_session(session_id)
+}
+
+pub fn canonical_timeline_for_session(
     session: &SessionSummary,
 ) -> Result<CanonicalTimeline, CoreError> {
     sources::load_timeline(session)
 }
 
-pub fn demo_compile_request(
+pub fn compile_request(
     source: CliTool,
     target: CliTool,
     rewind_event_id: &str,
 ) -> Result<CapsuleCompileRequest, CoreError> {
-    let data = demo_data(source, target)?;
+    let data = workbench_data(source, target)?;
     let source_session = data
         .sessions
         .iter()
@@ -157,11 +180,8 @@ pub fn demo_compile_request(
     })
 }
 
-pub fn demo_compile_output(
-    source: CliTool,
-    target: CliTool,
-) -> Result<CapsuleCompileOutput, CoreError> {
-    let data = demo_data(source, target)?;
+pub fn compile_output(source: CliTool, target: CliTool) -> Result<CapsuleCompileOutput, CoreError> {
+    let data = workbench_data(source, target)?;
     Ok(CapsuleCompileOutput {
         version: 1,
         capsule: data.capsule,
@@ -184,7 +204,7 @@ fn compile_capsule_for_session(
         compiler: "engineering-handoff".into(),
         timeline: timeline.clone(),
     };
-    Ok(DemoCapsuleCompiler.compile(&request)?.capsule)
+    Ok(FixtureCapsuleCompiler.compile(&request)?.capsule)
 }
 
 fn rewind_event_id_for_timeline(session_id: &str, timeline: &CanonicalTimeline) -> String {
@@ -216,7 +236,7 @@ fn fallback_session(source: CliTool) -> SessionSummary {
     }
 }
 
-fn demo_compilers() -> Vec<String> {
+fn compiler_catalog() -> Vec<String> {
     vec![
         "engineering-handoff".into(),
         "bugfix-continuation".into(),
@@ -230,8 +250,8 @@ mod tests {
     use crate::core::adapter::SourceAdapter;
 
     #[test]
-    fn demo_sessions_are_adapter_collected_and_time_sorted() {
-        let sessions = demo_sessions().expect("sessions");
+    fn sessions_are_adapter_collected_and_time_sorted() {
+        let sessions = sessions().expect("sessions");
 
         assert_eq!(sessions.len(), 3);
         assert_eq!(sessions[0].id, "codex-cxcp-design");
@@ -240,8 +260,8 @@ mod tests {
     }
 
     #[test]
-    fn demo_adapter_returns_canonical_timeline() {
-        let adapter = DemoSourceAdapter::new(CliTool::Codex);
+    fn fixture_adapter_returns_canonical_timeline() {
+        let adapter = FixtureTestSourceAdapter::new(CliTool::Codex);
         assert_eq!(adapter.tool(), CliTool::Codex);
         let timeline = adapter
             .load_timeline("codex-cxcp-design")
@@ -255,8 +275,7 @@ mod tests {
 
     #[test]
     fn compile_request_carries_source_session_rewind_and_timeline() {
-        let request =
-            demo_compile_request(CliTool::Codex, CliTool::Hermes, "evt-091").expect("request");
+        let request = compile_request(CliTool::Codex, CliTool::Hermes, "evt-091").expect("request");
 
         assert_eq!(request.version, 1);
         assert_eq!(request.source_session.id, "codex-cxcp-design");

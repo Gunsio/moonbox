@@ -17,6 +17,15 @@ pub fn list_sessions() -> Result<Vec<SessionSummary>, CoreError> {
     collect_sessions(&adapter_refs).map_err(CoreError::from)
 }
 
+pub fn find_session(session_id: &str) -> Result<Option<SessionSummary>, CoreError> {
+    for adapter in runtime_adapters() {
+        if let Some(session) = adapter.find_session(session_id)? {
+            return Ok(Some(session));
+        }
+    }
+    Ok(None)
+}
+
 pub fn load_timeline(session: &SessionSummary) -> Result<CanonicalTimeline, CoreError> {
     for adapter in runtime_adapters() {
         if adapter.tool() != session.cli {
@@ -83,5 +92,14 @@ mod tests {
 
         assert_eq!(timeline.source_session, session.id);
         assert!(!timeline.events.is_empty());
+    }
+
+    #[test]
+    fn test_registry_finds_fixture_session() {
+        let session = find_session("codex-cxcp-design")
+            .expect("find result")
+            .expect("session");
+
+        assert_eq!(session.cli, CliTool::Codex);
     }
 }

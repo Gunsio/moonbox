@@ -120,7 +120,7 @@ pub struct BranchNode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DemoData {
+pub struct WorkbenchData {
     pub source: CliTool,
     pub target: CliTool,
     pub sessions: Vec<SessionSummary>,
