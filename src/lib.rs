@@ -241,6 +241,7 @@ fn print_launch_plan(args: cli::LaunchArgs) -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&plan)?);
         } else {
             println!("launch: dry-run");
+            println!("action: target-handoff");
             println!("session: {}", plan.source_session.id);
             println!("target: {}", plan.target_cli);
             println!("branch: {}", plan.target_branch);

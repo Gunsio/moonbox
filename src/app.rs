@@ -71,6 +71,7 @@ pub struct App {
     pub command_input: String,
     pub show_help: bool,
     pub show_launch: bool,
+    pub launch_review: bool,
     pub show_open_original: bool,
     pub show_doctor: bool,
     pub show_diff: bool,
@@ -110,6 +111,7 @@ impl App {
             command_input: String::new(),
             show_help: false,
             show_launch: false,
+            launch_review: false,
             show_open_original: false,
             show_doctor: false,
             show_diff: false,
@@ -292,9 +294,35 @@ impl App {
     }
 
     fn handle_launch_key(&mut self, key: KeyEvent) {
+        if self.launch_review {
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    self.show_launch = false;
+                    self.launch_review = false;
+                    self.modal_scroll = 0;
+                    self.set_status("Launch review closed");
+                }
+                KeyCode::Char('y') => self.copy_launch_command(),
+                KeyCode::Enter => self.set_status("Launch review is copy-only; press y to copy"),
+                KeyCode::PageDown => self.scroll_modal(true, 6),
+                KeyCode::PageUp => self.scroll_modal(false, 6),
+                KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.scroll_modal(true, 6)
+                }
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.scroll_modal(false, 6)
+                }
+                KeyCode::Char('j') | KeyCode::Down => self.scroll_modal(true, 1),
+                KeyCode::Char('k') | KeyCode::Up => self.scroll_modal(false, 1),
+                _ => {}
+            }
+            return;
+        }
+
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.show_launch = false;
+                self.launch_review = false;
                 self.modal_scroll = 0;
                 self.set_status("Launch cancelled");
             }
@@ -328,6 +356,9 @@ impl App {
             KeyCode::Char('r') if self.show_doctor => self.refresh_doctor(),
             KeyCode::Char('y') if self.show_doctor => self.copy_doctor_report(),
             KeyCode::Char('y') => self.copy_focused_command(),
+            KeyCode::Enter if self.show_open_original => {
+                self.set_status("Original preview is copy-only; press y to copy")
+            }
             KeyCode::Char('j') | KeyCode::Down => self.scroll_modal(true, 1),
             KeyCode::Char('k') | KeyCode::Up => self.scroll_modal(false, 1),
             KeyCode::PageDown => self.scroll_modal(true, 6),
@@ -357,6 +388,7 @@ impl App {
             self.set_status("Original preview closed");
         } else if self.show_launch {
             self.show_launch = false;
+            self.launch_review = false;
             self.modal_scroll = 0;
             self.set_status("Launch cancelled");
         } else if self.show_help {
@@ -689,6 +721,7 @@ impl App {
         }
         self.pending_target = self.data.target;
         self.show_launch = true;
+        self.launch_review = false;
         self.modal_scroll = 0;
         self.set_status("Choose target CLI");
         self.pending_g = false;
@@ -708,12 +741,16 @@ impl App {
             return;
         }
         let _ = config::save_last_target(target);
-        self.show_launch = false;
+        self.show_launch = true;
+        self.launch_review = true;
         self.modal_scroll = 0;
         if validation.state == LaunchValidationState::Warning {
-            self.set_status(format!("Target saved: {target} ({})", validation.summary()));
+            self.set_status(format!(
+                "Review launch: {target} ({})",
+                validation.summary()
+            ));
         } else {
-            self.set_status(format!("Target saved: {target}"));
+            self.set_status(format!("Review launch: {target}"));
         }
         self.pending_g = false;
     }
@@ -820,6 +857,10 @@ impl App {
         let validation = self.validate_launch_for_target(self.pending_target);
         if validation.is_blocked() {
             self.set_status(format!("Target blocked: {}", validation.summary()));
+            return;
+        }
+        if !self.launch_review {
+            self.set_status("Confirm target first with enter");
             return;
         }
         self.copy_text("launch", self.launch_command());
@@ -1088,9 +1129,10 @@ mod tests {
         assert_eq!(app.status_message, "Target: Codex");
 
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
-        assert!(!app.show_launch);
+        assert!(app.show_launch);
+        assert!(app.launch_review);
         assert_eq!(app.data.target, CliTool::Codex);
-        assert!(app.status_message.starts_with("Target saved: Codex"));
+        assert!(app.status_message.starts_with("Review launch: Codex"));
         assert_eq!(app.data.source, CliTool::Codex);
         assert_eq!(app.data.capsule.source_cli, CliTool::Codex);
         assert_eq!(app.data.capsule.source_session, "codex-cxcp-design");
@@ -1142,6 +1184,7 @@ mod tests {
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
         assert!(app.show_launch);
+        assert!(!app.launch_review);
         assert_eq!(app.data.target, CliTool::Hermes);
         assert!(app.status_message.starts_with("Target blocked:"));
         assert!(app.status_message.contains("raw resume is known failed"));
@@ -1185,6 +1228,13 @@ mod tests {
     fn launch_copy_queues_clipboard_text() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        app.handle_key(key('y'));
+        assert!(app.take_clipboard_text().is_none());
+        assert_eq!(app.status_message, "Confirm target first with enter");
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        assert!(app.launch_review);
         app.handle_key(key('y'));
 
         let copied = app.take_clipboard_text().expect("clipboard text");
@@ -1198,6 +1248,11 @@ mod tests {
     fn original_copy_queues_execute_command() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.handle_key(key('o'));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        assert_eq!(
+            app.status_message,
+            "Original preview is copy-only; press y to copy"
+        );
         app.handle_key(key('y'));
 
         assert_eq!(

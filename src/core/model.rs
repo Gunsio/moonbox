@@ -242,9 +242,17 @@ impl LaunchValidation {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionAction {
+    OriginalResume,
+    TargetHandoff,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LaunchPlan {
     pub version: u16,
+    pub action: SessionAction,
     pub dry_run: bool,
     pub source_session: SessionSummary,
     pub target_cli: CliTool,
@@ -281,6 +289,7 @@ pub struct LaunchExecution {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OriginalSessionPlan {
     pub version: u16,
+    pub action: SessionAction,
     pub dry_run: bool,
     pub source_session: SessionSummary,
     pub command: TargetLaunchCommand,

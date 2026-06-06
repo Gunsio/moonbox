@@ -237,6 +237,7 @@ fn open_launch_and_verify_public_cli_contracts_are_dry_run_by_default() {
             .expect("open dry-run"),
     );
     assert_eq!(open["dry_run"], true);
+    assert_eq!(open["action"], "original_resume");
     assert_eq!(open["command"]["program"], "codex");
     assert_eq!(
         open["command"]["args"],
@@ -257,6 +258,7 @@ fn open_launch_and_verify_public_cli_contracts_are_dry_run_by_default() {
             .expect("launch dry-run"),
     );
     assert_eq!(launch["dry_run"], true);
+    assert_eq!(launch["action"], "target_handoff");
     assert_eq!(launch["verification"]["ready"], true);
     assert_eq!(launch["target_command"]["program"], "hermes");
 

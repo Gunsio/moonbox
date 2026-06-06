@@ -28,6 +28,8 @@ and this project uses semantic versioning once tagged releases start.
   `target_command` plan output.
 - Guarded original-session execution through `open --execute`.
 - Structured original open plan output through `open --json`.
+- `action` discriminators in dry-run `open --json` and `launch --json`
+  output, using `original_resume` and `target_handoff`.
 - First-class `moon` binary alias installed alongside `moonbox`.
 - Configurable compiler skill presets in `~/.config/moonbox/config.json`.
 - Compiler catalog output through `moonbox compilers`, including source,
@@ -76,11 +78,15 @@ and this project uses semantic versioning once tagged releases start.
   a full TUI workbench for explicit session ids.
 - Target launch execution is opt-in and refuses to spawn a target command when
   verification fails.
+- TUI target handoff now uses a two-stage flow: choose a target, review the
+  guarded execute command, then copy with `y`.
 - TUI launch copy now points at `moonbox launch --execute`, keeping long
   handoff prompts out of the modal while preserving guarded execution.
 - Original-session execution is opt-in and uses source-specific resume
   entrypoints; Hermes resume commands now use `hermes --resume <session>`.
 - TUI original-session copy now points at `moonbox open --execute`.
+- TUI original-session preview is copy-only; `enter` is disabled there to keep
+  original resume distinct from target handoff.
 - Compiler execution precedence is now explicit: environment override, config
   preset, then built-in fixture compiler.
 - Unknown compiler ids and disabled compiler presets now return structured

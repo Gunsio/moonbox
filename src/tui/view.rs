@@ -828,6 +828,73 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         .current_session()
         .map(|session| format!("{} / {}", session.cli, session.id))
         .unwrap_or_else(|| "No session selected".into());
+    let target_branch = app.launch_branch();
+    let pending_validation = app.validate_launch_for_target(app.pending_target);
+    if app.launch_review {
+        let lines = vec![
+            Line::from(Span::styled(
+                "Review target handoff",
+                Style::default()
+                    .fg(theme::GOLD)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::raw(""),
+            Line::from(vec![
+                Span::styled("Action: ", Style::default().fg(theme::BLUE)),
+                Span::styled(
+                    "target handoff",
+                    Style::default()
+                        .fg(theme::CYAN)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("Session: ", Style::default().fg(theme::BLUE)),
+                Span::raw(session),
+            ]),
+            Line::from(vec![
+                Span::styled("Target: ", Style::default().fg(theme::BLUE)),
+                Span::raw(app.pending_target.to_string()),
+            ]),
+            Line::from(vec![
+                Span::styled("Branch: ", Style::default().fg(theme::BLUE)),
+                Span::raw(target_branch),
+            ]),
+            Line::from(vec![
+                Span::styled("Validation: ", Style::default().fg(theme::BLUE)),
+                Span::styled(
+                    validation_label(pending_validation.state),
+                    Style::default()
+                        .fg(validation_color(pending_validation.state))
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("  "),
+                Span::styled(
+                    pending_validation.summary(),
+                    Style::default().fg(theme::MUTED),
+                ),
+            ]),
+            Line::raw(""),
+            Line::from(Span::styled(
+                app.launch_command(),
+                Style::default().fg(theme::CYAN),
+            )),
+            Line::raw(""),
+            Line::from(Span::styled(
+                "y copy execute command   enter disabled   Esc close",
+                Style::default().fg(theme::MUTED),
+            )),
+        ];
+        frame.render_widget(
+            Paragraph::new(lines)
+                .block(panel_block(" Launch Review ", true))
+                .scroll((app.modal_scroll, 0))
+                .wrap(Wrap { trim: true }),
+            area,
+        );
+        return;
+    }
+
     let mut target_lines = Vec::new();
     for target in CliTool::ALL {
         let selected = target == app.pending_target;
@@ -858,8 +925,6 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             Span::styled(validation.summary(), muted_style),
         ]));
     }
-    let target_branch = app.launch_branch();
-    let pending_validation = app.validate_launch_for_target(app.pending_target);
     let mut lines = vec![
         Line::from(Span::styled(
             "Choose target CLI",
@@ -901,20 +966,15 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                 Style::default().fg(theme::MUTED),
             ),
         ]),
-        Line::from(vec![
-            Span::styled("Branch: ", Style::default().fg(theme::BLUE)),
-            Span::raw(target_branch),
-        ]),
-        Line::raw(""),
         if pending_validation.state == LaunchValidationState::Blocked {
             Line::from(Span::styled(
-                "Launch command disabled until validation passes",
+                "Launch review disabled until validation passes",
                 Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
             ))
         } else {
             Line::from(Span::styled(
-                app.launch_command(),
-                Style::default().fg(theme::CYAN),
+                "Press enter to review the handoff command before copying",
+                Style::default().fg(theme::GOLD),
             ))
         },
         Line::raw(""),
@@ -922,7 +982,7 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             if pending_validation.state == LaunchValidationState::Blocked {
                 "j/k choose target   enter/y blocked   Esc cancel"
             } else {
-                "j/k choose target   y copy command   enter confirm   Esc cancel"
+                "j/k choose target   enter review   y unavailable   Esc cancel"
             },
             Style::default().fg(theme::MUTED),
         )),
@@ -991,11 +1051,11 @@ fn render_open_original(frame: &mut Frame, root: Rect, app: &App) {
             )),
             Line::raw(""),
             Line::from(Span::styled(
-                "Original resume only. Handoff uses Launch.",
+                "Action: original resume only. Handoff uses Launch.",
                 Style::default().fg(theme::MUTED),
             )),
             Line::from(Span::styled(
-                "y copy execute command   Esc close",
+                "y copy execute command   enter disabled   Esc close",
                 Style::default().fg(theme::MUTED),
             )),
         ]
@@ -1200,5 +1260,19 @@ mod tests {
         assert_screen_contains(&screen, "Choose target CLI");
         assert_screen_contains(&screen, "BLOCKED");
         assert_screen_contains(&screen, "enter/y blocked");
+    }
+
+    #[test]
+    fn launch_review_renders_explicit_handoff_action() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.show_launch = true;
+        app.launch_review = true;
+        app.pending_target = CliTool::Hermes;
+        let screen = render_text(&app, 120, 36);
+
+        assert_screen_contains(&screen, "Launch Review");
+        assert_screen_contains(&screen, "target handoff");
+        assert_screen_contains(&screen, "moonbox launch --execute");
+        assert_screen_contains(&screen, "enter disabled");
     }
 }
