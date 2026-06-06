@@ -42,12 +42,15 @@ scripts/ci/full-gate.sh
 That script runs patch hygiene plus the CI/release gates. It expects a clean
 worktree for `cargo package --locked`; during pre-commit iteration use
 `MOONBOX_PACKAGE_ALLOW_DIRTY=1 scripts/ci/full-gate.sh`, then rerun it without
-the override after committing.
+the override after committing. It also requires `cargo-deny`; install it with
+`cargo install --locked cargo-deny`, or set `CARGO_DENY=/path/to/cargo-deny`
+when using a downloaded binary.
 
 Individual gates:
 
 ```bash
 git diff --check
+scripts/ci/supply-chain.sh
 cargo fmt --check
 cargo check --locked
 cargo test --locked
@@ -82,10 +85,10 @@ checklist and formula shape.
 
 Pull requests are expected to pass formatting, check, test, fixture replay
 eval, documentation build, fixture-safe CLI smoke, clippy, release build,
-package verification, and install smoke gates. GitHub Actions runs the same
-Rust quality gates and validates the README screenshot asset. Smoke gates
-redirect source homes to `target/` and never open or resume real local
-sessions.
+package verification, install smoke, and cargo-deny supply-chain gates. GitHub
+Actions runs the same Rust quality gates and validates the README screenshot
+asset. Smoke gates redirect source homes to `target/` and never open or resume
+real local sessions.
 
 ## Current State
 
@@ -133,6 +136,7 @@ The first implementation focuses on the product shell:
 - Deterministic fixture-only replay eval for the Codex/Claude/Hermes source-target matrix
 - Fixture-safe public CLI contract tests for the installed `moonbox` and `moon` command surfaces
 - Full local quality gate through `scripts/ci/full-gate.sh`
+- Cargo-deny supply-chain policy for advisories, duplicate versions, licenses, and crate sources
 - GitHub Actions CI for Rust quality gates, documentation build, fixture replay eval, fixture-safe CLI smoke, package verification, install smoke, and README screenshot validation
 - Dependabot configuration for Cargo and GitHub Actions updates
 - Contributing, security, changelog, issue template, and PR template docs
@@ -319,6 +323,7 @@ Stable interfaces matter more than any single framework:
 - M23: fixture-safe integration tests for public CLI contracts, covering `moonbox`/`moon` version parity, fixture-only replay eval, fixture fallback session listing, and dry-run open/launch/verify JSON behavior.
 - M24: documentation build gate with `RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps` in CI, PR checklist, README, and contributor docs.
 - M25: full local quality gate script that runs patch hygiene plus CI/release checks, with dirty-worktree package verification available during pre-commit iteration.
+- M26: cargo-deny supply-chain gate for RustSec advisories, yanked crates, duplicate-version policy, license allowlists, and trusted crate sources.
 
 ### Can Build Now
 

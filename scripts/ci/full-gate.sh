@@ -10,6 +10,7 @@ run() {
 }
 
 run git diff --check
+run scripts/ci/supply-chain.sh
 run cargo fmt --check
 run cargo check --locked
 run cargo test --locked
