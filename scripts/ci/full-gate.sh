@@ -20,6 +20,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps
 
 run cargo run --locked -- replay-eval --json
 run scripts/ci/cli-smoke.sh
+run scripts/ci/docs-assets-smoke.sh
 run scripts/ci/homebrew-docs-smoke.sh
 run cargo clippy --locked -- -D warnings
 run cargo build --release --locked
