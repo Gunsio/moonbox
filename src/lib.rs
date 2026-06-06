@@ -6,7 +6,7 @@ mod tui;
 use clap::{CommandFactory, Parser};
 use cli::{Cli, Command};
 use color_eyre::Result;
-use std::{io, path::Path};
+use std::{fs, io, path::Path};
 
 pub fn run() -> Result<()> {
     color_eyre::install()?;
@@ -25,6 +25,7 @@ pub fn run() -> Result<()> {
         Command::Launch(args) => print_launch_plan(args),
         Command::Verify(args) => print_verify_report(args),
         Command::ReplayEval(args) => print_replay_eval(args),
+        Command::DocsSnapshot(args) => print_docs_snapshot(args),
     }
 }
 
@@ -309,6 +310,16 @@ fn print_replay_eval(args: cli::JsonArgs) -> Result<()> {
                 case.check_count
             );
         }
+    }
+    Ok(())
+}
+
+fn print_docs_snapshot(args: cli::DocsSnapshotArgs) -> Result<()> {
+    let svg = tui::docs_screenshot_svg(args.width, args.height)?;
+    if let Some(path) = args.output {
+        fs::write(path, svg)?;
+    } else {
+        print!("{svg}");
     }
     Ok(())
 }

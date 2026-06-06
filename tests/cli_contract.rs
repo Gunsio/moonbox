@@ -129,6 +129,30 @@ fn completion_generation_uses_requested_or_invoked_binary_name() {
 }
 
 #[test]
+fn docs_snapshot_is_hidden_fixture_safe_and_generated() {
+    let help = output_text(
+        moonbox_command("docs-snapshot-help")
+            .arg("--help")
+            .output()
+            .expect("moonbox help"),
+    );
+    assert!(!help.contains("docs-snapshot"));
+
+    let svg = output_text(
+        moonbox_command("docs-snapshot")
+            .arg("docs-snapshot")
+            .output()
+            .expect("docs snapshot"),
+    );
+
+    assert!(svg.starts_with("<svg "));
+    assert!(svg.contains("Launch Review"));
+    assert!(svg.contains("Readiness details"));
+    assert!(svg.contains("moonbox launch --execute"));
+    assert!(svg.contains("copy execute command"));
+}
+
+#[test]
 fn replay_eval_cli_contract_is_fixture_only() {
     let report = output_json(
         moonbox_command("replay-eval")

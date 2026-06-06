@@ -93,6 +93,15 @@ pub struct App {
 impl App {
     pub fn new(source: CliTool, target: CliTool) -> Result<Self, CoreError> {
         let data = workbench::load_workbench(source, target)?;
+        Ok(Self::from_data(data, target))
+    }
+
+    pub fn new_fixture(source: CliTool, target: CliTool) -> Result<Self, CoreError> {
+        let data = workbench::load_fixture_workbench(source, target)?;
+        Ok(Self::from_data(data, target))
+    }
+
+    fn from_data(data: WorkbenchData, target: CliTool) -> Self {
         let rewind_event_id = initial_rewind_event_id(&data);
         let selected_session = data
             .sessions
@@ -101,7 +110,7 @@ impl App {
             .unwrap_or(0);
         let selected_event = rewind_event_index(&data, &rewind_event_id);
         let doctor_report = doctor::diagnose_with_session_summaries(&data.sessions);
-        Ok(Self {
+        Self {
             data,
             focus: Focus::Sessions,
             selected_session,
@@ -128,7 +137,7 @@ impl App {
             pending_g: false,
             clipboard_text: None,
             should_quit: false,
-        })
+        }
     }
 
     pub fn should_quit(&self) -> bool {

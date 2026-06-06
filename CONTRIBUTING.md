@@ -67,11 +67,16 @@ sessions.
 For README screenshot and install-documentation changes:
 
 ```bash
+cargo run --locked -- docs-snapshot --output docs/assets/moonbox-tui.svg
 scripts/ci/docs-assets-smoke.sh
 ```
 
-That smoke validates the SVG asset, the README image reference, the install
-commands, and the planned Homebrew wording.
+`docs-snapshot` is a hidden maintenance command that renders the real TUI
+Launch Review state from embedded fixtures; it must not scan, open, resume, or
+launch real sessions. The smoke regenerates the same SVG under `target/`,
+compares it with the committed asset, and then validates the README image
+reference, install commands, planned Homebrew wording, and key screenshot
+semantics.
 
 ## Engineering Standards
 

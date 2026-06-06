@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
 
@@ -40,6 +42,9 @@ pub enum Command {
     Verify(LaunchArgs),
     /// Replay embedded fixtures through compile and verify without opening sessions.
     ReplayEval(JsonArgs),
+    /// Generate deterministic documentation assets.
+    #[command(name = "docs-snapshot", hide = true)]
+    DocsSnapshot(DocsSnapshotArgs),
 }
 
 impl Default for Command {
@@ -65,6 +70,19 @@ pub struct TuiArgs {
 pub struct JsonArgs {
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Debug, Args, Clone, Default)]
+pub struct DocsSnapshotArgs {
+    /// Snapshot terminal width in cells.
+    #[arg(long, default_value_t = 160)]
+    pub width: u16,
+    /// Snapshot terminal height in cells.
+    #[arg(long, default_value_t = 44)]
+    pub height: u16,
+    /// Write the SVG to this path instead of stdout.
+    #[arg(long)]
+    pub output: Option<PathBuf>,
 }
 
 #[derive(Debug, Args, Clone, Default)]

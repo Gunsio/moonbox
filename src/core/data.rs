@@ -1,18 +1,18 @@
 use super::{
+    adapter::{SourceAdapter, collect_sessions},
     compiler::{
+        CapsuleCompiler, DEFAULT_COMPILER_ID, FixtureCapsuleCompiler,
         compile_with_configured_runner, compiler_catalog, default_compiler_id,
         default_rewind_event_id,
     },
     error::CoreError,
+    fixture::FixtureSourceAdapter,
     model::{
         BranchNode, CanonicalTimeline, CapsuleCompileOutput, CapsuleCompileRequest, CliTool,
         SessionStatus, SessionSummary, TimelineEvent, WorkCapsule, WorkbenchData,
     },
     sources,
 };
-
-#[cfg(test)]
-use super::fixture::FixtureSourceAdapter;
 
 pub fn workbench_data(source: CliTool, target: CliTool) -> Result<WorkbenchData, CoreError> {
     let sessions = sessions()?;
@@ -88,6 +88,35 @@ pub fn workbench_data_for_session(
         capsule,
         &source_session_id,
     )))
+}
+
+pub fn fixture_workbench_data(
+    source: CliTool,
+    target: CliTool,
+) -> Result<WorkbenchData, CoreError> {
+    let sessions = fixture_sessions()?;
+    let source_session = sessions
+        .iter()
+        .find(|session| session.cli == source)
+        .cloned()
+        .unwrap_or_else(|| fallback_session(source));
+    let source_session_id = source_session.id.clone();
+    let timeline = fixture_timeline_for_session(&source_session)?;
+    let rewind_event_id = rewind_event_id_for_timeline(&source_session_id, &timeline);
+    let capsule = compile_capsule_for_session_with_fixture_compiler(
+        &source_session,
+        target,
+        &timeline,
+        &rewind_event_id,
+    )?;
+    Ok(build_workbench_data(
+        source,
+        target,
+        sessions,
+        timeline.events,
+        capsule,
+        &source_session_id,
+    ))
 }
 
 fn build_workbench_data(
@@ -282,6 +311,43 @@ fn compile_capsule_for_session(
         timeline: timeline.clone(),
     };
     Ok(compile_with_configured_runner(&request)?.capsule)
+}
+
+fn compile_capsule_for_session_with_fixture_compiler(
+    session: &SessionSummary,
+    target: CliTool,
+    timeline: &CanonicalTimeline,
+    rewind_event_id: &str,
+) -> Result<WorkCapsule, CoreError> {
+    let request = CapsuleCompileRequest {
+        version: 1,
+        source_cli: session.cli,
+        target_cli: target,
+        source_session: session.clone(),
+        rewind_event_id: rewind_event_id.into(),
+        token_budget: 100_000,
+        compiler: DEFAULT_COMPILER_ID.into(),
+        timeline: timeline.clone(),
+    };
+    Ok(FixtureCapsuleCompiler.compile(&request)?.capsule)
+}
+
+fn fixture_sessions() -> Result<Vec<SessionSummary>, CoreError> {
+    let adapters = CliTool::ALL
+        .into_iter()
+        .map(FixtureSourceAdapter::new)
+        .collect::<Vec<_>>();
+    let adapter_refs = adapters
+        .iter()
+        .map(|adapter| adapter as &dyn SourceAdapter)
+        .collect::<Vec<_>>();
+    collect_sessions(&adapter_refs).map_err(CoreError::from)
+}
+
+fn fixture_timeline_for_session(session: &SessionSummary) -> Result<CanonicalTimeline, CoreError> {
+    FixtureSourceAdapter::new(session.cli)
+        .load_timeline(&session.id)
+        .map_err(CoreError::from)
 }
 
 fn rewind_event_id_for_timeline(session_id: &str, timeline: &CanonicalTimeline) -> String {
