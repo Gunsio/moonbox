@@ -84,12 +84,15 @@ pub fn launch_plan(
     let Some(source_session) = selected_session(session_id)? else {
         return Ok(None);
     };
-    let Some(data) = load_workbench_for_session(&source_session.id, target)? else {
+    let Some((source_session, timeline, generated_capsule)) =
+        data::launch_artifacts_for_session_id(&source_session.id, target)?
+    else {
         return Ok(None);
     };
-    let (capsule, capsule_path) = capsule_for_plan(&data.capsule, capsule_path)?;
+    let (capsule, capsule_path) = capsule_for_plan(&generated_capsule, capsule_path)?;
     let command = launch_command(target, &source_session.id, capsule_path.as_deref());
-    let verification = verifier::verify_capsule(&capsule, &source_session, &data.timeline, target);
+    let verification =
+        verifier::verify_capsule(&capsule, &source_session, &timeline.events, target);
 
     Ok(Some(LaunchPlan {
         version: 1,
