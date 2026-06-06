@@ -31,6 +31,9 @@ and this project uses semantic versioning once tagged releases start.
 - Configurable compiler skill presets in `~/.config/moonbox/config.json`.
 - Compiler catalog output through `moonbox compilers`, including source,
   status, score, command, arguments, timeout, and quality reason.
+- Hardened verification checks for Work Capsule version, required fields,
+  handoff context, risk context, capsule size, target branch markers, and
+  execute-time target command preflight.
 - Shared verifier policy for CLI and TUI launch validation.
 - Real `--capsule` file parsing and target mismatch verification.
 - README screenshot, installation notes, and Homebrew release planning docs.
@@ -58,8 +61,9 @@ and this project uses semantic versioning once tagged releases start.
   configuration errors instead of silently compiling through the fixture path.
 - Saving the last selected target now preserves compiler presets and
   `default_compiler` in the user config file.
+- TUI verify status no longer hard-codes the verifier check count.
 
 ### Not Yet Released
 
 - Homebrew formula and release archives are planned but not published.
-- Verifier hardening and replay evaluation are planned.
+- Replay evaluation is planned.

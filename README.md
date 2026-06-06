@@ -116,6 +116,7 @@ The first implementation focuses on the product shell:
 - Target launch dry-run plans with Work Capsule verification reports
 - Single core verifier policy shared by CLI and TUI target validation
 - `--capsule` reads a real Work Capsule JSON file when provided; generated dry-run capsules do not pretend to have a file path
+- Hardened verifier checks for Work Capsule version, required fields, handoff context, risk context, capsule size, target branch markers, and execution command preflight
 - GitHub Actions CI for Rust quality gates and README screenshot validation
 - Dependabot configuration for Cargo and GitHub Actions updates
 - Contributing, security, changelog, issue template, and PR template docs
@@ -263,7 +264,7 @@ Stable interfaces matter more than any single framework:
 
 - `SourceAdapter`: read-only session parsing
 - `CapsuleCompiler`: snapshot to Work Capsule; fixture and process runners exist now
-- `Verifier`: schema, token, capability, and handoff checks; shared by CLI/TUI
+- `Verifier`: schema, token, capability, handoff, size, and execution preflight checks; shared by CLI/TUI
 - `SkillRunner`: JSON input/output compiler skill execution through a process runner
 - `TargetLauncher`: target-specific command construction and guarded process execution
 
@@ -288,10 +289,10 @@ Stable interfaces matter more than any single framework:
 - M14: guarded target launcher execution with `launch --execute`, target-specific Codex/Claude/Hermes command generation, structured `target_command` JSON, binary overrides, verification blocking before spawn, and TUI copy commands that execute through Moonbox.
 - M15: guarded original-session execution with `open --execute`, structured original open plan JSON, source-specific Codex/Claude/Hermes resume commands, corrected Hermes resume command generation, binary overrides, and TUI copy commands that execute through Moonbox.
 - M16: configurable compiler skill presets with `default_compiler`, catalog status/score signals, `moonbox compilers`, environment override precedence, and stricter unknown/disabled compiler errors.
+- M17: verifier hardening with Work Capsule version and required-field checks, handoff-context actionability, risk-context warnings, capsule-size thresholds, stricter target-branch validation, and execute-time target command preflight before spawn.
 
 ### Can Build Now
 
-- Verifier hardening.
 - Replay eval.
 
 ### Prototype Now, Improve With Real Data
