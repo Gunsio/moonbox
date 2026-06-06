@@ -23,10 +23,10 @@ pub enum Command {
     Open(OpenArgs),
     /// Print the current Work Capsule.
     Capsule(JsonArgs),
-    /// Print the compiler request contract fixture.
-    CompileRequest(JsonArgs),
-    /// Print the compiler output contract fixture.
-    CompileOutput(JsonArgs),
+    /// Print the compiler request contract.
+    CompileRequest(CompileArgs),
+    /// Print the compiler output contract.
+    CompileOutput(CompileArgs),
     /// Dry-run a target launch plan and verification report.
     Launch(LaunchArgs),
     /// Verify the selected Work Capsule without launching.
@@ -56,6 +56,15 @@ pub struct TuiArgs {
 pub struct JsonArgs {
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Debug, Args, Clone, Default)]
+pub struct CompileArgs {
+    #[arg(long)]
+    pub json: bool,
+    /// Compiler id to use. Defaults to the configured external compiler or engineering-handoff.
+    #[arg(long)]
+    pub compiler: Option<String>,
 }
 
 #[derive(Debug, Args, Clone)]

@@ -448,9 +448,32 @@ impl App {
 
     fn compile_capsule(&mut self) {
         let compiler = self.data.compilers[self.selected_compiler].clone();
-        self.compile_status = "COMPILED";
-        self.data.capsule.compiler = compiler.clone();
-        self.set_status(format!("Capsule compiled: {compiler}"));
+        let Some(session_id) = self.current_session().map(|session| session.id.clone()) else {
+            self.compile_status = "FAILED";
+            self.set_status("Compile failed: no session selected");
+            self.pending_g = false;
+            return;
+        };
+        match workbench::compile_capsule(
+            &session_id,
+            self.data.target,
+            &self.rewind_event_id,
+            &compiler,
+        ) {
+            Ok(Some(capsule)) => {
+                self.compile_status = "COMPILED";
+                self.data.capsule = capsule;
+                self.set_status(format!("Capsule compiled: {compiler}"));
+            }
+            Ok(None) => {
+                self.compile_status = "FAILED";
+                self.set_status("Compile failed: session not found");
+            }
+            Err(error) => {
+                self.compile_status = "FAILED";
+                self.set_status(format!("Compile failed: {error}"));
+            }
+        }
         self.pending_g = false;
     }
 
@@ -873,6 +896,19 @@ mod tests {
         let first = app.data.capsule.compiler.clone();
         app.handle_key(key('s'));
         assert_ne!(app.data.capsule.compiler, first);
+    }
+
+    #[test]
+    fn compile_key_runs_selected_compiler() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.handle_key(key('s'));
+        let compiler = app.data.capsule.compiler.clone();
+
+        app.handle_key(key('c'));
+
+        assert_eq!(app.compile_status, "COMPILED");
+        assert_eq!(app.data.capsule.compiler, compiler);
+        assert!(app.status_message.contains("Capsule compiled"));
     }
 
     #[test]

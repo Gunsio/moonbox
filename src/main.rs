@@ -76,11 +76,12 @@ fn print_capsule(args: cli::JsonArgs) -> Result<()> {
     Ok(())
 }
 
-fn print_compile_request(args: cli::JsonArgs) -> Result<()> {
+fn print_compile_request(args: cli::CompileArgs) -> Result<()> {
     let request = core::workbench::compile_request(
         core::model::CliTool::Codex,
         core::model::CliTool::Hermes,
         "evt-091",
+        args.compiler.as_deref(),
     )?;
     if args.json {
         println!("{}", serde_json::to_string_pretty(&request)?);
@@ -94,9 +95,12 @@ fn print_compile_request(args: cli::JsonArgs) -> Result<()> {
     Ok(())
 }
 
-fn print_compile_output(args: cli::JsonArgs) -> Result<()> {
-    let output =
-        core::workbench::compile_output(core::model::CliTool::Codex, core::model::CliTool::Hermes)?;
+fn print_compile_output(args: cli::CompileArgs) -> Result<()> {
+    let output = core::workbench::compile_output(
+        core::model::CliTool::Codex,
+        core::model::CliTool::Hermes,
+        args.compiler.as_deref(),
+    )?;
     if args.json {
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {

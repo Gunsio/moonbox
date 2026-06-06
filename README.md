@@ -105,7 +105,8 @@ The first implementation focuses on the product shell:
 - `SourceAdapter` contract and fixture-backed adapter fallback layer
 - Fallible adapter discovery; bad source data returns structured errors instead of panics
 - File-backed adapter fixtures for Codex, Claude, and Hermes session/timeline parsing
-- `CapsuleCompiler` trait with a fixture compiler implementation
+- `CapsuleCompiler` trait with fixture and process-backed compiler implementations
+- External compiler skill runner via `MOONBOX_COMPILER`, JSON stdin/stdout, structured errors, and timeout handling
 - Canonical Timeline and compiler request/output JSON contract fixtures
 - Target launch dry-run plans with Work Capsule verification reports
 - Single core verifier policy shared by CLI and TUI target validation
@@ -134,6 +135,7 @@ cargo run -- open --session <session-id>
 cargo run -- capsule --json
 cargo run -- compile-request --json
 cargo run -- compile-output --json
+cargo run -- compile-output --compiler <compiler-id> --json
 cargo run -- launch --target hermes --session <session-id> --json
 cargo run -- verify --target hermes --session <session-id> --capsule ./capsule.json --json
 cargo run -- verify --target hermes --session hermes-cxcp-502 --json
@@ -141,6 +143,20 @@ cargo run -- verify --target hermes --session hermes-cxcp-502 --json
 
 `open`, `launch`, and `verify` currently print or validate plans; they do not
 resume a real target process.
+
+External compiler skills are optional. When configured, Moonbox sends a
+`CapsuleCompileRequest` JSON object to the process stdin and expects a
+`CapsuleCompileOutput` JSON object on stdout.
+
+```bash
+MOONBOX_COMPILER=/path/to/compiler \
+MOONBOX_COMPILER_ID=engineering-handoff \
+MOONBOX_COMPILER_ARGS='["--mode","handoff"]' \
+MOONBOX_COMPILER_TIMEOUT_MS=30000 \
+cargo run -- compile-output --compiler engineering-handoff --json
+```
+
+Without `MOONBOX_COMPILER`, Moonbox uses the built-in fixture compiler.
 
 ## Interaction Model
 
@@ -204,9 +220,9 @@ Source Adapter -> Canonical Timeline -> Rewind Engine
 Stable interfaces matter more than any single framework:
 
 - `SourceAdapter`: read-only session parsing
-- `CapsuleCompiler`: snapshot to Work Capsule; fixture compiler exists now
+- `CapsuleCompiler`: snapshot to Work Capsule; fixture and process runners exist now
 - `Verifier`: schema, token, capability, and handoff checks; shared by CLI/TUI
-- `SkillRunner`: JSON input/output compiler skill execution, next real backend
+- `SkillRunner`: JSON input/output compiler skill execution through a process runner
 - `TargetLauncher`: create target CLI new branch, next real backend
 
 ## TODO
@@ -224,11 +240,11 @@ Stable interfaces matter more than any single framework:
 - M8: open-source hygiene with CI, dependency automation, contribution docs, security policy, changelog, and GitHub templates.
 - M9: real Codex `SourceAdapter` for `~/.codex/sessions`, runtime source registry, and bounded real-session discovery.
 - M10: source architecture hardening with `WorkbenchData` naming, non-demo workbench APIs, and unbounded explicit Codex session lookup.
+- M11: process-backed compiler skill runner with JSON stdin/stdout contract, timeout/failure handling, CLI `--compiler`, and real TUI compile action.
 
 ### Can Build Now
 
 - Real Claude / Hermes Source Adapter implementations.
-- Real SkillRunner execution behind `CapsuleCompiler`.
 - Real target launcher execution behind the existing dry-run plan.
 
 ### Prototype Now, Improve With Real Data
