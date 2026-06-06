@@ -5,7 +5,7 @@ use crate::core::{
     error::CoreError,
     model::{
         CliTool, DoctorReport, LaunchValidation, LaunchValidationState, SessionSummary,
-        WorkbenchData,
+        VerificationReport, WorkCapsule, WorkbenchData,
     },
     verifier, workbench,
 };
@@ -906,14 +906,28 @@ impl App {
     }
 
     pub fn validate_launch_for_target(&self, target: CliTool) -> LaunchValidation {
-        let Some(session) = self.current_session() else {
+        let Some(report) = self.launch_verification_for_target(target) else {
             return LaunchValidation::blocked(vec!["No session selected".into()]);
         };
+        verifier::validation_from_report(&report)
+    }
 
+    pub fn launch_verification_for_target(&self, target: CliTool) -> Option<VerificationReport> {
+        let session = self.current_session()?;
+        let capsule = self.launch_capsule_for_target(target);
+        Some(verifier::verify_capsule(
+            &capsule,
+            session,
+            &self.data.timeline,
+            target,
+        ))
+    }
+
+    fn launch_capsule_for_target(&self, target: CliTool) -> WorkCapsule {
         let mut capsule = self.data.capsule.clone();
         capsule.target_cli = target;
         capsule.target_branch = format!("moonbox/{}-rewind-{}", target.id(), self.rewind_event_id);
-        verifier::validate_launch(&capsule, session, &self.data.timeline, target)
+        capsule
     }
 
     fn apply_rewind_event(&mut self, id: String, title: String) {
@@ -1171,9 +1185,15 @@ mod tests {
         let app = new_app(CliTool::Codex, CliTool::Codex);
 
         let validation = app.validate_launch_for_target(CliTool::Codex);
+        let report = app
+            .launch_verification_for_target(CliTool::Codex)
+            .expect("launch verification");
 
         assert_eq!(validation.state, LaunchValidationState::Warning);
         assert!(validation.summary().contains("Same-CLI handoff"));
+        assert!(report.checks.iter().any(|check| {
+            check.name == "target_support" && check.detail.contains("Same-CLI handoff")
+        }));
     }
 
     #[test]

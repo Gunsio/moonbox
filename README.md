@@ -126,6 +126,7 @@ The first implementation focuses on the product shell:
   `original_resume` for `open`, `target_handoff` for `launch`
 - Target selection lives inside the launch flow, with explicit `> [x]` radio-list selection
 - Target picker validates each target as `READY`, `WARN`, or `BLOCKED`; blocked targets cannot confirm or copy launch commands
+- Target picker and Launch Review show verifier-backed readiness rows so users can see the exact PASS/WARN/FAIL signal behind each target state
 - Target handoff uses a two-stage TUI flow: choose target, review the execute command, then press `y` to copy it
 - Last confirmed target is persisted in `~/.config/moonbox/config.json`
 - Real Codex, Claude, and Hermes timeline parsing
@@ -310,10 +311,12 @@ review panel; only that panel exposes the copyable execute command. Pressing
 visible and annotates each option with `READY`, `WARN`, or `BLOCKED`; blocked
 targets keep launch review disabled until validation passes. The picker uses
 the same verifier policy as the CLI, so `moon verify` and the TUI cannot
-disagree on target readiness. Press `D` or run `:doctor` to open the
-environment Doctor panel; `r` refreshes diagnostics and `y` copies the JSON
-report. The panel is read-only and does not load timelines, resume sessions,
-launch targets, or spawn target binaries.
+disagree on target readiness. The selected target also shows readiness detail
+rows from the verifier report, with blocking failures and warnings prioritized
+over pass checks. Press `D` or run `:doctor` to open the environment Doctor
+panel; `r` refreshes diagnostics and `y` copies the JSON report. The panel is
+read-only and does not load timelines, resume sessions, launch targets, or
+spawn target binaries.
 
 Session search matches id, title, cwd, source, branch, and health reason. When a
 different session becomes selected by movement, source filter, or search,
@@ -420,11 +423,10 @@ Stable interfaces matter more than any single framework:
 - M32: explicit fixture session mode through `MOONBOX_SESSION_MODE=fixture`, surfaced in Doctor diagnostics and wired into smoke scripts to prevent accidental real-session discovery.
 - M33: action intent hardening with `original_resume` / `target_handoff` dry-run discriminators, two-stage TUI launch review, original-preview copy-only behavior, and contract/render tests for both paths.
 - M34: fixture replay corpus expansion with 9 source-target matrix cases plus 3 synthetic regressions for target mismatch, oversized capsule, and missing-tool preflight; replay output now includes case kind, scenario, capsule target, coverage rows, and updated fixture-safe CLI smoke/contract checks.
+- M35: target readiness explanation rows in the TUI launch picker and Launch Review, backed by verifier report checks with FAIL/WARN priority, READY pass-check context, corrected launch key hints, and render/App tests for blocked, warning, and ready states.
 
 ### Can Build Now
 
-- Add target readiness explanation rows in the TUI using existing verifier
-  signals, without reading or launching real sessions.
 - Finalize README screenshots and install docs for the pre-release branch.
 
 ### Prototype Now, Improve With Real Data
