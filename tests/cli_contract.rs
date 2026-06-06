@@ -140,8 +140,18 @@ fn replay_eval_cli_contract_is_fixture_only() {
     assert_eq!(report["fixture_only"], true);
     assert_eq!(report["source_count"], 3);
     assert_eq!(report["target_count"], 3);
-    assert_eq!(report["case_count"], 9);
+    assert_eq!(report["matrix_case_count"], 9);
+    assert_eq!(report["synthetic_case_count"], 3);
+    assert_eq!(report["case_count"], 12);
+    assert_eq!(report["coverage_count"], 5);
     assert_eq!(report["pipeline_passed"], true);
+    assert!(
+        report["coverage"]
+            .as_array()
+            .expect("coverage")
+            .iter()
+            .all(|coverage| coverage["covered"] == true)
+    );
 }
 
 #[test]

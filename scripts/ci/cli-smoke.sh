@@ -75,6 +75,11 @@ grep -q '"status": "pass"' "$output_dir/verify.json"
 
 "$moonbox" replay-eval --json > "$output_dir/replay-eval.json"
 grep -q '"fixture_only": true' "$output_dir/replay-eval.json"
-grep -q '"case_count": 9' "$output_dir/replay-eval.json"
+grep -q '"matrix_case_count": 9' "$output_dir/replay-eval.json"
+grep -q '"synthetic_case_count": 3' "$output_dir/replay-eval.json"
+grep -q '"case_count": 12' "$output_dir/replay-eval.json"
+grep -q '"target_mismatch"' "$output_dir/replay-eval.json"
+grep -q '"oversized_capsule"' "$output_dir/replay-eval.json"
+grep -q '"missing_tool_preflight"' "$output_dir/replay-eval.json"
 
 echo "moonbox CLI smoke passed with fixture-only source homes at $smoke_home"
