@@ -48,6 +48,7 @@ and this project uses semantic versioning once tagged releases start.
 - Fixture-safe integration tests for public CLI contracts across `moonbox` and
   `moon` binaries.
 - Documentation build gate with rustdoc warnings treated as errors.
+- Full local quality gate script for patch hygiene plus CI/release checks.
 - Shared verifier policy for CLI and TUI launch validation.
 - Real `--capsule` file parsing and target mismatch verification.
 - README screenshot, installation notes, and Homebrew release planning docs.

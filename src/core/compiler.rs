@@ -725,10 +725,18 @@ fn session_profile(session_id: &str) -> (&'static str, &'static str, Vec<String>
 mod tests {
     use super::*;
     use crate::core::{data, model::CliTool};
-    use std::{fs, path::PathBuf, time::Duration};
+    use std::{
+        fs,
+        path::PathBuf,
+        sync::atomic::{AtomicUsize, Ordering},
+        time::{Duration, SystemTime, UNIX_EPOCH},
+    };
 
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+
+    #[cfg(unix)]
+    static SCRIPT_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
     #[test]
     fn fixture_compiler_rejects_missing_rewind() {
@@ -960,10 +968,17 @@ JSON
 
     #[cfg(unix)]
     fn executable_script(name: &str, contents: &str) -> PathBuf {
-        let path = std::env::temp_dir().join(format!(
-            "moonbox-process-compiler-{name}-{}.sh",
+        let unique = SCRIPT_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "moonbox-process-compiler-{name}-{}-{nanos}-{unique}",
             std::process::id()
         ));
+        fs::create_dir_all(&dir).expect("script dir");
+        let path = dir.join("compiler.sh");
         fs::write(&path, contents).expect("script");
         let mut permissions = fs::metadata(&path).expect("metadata").permissions();
         permissions.set_mode(0o755);

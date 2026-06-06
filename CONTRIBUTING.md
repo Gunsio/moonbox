@@ -19,6 +19,18 @@ cargo run --locked -- tui
 Run these before opening a pull request:
 
 ```bash
+scripts/ci/full-gate.sh
+```
+
+The full gate runs patch hygiene plus the CI/release checks. It expects a clean
+worktree for `cargo package --locked`; during pre-commit iteration you can use
+`MOONBOX_PACKAGE_ALLOW_DIRTY=1 scripts/ci/full-gate.sh`, then run it again
+without the override after committing.
+
+Expanded gates:
+
+```bash
+git diff --check
 cargo fmt --check
 cargo check --locked
 cargo test --locked
