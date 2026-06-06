@@ -11,8 +11,10 @@ Describe the change and why it matters.
 - [ ] `cargo fmt --check`
 - [ ] `cargo check`
 - [ ] `cargo test`
+- [ ] `cargo run --locked -- replay-eval --json`
 - [ ] `cargo clippy -- -D warnings`
 - [ ] `cargo build --release`
+- [ ] `cargo package --locked`
 
 ## Documentation
 

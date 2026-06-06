@@ -37,6 +37,8 @@ and this project uses semantic versioning once tagged releases start.
 - Fixture-only replay evaluation through `moonbox replay-eval`, covering every
   Codex/Claude/Hermes source-target pair without scanning or opening local
   session stores.
+- CI gates for fixture replay evaluation and `cargo package --locked`
+  verification.
 - Shared verifier policy for CLI and TUI launch validation.
 - Real `--capsule` file parsing and target mismatch verification.
 - README screenshot, installation notes, and Homebrew release planning docs.
