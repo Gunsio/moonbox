@@ -21,6 +21,7 @@ fn main() -> Result<()> {
         Command::Compilers(args) => print_compilers(args),
         Command::Launch(args) => print_launch_plan(args),
         Command::Verify(args) => print_verify_report(args),
+        Command::ReplayEval(args) => print_replay_eval(args),
     }
 }
 
@@ -237,6 +238,40 @@ fn print_verify_report(args: cli::LaunchArgs) -> Result<()> {
     Ok(())
 }
 
+fn print_replay_eval(args: cli::JsonArgs) -> Result<()> {
+    let report = core::replay_eval::evaluate_fixture_replay()?;
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("replay-eval: fixture-only");
+        println!("compiler: {}", report.compiler);
+        println!(
+            "cases: {} source(s) x {} target(s) = {}",
+            report.source_count, report.target_count, report.case_count
+        );
+        println!(
+            "pipeline: {}",
+            replay_pipeline_status(report.pipeline_passed)
+        );
+        println!(
+            "status: PASS {} / WARN {} / FAIL {}",
+            report.status_counts.pass, report.status_counts.warn, report.status_counts.fail
+        );
+        for case in report.cases {
+            println!(
+                "- {} -> {} {} session={} rewind={} checks={}",
+                case.source_cli,
+                case.target_cli,
+                case.status,
+                case.source_session,
+                case.rewind_event_id,
+                case.check_count
+            );
+        }
+    }
+    Ok(())
+}
+
 fn launch_target(target: Option<core::model::CliTool>) -> core::model::CliTool {
     target
         .or_else(core::config::load_last_target)
@@ -248,6 +283,10 @@ fn launch_status(status: core::model::LaunchExecutionStatus) -> &'static str {
         core::model::LaunchExecutionStatus::Success => "success",
         core::model::LaunchExecutionStatus::Failed => "failed",
     }
+}
+
+fn replay_pipeline_status(passed: bool) -> &'static str {
+    if passed { "passed" } else { "failed" }
 }
 
 fn print_checks(checks: &[core::model::VerificationCheck]) {

@@ -33,6 +33,8 @@ pub enum Command {
     Launch(LaunchArgs),
     /// Verify the selected Work Capsule without launching.
     Verify(LaunchArgs),
+    /// Replay embedded fixtures through compile and verify without opening sessions.
+    ReplayEval(JsonArgs),
 }
 
 impl Default for Command {

@@ -34,6 +34,9 @@ and this project uses semantic versioning once tagged releases start.
 - Hardened verification checks for Work Capsule version, required fields,
   handoff context, risk context, capsule size, target branch markers, and
   execute-time target command preflight.
+- Fixture-only replay evaluation through `moonbox replay-eval`, covering every
+  Codex/Claude/Hermes source-target pair without scanning or opening local
+  session stores.
 - Shared verifier policy for CLI and TUI launch validation.
 - Real `--capsule` file parsing and target mismatch verification.
 - README screenshot, installation notes, and Homebrew release planning docs.
@@ -66,4 +69,3 @@ and this project uses semantic versioning once tagged releases start.
 ### Not Yet Released
 
 - Homebrew formula and release archives are planned but not published.
-- Replay evaluation is planned.
