@@ -28,6 +28,7 @@ and this project uses semantic versioning once tagged releases start.
   `target_command` plan output.
 - Guarded original-session execution through `open --execute`.
 - Structured original open plan output through `open --json`.
+- First-class `moon` binary alias installed alongside `moonbox`.
 - Configurable compiler skill presets in `~/.config/moonbox/config.json`.
 - Compiler catalog output through `moonbox compilers`, including source,
   status, score, command, arguments, timeout, and quality reason.
@@ -69,6 +70,8 @@ and this project uses semantic versioning once tagged releases start.
 - Saving the last selected target now preserves compiler presets and
   `default_compiler` in the user config file.
 - TUI verify status no longer hard-codes the verifier check count.
+- CLI runtime now lives behind a shared library entrypoint used by both
+  `moonbox` and `moon`.
 
 ### Not Yet Released
 

@@ -49,11 +49,11 @@ class Moonbox < Formula
 
   def install
     system "cargo", "install", *std_cargo_args
-    bin.install_symlink bin/"moonbox" => "moon"
   end
 
   test do
     assert_match "moonbox", shell_output("#{bin}/moonbox --version")
+    assert_match "moonbox", shell_output("#{bin}/moon --version")
   end
 end
 ```
