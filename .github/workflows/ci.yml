@@ -58,6 +58,9 @@ jobs:
       - name: Run fixture replay evaluation
         run: cargo run --locked -- replay-eval --json
 
+      - name: Run fixture-safe CLI smoke
+        run: scripts/ci/cli-smoke.sh
+
       - name: Run clippy
         run: cargo clippy --locked -- -D warnings
 

@@ -39,6 +39,8 @@ and this project uses semantic versioning once tagged releases start.
   session stores.
 - CI gates for fixture replay evaluation and `cargo package --locked`
   verification.
+- Fixture-safe CLI smoke script for non-executing command surfaces, with source
+  homes redirected away from real local session stores.
 - Shared verifier policy for CLI and TUI launch validation.
 - Real `--capsule` file parsing and target mismatch verification.
 - README screenshot, installation notes, and Homebrew release planning docs.

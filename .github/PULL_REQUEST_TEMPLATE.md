@@ -12,6 +12,7 @@ Describe the change and why it matters.
 - [ ] `cargo check`
 - [ ] `cargo test`
 - [ ] `cargo run --locked -- replay-eval --json`
+- [ ] `scripts/ci/cli-smoke.sh`
 - [ ] `cargo clippy -- -D warnings`
 - [ ] `cargo build --release`
 - [ ] `cargo package --locked`
