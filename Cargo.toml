@@ -5,6 +5,11 @@ edition = "2024"
 description = "Cross-CLI session rewind workbench"
 license = "MIT"
 repository = "https://github.com/Gunsio/moonbox"
+homepage = "https://github.com/Gunsio/moonbox"
+readme = "README.md"
+keywords = ["cli", "tui", "ai", "handoff", "session"]
+categories = ["command-line-utilities", "development-tools"]
+rust-version = "1.88"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
@@ -13,4 +18,3 @@ crossterm = "0.29"
 ratatui = "0.30"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-
