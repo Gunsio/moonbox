@@ -9,13 +9,14 @@ Describe the change and why it matters.
 ## Verification
 
 - [ ] `cargo fmt --check`
-- [ ] `cargo check`
+- [ ] `cargo check --locked`
 - [ ] `cargo test`
 - [ ] `cargo run --locked -- replay-eval --json`
 - [ ] `scripts/ci/cli-smoke.sh`
-- [ ] `cargo clippy -- -D warnings`
-- [ ] `cargo build --release`
+- [ ] `cargo clippy --locked -- -D warnings`
+- [ ] `cargo build --release --locked`
 - [ ] `cargo package --locked`
+- [ ] `scripts/ci/install-smoke.sh`
 
 ## Documentation
 

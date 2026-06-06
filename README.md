@@ -30,7 +30,7 @@ Requires Rust 1.88 or newer.
 ```bash
 git clone https://github.com/Gunsio/moonbox.git
 cd moonbox
-cargo run -- tui
+cargo run --locked -- tui
 ```
 
 For local development:
@@ -41,9 +41,10 @@ cargo check --locked
 cargo test --locked
 cargo run --locked -- replay-eval --json
 scripts/ci/cli-smoke.sh
-cargo clippy -- -D warnings
+cargo clippy --locked -- -D warnings
 cargo build --release --locked
 cargo package --locked
+scripts/ci/install-smoke.sh
 ```
 
 ### Homebrew
@@ -67,9 +68,10 @@ checklist and formula shape.
 - [Homebrew release notes](docs/release/homebrew.md)
 
 Pull requests are expected to pass formatting, check, test, fixture replay
-eval, fixture-safe CLI smoke, clippy, release build, and package verification
-gates. GitHub Actions runs the same Rust quality gates and validates the README
-screenshot asset.
+eval, fixture-safe CLI smoke, clippy, release build, package verification, and
+install smoke gates. GitHub Actions runs the same Rust quality gates and
+validates the README screenshot asset. Smoke gates redirect source homes to
+`target/` and never open or resume real local sessions.
 
 ## Current State
 
@@ -115,7 +117,7 @@ The first implementation focuses on the product shell:
 - Hardened verifier checks for Work Capsule version, required fields, handoff context, risk context, capsule size, target branch markers, and execution command preflight
 - First-class `moon` binary alias installed alongside `moonbox`
 - Deterministic fixture-only replay eval for the Codex/Claude/Hermes source-target matrix
-- GitHub Actions CI for Rust quality gates, fixture replay eval, fixture-safe CLI smoke, package verification, and README screenshot validation
+- GitHub Actions CI for Rust quality gates, fixture replay eval, fixture-safe CLI smoke, package verification, install smoke, and README screenshot validation
 - Dependabot configuration for Cargo and GitHub Actions updates
 - Contributing, security, changelog, issue template, and PR template docs
 
@@ -297,6 +299,7 @@ Stable interfaces matter more than any single framework:
 - M19: release gate hardening with fixture replay eval and `cargo package --locked` wired into GitHub Actions and the PR verification checklist.
 - M20: fixture-safe CLI command smoke gate that overrides source homes to `target/moonbox-smoke-home`, validates non-executing command surfaces, and runs in GitHub Actions plus the PR checklist.
 - M21: first-class `moon` binary alias via a shared library entrypoint, preserving `cargo run` default behavior and adding smoke coverage for the alias.
+- M22: fixture-safe install smoke gate that runs `cargo install --path . --root target/moonbox-install-smoke --locked --offline --force`, verifies installed `moonbox` and `moon`, and checks installed `moon replay-eval --json` without scanning or opening real sessions.
 
 ### Can Build Now
 
