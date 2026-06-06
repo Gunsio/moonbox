@@ -2,7 +2,10 @@ use std::{env, fs, path::Path};
 
 use super::{
     compiler, config, launcher,
-    model::{CliTool, CompilerPresetStatus, DoctorReport, VerificationCheck, VerificationStatus},
+    model::{
+        CliTool, CompilerPresetStatus, DoctorReport, SessionSummary, VerificationCheck,
+        VerificationStatus,
+    },
     workbench,
 };
 
@@ -13,6 +16,20 @@ pub fn diagnose() -> DoctorReport {
     checks.extend(CliTool::ALL.into_iter().map(target_binary_check));
     checks.push(compiler_catalog_check());
 
+    report(checks)
+}
+
+pub fn diagnose_with_session_summaries(sessions: &[SessionSummary]) -> DoctorReport {
+    let mut checks = Vec::new();
+    checks.push(config_check());
+    checks.push(session_summaries_check(sessions));
+    checks.extend(CliTool::ALL.into_iter().map(target_binary_check));
+    checks.push(compiler_catalog_check());
+
+    report(checks)
+}
+
+fn report(checks: Vec<VerificationCheck>) -> DoctorReport {
     let status = overall_status(&checks);
     DoctorReport {
         version: 1,
@@ -61,39 +78,44 @@ fn config_check() -> VerificationCheck {
 
 fn session_discovery_check() -> VerificationCheck {
     match workbench::list_sessions() {
-        Ok(sessions) if sessions.is_empty() => check(
-            "session_discovery",
-            VerificationStatus::Warn,
-            "no sessions discovered from configured source homes",
-        ),
-        Ok(sessions) => {
-            let codex = sessions
-                .iter()
-                .filter(|session| session.cli == CliTool::Codex)
-                .count();
-            let claude = sessions
-                .iter()
-                .filter(|session| session.cli == CliTool::Claude)
-                .count();
-            let hermes = sessions
-                .iter()
-                .filter(|session| session.cli == CliTool::Hermes)
-                .count();
-            check(
-                "session_discovery",
-                VerificationStatus::Pass,
-                format!(
-                    "{} session summaries discovered; codex={codex}, claude={claude}, hermes={hermes}",
-                    sessions.len()
-                ),
-            )
-        }
+        Ok(sessions) => session_summaries_check(&sessions),
         Err(error) => check(
             "session_discovery",
             VerificationStatus::Fail,
             format!("cannot list session summaries: {error}"),
         ),
     }
+}
+
+fn session_summaries_check(sessions: &[SessionSummary]) -> VerificationCheck {
+    if sessions.is_empty() {
+        return check(
+            "session_discovery",
+            VerificationStatus::Warn,
+            "no sessions discovered from configured source homes",
+        );
+    }
+
+    let codex = sessions
+        .iter()
+        .filter(|session| session.cli == CliTool::Codex)
+        .count();
+    let claude = sessions
+        .iter()
+        .filter(|session| session.cli == CliTool::Claude)
+        .count();
+    let hermes = sessions
+        .iter()
+        .filter(|session| session.cli == CliTool::Hermes)
+        .count();
+    check(
+        "session_discovery",
+        VerificationStatus::Pass,
+        format!(
+            "{} session summaries discovered; codex={codex}, claude={claude}, hermes={hermes}",
+            sessions.len()
+        ),
+    )
 }
 
 fn target_binary_check(target: CliTool) -> VerificationCheck {

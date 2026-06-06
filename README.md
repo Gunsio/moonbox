@@ -136,6 +136,8 @@ The first implementation focuses on the product shell:
 - Shell completion generation for `moonbox` and `moon`
 - Non-executing `doctor` diagnostics for config, session discovery, target
   binaries, and compiler catalog readiness
+- TUI Doctor panel with refresh and JSON copy for the same non-executing
+  diagnostics
 - Deterministic fixture-only replay eval for the Codex/Claude/Hermes source-target matrix
 - Fixture-safe public CLI contract tests for the installed `moonbox` and `moon` command surfaces
 - Full local quality gate through `scripts/ci/full-gate.sh`
@@ -263,7 +265,10 @@ changing the saved target. The picker keeps every target visible and annotates
 each option with `READY`, `WARN`, or `BLOCKED`; blocked targets keep the launch
 command disabled until validation passes. The picker uses the same verifier
 policy as the CLI, so `moon verify` and the TUI cannot disagree on target
-readiness.
+readiness. Press `D` or run `:doctor` to open the environment Doctor panel;
+`r` refreshes diagnostics and `y` copies the JSON report. The panel is
+read-only and does not load timelines, resume sessions, launch targets, or
+spawn target binaries.
 
 Session search matches id, title, cwd, source, branch, and health reason. When a
 different session becomes selected by movement, source filter, or search,
