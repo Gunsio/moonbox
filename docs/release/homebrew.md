@@ -49,11 +49,15 @@ class Moonbox < Formula
 
   def install
     system "cargo", "install", *std_cargo_args
+    generate_completions_from_executable(bin/"moonbox", "completions")
+    generate_completions_from_executable(bin/"moon", "completions")
   end
 
   test do
     assert_match "moonbox", shell_output("#{bin}/moonbox --version")
     assert_match "moonbox", shell_output("#{bin}/moon --version")
+    assert_match "replay-eval", shell_output("#{bin}/moonbox completions bash")
+    assert_match "complete -c moon", shell_output("#{bin}/moon completions fish")
   end
 end
 ```

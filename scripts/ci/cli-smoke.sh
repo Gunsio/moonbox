@@ -28,6 +28,14 @@ grep -q "replay-eval" "$output_dir/help.txt"
 "$moon" --help > "$output_dir/moon-help.txt"
 grep -q "replay-eval" "$output_dir/moon-help.txt"
 
+"$moonbox" completions bash > "$output_dir/moonbox.bash"
+grep -q "_moonbox" "$output_dir/moonbox.bash"
+grep -q "replay-eval" "$output_dir/moonbox.bash"
+
+"$moon" completions fish > "$output_dir/moon.fish"
+grep -q "complete -c moon" "$output_dir/moon.fish"
+grep -q "completions" "$output_dir/moon.fish"
+
 "$moonbox" sessions --json > "$output_dir/sessions.json"
 grep -q "codex-cxcp-design" "$output_dir/sessions.json"
 grep -q "claude-qc-platform" "$output_dir/sessions.json"

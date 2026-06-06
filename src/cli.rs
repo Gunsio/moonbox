@@ -1,4 +1,5 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap_complete::Shell;
 
 use crate::core::model::CliTool;
 
@@ -29,6 +30,8 @@ pub enum Command {
     CompileOutput(CompileArgs),
     /// List configured compiler skill presets.
     Compilers(JsonArgs),
+    /// Generate shell completion scripts.
+    Completions(CompletionsArgs),
     /// Dry-run a target launch plan and verification report.
     Launch(LaunchArgs),
     /// Verify the selected Work Capsule without launching.
@@ -69,6 +72,31 @@ pub struct CompileArgs {
     /// Compiler id to use. Defaults to the configured external compiler or engineering-handoff.
     #[arg(long)]
     pub compiler: Option<String>,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct CompletionsArgs {
+    /// Shell to generate completions for.
+    #[arg(value_enum)]
+    pub shell: Shell,
+    /// Binary name to generate completions for. Defaults to the invoked binary.
+    #[arg(long = "bin", value_enum)]
+    pub binary: Option<CompletionBinary>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum CompletionBinary {
+    Moonbox,
+    Moon,
+}
+
+impl CompletionBinary {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Moonbox => "moonbox",
+            Self::Moon => "moon",
+        }
+    }
 }
 
 #[derive(Debug, Args, Clone)]
