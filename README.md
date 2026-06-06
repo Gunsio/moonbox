@@ -33,6 +33,8 @@ moon --version
 
 ### Source Checkout
 
+Requires Rust 1.88 or newer.
+
 ```bash
 git clone https://github.com/Gunsio/moonbox.git
 cd moonbox
@@ -43,8 +45,10 @@ For local development:
 
 ```bash
 cargo fmt --check
+cargo check
 cargo test
 cargo clippy -- -D warnings
+cargo build --release
 ```
 
 ### Homebrew
@@ -59,6 +63,17 @@ brew install moonbox
 
 See [docs/release/homebrew.md](docs/release/homebrew.md) for the release
 checklist and formula shape.
+
+## Project Standards
+
+- [Contributing guide](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [Changelog](CHANGELOG.md)
+- [Homebrew release notes](docs/release/homebrew.md)
+
+Pull requests are expected to pass formatting, check, test, clippy, and release
+build gates. GitHub Actions runs the same Rust quality gates and validates the
+README screenshot asset.
 
 ## Current State
 
@@ -90,6 +105,9 @@ The first implementation focuses on the product shell:
 - Target launch dry-run plans with Work Capsule verification reports
 - Single core verifier policy shared by CLI and TUI target validation
 - `--capsule` reads a real Work Capsule JSON file when provided; generated dry-run capsules do not pretend to have a file path
+- GitHub Actions CI for Rust quality gates and README screenshot validation
+- Dependabot configuration for Cargo and GitHub Actions updates
+- Contributing, security, changelog, issue template, and PR template docs
 
 ## Run
 
@@ -194,6 +212,7 @@ Stable interfaces matter more than any single framework:
 - M5: file-backed adapter fixture snapshots for Codex, Claude, and Hermes session/timeline parsing.
 - M6: target launcher dry-run plus Work Capsule verification loop.
 - M7: core boundary hardening with fallible adapters, shared verifier policy, real `--capsule` file validation, and a `CapsuleCompiler` trait.
+- M8: open-source hygiene with CI, dependency automation, contribution docs, security policy, changelog, and GitHub templates.
 
 ### Can Build Now
 
