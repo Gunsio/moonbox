@@ -85,13 +85,15 @@ The first implementation focuses on the product shell:
 - Time-sorted global session list with source tags
 - Real Codex session discovery from `~/.codex/sessions`
 - Runtime Codex home override via `MOONBOX_CODEX_HOME` or `CODEX_HOME`
-- Runtime Codex list limit defaults to the newest 200 sessions; explicit session lookup still searches the full Codex store
-- Set `MOONBOX_SESSION_LIMIT=0` for unlimited Codex list discovery
+- Real Claude session discovery from `~/.claude/projects`
+- Runtime Claude home override via `MOONBOX_CLAUDE_HOME` or `CLAUDE_HOME`
+- Runtime list limit defaults to the newest 200 sessions per real adapter; explicit session lookup still searches the full store
+- Set `MOONBOX_SESSION_LIMIT=0` for unlimited real-session list discovery
 - Source filter defaults to `All`; `Source` is a session-list filter, not a global handoff mode
 - Target selection lives inside the launch flow, with explicit `> [x]` radio-list selection
 - Target picker validates each target as `READY`, `WARN`, or `BLOCKED`; blocked targets cannot confirm or copy launch commands
 - Last confirmed target is persisted in `~/.config/moonbox/config.json`
-- Real Codex timeline parsing plus fixture-backed Claude/Hermes sessions
+- Real Codex and Claude timeline parsing plus fixture-backed Hermes sessions
 - Original-session open command, Work Capsule, and branch tree previews
 - Live `/` session search, combined filter display, and one-key clear with `a`
 - Selected/filtered session drives timeline, Work Capsule, branch preview, token budget, and default rewind point
@@ -241,10 +243,11 @@ Stable interfaces matter more than any single framework:
 - M9: real Codex `SourceAdapter` for `~/.codex/sessions`, runtime source registry, and bounded real-session discovery.
 - M10: source architecture hardening with `WorkbenchData` naming, non-demo workbench APIs, and unbounded explicit Codex session lookup.
 - M11: process-backed compiler skill runner with JSON stdin/stdout contract, timeout/failure handling, CLI `--compiler`, and real TUI compile action.
+- M12: real Claude `SourceAdapter` for `~/.claude/projects`, shared local JSONL adapter utilities, bounded Claude discovery, unbounded explicit Claude session lookup, and real Claude timeline parsing.
 
 ### Can Build Now
 
-- Real Claude / Hermes Source Adapter implementations.
+- Real Hermes Source Adapter implementation.
 - Real target launcher execution behind the existing dry-run plan.
 
 ### Prototype Now, Improve With Real Data
@@ -254,7 +257,7 @@ Stable interfaces matter more than any single framework:
 
 ### Best After Real Session Data
 
-- Real session discovery for Claude and Hermes.
+- Real session discovery for Hermes.
 - Target compatibility checks, disabled target options, and human-readable incompatibility reasons.
 - Token budget and compression strategy previews.
 - Tool-call, attachment, git diff, and compact-point restoration status.
