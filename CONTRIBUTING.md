@@ -11,7 +11,7 @@ Moonbox requires Rust 1.88 or newer.
 ```bash
 git clone https://github.com/Gunsio/moonbox.git
 cd moonbox
-cargo run -- tui
+cargo run --locked -- tui
 ```
 
 ## Required Checks
@@ -20,11 +20,19 @@ Run these before opening a pull request:
 
 ```bash
 cargo fmt --check
-cargo check
-cargo test
-cargo clippy -- -D warnings
-cargo build --release
+cargo check --locked
+cargo test --locked
+cargo run --locked -- replay-eval --json
+scripts/ci/cli-smoke.sh
+cargo clippy --locked -- -D warnings
+cargo build --release --locked
+cargo package --locked
+scripts/ci/install-smoke.sh
 ```
+
+`cargo test --locked` includes public CLI contract tests for the actual
+`moonbox` and `moon` binaries. Those tests redirect source homes into
+`target/cli-contract-home` and must stay fixture-safe.
 
 For README screenshot changes:
 
@@ -44,6 +52,8 @@ xmllint --noout docs/assets/moonbox-tui.svg
   and impossible invariants.
 - Keep fixture data deterministic and representative enough to protect future
   real adapters.
+- Keep tests and smoke scripts from opening or resuming recent active sessions.
+  Use explicit fixture homes or embedded fixtures for automated checks.
 - Update README and the Feishu plan whenever public behavior, install commands,
   release state, or architecture milestones change.
 

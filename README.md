@@ -117,6 +117,7 @@ The first implementation focuses on the product shell:
 - Hardened verifier checks for Work Capsule version, required fields, handoff context, risk context, capsule size, target branch markers, and execution command preflight
 - First-class `moon` binary alias installed alongside `moonbox`
 - Deterministic fixture-only replay eval for the Codex/Claude/Hermes source-target matrix
+- Fixture-safe public CLI contract tests for the installed `moonbox` and `moon` command surfaces
 - GitHub Actions CI for Rust quality gates, fixture replay eval, fixture-safe CLI smoke, package verification, install smoke, and README screenshot validation
 - Dependabot configuration for Cargo and GitHub Actions updates
 - Contributing, security, changelog, issue template, and PR template docs
@@ -300,6 +301,7 @@ Stable interfaces matter more than any single framework:
 - M20: fixture-safe CLI command smoke gate that overrides source homes to `target/moonbox-smoke-home`, validates non-executing command surfaces, and runs in GitHub Actions plus the PR checklist.
 - M21: first-class `moon` binary alias via a shared library entrypoint, preserving `cargo run` default behavior and adding smoke coverage for the alias.
 - M22: fixture-safe install smoke gate that runs `cargo install --path . --root target/moonbox-install-smoke --locked --offline --force`, verifies installed `moonbox` and `moon`, and checks installed `moon replay-eval --json` without scanning or opening real sessions.
+- M23: fixture-safe integration tests for public CLI contracts, covering `moonbox`/`moon` version parity, fixture-only replay eval, fixture fallback session listing, and dry-run open/launch/verify JSON behavior.
 
 ### Can Build Now
 
