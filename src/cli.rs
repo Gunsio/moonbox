@@ -73,7 +73,7 @@ pub struct LaunchArgs {
     /// Target CLI. Defaults to the last confirmed target.
     #[arg(long, value_enum)]
     pub target: Option<CliTool>,
-    /// Capsule path to validate. Defaults to the selected rewind capsule path.
+    /// Work Capsule JSON file to read and validate. Defaults to a generated dry-run capsule.
     #[arg(long)]
     pub capsule: Option<String>,
     /// Print JSON output.

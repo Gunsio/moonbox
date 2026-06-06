@@ -1,51 +1,76 @@
 use super::{
     adapter::{SourceAdapter, collect_sessions},
+    compiler::{CapsuleCompiler, DemoCapsuleCompiler, default_rewind_event_id},
+    error::CoreError,
     fixture::FixtureSourceAdapter,
     model::{
-        BranchNode, CanonicalTimeline, CapsuleCompileOutput, CapsuleCompileRequest, ChecklistItem,
-        CliTool, DemoData, SessionStatus, SessionSummary, TimelineEvent, WorkCapsule,
+        BranchNode, CanonicalTimeline, CapsuleCompileOutput, CapsuleCompileRequest, CliTool,
+        DemoData, SessionStatus, SessionSummary, TimelineEvent, WorkCapsule,
     },
 };
 
-pub fn demo_data(source: CliTool, target: CliTool) -> DemoData {
-    let sessions = demo_sessions();
+pub fn demo_data(source: CliTool, target: CliTool) -> Result<DemoData, CoreError> {
+    let sessions = demo_sessions()?;
     let source_session = sessions
         .iter()
         .find(|session| session.cli == source)
         .cloned()
         .unwrap_or_else(|| fallback_session(source));
     let source_session_id = source_session.id.clone();
-    demo_data_for_session(&source_session_id, target).unwrap_or_else(|| {
-        let timeline = demo_timeline_for_session(&source_session);
-        let capsule = demo_capsule_for_session(&source_session, target);
-        build_demo_data(
-            source,
-            target,
-            sessions,
-            timeline,
-            capsule,
-            &source_session_id,
-        )
-    })
-}
+    if let Some(data) = demo_data_for_session(&source_session_id, target)? {
+        return Ok(data);
+    }
 
-pub fn demo_data_for_session(session_id: &str, target: CliTool) -> Option<DemoData> {
-    let sessions = demo_sessions();
-    let source_session = sessions
-        .iter()
-        .find(|session| session.id == session_id)
-        .cloned()?;
-    let source_session_id = source_session.id.clone();
-    let timeline = demo_timeline_for_session(&source_session);
-    let capsule = demo_capsule_for_session(&source_session, target);
-    Some(build_demo_data(
-        source_session.cli,
+    let timeline = CanonicalTimeline {
+        version: 1,
+        source_cli: source,
+        source_session: source_session_id.clone(),
+        events: Vec::new(),
+    };
+    let capsule = compile_capsule_for_session(
+        &source_session,
+        target,
+        &timeline,
+        default_rewind_event_id(&source_session_id),
+    )?;
+    Ok(build_demo_data(
+        source,
         target,
         sessions,
-        timeline,
+        timeline.events,
         capsule,
         &source_session_id,
     ))
+}
+
+pub fn demo_data_for_session(
+    session_id: &str,
+    target: CliTool,
+) -> Result<Option<DemoData>, CoreError> {
+    let sessions = demo_sessions()?;
+    let source_session = sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .cloned();
+    let Some(source_session) = source_session else {
+        return Ok(None);
+    };
+    let source_session_id = source_session.id.clone();
+    let timeline = demo_canonical_timeline_for_session(&source_session)?;
+    let capsule = compile_capsule_for_session(
+        &source_session,
+        target,
+        &timeline,
+        default_rewind_event_id(&source_session_id),
+    )?;
+    Ok(Some(build_demo_data(
+        source_session.cli,
+        target,
+        sessions,
+        timeline.events,
+        capsule,
+        &source_session_id,
+    )))
 }
 
 fn build_demo_data(
@@ -104,7 +129,7 @@ pub fn demo_adapters() -> [DemoSourceAdapter; 3] {
     ]
 }
 
-pub fn demo_sessions() -> Vec<SessionSummary> {
+pub fn demo_sessions() -> Result<Vec<SessionSummary>, CoreError> {
     let adapters = demo_adapters();
     collect_sessions(
         &adapters
@@ -112,28 +137,30 @@ pub fn demo_sessions() -> Vec<SessionSummary> {
             .map(|adapter| adapter as &dyn SourceAdapter)
             .collect::<Vec<_>>(),
     )
+    .map_err(CoreError::from)
 }
 
-pub fn demo_timeline_for_session(session: &SessionSummary) -> Vec<TimelineEvent> {
+pub fn demo_canonical_timeline_for_session(
+    session: &SessionSummary,
+) -> Result<CanonicalTimeline, CoreError> {
     DemoSourceAdapter::new(session.cli)
         .load_timeline(&session.id)
-        .map(|timeline| timeline.events)
-        .unwrap_or_default()
+        .map_err(CoreError::from)
 }
 
 pub fn demo_compile_request(
     source: CliTool,
     target: CliTool,
     rewind_event_id: &str,
-) -> CapsuleCompileRequest {
-    let data = demo_data(source, target);
+) -> Result<CapsuleCompileRequest, CoreError> {
+    let data = demo_data(source, target)?;
     let source_session = data
         .sessions
         .iter()
         .find(|session| session.id == data.capsule.source_session)
         .cloned()
         .unwrap_or_else(|| fallback_session(source));
-    CapsuleCompileRequest {
+    Ok(CapsuleCompileRequest {
         version: 1,
         source_cli: source,
         target_cli: target,
@@ -141,98 +168,43 @@ pub fn demo_compile_request(
         rewind_event_id: rewind_event_id.into(),
         token_budget: 100_000,
         compiler: data.capsule.compiler.clone(),
-        timeline: DemoSourceAdapter::new(source)
-            .load_timeline(&data.capsule.source_session)
-            .unwrap_or(CanonicalTimeline {
-                version: 1,
-                source_cli: source,
-                source_session: data.capsule.source_session.clone(),
-                events: data.timeline,
-            }),
-    }
+        timeline: CanonicalTimeline {
+            version: 1,
+            source_cli: source,
+            source_session: data.capsule.source_session.clone(),
+            events: data.timeline,
+        },
+    })
 }
 
-pub fn demo_compile_output(source: CliTool, target: CliTool) -> CapsuleCompileOutput {
-    CapsuleCompileOutput {
+pub fn demo_compile_output(
+    source: CliTool,
+    target: CliTool,
+) -> Result<CapsuleCompileOutput, CoreError> {
+    let data = demo_data(source, target)?;
+    Ok(CapsuleCompileOutput {
         version: 1,
-        capsule: demo_data(source, target).capsule,
-    }
+        capsule: data.capsule,
+    })
 }
 
-fn demo_capsule_for_session(session: &SessionSummary, target: CliTool) -> WorkCapsule {
-    let (goal, state, rewind_point, risks) = match session.id.as_str() {
-        "claude-qc-platform" => (
-            "Continue QC trace propagation repair without losing staging context.",
-            "Trace propagation patch is drafted; staging verification is still pending.",
-            "evt-074 / before staging verification",
-            vec![
-                "Gateway fallback may hide upstream request_id bugs.".into(),
-                "Staging traffic volume may not cover async retry paths.".into(),
-            ],
-        ),
-        "hermes-cxcp-502" => (
-            "Recover the cxcp investigation by avoiding raw copied-session resume.",
-            "Raw resume failed with 502. The target path is Work Capsule handoff.",
-            "evt-052 / before raw resume retry",
-            vec![
-                "Copied session rows can miss hidden provider state.".into(),
-                "Target CLI resume protocol may reject raw source metadata.".into(),
-            ],
-        ),
-        _ => (
-            "Build Moonbox as a cross-CLI session rewind workbench.",
-            "Raw resume is rejected. The target path is new branch + Work Capsule.",
-            "evt-091 / before raw resume",
-            vec![
-                "Tool outputs and attachments can exceed target token budget.".into(),
-                "Target CLI injection protocol may differ per tool.".into(),
-            ],
-        ),
-    };
-
-    WorkCapsule {
+fn compile_capsule_for_session(
+    session: &SessionSummary,
+    target: CliTool,
+    timeline: &CanonicalTimeline,
+    rewind_event_id: &str,
+) -> Result<WorkCapsule, CoreError> {
+    let request = CapsuleCompileRequest {
         version: 1,
         source_cli: session.cli,
         target_cli: target,
-        source_session: session.id.clone(),
-        rewind_point: rewind_point.into(),
+        source_session: session.clone(),
+        rewind_event_id: rewind_event_id.into(),
+        token_budget: 100_000,
         compiler: "engineering-handoff".into(),
-        target_branch: format!(
-            "moonbox/{}-rewind-{}",
-            target.id(),
-            rewind_point.split_whitespace().next().unwrap_or("evt-000")
-        ),
-        goal: goal.into(),
-        state: state.into(),
-        decisions: vec![
-            "Source sessions are read-only.".into(),
-            "Compression and compatibility live in replaceable compiler skills.".into(),
-            "TUI is a first-class workbench, not an fzf picker.".into(),
-        ],
-        todo: vec![
-            ChecklistItem {
-                done: true,
-                text: "Define canonical timeline and capsule schema.".into(),
-            },
-            ChecklistItem {
-                done: false,
-                text: "Implement source adapters for Codex, Claude, Hermes.".into(),
-            },
-            ChecklistItem {
-                done: false,
-                text: "Implement target launcher and verification loop.".into(),
-            },
-        ],
-        evidence: vec![
-            format!("session: {} ({})", session.id, session.cli),
-            format!("cwd: {}", session.cwd),
-            session
-                .health_reason
-                .clone()
-                .unwrap_or_else(|| "no health reason".into()),
-        ],
-        risks,
-    }
+        timeline: timeline.clone(),
+    };
+    Ok(DemoCapsuleCompiler.compile(&request)?.capsule)
 }
 
 fn fallback_session(source: CliTool) -> SessionSummary {
@@ -266,7 +238,7 @@ mod tests {
 
     #[test]
     fn demo_sessions_are_adapter_collected_and_time_sorted() {
-        let sessions = demo_sessions();
+        let sessions = demo_sessions().expect("sessions");
 
         assert_eq!(sessions.len(), 3);
         assert_eq!(sessions[0].id, "codex-cxcp-design");
@@ -290,7 +262,8 @@ mod tests {
 
     #[test]
     fn compile_request_carries_source_session_rewind_and_timeline() {
-        let request = demo_compile_request(CliTool::Codex, CliTool::Hermes, "evt-091");
+        let request =
+            demo_compile_request(CliTool::Codex, CliTool::Hermes, "evt-091").expect("request");
 
         assert_eq!(request.version, 1);
         assert_eq!(request.source_session.id, "codex-cxcp-design");

@@ -1,12 +1,13 @@
 use super::model::{
-    CliTool, SessionStatus, SessionSummary, TimelineEvent, VerificationCheck, VerificationReport,
-    VerificationStatus, WorkCapsule,
+    CliTool, LaunchValidation, SessionStatus, SessionSummary, TimelineEvent, VerificationCheck,
+    VerificationReport, VerificationStatus, WorkCapsule,
 };
 
 pub fn verify_capsule(
     capsule: &WorkCapsule,
     session: &SessionSummary,
     timeline: &[TimelineEvent],
+    requested_target: CliTool,
 ) -> VerificationReport {
     let rewind_id = rewind_event_id(capsule);
     let mut checks = Vec::new();
@@ -21,6 +22,19 @@ pub fn verify_capsule(
         format!(
             "capsule source {} / {} vs selected {} / {}",
             capsule.source_cli, capsule.source_session, session.cli, session.id
+        ),
+    ));
+
+    checks.push(check(
+        "target_cli",
+        if capsule.target_cli == requested_target {
+            VerificationStatus::Pass
+        } else {
+            VerificationStatus::Fail
+        },
+        format!(
+            "capsule target {} vs requested {}",
+            capsule.target_cli, requested_target
         ),
     ));
 
@@ -75,14 +89,16 @@ pub fn verify_capsule(
 
     checks.push(check(
         "target_support",
-        target_support_status(session, capsule.target_cli),
-        if session.status == SessionStatus::Failed && session.cli == capsule.target_cli {
+        target_support_status(session, requested_target),
+        if session.status == SessionStatus::Failed && session.cli == requested_target {
             format!(
                 "{} raw resume is known failed for this session",
-                capsule.target_cli
+                requested_target
             )
+        } else if session.cli == requested_target {
+            format!("Same-CLI handoff to {requested_target}; prefer original resume for no handoff")
         } else {
-            format!("{} handoff dry-run supported", capsule.target_cli)
+            format!("{requested_target} handoff dry-run supported")
         },
     ));
 
@@ -92,6 +108,36 @@ pub fn verify_capsule(
         status,
         ready: status != VerificationStatus::Fail,
         checks,
+    }
+}
+
+pub fn validate_launch(
+    capsule: &WorkCapsule,
+    session: &SessionSummary,
+    timeline: &[TimelineEvent],
+    requested_target: CliTool,
+) -> LaunchValidation {
+    let report = verify_capsule(capsule, session, timeline, requested_target);
+    let blockers = report
+        .checks
+        .iter()
+        .filter(|check| check.status == VerificationStatus::Fail)
+        .map(|check| check.detail.clone())
+        .collect::<Vec<_>>();
+    if !blockers.is_empty() {
+        return LaunchValidation::blocked(blockers);
+    }
+
+    let warnings = report
+        .checks
+        .iter()
+        .filter(|check| check.status == VerificationStatus::Warn)
+        .map(|check| check.detail.clone())
+        .collect::<Vec<_>>();
+    if !warnings.is_empty() {
+        LaunchValidation::warning(warnings)
+    } else {
+        LaunchValidation::ready()
     }
 }
 
@@ -106,6 +152,8 @@ fn rewind_event_id(capsule: &WorkCapsule) -> &str {
 fn target_support_status(session: &SessionSummary, target: CliTool) -> VerificationStatus {
     if session.status == SessionStatus::Failed && session.cli == target {
         VerificationStatus::Fail
+    } else if session.cli == target {
+        VerificationStatus::Warn
     } else {
         VerificationStatus::Pass
     }
@@ -146,14 +194,14 @@ mod tests {
 
     #[test]
     fn healthy_cross_cli_capsule_passes() {
-        let data = demo::demo_data(CliTool::Codex, CliTool::Hermes);
+        let data = demo::demo_data(CliTool::Codex, CliTool::Hermes).expect("demo");
         let session = data
             .sessions
             .iter()
             .find(|session| session.id == data.capsule.source_session)
             .expect("source session");
 
-        let report = verify_capsule(&data.capsule, session, &data.timeline);
+        let report = verify_capsule(&data.capsule, session, &data.timeline, CliTool::Hermes);
 
         assert_eq!(report.status, VerificationStatus::Pass);
         assert!(report.ready);
@@ -161,19 +209,56 @@ mod tests {
 
     #[test]
     fn failed_same_cli_capsule_fails_target_support() {
-        let data = demo::demo_data(CliTool::Hermes, CliTool::Hermes);
+        let data = demo::demo_data(CliTool::Hermes, CliTool::Hermes).expect("demo");
         let session = data
             .sessions
             .iter()
             .find(|session| session.id == data.capsule.source_session)
             .expect("source session");
 
-        let report = verify_capsule(&data.capsule, session, &data.timeline);
+        let report = verify_capsule(&data.capsule, session, &data.timeline, CliTool::Hermes);
 
         assert_eq!(report.status, VerificationStatus::Fail);
         assert!(!report.ready);
         assert!(report.checks.iter().any(
             |check| check.name == "target_support" && check.status == VerificationStatus::Fail
         ));
+    }
+
+    #[test]
+    fn healthy_same_cli_capsule_warns_target_support() {
+        let data = demo::demo_data(CliTool::Codex, CliTool::Codex).expect("demo");
+        let session = data
+            .sessions
+            .iter()
+            .find(|session| session.id == data.capsule.source_session)
+            .expect("source session");
+
+        let report = verify_capsule(&data.capsule, session, &data.timeline, CliTool::Codex);
+
+        assert_eq!(report.status, VerificationStatus::Warn);
+        assert!(report.ready);
+        assert!(report.checks.iter().any(
+            |check| check.name == "target_support" && check.status == VerificationStatus::Warn
+        ));
+    }
+
+    #[test]
+    fn mismatched_requested_target_fails() {
+        let data = demo::demo_data(CliTool::Codex, CliTool::Hermes).expect("demo");
+        let session = data
+            .sessions
+            .iter()
+            .find(|session| session.id == data.capsule.source_session)
+            .expect("source session");
+
+        let report = verify_capsule(&data.capsule, session, &data.timeline, CliTool::Codex);
+
+        assert_eq!(report.status, VerificationStatus::Fail);
+        assert!(!report.ready);
+        assert!(report
+            .checks
+            .iter()
+            .any(|check| check.name == "target_cli" && check.status == VerificationStatus::Fail));
     }
 }

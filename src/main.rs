@@ -30,7 +30,7 @@ fn run_tui(args: cli::TuiArgs) -> Result<()> {
         .unwrap_or(core::model::CliTool::Hermes);
     let filter = args.filter.or(args.source);
     let source = filter.unwrap_or(core::model::CliTool::Codex);
-    let mut app = app::App::new(source, target);
+    let mut app = app::App::new(source, target)?;
     if let Some(filter) = filter {
         app.apply_session_filter(app::SessionFilter::Tool(filter));
     }
@@ -41,7 +41,7 @@ fn run_tui(args: cli::TuiArgs) -> Result<()> {
 }
 
 fn print_sessions(args: cli::JsonArgs) -> Result<()> {
-    let sessions = core::workbench::list_sessions();
+    let sessions = core::workbench::list_sessions()?;
     if args.json {
         println!("{}", serde_json::to_string_pretty(&sessions)?);
     } else {
@@ -56,7 +56,7 @@ fn print_sessions(args: cli::JsonArgs) -> Result<()> {
 }
 
 fn print_open_command(args: cli::OpenArgs) -> Result<()> {
-    if let Some(command) = core::workbench::open_command(args.session.as_deref()) {
+    if let Some(command) = core::workbench::open_command(args.session.as_deref())? {
         println!("{command}");
     }
     Ok(())
@@ -64,7 +64,7 @@ fn print_open_command(args: cli::OpenArgs) -> Result<()> {
 
 fn print_capsule(args: cli::JsonArgs) -> Result<()> {
     let capsule =
-        core::workbench::capsule(core::model::CliTool::Codex, core::model::CliTool::Hermes);
+        core::workbench::capsule(core::model::CliTool::Codex, core::model::CliTool::Hermes)?;
     if args.json {
         println!("{}", serde_json::to_string_pretty(&capsule)?);
     } else {
@@ -81,7 +81,7 @@ fn print_compile_request(args: cli::JsonArgs) -> Result<()> {
         core::model::CliTool::Codex,
         core::model::CliTool::Hermes,
         "evt-091",
-    );
+    )?;
     if args.json {
         println!("{}", serde_json::to_string_pretty(&request)?);
     } else {
@@ -96,7 +96,7 @@ fn print_compile_request(args: cli::JsonArgs) -> Result<()> {
 
 fn print_compile_output(args: cli::JsonArgs) -> Result<()> {
     let output =
-        core::workbench::compile_output(core::model::CliTool::Codex, core::model::CliTool::Hermes);
+        core::workbench::compile_output(core::model::CliTool::Codex, core::model::CliTool::Hermes)?;
     if args.json {
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
@@ -110,7 +110,7 @@ fn print_compile_output(args: cli::JsonArgs) -> Result<()> {
 fn print_launch_plan(args: cli::LaunchArgs) -> Result<()> {
     let target = launch_target(args.target);
     let plan =
-        core::workbench::launch_plan(args.session.as_deref(), target, args.capsule.as_deref());
+        core::workbench::launch_plan(args.session.as_deref(), target, args.capsule.as_deref())?;
     if let Some(plan) = plan {
         if args.json {
             println!("{}", serde_json::to_string_pretty(&plan)?);
@@ -119,7 +119,10 @@ fn print_launch_plan(args: cli::LaunchArgs) -> Result<()> {
             println!("session: {}", plan.source_session.id);
             println!("target: {}", plan.target_cli);
             println!("branch: {}", plan.target_branch);
-            println!("capsule: {}", plan.capsule_path);
+            println!(
+                "capsule: {}",
+                plan.capsule_path.as_deref().unwrap_or("generated")
+            );
             println!("ready: {}", plan.verification.ready);
             println!("status: {}", plan.verification.status);
             println!("command: {}", plan.command);
@@ -133,7 +136,8 @@ fn print_launch_plan(args: cli::LaunchArgs) -> Result<()> {
 
 fn print_verify_report(args: cli::LaunchArgs) -> Result<()> {
     let target = launch_target(args.target);
-    let report = core::workbench::verify_launch(args.session.as_deref(), target);
+    let report =
+        core::workbench::verify_launch(args.session.as_deref(), target, args.capsule.as_deref())?;
     if let Some(report) = report {
         if args.json {
             println!("{}", serde_json::to_string_pretty(&report)?);

@@ -9,6 +9,57 @@ This repository is intentionally not a raw session copier. The source session
 is read-only. Compatibility and compression are delegated to replaceable
 compiler skills.
 
+![Moonbox TUI screenshot](docs/assets/moonbox-tui.svg)
+
+## Install
+
+### Cargo
+
+Install the current repository version:
+
+```bash
+cargo install --git https://github.com/Gunsio/moonbox
+moonbox --version
+```
+
+Moonbox also supports the shorter `moon` command. Until binary aliases are part
+of a tagged release, create a local symlink:
+
+```bash
+mkdir -p ~/.local/bin
+ln -sf "$(command -v moonbox)" ~/.local/bin/moon
+moon --version
+```
+
+### Source Checkout
+
+```bash
+git clone https://github.com/Gunsio/moonbox.git
+cd moonbox
+cargo run -- tui
+```
+
+For local development:
+
+```bash
+cargo fmt --check
+cargo test
+cargo clippy -- -D warnings
+```
+
+### Homebrew
+
+Homebrew distribution is planned, but not published yet. After the accepted
+release is tagged, the intended install path is:
+
+```bash
+brew tap Gunsio/tap
+brew install moonbox
+```
+
+See [docs/release/homebrew.md](docs/release/homebrew.md) for the release
+checklist and formula shape.
+
 ## Current State
 
 The first implementation focuses on the product shell:
@@ -32,19 +83,18 @@ The first implementation focuses on the product shell:
 - Copyable launch/original commands via `y` with OSC52 clipboard support
 - Serializable core models for future adapters
 - `SourceAdapter` contract and demo adapter fixture layer
+- Fallible adapter discovery; bad source data returns structured errors instead of panics
 - File-backed adapter fixtures for Codex, Claude, and Hermes session/timeline parsing
+- `CapsuleCompiler` trait with a demo fixture compiler implementation
 - Canonical Timeline and compiler request/output JSON contract fixtures
 - Target launch dry-run plans with Work Capsule verification reports
+- Single core verifier policy shared by CLI and TUI target validation
+- `--capsule` reads a real Work Capsule JSON file when provided; generated dry-run capsules do not pretend to have a file path
 
 ## Run
 
 ```bash
-cargo run
-```
-
-Global command after local install:
-
-```bash
+moonbox
 moon
 ```
 
@@ -61,6 +111,7 @@ cargo run -- capsule --json
 cargo run -- compile-request --json
 cargo run -- compile-output --json
 cargo run -- launch --target hermes --session codex-cxcp-design --json
+cargo run -- verify --target hermes --session codex-cxcp-design --capsule ./capsule.json --json
 cargo run -- verify --target hermes --session hermes-cxcp-502 --json
 ```
 
@@ -78,7 +129,9 @@ chosen only in the launch picker. In the target picker, `j/k` moves the pending
 selection, `enter` confirms and persists it, and `Esc` / `q` cancels without
 changing the saved target. The picker keeps every target visible and annotates
 each option with `READY`, `WARN`, or `BLOCKED`; blocked targets keep the launch
-command disabled until validation passes.
+command disabled until validation passes. The picker uses the same verifier
+policy as the CLI, so `moon verify` and the TUI cannot disagree on target
+readiness.
 
 Session search matches id, title, cwd, source, branch, and health reason. When a
 different session becomes selected by movement, source filter, or search,
@@ -124,10 +177,10 @@ Source Adapter -> Canonical Timeline -> Rewind Engine
 Stable interfaces matter more than any single framework:
 
 - `SourceAdapter`: read-only session parsing
-- `SkillRunner`: JSON input/output compiler skill execution
-- `CapsuleCompiler`: snapshot to Work Capsule
-- `TargetLauncher`: create target CLI new branch
-- `Verifier`: schema, token, capability, and handoff checks
+- `CapsuleCompiler`: snapshot to Work Capsule; demo fixture compiler exists now
+- `Verifier`: schema, token, capability, and handoff checks; shared by CLI/TUI
+- `SkillRunner`: JSON input/output compiler skill execution, next real backend
+- `TargetLauncher`: create target CLI new branch, next real backend
 
 ## TODO
 
@@ -140,10 +193,12 @@ Stable interfaces matter more than any single framework:
 - M4: launch validation with target picker READY/WARN/BLOCKED states and blocked command confirmation/copy guards.
 - M5: file-backed adapter fixture snapshots for Codex, Claude, and Hermes session/timeline parsing.
 - M6: target launcher dry-run plus Work Capsule verification loop.
+- M7: core boundary hardening with fallible adapters, shared verifier policy, real `--capsule` file validation, and a `CapsuleCompiler` trait.
 
 ### Can Build Now
 
 - Real Codex / Claude / Hermes Source Adapter implementations.
+- Real SkillRunner execution behind `CapsuleCompiler`.
 - Real target launcher execution behind the existing dry-run plan.
 
 ### Prototype Now, Improve With Real Data
