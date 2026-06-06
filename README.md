@@ -64,6 +64,7 @@ cargo test --locked
 RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps
 cargo run --locked -- replay-eval --json
 scripts/ci/cli-smoke.sh
+scripts/ci/docs-assets-smoke.sh
 scripts/ci/homebrew-docs-smoke.sh
 cargo clippy --locked -- -D warnings
 cargo build --release --locked
@@ -98,11 +99,13 @@ scripts/ci/homebrew-docs-smoke.sh
 - [Homebrew release notes](docs/release/homebrew.md)
 
 Pull requests are expected to pass formatting, check, test, fixture replay
-eval, documentation build, fixture-safe CLI smoke, Homebrew docs smoke, clippy,
-release build, package verification, install smoke, and cargo-deny supply-chain
-gates. GitHub Actions runs the same Rust quality gates and validates the README
-screenshot asset. Smoke gates set `MOONBOX_SESSION_MODE=fixture`, redirect
-source homes to `target/`, and never open or resume real local sessions.
+eval, documentation build, fixture-safe CLI smoke, docs asset smoke, Homebrew
+docs smoke, clippy, release build, package verification, install smoke, and
+cargo-deny supply-chain gates. GitHub Actions runs the same Rust quality gates
+and validates that the README screenshot, install commands, and Homebrew
+planned-state wording stay in sync. Smoke gates set `MOONBOX_SESSION_MODE=fixture`,
+redirect source homes to `target/`, and never open or resume real local
+sessions.
 
 ## Current State
 
@@ -165,8 +168,9 @@ The first implementation focuses on the product shell:
 - Fixture-safe public CLI contract tests for the installed `moonbox` and `moon` command surfaces
 - Full local quality gate through `scripts/ci/full-gate.sh`
 - Cargo-deny supply-chain policy for advisories, duplicate versions, licenses, and crate sources
+- README screenshot and install-command smoke coverage through `scripts/ci/docs-assets-smoke.sh`
 - Draft Homebrew formula template plus fixture-safe Homebrew docs smoke coverage
-- GitHub Actions CI for Rust quality gates, documentation build, fixture replay eval, fixture-safe CLI smoke, Homebrew docs smoke, package verification, install smoke, and README screenshot validation
+- GitHub Actions CI for Rust quality gates, documentation build, fixture replay eval, fixture-safe CLI smoke, docs asset smoke, Homebrew docs smoke, package verification, and install smoke
 - Dependabot configuration for Cargo and GitHub Actions updates
 - Contributing, security, changelog, issue template, and PR template docs
 
@@ -424,10 +428,11 @@ Stable interfaces matter more than any single framework:
 - M33: action intent hardening with `original_resume` / `target_handoff` dry-run discriminators, two-stage TUI launch review, original-preview copy-only behavior, and contract/render tests for both paths.
 - M34: fixture replay corpus expansion with 9 source-target matrix cases plus 3 synthetic regressions for target mismatch, oversized capsule, and missing-tool preflight; replay output now includes case kind, scenario, capsule target, coverage rows, and updated fixture-safe CLI smoke/contract checks.
 - M35: target readiness explanation rows in the TUI launch picker and Launch Review, backed by verifier report checks with FAIL/WARN priority, READY pass-check context, corrected launch key hints, and render/App tests for blocked, warning, and ready states.
+- M36: README screenshot/install polish with a Launch Review readiness screenshot, transparent SVG canvas, and `docs-assets-smoke` coverage for screenshot semantics, install commands, and unpublished Homebrew wording in both local and GitHub Actions gates.
 
 ### Can Build Now
 
-- Finalize README screenshots and install docs for the pre-release branch.
+- Add a generated screenshot pipeline if Ratatui snapshot export becomes worth the maintenance cost.
 
 ### Prototype Now, Improve With Real Data
 

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1440" height="860" viewBox="0 0 1440 860" role="img" aria-labelledby="title desc">
   <title id="title">Moonbox TUI screenshot</title>
-  <desc id="desc">A dark terminal UI for Moonbox showing session list, timeline, work capsule preview, branch path, and Vim-style key hints.</desc>
+  <desc id="desc">A dark terminal UI for Moonbox showing session list, timeline, launch review, verifier readiness details, and Vim-style key hints.</desc>
   <defs>
     <linearGradient id="screen" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#07090b"/>
@@ -24,11 +24,8 @@
     </style>
   </defs>
 
-  <rect width="1440" height="860" fill="#12151b"/>
-  <rect x="42" y="42" width="1356" height="776" rx="18" fill="#f7f7f5"/>
-
   <g filter="url(#shadow)">
-    <rect x="118" y="112" width="1204" height="666" rx="8" fill="url(#screen)" stroke="#58616f" stroke-width="2"/>
+    <rect x="118" y="112" width="1204" height="704" rx="8" fill="url(#screen)" stroke="#58616f" stroke-width="2"/>
   </g>
 
   <rect x="118" y="112" width="1204" height="58" rx="8" fill="#050607"/>
@@ -36,13 +33,13 @@
 
   <text x="144" y="149" class="mono text" font-size="19" font-weight="800">MOONBOX CLI v0.1.0</text>
   <text x="392" y="149" class="mono muted" font-size="17">Filter:</text>
-  <text x="456" y="149" class="mono blue" font-size="17" font-weight="700">All</text>
+  <text x="470" y="149" class="mono blue" font-size="17" font-weight="700">All</text>
   <text x="560" y="149" class="mono muted" font-size="17">Target:</text>
-  <text x="632" y="149" class="mono blue" font-size="17" font-weight="700">Hermes</text>
+  <text x="646" y="149" class="mono blue" font-size="17" font-weight="700">Hermes</text>
   <text x="758" y="149" class="mono muted" font-size="17">Compiler:</text>
-  <text x="850" y="149" class="mono green" font-size="17" font-weight="800">ACTIVE</text>
+  <text x="864" y="149" class="mono green" font-size="17" font-weight="800">ACTIVE</text>
   <text x="1004" y="149" class="mono muted" font-size="17">Verify:</text>
-  <text x="1074" y="149" class="mono green" font-size="17" font-weight="800">PASS</text>
+  <text x="1088" y="149" class="mono green" font-size="17" font-weight="800">PASS</text>
 
   <line x1="428" y1="170" x2="428" y2="692" class="border" stroke-width="2"/>
   <line x1="936" y1="170" x2="936" y2="692" class="border" stroke-width="2"/>
@@ -100,6 +97,35 @@
 
   <text x="966" y="642" class="sans red" font-size="18" font-weight="800">Risks</text>
   <text x="986" y="676" class="sans gold" font-size="18">! target protocol may differ per CLI</text>
+
+  <g filter="url(#shadow)">
+    <rect x="344" y="216" width="760" height="398" rx="9" fill="#050607" stroke="#e7c55f" stroke-width="2"/>
+  </g>
+  <text x="382" y="263" class="sans gold" font-size="24" font-weight="800">Launch Review</text>
+  <text x="382" y="305" class="mono muted" font-size="17">Action:</text>
+  <text x="464" y="305" class="mono text" font-size="17" font-weight="700">target handoff</text>
+  <text x="382" y="339" class="mono muted" font-size="17">Source:</text>
+  <text x="464" y="339" class="mono blue" font-size="17" font-weight="700">Codex</text>
+  <text x="598" y="339" class="mono muted" font-size="17">Target:</text>
+  <text x="682" y="339" class="mono blue" font-size="17" font-weight="700">Hermes</text>
+  <text x="382" y="373" class="mono muted" font-size="17">Branch:</text>
+  <text x="464" y="373" class="mono text" font-size="17">moonbox/hermes-rewind-evt-091</text>
+
+  <text x="382" y="429" class="sans blue" font-size="20" font-weight="800">Readiness details</text>
+  <text x="382" y="465" class="mono green" font-size="16" font-weight="800">PASS</text>
+  <text x="452" y="465" class="mono text" font-size="16" font-weight="800">target_cli</text>
+  <text x="628" y="465" class="mono muted" font-size="16">capsule target Hermes matches requested Hermes</text>
+  <text x="382" y="497" class="mono green" font-size="16" font-weight="800">PASS</text>
+  <text x="452" y="497" class="mono text" font-size="16" font-weight="800">rewind_exists</text>
+  <text x="628" y="497" class="mono muted" font-size="16">evt-091 is present in the selected timeline</text>
+  <text x="382" y="529" class="mono green" font-size="16" font-weight="800">PASS</text>
+  <text x="452" y="529" class="mono text" font-size="16" font-weight="800">handoff_context</text>
+  <text x="628" y="529" class="mono muted" font-size="16">goal, state, decisions, todo are actionable</text>
+
+  <rect x="382" y="552" width="656" height="34" rx="6" fill="#151a20" stroke="#3b4654"/>
+  <text x="404" y="574" class="mono blue" font-size="15" font-weight="800">y</text>
+  <text x="434" y="574" class="mono text" font-size="15">Copy guarded moonbox launch --execute command</text>
+  <text x="914" y="574" class="mono muted" font-size="15">enter Disabled</text>
 
   <text x="144" y="729" class="mono muted" font-size="17">* HEAD</text>
   <line x1="220" y1="724" x2="262" y2="724" stroke="#647083" stroke-width="3"/>

@@ -107,5 +107,5 @@ jobs:
       - name: Install XML tools
         run: sudo apt-get update && sudo apt-get install -y libxml2-utils
 
-      - name: Validate SVG screenshot
-        run: xmllint --noout docs/assets/moonbox-tui.svg
+      - name: Validate docs assets
+        run: scripts/ci/docs-assets-smoke.sh

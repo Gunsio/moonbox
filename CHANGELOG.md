@@ -65,6 +65,8 @@ and this project uses semantic versioning once tagged releases start.
 - Fixture-safe TUI render regression tests for main, Doctor, and Launch views.
 - Verifier-backed TUI target readiness explanation rows in the launch picker
   and Launch Review.
+- Documentation asset smoke coverage for README screenshot semantics,
+  installation commands, and unpublished Homebrew wording.
 - Draft Homebrew formula template plus a fixture-safe Homebrew docs smoke gate.
 - Shared verifier policy for CLI and TUI launch validation.
 - Real `--capsule` file parsing and target mismatch verification.
@@ -104,6 +106,8 @@ and this project uses semantic versioning once tagged releases start.
   `moonbox` and `moon`.
 - Replay eval JSON now separates matrix and synthetic case counts, labels each
   case with `case_kind` and `scenario`, and reports expected scenario coverage.
+- README screenshot now shows the current Launch Review readiness-details flow
+  on a transparent SVG canvas.
 
 ### Not Yet Released
 

@@ -38,6 +38,7 @@ cargo test --locked
 RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps
 cargo run --locked -- replay-eval --json
 scripts/ci/cli-smoke.sh
+scripts/ci/docs-assets-smoke.sh
 scripts/ci/homebrew-docs-smoke.sh
 cargo clippy --locked -- -D warnings
 cargo build --release --locked
@@ -63,11 +64,14 @@ source homes into `target/moonbox-homebrew-smoke-home`, sets
 `MOONBOX_SESSION_MODE=fixture`, and must not scan, open, or resume real
 sessions.
 
-For README screenshot changes:
+For README screenshot and install-documentation changes:
 
 ```bash
-xmllint --noout docs/assets/moonbox-tui.svg
+scripts/ci/docs-assets-smoke.sh
 ```
+
+That smoke validates the SVG asset, the README image reference, the install
+commands, and the planned Homebrew wording.
 
 ## Engineering Standards
 
