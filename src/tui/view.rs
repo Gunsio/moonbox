@@ -62,6 +62,49 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
 }
 
+pub fn render_loading(frame: &mut Frame, tick: usize) {
+    let area = frame.area();
+    frame.render_widget(
+        Block::default().style(Style::default().fg(theme::TEXT)),
+        area,
+    );
+    let root = centered(area, 52, 32);
+    let spinner = ["|", "/", "-", "\\"][tick % 4];
+    let lines = vec![
+        Line::from(vec![
+            Span::styled(
+                " MOONBOX ",
+                Style::default()
+                    .fg(theme::TEXT)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("月光宝盒", Style::default().fg(theme::MUTED)),
+        ]),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled(spinner, Style::default().fg(theme::GOLD)),
+            Span::raw(" indexing source sessions"),
+        ]),
+        Line::from(vec![
+            Span::raw("   bounded scan "),
+            Span::styled("active", Style::default().fg(theme::GREEN)),
+        ]),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled("q", Style::default().fg(theme::BLUE)),
+            Span::raw(" quit   "),
+            Span::styled("esc", Style::default().fg(theme::BLUE)),
+            Span::raw(" cancel"),
+        ]),
+    ];
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(panel_block(" Loading ", true))
+            .alignment(Alignment::Left),
+        root,
+    );
+}
+
 fn render_header(frame: &mut Frame, area: Rect, app: &App) {
     let verify = if app.verify_passed {
         "PASS"
@@ -1357,6 +1400,15 @@ mod tests {
         format!("{}", terminal.backend())
     }
 
+    fn render_loading_text(tick: usize, width: u16, height: u16) -> String {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| render_loading(frame, tick))
+            .expect("draw");
+        format!("{}", terminal.backend())
+    }
+
     fn assert_screen_contains(screen: &str, expected: &str) {
         assert!(
             screen.contains(expected),
@@ -1377,6 +1429,17 @@ mod tests {
             assert_screen_contains(&screen, "Status");
             assert!(screen.chars().any(|ch| !ch.is_whitespace()));
         }
+    }
+
+    #[test]
+    fn loading_screen_renders_animated_state() {
+        let first = render_loading_text(0, 100, 30);
+        let second = render_loading_text(1, 100, 30);
+
+        assert_screen_contains(&first, "MOONBOX");
+        assert_screen_contains(&first, "indexing source sessions");
+        assert_screen_contains(&first, "bounded scan");
+        assert_ne!(first, second);
     }
 
     #[test]

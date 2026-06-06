@@ -3,13 +3,18 @@ mod theme;
 mod view;
 
 use std::io::{self, Write};
+use std::sync::mpsc;
+use std::thread;
 use std::time::Duration;
 
 use color_eyre::Result;
-use crossterm::event::{self, Event};
+use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use ratatui::DefaultTerminal;
 
-use crate::app::App;
+use crate::{
+    app::{App, SessionFilter},
+    core::model::CliTool,
+};
 
 pub fn docs_screenshot_svg(width: u16, height: u16) -> Result<String> {
     snapshot::docs_screenshot_svg(width, height)
@@ -28,6 +33,41 @@ pub fn run(terminal: &mut DefaultTerminal, mut app: App) -> Result<()> {
         }
     }
     Ok(())
+}
+
+pub fn run_with_loading(
+    terminal: &mut DefaultTerminal,
+    source: CliTool,
+    target: CliTool,
+    filter: Option<CliTool>,
+) -> Result<()> {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let mut result = App::new(source, target);
+        if let Ok(app) = result.as_mut()
+            && let Some(filter) = filter
+        {
+            app.apply_session_filter(SessionFilter::Tool(filter));
+        }
+        let _ = sender.send(result);
+    });
+
+    let mut tick = 0usize;
+    loop {
+        terminal.draw(|frame| view::render_loading(frame, tick))?;
+        if let Ok(app) = receiver.try_recv() {
+            return run(terminal, app?);
+        }
+        if event::poll(Duration::from_millis(120))?
+            && let Event::Key(key) = event::read()?
+            && (matches!(key.code, KeyCode::Esc | KeyCode::Char('q'))
+                || key.modifiers.contains(KeyModifiers::CONTROL)
+                    && matches!(key.code, KeyCode::Char('c')))
+        {
+            return Ok(());
+        }
+        tick = tick.wrapping_add(1);
+    }
 }
 
 fn copy_to_terminal_clipboard(text: &str) -> Result<()> {

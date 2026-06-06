@@ -4,6 +4,25 @@ use super::model::{
     CanonicalTimeline, CliTool, SessionSummary, SourceAdapterReport, SourceProvenance,
 };
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SourceScanStats {
+    pub list_limit: Option<usize>,
+    pub scan_entry_limit: Option<usize>,
+    pub summary_line_limit: Option<usize>,
+    pub scan_entry_count: usize,
+    pub scan_truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceReportMeta {
+    pub cli: CliTool,
+    pub provenance: SourceProvenance,
+    pub active: bool,
+    pub store_path: Option<String>,
+    pub filter_status: String,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdapterError {
     SessionNotFound {
@@ -45,6 +64,23 @@ pub trait SourceAdapter {
     fn provenance(&self) -> SourceProvenance;
     fn store_path(&self) -> Option<String>;
     fn list_sessions(&self) -> Result<Vec<SessionSummary>, AdapterError>;
+    fn list_sessions_with_report(
+        &self,
+        filter_status: &str,
+        reason: &str,
+    ) -> Result<(Vec<SessionSummary>, SourceAdapterReport), AdapterError> {
+        let sessions = self.list_sessions()?;
+        let report = report_from_sessions(
+            self.tool(),
+            self.provenance(),
+            true,
+            self.store_path(),
+            filter_status,
+            reason,
+            &sessions,
+        );
+        Ok((sessions, report))
+    }
     fn find_session(&self, session_id: &str) -> Result<Option<SessionSummary>, AdapterError> {
         Ok(self
             .list_sessions()?
@@ -52,6 +88,14 @@ pub trait SourceAdapter {
             .find(|session| session.id == session_id))
     }
     fn load_timeline(&self, session_id: &str) -> Result<CanonicalTimeline, AdapterError>;
+    fn load_timeline_limited(
+        &self,
+        session: &SessionSummary,
+        event_limit: Option<usize>,
+    ) -> Result<CanonicalTimeline, AdapterError> {
+        let _ = event_limit;
+        self.load_timeline(&session.id)
+    }
 }
 
 pub fn adapter_report(
@@ -80,11 +124,33 @@ pub fn report_from_sessions(
     reason: impl Into<String>,
     sessions: &[SessionSummary],
 ) -> SourceAdapterReport {
+    report_from_sessions_with_scan(
+        SourceReportMeta {
+            cli,
+            provenance,
+            active,
+            store_path,
+            filter_status: filter_status.into(),
+            reason: reason.into(),
+        },
+        sessions,
+        SourceScanStats {
+            scan_entry_count: sessions.len(),
+            ..SourceScanStats::default()
+        },
+    )
+}
+
+pub fn report_from_sessions_with_scan(
+    meta: SourceReportMeta,
+    sessions: &[SessionSummary],
+    scan_stats: SourceScanStats,
+) -> SourceAdapterReport {
     SourceAdapterReport {
-        cli,
-        provenance,
-        active,
-        store_path,
+        cli: meta.cli,
+        provenance: meta.provenance,
+        active: meta.active,
+        store_path: meta.store_path,
         session_count: sessions.len(),
         skipped_record_count: sessions
             .iter()
@@ -95,8 +161,13 @@ pub fn report_from_sessions(
             .map(|session| session.updated_at.as_str())
             .max()
             .map(str::to_owned),
-        filter_status: filter_status.into(),
-        reason: reason.into(),
+        filter_status: meta.filter_status,
+        reason: meta.reason,
+        list_limit: scan_stats.list_limit,
+        scan_entry_limit: scan_stats.scan_entry_limit,
+        summary_line_limit: scan_stats.summary_line_limit,
+        scan_entry_count: scan_stats.scan_entry_count,
+        scan_truncated: scan_stats.scan_truncated,
     }
 }
 

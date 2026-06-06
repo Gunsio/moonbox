@@ -92,8 +92,11 @@ semantics.
   CLIs must require an explicit session id rather than defaulting to the newest
   discovered session.
 - Keep source adapter state observable: real/fixture/missing provenance, store
-  path, skipped record count, and indexed-session counts belong in structured
-  diagnostics, not only in prose or debug logs.
+  path, skipped record count, indexed-session counts, list limits, scan limits,
+  visited scan entries, and truncation state belong in structured diagnostics,
+  not only in prose or debug logs.
+- Keep TUI interaction paths bounded. Startup, session switching, filtering, and
+  modal refreshes must not synchronously parse unbounded local session history.
 - Prefer stable core contracts over UI-only behavior.
 - Do not duplicate business policy between CLI and TUI. Shared rules belong in
   `src/core`.

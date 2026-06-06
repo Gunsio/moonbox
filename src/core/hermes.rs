@@ -9,10 +9,13 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::{
-    adapter::{AdapterError, SourceAdapter},
+    adapter::{
+        AdapterError, SourceAdapter, SourceReportMeta, SourceScanStats,
+        report_from_sessions_with_scan,
+    },
     local_jsonl::{
         configured_session_limit, display_time, event_id, human_timestamp, read_error,
-        text_from_value, title_case, truncate,
+        text_from_value, timeline_preview_truncated_event, title_case, truncate,
     },
     model::{
         CanonicalTimeline, CliTool, SessionStatus, SessionSummary, SourceProvenance, TimelineEvent,
@@ -189,10 +192,19 @@ impl HermesSourceAdapter {
             .map_err(|error| read_error(HERMES_TOOL, &self.state_db_path(), error))
     }
 
-    fn load_messages(&self, session_id: &str) -> Result<Vec<HermesMessageRow>, AdapterError> {
+    fn load_messages(
+        &self,
+        session_id: &str,
+        event_limit: Option<usize>,
+    ) -> Result<Vec<HermesMessageRow>, AdapterError> {
         let db = self.open_connection()?;
+        let limit_clause = if event_limit.is_some() {
+            "limit ?2"
+        } else {
+            ""
+        };
         let mut statement = db
-            .prepare(
+            .prepare(&format!(
                 r#"
                 select
                     role,
@@ -208,13 +220,22 @@ impl HermesSourceAdapter {
                 from messages
                 where session_id = ?1 and active = 1
                 order by timestamp asc, id asc
+                {limit_clause}
                 "#,
-            )
+            ))
             .map_err(|error| read_error(HERMES_TOOL, &self.state_db_path(), error))?;
-        let rows = statement
-            .query_map(params![session_id], message_row)
-            .map_err(|error| read_error(HERMES_TOOL, &self.state_db_path(), error))?;
-        collect_rows(rows, &self.state_db_path())
+        if let Some(limit) = event_limit {
+            let limit = i64::try_from(limit.saturating_add(1)).unwrap_or(i64::MAX);
+            let rows = statement
+                .query_map(params![session_id, limit], message_row)
+                .map_err(|error| read_error(HERMES_TOOL, &self.state_db_path(), error))?;
+            collect_rows(rows, &self.state_db_path())
+        } else {
+            let rows = statement
+                .query_map(params![session_id], message_row)
+                .map_err(|error| read_error(HERMES_TOOL, &self.state_db_path(), error))?;
+            collect_rows(rows, &self.state_db_path())
+        }
     }
 
     fn summary_for_row(
@@ -280,6 +301,31 @@ impl SourceAdapter for HermesSourceAdapter {
             .collect())
     }
 
+    fn list_sessions_with_report(
+        &self,
+        filter_status: &str,
+        reason: &str,
+    ) -> Result<(Vec<SessionSummary>, super::model::SourceAdapterReport), AdapterError> {
+        let sessions = self.list_sessions()?;
+        let report = report_from_sessions_with_scan(
+            SourceReportMeta {
+                cli: self.tool(),
+                provenance: self.provenance(),
+                active: true,
+                store_path: self.store_path(),
+                filter_status: filter_status.into(),
+                reason: reason.into(),
+            },
+            &sessions,
+            SourceScanStats {
+                list_limit: self.list_limit,
+                scan_entry_count: sessions.len(),
+                ..SourceScanStats::default()
+            },
+        );
+        Ok((sessions, report))
+    }
+
     fn find_session(&self, session_id: &str) -> Result<Option<SessionSummary>, AdapterError> {
         let Some(row) = self.find_session_row(session_id)? else {
             return Ok(None);
@@ -289,18 +335,45 @@ impl SourceAdapter for HermesSourceAdapter {
     }
 
     fn load_timeline(&self, session_id: &str) -> Result<CanonicalTimeline, AdapterError> {
+        self.load_timeline_limited_for_id(session_id, None)
+    }
+
+    fn load_timeline_limited(
+        &self,
+        session: &SessionSummary,
+        event_limit: Option<usize>,
+    ) -> Result<CanonicalTimeline, AdapterError> {
+        self.load_timeline_limited_for_id(&session.id, event_limit)
+    }
+}
+
+impl HermesSourceAdapter {
+    fn load_timeline_limited_for_id(
+        &self,
+        session_id: &str,
+        event_limit: Option<usize>,
+    ) -> Result<CanonicalTimeline, AdapterError> {
         if self.find_session_row(session_id)?.is_none() {
             return Err(AdapterError::SessionNotFound {
                 tool: HERMES_TOOL,
                 session_id: session_id.into(),
             });
         }
-        let events = self
-            .load_messages(session_id)?
+        let mut messages = self.load_messages(session_id, event_limit)?;
+        let truncated = event_limit.is_some_and(|limit| messages.len() > limit);
+        if let Some(limit) = event_limit {
+            messages.truncate(limit);
+        }
+        let mut events = messages
             .into_iter()
             .enumerate()
             .filter_map(|(index, row)| timeline_event(row, index + 1))
-            .collect();
+            .collect::<Vec<_>>();
+        if let Some(limit) = event_limit
+            && truncated
+        {
+            events.push(timeline_preview_truncated_event(events.len() + 1, limit));
+        }
 
         Ok(CanonicalTimeline {
             version: 1,

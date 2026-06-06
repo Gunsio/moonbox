@@ -1,5 +1,5 @@
 use super::{
-    adapter::{SourceAdapter, collect_sessions, report_from_sessions},
+    adapter::{SourceAdapter, collect_sessions},
     error::CoreError,
     fixture::FixtureSourceAdapter,
     model::{CanonicalTimeline, CliTool, SessionSummary, SourceAdapterReport, SourceProvenance},
@@ -13,6 +13,8 @@ use super::codex::CodexSourceAdapter;
 use super::hermes::HermesSourceAdapter;
 
 pub const SESSION_MODE_ENV: &str = "MOONBOX_SESSION_MODE";
+pub const TIMELINE_EVENT_LIMIT_ENV: &str = "MOONBOX_TIMELINE_EVENT_LIMIT";
+pub const DEFAULT_TIMELINE_EVENT_LIMIT: usize = 300;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionMode {
@@ -70,16 +72,11 @@ fn collect_inventory(
     let mut reports = Vec::new();
 
     for adapter in adapters {
-        let adapter_sessions = adapter.list_sessions()?;
-        reports.push(report_from_sessions(
-            adapter.tool(),
-            adapter.provenance(),
-            true,
-            adapter.store_path(),
+        let (adapter_sessions, adapter_report) = adapter.list_sessions_with_report(
             included_filter_status(adapter.provenance()),
             included_reason(adapter.provenance()),
-            &adapter_sessions,
-        ));
+        )?;
+        reports.push(adapter_report);
         sessions.extend(adapter_sessions.into_iter().inspect(|session| {
             debug_assert_eq!(session.cli, adapter.tool());
         }));
@@ -132,11 +129,37 @@ pub fn find_session(session_id: &str) -> Result<Option<SessionSummary>, CoreErro
 }
 
 pub fn load_timeline(session: &SessionSummary) -> Result<CanonicalTimeline, CoreError> {
+    load_timeline_with_limit(session, None)
+}
+
+pub fn load_timeline_preview(session: &SessionSummary) -> Result<CanonicalTimeline, CoreError> {
+    load_timeline_with_limit(session, configured_timeline_event_limit())
+}
+
+pub fn configured_timeline_event_limit() -> Option<usize> {
+    match std::env::var(TIMELINE_EVENT_LIMIT_ENV) {
+        Ok(value) if value.trim() == "0" => None,
+        Ok(value) => value
+            .trim()
+            .parse::<usize>()
+            .ok()
+            .filter(|limit| *limit > 0)
+            .or(Some(DEFAULT_TIMELINE_EVENT_LIMIT)),
+        Err(_) => Some(DEFAULT_TIMELINE_EVENT_LIMIT),
+    }
+}
+
+fn load_timeline_with_limit(
+    session: &SessionSummary,
+    event_limit: Option<usize>,
+) -> Result<CanonicalTimeline, CoreError> {
     for adapter in runtime_adapters() {
         if adapter.tool() != session.cli {
             continue;
         }
-        return adapter.load_timeline(&session.id).map_err(CoreError::from);
+        return adapter
+            .load_timeline_limited(session, event_limit)
+            .map_err(CoreError::from);
     }
 
     FixtureSourceAdapter::new(session.cli)
@@ -205,7 +228,7 @@ fn append_missing_reports(reports: &mut Vec<SourceAdapterReport>) {
         if reports.iter().any(|report| report.cli == tool) {
             continue;
         }
-        reports.push(report_from_sessions(
+        reports.push(super::adapter::report_from_sessions(
             tool,
             SourceProvenance::Missing,
             false,

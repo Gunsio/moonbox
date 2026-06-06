@@ -169,24 +169,42 @@ fn source_adapter_reports(checks: &mut Vec<VerificationCheck>) -> Vec<SourceAdap
 }
 
 fn source_adapter_check(report: &SourceAdapterReport) -> VerificationCheck {
-    let status = if !report.active || report.session_count == 0 || report.skipped_record_count > 0 {
+    let status = if !report.active
+        || report.session_count == 0
+        || report.skipped_record_count > 0
+        || report.scan_truncated
+    {
         VerificationStatus::Warn
     } else {
         VerificationStatus::Pass
     };
     let path = report.store_path.as_deref().unwrap_or("-");
     let last = report.last_indexed_at.as_deref().unwrap_or("-");
+    let list_limit = report
+        .list_limit
+        .map(|limit| limit.to_string())
+        .unwrap_or_else(|| "unlimited".into());
+    let scan_limit = report
+        .scan_entry_limit
+        .map(|limit| limit.to_string())
+        .unwrap_or_else(|| "unlimited".into());
+    let summary_limit = report
+        .summary_line_limit
+        .map(|limit| limit.to_string())
+        .unwrap_or_else(|| "unlimited".into());
     check(
         format!("source_{}_adapter", report.cli.id()),
         status,
         format!(
-            "{} {}; active={}; filter={}; path={path}; sessions={}; skipped={}; last={last}; {}",
+            "{} {}; active={}; filter={}; path={path}; sessions={}; skipped={}; last={last}; list_limit={list_limit}; scan_entries={}; scan_limit={scan_limit}; summary_line_limit={summary_limit}; scan_truncated={}; {}",
             report.cli,
             report.provenance,
             report.active,
             report.filter_status,
             report.session_count,
             report.skipped_record_count,
+            report.scan_entry_count,
+            report.scan_truncated,
             report.reason
         ),
     )

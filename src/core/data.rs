@@ -33,7 +33,7 @@ pub fn workbench_data(source: CliTool, target: CliTool) -> Result<WorkbenchData,
             events: Vec::new(),
         }
     } else {
-        canonical_timeline_for_session(&source_session)?
+        preview_timeline_for_session(&source_session)?
     };
 
     let rewind_event_id = rewind_event_id_for_timeline(&source_session_id, &timeline);
@@ -77,7 +77,7 @@ pub fn workbench_data_for_session(
     };
     let sessions = include_source_session(sessions, &source_session);
     let source_session_id = source_session.id.clone();
-    let timeline = canonical_timeline_for_session(&source_session)?;
+    let timeline = preview_timeline_for_session(&source_session)?;
     let rewind_event_id = rewind_event_id_for_timeline(&source_session_id, &timeline);
     let compiler = default_compiler_id();
     let capsule = compile_capsule_for_session(
@@ -205,6 +205,12 @@ pub fn canonical_timeline_for_session(
     session: &SessionSummary,
 ) -> Result<CanonicalTimeline, CoreError> {
     sources::load_timeline(session)
+}
+
+pub fn preview_timeline_for_session(
+    session: &SessionSummary,
+) -> Result<CanonicalTimeline, CoreError> {
+    sources::load_timeline_preview(session)
 }
 
 pub fn compile_request(

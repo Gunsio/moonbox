@@ -8,11 +8,13 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::{
-    adapter::{AdapterError, SourceAdapter},
+    adapter::{AdapterError, SourceAdapter, SourceReportMeta},
     local_jsonl::{
-        collect_project_jsonl_files, configured_session_limit, display_time, event_id,
-        find_token_count, human_timestamp, max_timestamp, open_reader, read_error,
-        sort_paths_by_modified_desc, text_from_value, title_case, truncate,
+        collect_project_jsonl_files, configured_session_limit, configured_session_scan_entry_limit,
+        configured_session_summary_line_limit, discover_project_jsonl_files, display_time,
+        event_id, find_token_count, human_timestamp, max_timestamp, open_reader,
+        push_timeline_event, read_error, sort_paths_by_modified_desc, text_from_value, title_case,
+        truncate,
     },
     model::{
         CanonicalTimeline, CliTool, SessionStatus, SessionSummary, SourceProvenance, TimelineEvent,
@@ -26,6 +28,8 @@ const CLAUDE_TOOL: CliTool = CliTool::Claude;
 pub struct ClaudeSourceAdapter {
     root: PathBuf,
     list_limit: Option<usize>,
+    scan_entry_limit: Option<usize>,
+    summary_line_limit: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -63,6 +67,7 @@ struct SummaryBuilder {
     token_count: Option<usize>,
     event_count: usize,
     malformed_lines: usize,
+    summary_truncated: bool,
     has_error: bool,
 }
 
@@ -71,14 +76,37 @@ impl ClaudeSourceAdapter {
         Self {
             root: root.into(),
             list_limit: configured_session_limit(),
+            scan_entry_limit: configured_session_scan_entry_limit(),
+            summary_line_limit: configured_session_summary_line_limit(),
         }
     }
 
     #[cfg(test)]
     fn with_session_limit(root: impl Into<PathBuf>, list_limit: Option<usize>) -> Self {
+        Self::with_limits(root, list_limit, None)
+    }
+
+    #[cfg(test)]
+    fn with_limits(
+        root: impl Into<PathBuf>,
+        list_limit: Option<usize>,
+        scan_entry_limit: Option<usize>,
+    ) -> Self {
+        Self::with_all_limits(root, list_limit, scan_entry_limit, None)
+    }
+
+    #[cfg(test)]
+    fn with_all_limits(
+        root: impl Into<PathBuf>,
+        list_limit: Option<usize>,
+        scan_entry_limit: Option<usize>,
+        summary_line_limit: Option<usize>,
+    ) -> Self {
         Self {
             root: root.into(),
             list_limit,
+            scan_entry_limit,
+            summary_line_limit,
         }
     }
 
@@ -117,7 +145,16 @@ impl ClaudeSourceAdapter {
     }
 
     fn listed_session_files(&self) -> Result<Vec<PathBuf>, AdapterError> {
-        self.session_files(self.list_limit)
+        Ok(self.listed_session_discovery()?.files)
+    }
+
+    fn listed_session_discovery(&self) -> Result<super::local_jsonl::JsonlDiscovery, AdapterError> {
+        discover_project_jsonl_files(
+            CLAUDE_TOOL,
+            &self.projects_dir(),
+            self.list_limit,
+            self.scan_entry_limit,
+        )
     }
 
     fn all_session_files(&self) -> Result<Vec<PathBuf>, AdapterError> {
@@ -125,10 +162,28 @@ impl ClaudeSourceAdapter {
     }
 
     fn parse_summary(&self, path: &Path) -> Result<SessionSummary, AdapterError> {
+        self.parse_summary_limited(path, None)
+    }
+
+    fn parse_list_summary(&self, path: &Path) -> Result<SessionSummary, AdapterError> {
+        self.parse_summary_limited(path, self.summary_line_limit)
+    }
+
+    fn parse_summary_limited(
+        &self,
+        path: &Path,
+        line_limit: Option<usize>,
+    ) -> Result<SessionSummary, AdapterError> {
         let mut builder = SummaryBuilder::new(path);
         let reader = open_reader(CLAUDE_TOOL, path)?;
 
-        for line in reader.lines() {
+        for (line_index, line) in reader.lines().enumerate() {
+            if let Some(limit) = line_limit
+                && line_index >= limit
+            {
+                builder.summary_truncated = true;
+                break;
+            }
             let line = line.map_err(|error| read_error(CLAUDE_TOOL, path, error))?;
             if line.trim().is_empty() {
                 continue;
@@ -159,6 +214,7 @@ impl ClaudeSourceAdapter {
         &self,
         session_id: &str,
         path: &Path,
+        event_limit: Option<usize>,
     ) -> Result<CanonicalTimeline, AdapterError> {
         let reader = open_reader(CLAUDE_TOOL, path)?;
         let mut events = Vec::new();
@@ -172,19 +228,24 @@ impl ClaudeSourceAdapter {
             let record = match serde_json::from_str::<ClaudeRecord>(&line) {
                 Ok(record) => record,
                 Err(error) => {
-                    events.push(TimelineEvent {
+                    let event = TimelineEvent {
                         id: event_id(events.len() + 1),
                         time: "??:??".into(),
                         kind: TimelineKind::Error,
                         title: "Malformed event".into(),
                         detail: format!("line {}: {}", line_index + 1, error),
-                    });
+                    };
+                    if push_timeline_event(&mut events, event, event_limit) {
+                        break;
+                    }
                     continue;
                 }
             };
 
-            if let Some(event) = timeline_event(record, events.len() + 1) {
-                events.push(event);
+            if let Some(event) = timeline_event(record, events.len() + 1)
+                && push_timeline_event(&mut events, event, event_limit)
+            {
+                break;
             }
         }
 
@@ -213,9 +274,37 @@ impl SourceAdapter for ClaudeSourceAdapter {
     fn list_sessions(&self) -> Result<Vec<SessionSummary>, AdapterError> {
         let mut sessions = Vec::new();
         for path in self.listed_session_files()? {
-            sessions.push(self.parse_summary(&path)?);
+            sessions.push(self.parse_list_summary(&path)?);
         }
         Ok(sessions)
+    }
+
+    fn list_sessions_with_report(
+        &self,
+        filter_status: &str,
+        reason: &str,
+    ) -> Result<(Vec<SessionSummary>, super::model::SourceAdapterReport), AdapterError> {
+        let discovery = self.listed_session_discovery()?;
+        let mut sessions = Vec::new();
+        for path in discovery.files {
+            sessions.push(self.parse_list_summary(&path)?);
+        }
+        let report = super::adapter::report_from_sessions_with_scan(
+            SourceReportMeta {
+                cli: self.tool(),
+                provenance: self.provenance(),
+                active: true,
+                store_path: self.store_path(),
+                filter_status: filter_status.into(),
+                reason: reason.into(),
+            },
+            &sessions,
+            super::adapter::SourceScanStats {
+                summary_line_limit: self.summary_line_limit,
+                ..discovery.scan_stats
+            },
+        );
+        Ok((sessions, report))
     }
 
     fn find_session(&self, session_id: &str) -> Result<Option<SessionSummary>, AdapterError> {
@@ -232,7 +321,29 @@ impl SourceAdapter for ClaudeSourceAdapter {
                 session_id: session_id.into(),
             });
         };
-        self.parse_timeline(session_id, &path)
+        self.parse_timeline(session_id, &path, None)
+    }
+
+    fn load_timeline_limited(
+        &self,
+        session: &SessionSummary,
+        event_limit: Option<usize>,
+    ) -> Result<CanonicalTimeline, AdapterError> {
+        if let Some(path) = session
+            .source_path
+            .as_deref()
+            .map(PathBuf::from)
+            .filter(|path| path.is_file())
+        {
+            return self.parse_timeline(&session.id, &path, event_limit);
+        }
+        let Some(path) = self.find_session_path(&session.id)? else {
+            return Err(AdapterError::SessionNotFound {
+                tool: CLAUDE_TOOL,
+                session_id: session.id.clone(),
+            });
+        };
+        self.parse_timeline(&session.id, &path, event_limit)
     }
 }
 
@@ -248,6 +359,7 @@ impl SummaryBuilder {
             token_count: None,
             event_count: 0,
             malformed_lines: 0,
+            summary_truncated: false,
             has_error: false,
         }
     }
@@ -298,7 +410,14 @@ impl SummaryBuilder {
         } else {
             SessionStatus::Healthy
         };
-        let health_reason = if self.malformed_lines > 0 {
+        let health_reason = if self.summary_truncated && self.malformed_lines > 0 {
+            format!(
+                "real Claude JSONL session; summary preview truncated; skipped {} malformed line(s)",
+                self.malformed_lines
+            )
+        } else if self.summary_truncated {
+            "real Claude JSONL session; summary preview truncated".into()
+        } else if self.malformed_lines > 0 {
             format!(
                 "real Claude JSONL session; skipped {} malformed line(s)",
                 self.malformed_lines
@@ -549,6 +668,83 @@ mod tests {
         assert_eq!(found.id, "session-a-old");
         assert_eq!(timeline.source_session, "session-a-old");
         assert_eq!(timeline.events[0].detail, "old");
+    }
+
+    #[test]
+    fn list_report_exposes_scan_budget_truncation() {
+        let root = test_root("scan-budget");
+        for id in ["session-a-old", "session-b-new"] {
+            write_session(
+                &root,
+                &format!("repo/{id}.jsonl"),
+                &format!(
+                    r#"{{"type":"user","sessionId":"{id}","timestamp":"2026-06-06T09:00:00.000Z","cwd":"/repo","message":{{"content":"{id}"}}}}"#
+                ),
+            );
+        }
+        let adapter = ClaudeSourceAdapter::with_limits(&root, Some(5), Some(2));
+
+        let (sessions, report) = adapter
+            .list_sessions_with_report("included_real_store", "test")
+            .expect("report");
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(report.session_count, 1);
+        assert_eq!(report.list_limit, Some(5));
+        assert_eq!(report.scan_entry_limit, Some(2));
+        assert_eq!(report.scan_entry_count, 2);
+        assert!(report.scan_truncated);
+    }
+
+    #[test]
+    fn timeline_preview_stops_at_event_limit() {
+        let root = test_root("timeline-preview-limit");
+        write_session(
+            &root,
+            "repo/claude-long.jsonl",
+            r#"{"type":"user","sessionId":"claude-long","timestamp":"2026-06-06T10:00:00.000Z","cwd":"/repo","message":{"content":"first"}}
+{"type":"assistant","sessionId":"claude-long","timestamp":"2026-06-06T10:01:00.000Z","cwd":"/repo","message":{"content":[{"type":"text","text":"second"}]}}
+{"type":"assistant","sessionId":"claude-long","timestamp":"2026-06-06T10:02:00.000Z","cwd":"/repo","message":{"content":[{"type":"text","text":"third should not parse"}]}}"#,
+        );
+        let adapter = ClaudeSourceAdapter::new(&root);
+        let session = adapter
+            .find_session("claude-long")
+            .expect("find")
+            .expect("session");
+
+        let timeline = adapter
+            .load_timeline_limited(&session, Some(2))
+            .expect("timeline");
+
+        assert_eq!(timeline.events.len(), 3);
+        assert_eq!(timeline.events[0].detail, "first");
+        assert_eq!(timeline.events[1].detail, "second");
+        assert_eq!(timeline.events[2].title, "Timeline preview truncated");
+    }
+
+    #[test]
+    fn list_summary_stops_at_summary_line_limit() {
+        let root = test_root("summary-line-limit");
+        write_session(
+            &root,
+            "repo/claude-limited.jsonl",
+            r#"{"type":"user","sessionId":"claude-limited","timestamp":"2026-06-06T10:00:00.000Z","cwd":"/repo","message":{"content":"visible"}}
+not-json-after-limit"#,
+        );
+        let adapter = ClaudeSourceAdapter::with_all_limits(&root, Some(10), None, Some(1));
+
+        let sessions = adapter.list_sessions().expect("sessions");
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "claude-limited");
+        assert_eq!(sessions[0].parse_skip_count, 0);
+        assert!(
+            sessions[0]
+                .health_reason
+                .as_deref()
+                .expect("health")
+                .contains("summary preview truncated")
+        );
     }
 
     fn test_root(name: &str) -> PathBuf {

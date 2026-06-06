@@ -82,6 +82,16 @@ and this project uses semantic versioning once tagged releases start.
 - Structured Doctor source adapter reports under `source_adapters`, including
   provenance, active/missing state, store path, session count, skipped record
   count, last indexed timestamp, and adapter filter status.
+- Bounded JSONL real-store discovery through `MOONBOX_SESSION_SCAN_LIMIT`,
+  with Doctor scan-cost fields for list limit, scan entry limit, visited entry
+  count, and truncation state.
+- Bounded JSONL session summary parsing through
+  `MOONBOX_SESSION_SUMMARY_LINE_LIMIT`, so listed large sessions do not require
+  full-file parsing before the TUI becomes usable.
+- Bounded TUI timeline previews through `MOONBOX_TIMELINE_EVENT_LIMIT`, with a
+  visible truncation marker for large sessions.
+- Animated TUI loading screen while source sessions are indexed before the
+  workbench becomes interactive.
 - Shared verifier policy for CLI and TUI launch validation.
 - Real `--capsule` file parsing and target mismatch verification.
 - README screenshot, installation notes, and Homebrew release planning docs.
