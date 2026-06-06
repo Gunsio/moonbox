@@ -83,14 +83,18 @@ The first implementation focuses on the product shell:
 - High-density TUI workbench
 - Vim-style keyboard navigation
 - Time-sorted global session list with source tags
+- Real Codex session discovery from `~/.codex/sessions`
+- Runtime Codex home override via `MOONBOX_CODEX_HOME` or `CODEX_HOME`
+- Runtime Codex list limit defaults to the newest 200 sessions; set `MOONBOX_SESSION_LIMIT=0` for unlimited discovery
 - Source filter defaults to `All`; `Source` is a session-list filter, not a global handoff mode
 - Target selection lives inside the launch flow, with explicit `> [x]` radio-list selection
 - Target picker validates each target as `READY`, `WARN`, or `BLOCKED`; blocked targets cannot confirm or copy launch commands
 - Last confirmed target is persisted in `~/.config/moonbox/config.json`
-- Demo sessions, timeline, original-session open command, Work Capsule, and branch tree
+- Real Codex timeline parsing plus fixture-backed Claude/Hermes sessions
+- Original-session open command, Work Capsule, and branch tree previews
 - Live `/` session search, combined filter display, and one-key clear with `a`
 - Selected/filtered session drives timeline, Work Capsule, branch preview, token budget, and default rewind point
-- Per-source demo fixtures with branch, token count, health reason, and session-specific timeline/capsule content
+- Fixture fallback with branch, token count, health reason, and session-specific timeline/capsule content
 - Fixed status line for action feedback
 - Context-aware key bar for the current panel or modal
 - Visible rewind marker in the timeline, plus rewind-aware branch and launch preview
@@ -124,14 +128,18 @@ moon tui
 cargo run -- tui --filter claude
 cargo run -- tui --target codex
 cargo run -- sessions --json
-cargo run -- open --session codex-cxcp-design
+MOONBOX_SESSION_LIMIT=50 cargo run -- sessions --json
+cargo run -- open --session <session-id>
 cargo run -- capsule --json
 cargo run -- compile-request --json
 cargo run -- compile-output --json
-cargo run -- launch --target hermes --session codex-cxcp-design --json
-cargo run -- verify --target hermes --session codex-cxcp-design --capsule ./capsule.json --json
+cargo run -- launch --target hermes --session <session-id> --json
+cargo run -- verify --target hermes --session <session-id> --capsule ./capsule.json --json
 cargo run -- verify --target hermes --session hermes-cxcp-502 --json
 ```
+
+`open`, `launch`, and `verify` currently print or validate plans; they do not
+resume a real target process.
 
 ## Interaction Model
 
@@ -213,10 +221,11 @@ Stable interfaces matter more than any single framework:
 - M6: target launcher dry-run plus Work Capsule verification loop.
 - M7: core boundary hardening with fallible adapters, shared verifier policy, real `--capsule` file validation, and a `CapsuleCompiler` trait.
 - M8: open-source hygiene with CI, dependency automation, contribution docs, security policy, changelog, and GitHub templates.
+- M9: real Codex `SourceAdapter` for `~/.codex/sessions`, runtime source registry, and bounded real-session discovery.
 
 ### Can Build Now
 
-- Real Codex / Claude / Hermes Source Adapter implementations.
+- Real Claude / Hermes Source Adapter implementations.
 - Real SkillRunner execution behind `CapsuleCompiler`.
 - Real target launcher execution behind the existing dry-run plan.
 
@@ -227,7 +236,7 @@ Stable interfaces matter more than any single framework:
 
 ### Best After Real Session Data
 
-- Real session discovery for Codex, Claude, and Hermes.
+- Real session discovery for Claude and Hermes.
 - Target compatibility checks, disabled target options, and human-readable incompatibility reasons.
 - Token budget and compression strategy previews.
 - Tool-call, attachment, git diff, and compact-point restoration status.
