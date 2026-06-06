@@ -63,6 +63,8 @@ and this project uses semantic versioning once tagged releases start.
 - TUI Doctor panel with `D` / `:doctor`, refresh, and JSON copy support for
   the same non-executing diagnostics.
 - Fixture-safe TUI render regression tests for main, Doctor, and Launch views.
+- Verifier-backed TUI target readiness explanation rows in the launch picker
+  and Launch Review.
 - Draft Homebrew formula template plus a fixture-safe Homebrew docs smoke gate.
 - Shared verifier policy for CLI and TUI launch validation.
 - Real `--capsule` file parsing and target mismatch verification.
@@ -82,6 +84,8 @@ and this project uses semantic versioning once tagged releases start.
   verification fails.
 - TUI target handoff now uses a two-stage flow: choose a target, review the
   guarded execute command, then copy with `y`.
+- TUI launch key hints now distinguish target selection from Launch Review, so
+  `y` is shown as unavailable until review.
 - TUI launch copy now points at `moonbox launch --execute`, keeping long
   handoff prompts out of the modal while preserving guarded execution.
 - Original-session execution is opt-in and uses source-specific resume

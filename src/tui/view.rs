@@ -11,7 +11,8 @@ use ratatui::{
 use crate::{
     app::{App, Focus},
     core::model::{
-        CliTool, LaunchValidationState, SessionStatus, TimelineKind, VerificationStatus,
+        CliTool, LaunchValidationState, SessionStatus, TimelineKind, VerificationReport,
+        VerificationStatus,
     },
 };
 
@@ -587,6 +588,14 @@ type KeyHint = (&'static str, &'static str);
 
 fn active_key_hints(app: &App) -> Vec<KeyHint> {
     if app.show_launch {
+        if app.launch_review {
+            return vec![
+                ("y", "Copy"),
+                ("enter", "Disabled"),
+                ("PgUp/Dn", "Scroll"),
+                ("Esc", "Close"),
+            ];
+        }
         if app.validate_launch_for_target(app.pending_target).state
             == LaunchValidationState::Blocked
         {
@@ -599,8 +608,8 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
         }
         return vec![
             ("j/k", "Target"),
-            ("enter", "Save"),
-            ("y", "Copy"),
+            ("enter", "Review"),
+            ("y", "Unavailable"),
             ("PgUp/Dn", "Scroll"),
             ("Esc", "Cancel"),
         ];
@@ -732,7 +741,7 @@ fn render_help(frame: &mut Frame, root: Rect, app: &App) {
         Line::raw("[ / ]           previous / next session source filter"),
         Line::raw("space           set rewind point"),
         Line::raw("c, v, d, s      compile, verify, diff, switch skill"),
-        Line::raw("enter           choose target and show handoff command"),
+        Line::raw("enter           choose target and review handoff"),
         Line::raw(":               command mode"),
         Line::raw("q / Esc         close or quit"),
     ];
@@ -830,8 +839,9 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         .unwrap_or_else(|| "No session selected".into());
     let target_branch = app.launch_branch();
     let pending_validation = app.validate_launch_for_target(app.pending_target);
+    let pending_report = app.launch_verification_for_target(app.pending_target);
     if app.launch_review {
-        let lines = vec![
+        let mut lines = vec![
             Line::from(Span::styled(
                 "Review target handoff",
                 Style::default()
@@ -876,6 +886,16 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             ]),
             Line::raw(""),
             Line::from(Span::styled(
+                "Readiness details",
+                Style::default()
+                    .fg(theme::BLUE)
+                    .add_modifier(Modifier::BOLD),
+            )),
+        ];
+        lines.extend(readiness_lines(pending_report.as_ref(), 6));
+        lines.extend([
+            Line::raw(""),
+            Line::from(Span::styled(
                 app.launch_command(),
                 Style::default().fg(theme::CYAN),
             )),
@@ -884,7 +904,7 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                 "y copy execute command   enter disabled   Esc close",
                 Style::default().fg(theme::MUTED),
             )),
-        ];
+        ]);
         frame.render_widget(
             Paragraph::new(lines)
                 .block(panel_block(" Launch Review ", true))
@@ -966,6 +986,16 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                 Style::default().fg(theme::MUTED),
             ),
         ]),
+        Line::raw(""),
+        Line::from(Span::styled(
+            "Readiness details",
+            Style::default()
+                .fg(theme::BLUE)
+                .add_modifier(Modifier::BOLD),
+        )),
+    ]);
+    lines.extend(readiness_lines(pending_report.as_ref(), 6));
+    lines.extend([
         if pending_validation.state == LaunchValidationState::Blocked {
             Line::from(Span::styled(
                 "Launch review disabled until validation passes",
@@ -1010,6 +1040,78 @@ fn validation_color(state: LaunchValidationState) -> Color {
         LaunchValidationState::Warning => theme::GOLD,
         LaunchValidationState::Blocked => theme::RED,
     }
+}
+
+fn readiness_lines(report: Option<&VerificationReport>, max_rows: usize) -> Vec<Line<'static>> {
+    let Some(report) = report else {
+        return vec![Line::from(vec![
+            Span::styled(
+                "BLOCKED ",
+                Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("session", Style::default().fg(theme::TEXT)),
+            Span::styled("  No session selected", Style::default().fg(theme::MUTED)),
+        ])];
+    };
+
+    let mut checks = report
+        .checks
+        .iter()
+        .filter(|check| check.status == VerificationStatus::Fail)
+        .chain(
+            report
+                .checks
+                .iter()
+                .filter(|check| check.status == VerificationStatus::Warn),
+        )
+        .collect::<Vec<_>>();
+
+    if checks.is_empty() {
+        for name in [
+            "capsule_source",
+            "target_cli",
+            "rewind_exists",
+            "handoff_context",
+            "target_support",
+        ] {
+            if let Some(check) = report.checks.iter().find(|check| check.name == name) {
+                checks.push(check);
+            }
+        }
+    }
+
+    let overflow = checks.len().saturating_sub(max_rows);
+    checks.truncate(max_rows);
+    let mut lines = checks
+        .into_iter()
+        .map(|check| {
+            let color = verification_color(check.status);
+            Line::from(vec![
+                Span::styled(
+                    format!("{:<5} ", check.status),
+                    Style::default().fg(color).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    check.name.clone(),
+                    Style::default()
+                        .fg(theme::TEXT)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("  {}", check.detail),
+                    Style::default().fg(theme::MUTED),
+                ),
+            ])
+        })
+        .collect::<Vec<_>>();
+
+    if overflow > 0 {
+        lines.push(Line::from(Span::styled(
+            format!("... {overflow} more readiness signal(s)"),
+            Style::default().fg(theme::MUTED),
+        )));
+    }
+    lines
 }
 
 fn verification_color(status: VerificationStatus) -> Color {
@@ -1259,6 +1361,10 @@ mod tests {
         assert_screen_contains(&screen, "Launch");
         assert_screen_contains(&screen, "Choose target CLI");
         assert_screen_contains(&screen, "BLOCKED");
+        assert_screen_contains(&screen, "Readiness details");
+        assert_screen_contains(&screen, "FAIL");
+        assert_screen_contains(&screen, "target_support");
+        assert_screen_contains(&screen, "raw resume is known failed");
         assert_screen_contains(&screen, "enter/y blocked");
     }
 
@@ -1272,7 +1378,24 @@ mod tests {
 
         assert_screen_contains(&screen, "Launch Review");
         assert_screen_contains(&screen, "target handoff");
+        assert_screen_contains(&screen, "Readiness details");
+        assert_screen_contains(&screen, "PASS");
+        assert_screen_contains(&screen, "target_cli");
         assert_screen_contains(&screen, "moonbox launch --execute");
         assert_screen_contains(&screen, "enter disabled");
+    }
+
+    #[test]
+    fn launch_overlay_renders_warning_readiness_signal() {
+        let mut app = App::new(CliTool::Codex, CliTool::Codex).expect("app");
+        app.show_launch = true;
+        app.pending_target = CliTool::Codex;
+        let screen = render_text(&app, 120, 36);
+
+        assert_screen_contains(&screen, "WARN");
+        assert_screen_contains(&screen, "Readiness details");
+        assert_screen_contains(&screen, "target_support");
+        assert_screen_contains(&screen, "Same-CLI handoff");
+        assert_screen_contains(&screen, "enter review");
     }
 }

@@ -190,6 +190,10 @@ pub fn validate_launch(
     requested_target: CliTool,
 ) -> LaunchValidation {
     let report = verify_capsule(capsule, session, timeline, requested_target);
+    validation_from_report(&report)
+}
+
+pub fn validation_from_report(report: &VerificationReport) -> LaunchValidation {
     let blockers = report
         .checks
         .iter()
