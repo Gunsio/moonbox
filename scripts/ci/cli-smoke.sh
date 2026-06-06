@@ -20,9 +20,13 @@ if [[ "$target_dir" != /* ]]; then
   target_dir="$repo_root/$target_dir"
 fi
 moonbox="$target_dir/debug/moonbox"
+moon="$target_dir/debug/moon"
 
 "$moonbox" --help > "$output_dir/help.txt"
 grep -q "replay-eval" "$output_dir/help.txt"
+
+"$moon" --help > "$output_dir/moon-help.txt"
+grep -q "replay-eval" "$output_dir/moon-help.txt"
 
 "$moonbox" sessions --json > "$output_dir/sessions.json"
 grep -q "codex-cxcp-design" "$output_dir/sessions.json"

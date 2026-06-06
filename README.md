@@ -20,14 +20,6 @@ Install the current repository version:
 ```bash
 cargo install --git https://github.com/Gunsio/moonbox
 moonbox --version
-```
-
-Moonbox also supports the shorter `moon` command. Until binary aliases are part
-of a tagged release, create a local symlink:
-
-```bash
-mkdir -p ~/.local/bin
-ln -sf "$(command -v moonbox)" ~/.local/bin/moon
 moon --version
 ```
 
@@ -121,6 +113,7 @@ The first implementation focuses on the product shell:
 - Single core verifier policy shared by CLI and TUI target validation
 - `--capsule` reads a real Work Capsule JSON file when provided; generated dry-run capsules do not pretend to have a file path
 - Hardened verifier checks for Work Capsule version, required fields, handoff context, risk context, capsule size, target branch markers, and execution command preflight
+- First-class `moon` binary alias installed alongside `moonbox`
 - Deterministic fixture-only replay eval for the Codex/Claude/Hermes source-target matrix
 - GitHub Actions CI for Rust quality gates, fixture replay eval, fixture-safe CLI smoke, package verification, and README screenshot validation
 - Dependabot configuration for Cargo and GitHub Actions updates
@@ -303,6 +296,7 @@ Stable interfaces matter more than any single framework:
 - M18: deterministic fixture-only replay eval covering the Codex/Claude/Hermes source-target matrix, with JSON/text CLI output and verifier signal counts without scanning or opening real sessions.
 - M19: release gate hardening with fixture replay eval and `cargo package --locked` wired into GitHub Actions and the PR verification checklist.
 - M20: fixture-safe CLI command smoke gate that overrides source homes to `target/moonbox-smoke-home`, validates non-executing command surfaces, and runs in GitHub Actions plus the PR checklist.
+- M21: first-class `moon` binary alias via a shared library entrypoint, preserving `cargo run` default behavior and adding smoke coverage for the alias.
 
 ### Can Build Now
 
