@@ -10,7 +10,8 @@ Describe the change and why it matters.
 
 - [ ] `cargo fmt --check`
 - [ ] `cargo check --locked`
-- [ ] `cargo test`
+- [ ] `cargo test --locked`
+- [ ] `RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps`
 - [ ] `cargo run --locked -- replay-eval --json`
 - [ ] `scripts/ci/cli-smoke.sh`
 - [ ] `cargo clippy --locked -- -D warnings`
