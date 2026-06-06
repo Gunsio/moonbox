@@ -43,6 +43,7 @@ scripts/ci/homebrew-docs-smoke.sh
 cargo clippy --locked -- -D warnings
 cargo build --release --locked
 cargo package --locked
+scripts/ci/release-artifacts-smoke.sh
 scripts/ci/install-smoke.sh
 ```
 
@@ -63,6 +64,12 @@ and the exact completion-generation commands the formula will use. It redirects
 source homes into `target/moonbox-homebrew-smoke-home`, sets
 `MOONBOX_SESSION_MODE=fixture`, and must not scan, open, or resume real
 sessions.
+
+`scripts/ci/release-artifacts-smoke.sh` stages source, Cargo crate, and host
+binary archives under `target/`, verifies `SHA256SUMS` and
+`release-manifest.json`, and checks that generated shell completions are present
+inside the binary archive. It sets `MOONBOX_SESSION_MODE=fixture` while
+generating completions and must not scan, open, or resume real sessions.
 
 For README screenshot and install-documentation changes:
 
@@ -113,3 +120,13 @@ Do not publish a Homebrew formula, release archive, or package registry version
 until the milestone is accepted and a version tag is planned. The Homebrew path
 is documented in [docs/release/homebrew.md](docs/release/homebrew.md), but it is
 not live yet.
+
+For a dry run of the staged release artifacts:
+
+```bash
+scripts/release/stage-artifacts.sh --version 0.1.0
+```
+
+For an accepted tag, run the same script with `--ref v0.1.0` and attach the
+generated archives, `SHA256SUMS`, and `release-manifest.json` to the GitHub
+release before updating the Homebrew tap.

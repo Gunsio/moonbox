@@ -76,6 +76,9 @@ jobs:
       - name: Verify package
         run: cargo package --locked
 
+      - name: Run release artifacts smoke
+        run: scripts/ci/release-artifacts-smoke.sh
+
       - name: Run install smoke
         run: scripts/ci/install-smoke.sh
 

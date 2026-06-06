@@ -21,6 +21,7 @@ Describe the change and why it matters.
 - [ ] `cargo clippy --locked -- -D warnings`
 - [ ] `cargo build --release --locked`
 - [ ] `cargo package --locked`
+- [ ] `scripts/ci/release-artifacts-smoke.sh`
 - [ ] `scripts/ci/install-smoke.sh`
 
 ## Documentation
