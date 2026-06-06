@@ -161,6 +161,8 @@ The first implementation focuses on the product shell:
   binaries, and compiler catalog readiness
 - TUI Doctor panel with refresh and JSON copy for the same non-executing
   diagnostics
+- Hidden fixture-only `docs-snapshot` maintenance command for regenerating the
+  README TUI screenshot from the real Ratatui render buffer
 - Fixture session mode for demos, CI, release smoke, and other environments
   that must not read real local session stores
 - Fixture-safe TUI render regression tests for main, Doctor, and Launch views
@@ -429,10 +431,11 @@ Stable interfaces matter more than any single framework:
 - M34: fixture replay corpus expansion with 9 source-target matrix cases plus 3 synthetic regressions for target mismatch, oversized capsule, and missing-tool preflight; replay output now includes case kind, scenario, capsule target, coverage rows, and updated fixture-safe CLI smoke/contract checks.
 - M35: target readiness explanation rows in the TUI launch picker and Launch Review, backed by verifier report checks with FAIL/WARN priority, READY pass-check context, corrected launch key hints, and render/App tests for blocked, warning, and ready states.
 - M36: README screenshot/install polish with a Launch Review readiness screenshot, transparent SVG canvas, and `docs-assets-smoke` coverage for screenshot semantics, install commands, and unpublished Homebrew wording in both local and GitHub Actions gates.
+- M37: generated docs screenshot pipeline with a hidden fixture-only `docs-snapshot` command that renders the real Ratatui Launch Review buffer to SVG, compares the generated output byte-for-byte in `docs-assets-smoke`, and keeps the command hidden from normal help while covered by CLI contract tests.
 
 ### Can Build Now
 
-- Add a generated screenshot pipeline if Ratatui snapshot export becomes worth the maintenance cost.
+- Define release artifact and checksum automation once the first publish path is accepted.
 
 ### Prototype Now, Improve With Real Data
 

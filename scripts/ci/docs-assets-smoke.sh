@@ -5,6 +5,25 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
 svg="docs/assets/moonbox-tui.svg"
+smoke_home="${MOONBOX_DOCS_ASSETS_SMOKE_HOME:-$repo_root/target/moonbox-docs-assets-smoke-home}"
+output_dir="$smoke_home/output"
+generated="$output_dir/moonbox-tui.svg"
+mkdir -p "$output_dir"
+
+export MOONBOX_CODEX_HOME="$smoke_home/codex"
+export MOONBOX_CLAUDE_HOME="$smoke_home/claude"
+export MOONBOX_HERMES_HOME="$smoke_home/hermes"
+export MOONBOX_CONFIG="$smoke_home/config.json"
+export MOONBOX_SESSION_MODE=fixture
+export MOONBOX_SESSION_LIMIT=50
+
+cargo run --locked -- docs-snapshot --output "$generated"
+
+if ! cmp -s "$generated" "$svg"; then
+  diff -u "$generated" "$svg"
+  echo "README screenshot asset is stale; regenerate with: cargo run --locked -- docs-snapshot --output docs/assets/moonbox-tui.svg" >&2
+  exit 1
+fi
 
 xmllint --noout "$svg"
 
@@ -17,7 +36,7 @@ grep -Fq 'Homebrew distribution is planned, but not published yet.' README.md
 grep -Fq 'Launch Review' "$svg"
 grep -Fq 'Readiness details' "$svg"
 grep -Fq 'moonbox launch --execute' "$svg"
-grep -Fq 'enter Disabled' "$svg"
-grep -Fq 'Copy guarded' "$svg"
+grep -Fq 'enter disabled' "$svg"
+grep -Fq 'copy execute command' "$svg"
 
 echo "moonbox docs asset smoke passed"

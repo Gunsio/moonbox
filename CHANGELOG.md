@@ -67,6 +67,8 @@ and this project uses semantic versioning once tagged releases start.
   and Launch Review.
 - Documentation asset smoke coverage for README screenshot semantics,
   installation commands, and unpublished Homebrew wording.
+- Hidden fixture-only `docs-snapshot` maintenance command that renders the real
+  Ratatui Launch Review buffer to SVG for the README screenshot asset.
 - Draft Homebrew formula template plus a fixture-safe Homebrew docs smoke gate.
 - Shared verifier policy for CLI and TUI launch validation.
 - Real `--capsule` file parsing and target mismatch verification.
@@ -107,7 +109,7 @@ and this project uses semantic versioning once tagged releases start.
 - Replay eval JSON now separates matrix and synthetic case counts, labels each
   case with `case_kind` and `scenario`, and reports expected scenario coverage.
 - README screenshot now shows the current Launch Review readiness-details flow
-  on a transparent SVG canvas.
+  on a transparent SVG canvas, generated from the real TUI render path.
 
 ### Not Yet Released
 

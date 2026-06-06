@@ -1,3 +1,4 @@
+mod snapshot;
 mod theme;
 mod view;
 
@@ -9,6 +10,10 @@ use crossterm::event::{self, Event};
 use ratatui::DefaultTerminal;
 
 use crate::app::App;
+
+pub fn docs_screenshot_svg(width: u16, height: u16) -> Result<String> {
+    snapshot::docs_screenshot_svg(width, height)
+}
 
 pub fn run(terminal: &mut DefaultTerminal, mut app: App) -> Result<()> {
     while !app.should_quit() {

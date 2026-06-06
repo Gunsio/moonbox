@@ -16,6 +16,13 @@ pub fn load_workbench(source: CliTool, target: CliTool) -> Result<WorkbenchData,
     data::workbench_data(source, target)
 }
 
+pub fn load_fixture_workbench(
+    source: CliTool,
+    target: CliTool,
+) -> Result<WorkbenchData, CoreError> {
+    data::fixture_workbench_data(source, target)
+}
+
 pub fn load_workbench_for_session(
     session_id: &str,
     target: CliTool,
