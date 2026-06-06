@@ -36,12 +36,8 @@ fn run_tui(args: cli::TuiArgs) -> Result<()> {
         .unwrap_or(core::model::CliTool::Hermes);
     let filter = args.filter.or(args.source);
     let source = filter.unwrap_or(core::model::CliTool::Codex);
-    let mut app = app::App::new(source, target)?;
-    if let Some(filter) = filter {
-        app.apply_session_filter(app::SessionFilter::Tool(filter));
-    }
     let mut terminal = ratatui::init();
-    let result = tui::run(&mut terminal, app);
+    let result = tui::run_with_loading(&mut terminal, source, target, filter);
     ratatui::restore();
     result
 }

@@ -235,6 +235,16 @@ pub struct SourceAdapterReport {
     pub last_indexed_at: Option<String>,
     pub filter_status: String,
     pub reason: String,
+    #[serde(default)]
+    pub list_limit: Option<usize>,
+    #[serde(default)]
+    pub scan_entry_limit: Option<usize>,
+    #[serde(default)]
+    pub summary_line_limit: Option<usize>,
+    #[serde(default)]
+    pub scan_entry_count: usize,
+    #[serde(default)]
+    pub scan_truncated: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

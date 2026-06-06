@@ -29,7 +29,9 @@ fn fixture_safe_command(binary: &str, test_name: &str) -> Command {
         .env("MOONBOX_CLAUDE_HOME", claude_home)
         .env("MOONBOX_HERMES_HOME", hermes_home)
         .env("MOONBOX_CONFIG", home.join("config.json"))
-        .env("MOONBOX_SESSION_LIMIT", "50");
+        .env("MOONBOX_SESSION_LIMIT", "50")
+        .env("MOONBOX_SESSION_SCAN_LIMIT", "500")
+        .env("MOONBOX_SESSION_SUMMARY_LINE_LIMIT", "800");
 
     for key in [
         "CODEX_HOME",
@@ -242,6 +244,14 @@ fn doctor_cli_contract_is_non_executing_and_fixture_safe() {
             .iter()
             .all(|adapter| adapter["active"] == true && adapter["session_count"] == 1)
     );
+    assert!(
+        adapters
+            .iter()
+            .all(|adapter| adapter["scan_entry_count"] == 1
+                && adapter["scan_truncated"] == false
+                && adapter["summary_line_limit"].is_null()
+                && adapter["scan_entry_limit"].is_null())
+    );
 }
 
 #[test]
@@ -368,6 +378,10 @@ fn doctor_reports_real_and_missing_source_adapters_without_fixture_mixing() {
     assert_eq!(codex["provenance"], "real");
     assert_eq!(codex["active"], true);
     assert_eq!(codex["session_count"], 1);
+    assert_eq!(codex["list_limit"], 50);
+    assert_eq!(codex["scan_entry_limit"], 500);
+    assert_eq!(codex["summary_line_limit"], 800);
+    assert_eq!(codex["scan_truncated"], false);
 
     for tool in ["claude", "hermes"] {
         let adapter = adapters
@@ -379,6 +393,66 @@ fn doctor_reports_real_and_missing_source_adapters_without_fixture_mixing() {
         assert_eq!(adapter["session_count"], 0);
         assert_eq!(adapter["filter_status"], "excluded_missing_store");
     }
+}
+
+#[test]
+fn doctor_reports_bounded_real_store_scan_cost() {
+    let test_name = "doctor-real-store-scan-budget";
+    let home = fixture_home(test_name);
+    let codex_store = home.join("codex").join("sessions");
+    fs::create_dir_all(&codex_store).expect("codex store");
+    for id in ["codex-a", "codex-b", "codex-c"] {
+        fs::write(
+            codex_store.join(format!("{id}.jsonl")),
+            format!(
+                r#"{{"timestamp":"2026-06-06T10:00:00Z","type":"session_meta","payload":{{"id":"{id}","cwd":"/tmp/moonbox-real"}}}}"#
+            ),
+        )
+        .expect("codex jsonl");
+    }
+
+    let binary = env!("CARGO_BIN_EXE_moonbox");
+    let report = output_json(
+        moonbox_command(test_name)
+            .arg("doctor")
+            .arg("--json")
+            .env("MOONBOX_SESSION_SCAN_LIMIT", "2")
+            .env("MOONBOX_CODEX_BIN", binary)
+            .env("MOONBOX_CLAUDE_BIN", binary)
+            .env("MOONBOX_HERMES_BIN", binary)
+            .output()
+            .expect("doctor"),
+    );
+
+    assert_eq!(report["ready"], true);
+    assert_eq!(report["status"], "warn");
+    let adapters = report["source_adapters"]
+        .as_array()
+        .expect("source adapters");
+    let codex = adapters
+        .iter()
+        .find(|adapter| adapter["cli"] == "codex")
+        .expect("codex adapter");
+    assert_eq!(codex["provenance"], "real");
+    assert_eq!(codex["session_count"], 2);
+    assert_eq!(codex["list_limit"], 50);
+    assert_eq!(codex["scan_entry_limit"], 2);
+    assert_eq!(codex["summary_line_limit"], 800);
+    assert_eq!(codex["scan_entry_count"], 2);
+    assert_eq!(codex["scan_truncated"], true);
+
+    let checks = report["checks"].as_array().expect("checks");
+    let codex_check = checks
+        .iter()
+        .find(|check| check["name"] == "source_codex_adapter")
+        .expect("codex check");
+    assert_eq!(codex_check["status"], "warn");
+    assert!(
+        codex_check["detail"]
+            .as_str()
+            .expect("detail")
+            .contains("scan_truncated=true")
+    );
 }
 
 #[test]

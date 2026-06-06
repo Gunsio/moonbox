@@ -138,6 +138,12 @@ The first implementation focuses on the product shell:
 - Runtime Hermes home override via `MOONBOX_HERMES_HOME` or `HERMES_HOME`
 - Runtime list limit defaults to the newest 200 sessions per real adapter; explicit session lookup still searches the full store
 - Set `MOONBOX_SESSION_LIMIT=0` for unlimited real-session list discovery
+- Runtime scan entry limit defaults to 5000 filesystem entries per JSONL-backed real adapter, so list and Doctor discovery stay bounded on large local stores
+- Set `MOONBOX_SESSION_SCAN_LIMIT=0` for unlimited JSONL scan discovery, or a positive integer to tune the guardrail
+- Runtime summary parsing defaults to the first 800 lines per listed JSONL session, so a few very large sessions cannot stall the global index
+- Set `MOONBOX_SESSION_SUMMARY_LINE_LIMIT=0` for full summary parsing, or a positive integer to tune index latency
+- TUI timeline preview defaults to the first 300 events per selected session, with a visible truncation marker for large sessions
+- Set `MOONBOX_TIMELINE_EVENT_LIMIT=0` for full TUI timeline previews, or a positive integer to tune switching latency
 - Set `MOONBOX_SESSION_MODE=fixture` to disable real source stores and force embedded fixture sessions
 - Auto discovery only falls back to fixture sessions when no real source stores are present; real and fixture sources are not mixed
 - Source filter defaults to `All`; `Source` is a session-list filter, not a global handoff mode
@@ -154,6 +160,7 @@ The first implementation focuses on the product shell:
 - Original-session open command, Work Capsule, and branch tree previews
 - Live `/` session search, combined filter display, and one-key clear with `a`
 - Selected/filtered session drives timeline, Work Capsule, branch preview, token budget, and default rewind point
+- Animated TUI loading screen while source sessions are indexed in the background
 - Fixture fallback with branch, token count, health reason, and session-specific timeline/capsule content
 - Fixed status line for action feedback
 - Context-aware key bar for the current panel or modal
@@ -214,6 +221,9 @@ cargo run -- tui --target codex
 cargo run -- sessions --json
 MOONBOX_SESSION_MODE=fixture cargo run -- sessions --filter hermes --json
 MOONBOX_SESSION_LIMIT=50 cargo run -- sessions --json
+MOONBOX_SESSION_SCAN_LIMIT=1000 cargo run -- doctor --json
+MOONBOX_SESSION_SUMMARY_LINE_LIMIT=200 cargo run -- sessions --json
+MOONBOX_TIMELINE_EVENT_LIMIT=100 cargo run -- tui
 cargo run -- open --session <session-id>
 cargo run -- open --session <session-id> --json
 cargo run -- open --execute --session <session-id>
@@ -247,9 +257,20 @@ summary discovery, target binary availability, and compiler catalog readiness
 without loading timelines, resuming sessions, or spawning targets. Its JSON
 output includes `source_adapters` entries with provenance, active/missing state,
 store path, session count, skipped record count, last indexed timestamp, and
-adapter filter status. Target binaries can be overridden with `MOONBOX_CODEX_BIN`,
+adapter filter status. It also reports list and scan guardrails through
+`list_limit`, `scan_entry_limit`, `summary_line_limit`, `scan_entry_count`, and
+`scan_truncated`, so a large local store cannot silently degrade into an
+unbounded default scan or full-file summary parse. Target
+binaries can be overridden with `MOONBOX_CODEX_BIN`,
 `MOONBOX_CLAUDE_BIN`, or `MOONBOX_HERMES_BIN` for local testing and custom
 installs.
+
+The TUI starts with an animated loading screen while source sessions are
+indexed. Session switching uses a bounded timeline preview by default, so very
+large JSONL sessions do not freeze navigation. When the preview reaches
+`MOONBOX_TIMELINE_EVENT_LIMIT`, Moonbox adds a `Timeline preview truncated`
+event to the timeline. Set `MOONBOX_TIMELINE_EVENT_LIMIT=0` only when you
+explicitly want full timeline previews in the TUI.
 
 `replay-eval` is also non-executing. It uses only embedded fixtures, does not
 scan local session stores, and reports verifier signals across every
@@ -471,6 +492,7 @@ Stable interfaces matter more than any single framework:
 - M38: release artifact staging with source, Cargo crate, and host binary archives, generated shell completions, `SHA256SUMS`, `release-manifest.json`, Homebrew source archive URL/checksum guidance, and CI smoke validation without publishing.
 - M39: real-session index hardening with fixture fallback only when no real stores exist, CLI `sessions --filter <source>` support, and execute-time guards requiring explicit `--session` before original resume or target handoff can spawn a process.
 - M40: adapter health reporting with per-session provenance fields, structured `doctor.source_adapters`, TUI source badges, missing-store reports when real adapters are active, and single-scan inventory plumbing to avoid duplicate source discovery during diagnostics.
+- M41: real-store performance guardrails with bounded JSONL scan discovery, Doctor scan-cost fields, animated TUI loading while indexing, and bounded TUI timeline previews so large sessions do not freeze navigation.
 
 ### Can Build Now
 
