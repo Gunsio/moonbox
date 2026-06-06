@@ -3,9 +3,10 @@ use std::fs;
 use super::{
     data,
     error::CoreError,
+    launcher,
     model::{
-        CapsuleCompileOutput, CapsuleCompileRequest, CliTool, LaunchPlan, SessionSummary,
-        VerificationReport, WorkCapsule, WorkbenchData,
+        CapsuleCompileOutput, CapsuleCompileRequest, CliTool, LaunchExecution, LaunchPlan,
+        SessionSummary, VerificationReport, WorkCapsule, WorkbenchData,
     },
     verifier,
 };
@@ -90,7 +91,8 @@ pub fn launch_plan(
         return Ok(None);
     };
     let (capsule, capsule_path) = capsule_for_plan(&generated_capsule, capsule_path)?;
-    let command = launch_command(target, &source_session.id, capsule_path.as_deref());
+    let target_command = launcher::target_command(target, &source_session, &capsule)?;
+    let command = target_command.display.clone();
     let verification =
         verifier::verify_capsule(&capsule, &source_session, &timeline.events, target);
 
@@ -102,6 +104,7 @@ pub fn launch_plan(
         target_branch: capsule.target_branch,
         capsule_path,
         command,
+        target_command,
         verification,
     }))
 }
@@ -112,6 +115,17 @@ pub fn verify_launch(
     capsule_path: Option<&str>,
 ) -> Result<Option<VerificationReport>, CoreError> {
     Ok(launch_plan(session_id, target, capsule_path)?.map(|plan| plan.verification))
+}
+
+pub fn execute_launch(
+    session_id: Option<&str>,
+    target: CliTool,
+    capsule_path: Option<&str>,
+) -> Result<Option<LaunchExecution>, CoreError> {
+    let Some(plan) = launch_plan(session_id, target, capsule_path)? else {
+        return Ok(None);
+    };
+    launcher::execute_plan(plan).map(Some)
 }
 
 fn selected_session(session_id: Option<&str>) -> Result<Option<SessionSummary>, CoreError> {
@@ -142,9 +156,13 @@ fn capsule_for_plan(
     Ok((capsule, Some(path.into())))
 }
 
-fn launch_command(target: CliTool, session_id: &str, capsule_path: Option<&str>) -> String {
+pub fn moonbox_execute_command(
+    target: CliTool,
+    session_id: &str,
+    capsule_path: Option<&str>,
+) -> String {
     let base = format!(
-        "moonbox launch --target {} --session {}",
+        "moonbox launch --execute --target {} --session {}",
         target.id(),
         session_id
     );
@@ -170,6 +188,7 @@ mod tests {
 
         assert_eq!(plan.capsule_path, None);
         assert!(!plan.command.contains("--capsule"));
+        assert!(plan.command.starts_with("hermes chat "));
         assert_eq!(plan.verification.status, VerificationStatus::Pass);
     }
 
@@ -208,5 +227,25 @@ mod tests {
             .checks
             .iter()
             .any(|check| check.name == "target_cli" && check.status == VerificationStatus::Fail));
+    }
+
+    #[test]
+    fn execute_launch_rejects_failed_verification_before_spawning_target() {
+        let path = env::temp_dir().join(format!(
+            "moonbox-target-execute-mismatch-{}.json",
+            std::process::id()
+        ));
+        let capsule = capsule(CliTool::Codex, CliTool::Hermes).expect("capsule");
+        fs::write(&path, serde_json::to_string_pretty(&capsule).expect("json"))
+            .expect("write capsule");
+
+        let error = execute_launch(
+            Some("codex-cxcp-design"),
+            CliTool::Codex,
+            Some(path.to_str().expect("utf-8 path")),
+        )
+        .expect_err("blocked launch");
+
+        assert!(matches!(error, CoreError::LaunchBlocked { .. }));
     }
 }

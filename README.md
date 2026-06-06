@@ -141,12 +141,16 @@ cargo run -- compile-request --json
 cargo run -- compile-output --json
 cargo run -- compile-output --compiler <compiler-id> --json
 cargo run -- launch --target hermes --session <session-id> --json
+cargo run -- launch --execute --target hermes --session <session-id>
 cargo run -- verify --target hermes --session <session-id> --capsule ./capsule.json --json
 cargo run -- verify --target hermes --session hermes-cxcp-502 --json
 ```
 
-`open`, `launch`, and `verify` currently print or validate plans; they do not
-resume a real target process.
+`open` and `verify` print or validate plans without resuming a real process.
+`launch` is still dry-run by default. Passing `--execute` runs the verified
+target command after all verification checks pass. Target binaries can be
+overridden with `MOONBOX_CODEX_BIN`, `MOONBOX_CLAUDE_BIN`, or
+`MOONBOX_HERMES_BIN` for local testing and custom installs.
 
 External compiler skills are optional. When configured, Moonbox sends a
 `CapsuleCompileRequest` JSON object to the process stdin and expects a
@@ -227,7 +231,7 @@ Stable interfaces matter more than any single framework:
 - `CapsuleCompiler`: snapshot to Work Capsule; fixture and process runners exist now
 - `Verifier`: schema, token, capability, and handoff checks; shared by CLI/TUI
 - `SkillRunner`: JSON input/output compiler skill execution through a process runner
-- `TargetLauncher`: create target CLI new branch, next real backend
+- `TargetLauncher`: target-specific command construction and guarded process execution
 
 ## TODO
 
@@ -247,14 +251,14 @@ Stable interfaces matter more than any single framework:
 - M11: process-backed compiler skill runner with JSON stdin/stdout contract, timeout/failure handling, CLI `--compiler`, and real TUI compile action.
 - M12: real Claude `SourceAdapter` for `~/.claude/projects`, shared local JSONL adapter utilities, bounded Claude discovery, unbounded explicit Claude session lookup, and real Claude timeline parsing.
 - M13: real Hermes `SourceAdapter` for `~/.hermes/state.db`, optional `sessions.json` enrichment, SQLite message timeline parsing, id-based explicit lookup routing, and lightweight CLI launch/verify artifacts for large real stores.
+- M14: guarded target launcher execution with `launch --execute`, target-specific Codex/Claude/Hermes command generation, structured `target_command` JSON, binary overrides, verification blocking before spawn, and TUI copy commands that execute through Moonbox.
 
 ### Can Build Now
 
-- Real target launcher execution behind the existing dry-run plan.
+- Real original-session launching instead of command preview/printing only.
 
 ### Prototype Now, Improve With Real Data
 
-- Launch preview: keep the command structure now, generate exact commands after target launcher execution exists.
 - Session health badges: basic adapter status now, compute from real resume errors and compatibility signals later.
 
 ### Best After Real Session Data
@@ -262,4 +266,3 @@ Stable interfaces matter more than any single framework:
 - Target compatibility checks, disabled target options, and human-readable incompatibility reasons.
 - Token budget and compression strategy previews.
 - Tool-call, attachment, git diff, and compact-point restoration status.
-- Real original-session launching instead of command preview/printing only.
