@@ -72,6 +72,12 @@ pub struct OpenArgs {
     /// Session id to open. Defaults to the newest discovered session.
     #[arg(long)]
     pub session: Option<String>,
+    /// Execute the original CLI resume command instead of printing a dry-run plan.
+    #[arg(long)]
+    pub execute: bool,
+    /// Print JSON output.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args, Clone, Default)]

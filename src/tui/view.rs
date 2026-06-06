@@ -880,7 +880,7 @@ fn render_open_original(frame: &mut Frame, root: Rect, app: &App) {
             ]),
             Line::raw(""),
             Line::from(Span::styled(
-                &session.resume_command,
+                app.original_open_command().unwrap_or_default(),
                 Style::default().fg(theme::CYAN),
             )),
             Line::raw(""),
@@ -889,7 +889,7 @@ fn render_open_original(frame: &mut Frame, root: Rect, app: &App) {
                 Style::default().fg(theme::MUTED),
             )),
             Line::from(Span::styled(
-                "y copy command   Esc close",
+                "y copy execute command   Esc close",
                 Style::default().fg(theme::MUTED),
             )),
         ]

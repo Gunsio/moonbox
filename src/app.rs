@@ -794,7 +794,7 @@ impl App {
     }
 
     fn copy_original_command(&mut self) {
-        if let Some(command) = self.original_resume_command() {
+        if let Some(command) = self.original_open_command() {
             self.copy_text("original", command);
         } else {
             self.set_status("No session selected");
@@ -817,9 +817,9 @@ impl App {
         )
     }
 
-    pub fn original_resume_command(&self) -> Option<String> {
+    pub fn original_open_command(&self) -> Option<String> {
         self.current_session()
-            .map(|session| session.resume_command.clone())
+            .map(|session| workbench::moonbox_open_execute_command(&session.id))
     }
 
     pub fn validate_launch_for_target(&self, target: CliTool) -> LaunchValidation {
@@ -1152,14 +1152,14 @@ mod tests {
     }
 
     #[test]
-    fn original_copy_queues_resume_command() {
+    fn original_copy_queues_execute_command() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.handle_key(key('o'));
         app.handle_key(key('y'));
 
         assert_eq!(
             app.take_clipboard_text().as_deref(),
-            Some("codex resume codex-cxcp-design")
+            Some("moonbox open --execute --session codex-cxcp-design")
         );
         assert_eq!(app.status_message, "Copied original command");
     }

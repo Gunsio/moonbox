@@ -56,8 +56,43 @@ fn print_sessions(args: cli::JsonArgs) -> Result<()> {
 }
 
 fn print_open_command(args: cli::OpenArgs) -> Result<()> {
+    if args.execute {
+        let execution = core::workbench::execute_open(args.session.as_deref())?;
+        if let Some(execution) = execution {
+            if args.json {
+                println!("{}", serde_json::to_string_pretty(&execution)?);
+            } else {
+                println!("open: execute");
+                println!("status: {}", launch_status(execution.status));
+                println!(
+                    "exit: {}",
+                    execution
+                        .exit_code
+                        .map(|code| code.to_string())
+                        .unwrap_or_else(|| "signal".into())
+                );
+                println!("command: {}", execution.plan.command.display);
+            }
+        } else {
+            println!("No session selected");
+        }
+        return Ok(());
+    }
+
+    if args.json {
+        let plan = core::workbench::open_plan(args.session.as_deref())?;
+        if let Some(plan) = plan {
+            println!("{}", serde_json::to_string_pretty(&plan)?);
+        } else {
+            println!("No session selected");
+        }
+        return Ok(());
+    }
+
     if let Some(command) = core::workbench::open_command(args.session.as_deref())? {
         println!("{command}");
+    } else {
+        println!("No session selected");
     }
     Ok(())
 }

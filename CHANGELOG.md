@@ -26,6 +26,8 @@ and this project uses semantic versioning once tagged releases start.
 - Guarded target launcher execution through `launch --execute`.
 - Target-specific Codex, Claude, and Hermes command generation with structured
   `target_command` plan output.
+- Guarded original-session execution through `open --execute`.
+- Structured original open plan output through `open --json`.
 - Shared verifier policy for CLI and TUI launch validation.
 - Real `--capsule` file parsing and target mismatch verification.
 - README screenshot, installation notes, and Homebrew release planning docs.
@@ -44,8 +46,11 @@ and this project uses semantic versioning once tagged releases start.
   verification fails.
 - TUI launch copy now points at `moonbox launch --execute`, keeping long
   handoff prompts out of the modal while preserving guarded execution.
+- Original-session execution is opt-in and uses source-specific resume
+  entrypoints; Hermes resume commands now use `hermes --resume <session>`.
+- TUI original-session copy now points at `moonbox open --execute`.
 
 ### Not Yet Released
 
 - Homebrew formula and release archives are planned but not published.
-- Real original-session launching is not implemented yet.
+- Real compiler presets, verifier hardening, and replay evaluation are planned.

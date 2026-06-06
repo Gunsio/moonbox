@@ -330,7 +330,16 @@ fn fallback_session(source: CliTool) -> SessionSummary {
         token_count: None,
         health_reason: Some("synthetic fallback".into()),
         event_count: 0,
-        resume_command: format!("{} resume {}-session", source.id(), source.id()),
+        resume_command: fallback_resume_command(source),
+    }
+}
+
+fn fallback_resume_command(source: CliTool) -> String {
+    let id = format!("{}-session", source.id());
+    match source {
+        CliTool::Codex => format!("codex resume {id}"),
+        CliTool::Claude => format!("claude --resume {id}"),
+        CliTool::Hermes => format!("hermes --resume {id}"),
     }
 }
 
