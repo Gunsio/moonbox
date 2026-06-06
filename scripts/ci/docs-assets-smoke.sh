@@ -35,6 +35,7 @@ grep -Fq 'Homebrew distribution is planned, but not published yet.' README.md
 
 grep -Fq 'Launch Review' "$svg"
 grep -Fq 'Readiness details' "$svg"
+grep -Fq '[Codex F]' "$svg"
 grep -Fq 'moonbox launch --execute' "$svg"
 grep -Fq 'enter disabled' "$svg"
 grep -Fq 'copy execute command' "$svg"

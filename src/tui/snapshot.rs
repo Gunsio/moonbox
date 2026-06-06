@@ -30,6 +30,7 @@ pub fn docs_screenshot_svg(width: u16, height: u16) -> Result<String> {
         version: 1,
         status: VerificationStatus::Pass,
         ready: true,
+        source_adapters: Vec::new(),
         checks: Vec::new(),
     };
 

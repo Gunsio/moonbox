@@ -51,6 +51,25 @@ pub enum SessionStatus {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceProvenance {
+    Real,
+    #[default]
+    Fixture,
+    Missing,
+}
+
+impl Display for SourceProvenance {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Real => f.write_str("real"),
+            Self::Fixture => f.write_str("fixture"),
+            Self::Missing => f.write_str("missing"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionSummary {
     pub id: String,
@@ -65,6 +84,12 @@ pub struct SessionSummary {
     pub health_reason: Option<String>,
     pub event_count: usize,
     pub resume_command: String,
+    #[serde(default)]
+    pub source_provenance: SourceProvenance,
+    #[serde(default)]
+    pub source_path: Option<String>,
+    #[serde(default)]
+    pub parse_skip_count: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -123,6 +148,7 @@ pub struct BranchNode {
 pub struct WorkbenchData {
     pub source: CliTool,
     pub target: CliTool,
+    pub source_adapters: Vec<SourceAdapterReport>,
     pub sessions: Vec<SessionSummary>,
     pub timeline: Vec<TimelineEvent>,
     pub capsule: WorkCapsule,
@@ -194,7 +220,21 @@ pub struct DoctorReport {
     pub version: u16,
     pub status: VerificationStatus,
     pub ready: bool,
+    pub source_adapters: Vec<SourceAdapterReport>,
     pub checks: Vec<VerificationCheck>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceAdapterReport {
+    pub cli: CliTool,
+    pub provenance: SourceProvenance,
+    pub active: bool,
+    pub store_path: Option<String>,
+    pub session_count: usize,
+    pub skipped_record_count: usize,
+    pub last_indexed_at: Option<String>,
+    pub filter_status: String,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

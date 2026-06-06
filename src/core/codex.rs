@@ -15,7 +15,8 @@ use super::{
         text_from_value, title_case, truncate,
     },
     model::{
-        CanonicalTimeline, CliTool, SessionStatus, SessionSummary, TimelineEvent, TimelineKind,
+        CanonicalTimeline, CliTool, SessionStatus, SessionSummary, SourceProvenance, TimelineEvent,
+        TimelineKind,
     },
 };
 
@@ -80,6 +81,11 @@ impl CodexSourceAdapter {
     #[cfg(not(test))]
     pub fn has_session_store(&self) -> bool {
         self.sessions_dir().is_dir()
+    }
+
+    #[cfg(not(test))]
+    pub(crate) fn session_store_path(&self) -> PathBuf {
+        self.sessions_dir()
     }
 
     fn sessions_dir(&self) -> PathBuf {
@@ -182,6 +188,14 @@ impl CodexSourceAdapter {
 impl SourceAdapter for CodexSourceAdapter {
     fn tool(&self) -> CliTool {
         CODEX_TOOL
+    }
+
+    fn provenance(&self) -> SourceProvenance {
+        SourceProvenance::Real
+    }
+
+    fn store_path(&self) -> Option<String> {
+        Some(self.sessions_dir().display().to_string())
     }
 
     fn list_sessions(&self) -> Result<Vec<SessionSummary>, AdapterError> {
@@ -326,6 +340,9 @@ impl SummaryBuilder {
             health_reason: Some(health_reason),
             event_count: self.event_count,
             resume_command: format!("codex resume {id}"),
+            source_provenance: SourceProvenance::Real,
+            source_path: Some(self.path.display().to_string()),
+            parse_skip_count: self.malformed_lines,
         }
     }
 }

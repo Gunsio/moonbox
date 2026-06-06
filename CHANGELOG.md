@@ -77,6 +77,11 @@ and this project uses semantic versioning once tagged releases start.
   manifest metadata, and archive contents.
 - Source filtering for the public `moonbox sessions` command through
   `--filter <source>`.
+- Per-session source provenance fields in `moonbox sessions --json`:
+  `source_provenance`, `source_path`, and `parse_skip_count`.
+- Structured Doctor source adapter reports under `source_adapters`, including
+  provenance, active/missing state, store path, session count, skipped record
+  count, last indexed timestamp, and adapter filter status.
 - Shared verifier policy for CLI and TUI launch validation.
 - Real `--capsule` file parsing and target mismatch verification.
 - README screenshot, installation notes, and Homebrew release planning docs.
@@ -124,6 +129,10 @@ and this project uses semantic versioning once tagged releases start.
   stores are present, so real local indexes are not mixed with demo sessions.
 - `open --execute` and `launch --execute` now require an explicit `--session`;
   dry-runs can still omit `--session` to preview the newest discovered session.
+- Doctor diagnostics now use a single source inventory scan for session
+  discovery and adapter health reporting, avoiding duplicate real-store scans.
+- TUI session rows now include REAL/FIXTURE provenance badges, while the Doctor
+  overlay exposes full adapter path and skip-count details.
 
 ### Not Yet Released
 

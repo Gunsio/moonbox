@@ -1,6 +1,8 @@
 use std::{error::Error, fmt};
 
-use super::model::{CanonicalTimeline, CliTool, SessionSummary};
+use super::model::{
+    CanonicalTimeline, CliTool, SessionSummary, SourceAdapterReport, SourceProvenance,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdapterError {
@@ -40,6 +42,8 @@ impl Error for AdapterError {}
 
 pub trait SourceAdapter {
     fn tool(&self) -> CliTool;
+    fn provenance(&self) -> SourceProvenance;
+    fn store_path(&self) -> Option<String>;
     fn list_sessions(&self) -> Result<Vec<SessionSummary>, AdapterError>;
     fn find_session(&self, session_id: &str) -> Result<Option<SessionSummary>, AdapterError> {
         Ok(self
@@ -48,6 +52,52 @@ pub trait SourceAdapter {
             .find(|session| session.id == session_id))
     }
     fn load_timeline(&self, session_id: &str) -> Result<CanonicalTimeline, AdapterError>;
+}
+
+pub fn adapter_report(
+    adapter: &dyn SourceAdapter,
+    filter_status: impl Into<String>,
+    reason: impl Into<String>,
+) -> Result<SourceAdapterReport, AdapterError> {
+    let sessions = adapter.list_sessions()?;
+    Ok(report_from_sessions(
+        adapter.tool(),
+        adapter.provenance(),
+        true,
+        adapter.store_path(),
+        filter_status,
+        reason,
+        &sessions,
+    ))
+}
+
+pub fn report_from_sessions(
+    cli: CliTool,
+    provenance: SourceProvenance,
+    active: bool,
+    store_path: Option<String>,
+    filter_status: impl Into<String>,
+    reason: impl Into<String>,
+    sessions: &[SessionSummary],
+) -> SourceAdapterReport {
+    SourceAdapterReport {
+        cli,
+        provenance,
+        active,
+        store_path,
+        session_count: sessions.len(),
+        skipped_record_count: sessions
+            .iter()
+            .map(|session| session.parse_skip_count)
+            .sum(),
+        last_indexed_at: sessions
+            .iter()
+            .map(|session| session.updated_at.as_str())
+            .max()
+            .map(str::to_owned),
+        filter_status: filter_status.into(),
+        reason: reason.into(),
+    }
 }
 
 pub fn collect_sessions(

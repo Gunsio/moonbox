@@ -3,40 +3,79 @@ use std::{env, fs, path::Path};
 use super::{
     compiler, config, launcher,
     model::{
-        CliTool, CompilerPresetStatus, DoctorReport, SessionSummary, VerificationCheck,
-        VerificationStatus,
+        CliTool, CompilerPresetStatus, DoctorReport, SessionSummary, SourceAdapterReport,
+        VerificationCheck, VerificationStatus,
     },
-    sources, workbench,
+    sources,
 };
 
 pub fn diagnose() -> DoctorReport {
     let mut checks = Vec::new();
     checks.push(config_check());
     checks.push(session_mode_check());
-    checks.push(session_discovery_check());
+    let source_adapters = match sources::source_inventory() {
+        Ok(inventory) => {
+            checks.extend(inventory.adapter_reports.iter().map(source_adapter_check));
+            checks.push(session_summaries_check(&inventory.sessions));
+            inventory.adapter_reports
+        }
+        Err(error) => {
+            checks.push(check(
+                "source_adapters",
+                VerificationStatus::Fail,
+                format!("cannot inspect source adapters: {error}"),
+            ));
+            checks.push(check(
+                "session_discovery",
+                VerificationStatus::Fail,
+                format!("cannot list session summaries: {error}"),
+            ));
+            Vec::new()
+        }
+    };
     checks.extend(CliTool::ALL.into_iter().map(target_binary_check));
     checks.push(compiler_catalog_check());
 
-    report(checks)
+    report(checks, source_adapters)
 }
 
 pub fn diagnose_with_session_summaries(sessions: &[SessionSummary]) -> DoctorReport {
     let mut checks = Vec::new();
     checks.push(config_check());
     checks.push(session_mode_check());
+    let source_adapters = source_adapter_reports(&mut checks);
     checks.push(session_summaries_check(sessions));
     checks.extend(CliTool::ALL.into_iter().map(target_binary_check));
     checks.push(compiler_catalog_check());
 
-    report(checks)
+    report(checks, source_adapters)
 }
 
-fn report(checks: Vec<VerificationCheck>) -> DoctorReport {
+pub fn diagnose_with_inventory(
+    sessions: &[SessionSummary],
+    source_adapters: &[SourceAdapterReport],
+) -> DoctorReport {
+    let mut checks = Vec::new();
+    checks.push(config_check());
+    checks.push(session_mode_check());
+    checks.extend(source_adapters.iter().map(source_adapter_check));
+    checks.push(session_summaries_check(sessions));
+    checks.extend(CliTool::ALL.into_iter().map(target_binary_check));
+    checks.push(compiler_catalog_check());
+
+    report(checks, source_adapters.to_vec())
+}
+
+fn report(
+    checks: Vec<VerificationCheck>,
+    source_adapters: Vec<SourceAdapterReport>,
+) -> DoctorReport {
     let status = overall_status(&checks);
     DoctorReport {
         version: 1,
         status,
         ready: status != VerificationStatus::Fail,
+        source_adapters,
         checks,
     }
 }
@@ -112,15 +151,45 @@ fn config_check() -> VerificationCheck {
     }
 }
 
-fn session_discovery_check() -> VerificationCheck {
-    match workbench::list_sessions() {
-        Ok(sessions) => session_summaries_check(&sessions),
-        Err(error) => check(
-            "session_discovery",
-            VerificationStatus::Fail,
-            format!("cannot list session summaries: {error}"),
-        ),
+fn source_adapter_reports(checks: &mut Vec<VerificationCheck>) -> Vec<SourceAdapterReport> {
+    match sources::adapter_reports() {
+        Ok(reports) => {
+            checks.extend(reports.iter().map(source_adapter_check));
+            reports
+        }
+        Err(error) => {
+            checks.push(check(
+                "source_adapters",
+                VerificationStatus::Fail,
+                format!("cannot inspect source adapters: {error}"),
+            ));
+            Vec::new()
+        }
     }
+}
+
+fn source_adapter_check(report: &SourceAdapterReport) -> VerificationCheck {
+    let status = if !report.active || report.session_count == 0 || report.skipped_record_count > 0 {
+        VerificationStatus::Warn
+    } else {
+        VerificationStatus::Pass
+    };
+    let path = report.store_path.as_deref().unwrap_or("-");
+    let last = report.last_indexed_at.as_deref().unwrap_or("-");
+    check(
+        format!("source_{}_adapter", report.cli.id()),
+        status,
+        format!(
+            "{} {}; active={}; filter={}; path={path}; sessions={}; skipped={}; last={last}; {}",
+            report.cli,
+            report.provenance,
+            report.active,
+            report.filter_status,
+            report.session_count,
+            report.skipped_record_count,
+            report.reason
+        ),
+    )
 }
 
 fn session_summaries_check(sessions: &[SessionSummary]) -> VerificationCheck {

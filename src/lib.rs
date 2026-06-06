@@ -55,14 +55,33 @@ fn print_sessions(args: cli::SessionListArgs) -> Result<()> {
     if args.json {
         println!("{}", serde_json::to_string_pretty(&sessions)?);
     } else {
+        println!(
+            "filter: {}",
+            filter
+                .map(|tool| tool.id().to_owned())
+                .unwrap_or_else(|| "all".into())
+        );
         for session in sessions {
             println!(
-                "{:<8} {:<28} {:<24} {}",
-                session.cli, session.title, session.cwd, session.updated
+                "{:<8} {:<7} {:<28} {:<24} {}{}",
+                session.cli,
+                session.source_provenance,
+                session.title,
+                session.cwd,
+                session.updated,
+                parse_skip_suffix(session.parse_skip_count)
             );
         }
     }
     Ok(())
+}
+
+fn parse_skip_suffix(parse_skip_count: usize) -> String {
+    if parse_skip_count == 0 {
+        String::new()
+    } else {
+        format!("  skipped={parse_skip_count}")
+    }
 }
 
 fn print_open_command(args: cli::OpenArgs) -> Result<()> {

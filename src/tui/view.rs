@@ -11,8 +11,8 @@ use ratatui::{
 use crate::{
     app::{App, Focus},
     core::model::{
-        CliTool, LaunchValidationState, SessionStatus, TimelineKind, VerificationReport,
-        VerificationStatus,
+        CliTool, LaunchValidationState, SessionStatus, SourceProvenance, TimelineKind,
+        VerificationReport, VerificationStatus,
     },
 };
 
@@ -214,7 +214,17 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
                         status,
                         Span::raw(" "),
                         Span::styled(
-                            format!("[{}] ", session.cli),
+                            format!("[{} ", session.cli),
+                            Style::default()
+                                .fg(theme::CYAN)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            source_provenance_label(session.source_provenance),
+                            source_provenance_style(session.source_provenance),
+                        ),
+                        Span::styled(
+                            "] ",
                             Style::default()
                                 .fg(theme::CYAN)
                                 .add_modifier(Modifier::BOLD),
@@ -252,7 +262,7 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
                         ),
                         Span::styled("  ·  ", Style::default().fg(theme::MUTED)),
                         Span::styled(
-                            session.health_reason.as_deref().unwrap_or("ready"),
+                            session_health_detail(session),
                             session_health_style(session.status),
                         ),
                     ]),
@@ -308,6 +318,37 @@ fn session_health_style(status: SessionStatus) -> Style {
         SessionStatus::Healthy => Style::default().fg(theme::GREEN),
         SessionStatus::Warning => Style::default().fg(theme::GOLD),
         SessionStatus::Failed => Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+    }
+}
+
+fn source_provenance_label(provenance: SourceProvenance) -> &'static str {
+    match provenance {
+        SourceProvenance::Real => "R",
+        SourceProvenance::Fixture => "F",
+        SourceProvenance::Missing => "M",
+    }
+}
+
+fn source_provenance_style(provenance: SourceProvenance) -> Style {
+    match provenance {
+        SourceProvenance::Real => Style::default()
+            .fg(theme::GREEN)
+            .add_modifier(Modifier::BOLD),
+        SourceProvenance::Fixture => Style::default().fg(theme::BLUE),
+        SourceProvenance::Missing => Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+    }
+}
+
+fn session_health_detail(session: &crate::core::model::SessionSummary) -> String {
+    let reason = session.health_reason.as_deref().unwrap_or("ready");
+    let provenance = session.source_provenance.to_string();
+    if session.parse_skip_count == 0 {
+        format!("{provenance} · {reason}")
+    } else {
+        format!(
+            "{provenance} · skipped {} · {reason}",
+            session.parse_skip_count
+        )
     }
 }
 
@@ -1347,7 +1388,8 @@ mod tests {
 
         assert_screen_contains(&screen, "Doctor");
         assert_screen_contains(&screen, "Environment doctor");
-        assert_screen_contains(&screen, "session_discovery");
+        assert_screen_contains(&screen, "source_codex_adapter");
+        assert_screen_contains(&screen, "fixtures/adapters/codex");
         assert_screen_contains(&screen, "Copy JSON");
     }
 

@@ -91,6 +91,9 @@ semantics.
 - Keep real-session automation explicit: commands that spawn source or target
   CLIs must require an explicit session id rather than defaulting to the newest
   discovered session.
+- Keep source adapter state observable: real/fixture/missing provenance, store
+  path, skipped record count, and indexed-session counts belong in structured
+  diagnostics, not only in prose or debug logs.
 - Prefer stable core contracts over UI-only behavior.
 - Do not duplicate business policy between CLI and TUI. Shared rules belong in
   `src/core`.

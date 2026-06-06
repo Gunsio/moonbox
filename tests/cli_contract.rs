@@ -213,6 +213,9 @@ fn doctor_cli_contract_is_non_executing_and_fixture_safe() {
     let checks = report["checks"].as_array().expect("checks");
     for name in [
         "config_file",
+        "source_codex_adapter",
+        "source_claude_adapter",
+        "source_hermes_adapter",
         "session_discovery",
         "target_codex_binary",
         "target_claude_binary",
@@ -224,6 +227,21 @@ fn doctor_cli_contract_is_non_executing_and_fixture_safe() {
             "missing doctor check {name}: {report:#}"
         );
     }
+
+    let adapters = report["source_adapters"]
+        .as_array()
+        .expect("source adapters");
+    assert_eq!(adapters.len(), 3);
+    assert!(
+        adapters
+            .iter()
+            .all(|adapter| adapter["provenance"] == "fixture")
+    );
+    assert!(
+        adapters
+            .iter()
+            .all(|adapter| adapter["active"] == true && adapter["session_count"] == 1)
+    );
 }
 
 #[test]
@@ -244,6 +262,16 @@ fn session_listing_uses_fixture_fallback_when_source_homes_are_isolated() {
     assert_eq!(
         ids,
         ["codex-cxcp-design", "claude-qc-platform", "hermes-cxcp-502"]
+    );
+    assert!(
+        sessions.as_array().expect("session array").iter().all(
+            |session| session["source_provenance"] == "fixture"
+                && session["parse_skip_count"] == 0
+                && session["source_path"]
+                    .as_str()
+                    .expect("source path")
+                    .starts_with("fixtures/adapters/")
+        )
     );
 }
 
@@ -271,7 +299,8 @@ fn auto_mode_does_not_mix_real_sessions_with_missing_source_fixtures() {
     fs::write(
         codex_store.join("real-codex.jsonl"),
         r#"{"timestamp":"2026-06-06T10:00:00Z","type":"session_meta","payload":{"id":"codex-real-isolated","cwd":"/tmp/moonbox-real","git":{"branch":"main"}}}
-{"timestamp":"2026-06-06T10:01:00Z","type":"response_item","payload":{"role":"user","content":[{"type":"input_text","text":"Use real Codex store only"}]}}"#,
+{"timestamp":"2026-06-06T10:01:00Z","type":"response_item","payload":{"role":"user","content":[{"type":"input_text","text":"Use real Codex store only"}]}}
+not-json"#,
     )
     .expect("codex jsonl");
 
@@ -291,6 +320,65 @@ fn auto_mode_does_not_mix_real_sessions_with_missing_source_fixtures() {
     assert_eq!(ids, ["codex-real-isolated"]);
     assert!(!ids.contains(&"claude-qc-platform"));
     assert!(!ids.contains(&"hermes-cxcp-502"));
+    let session = &sessions.as_array().expect("session array")[0];
+    assert_eq!(session["source_provenance"], "real");
+    assert_eq!(session["parse_skip_count"], 1);
+    assert!(
+        session["source_path"]
+            .as_str()
+            .expect("source path")
+            .ends_with("real-codex.jsonl")
+    );
+}
+
+#[test]
+fn doctor_reports_real_and_missing_source_adapters_without_fixture_mixing() {
+    let test_name = "doctor-real-store-report";
+    let home = fixture_home(test_name);
+    let codex_store = home.join("codex").join("sessions").join("2026");
+    fs::create_dir_all(&codex_store).expect("codex store");
+    fs::write(
+        codex_store.join("real-codex.jsonl"),
+        r#"{"timestamp":"2026-06-06T10:00:00Z","type":"session_meta","payload":{"id":"codex-real-isolated","cwd":"/tmp/moonbox-real","git":{"branch":"main"}}}
+{"timestamp":"2026-06-06T10:01:00Z","type":"response_item","payload":{"role":"user","content":[{"type":"input_text","text":"Use real Codex store only"}]}}"#,
+    )
+    .expect("codex jsonl");
+
+    let binary = env!("CARGO_BIN_EXE_moonbox");
+    let report = output_json(
+        moonbox_command(test_name)
+            .arg("doctor")
+            .arg("--json")
+            .env("MOONBOX_CODEX_BIN", binary)
+            .env("MOONBOX_CLAUDE_BIN", binary)
+            .env("MOONBOX_HERMES_BIN", binary)
+            .output()
+            .expect("doctor"),
+    );
+
+    assert_eq!(report["ready"], true);
+    assert_eq!(report["status"], "warn");
+    let adapters = report["source_adapters"]
+        .as_array()
+        .expect("source adapters");
+    let codex = adapters
+        .iter()
+        .find(|adapter| adapter["cli"] == "codex")
+        .expect("codex adapter");
+    assert_eq!(codex["provenance"], "real");
+    assert_eq!(codex["active"], true);
+    assert_eq!(codex["session_count"], 1);
+
+    for tool in ["claude", "hermes"] {
+        let adapter = adapters
+            .iter()
+            .find(|adapter| adapter["cli"] == tool)
+            .unwrap_or_else(|| panic!("missing {tool} adapter report"));
+        assert_eq!(adapter["provenance"], "missing");
+        assert_eq!(adapter["active"], false);
+        assert_eq!(adapter["session_count"], 0);
+        assert_eq!(adapter["filter_status"], "excluded_missing_store");
+    }
 }
 
 #[test]

@@ -30,6 +30,10 @@ checkout, install the same two binaries with:
 cargo install --path . --locked
 ```
 
+If `moon --help` still says the session list "uses demo data", the global binary
+is stale. Reinstall from the current checkout or run through `cargo run --locked
+-- ...` while testing local changes.
+
 ### Source Checkout
 
 Requires Rust 1.88 or newer.
@@ -138,6 +142,7 @@ The first implementation focuses on the product shell:
 - Auto discovery only falls back to fixture sessions when no real source stores are present; real and fixture sources are not mixed
 - Source filter defaults to `All`; `Source` is a session-list filter, not a global handoff mode
 - `moonbox sessions --filter <source>` lists one source while keeping default output as the time-sorted global session index
+- `moonbox sessions --json` keeps the stable session array shape and annotates each session with `source_provenance`, `source_path`, and `parse_skip_count`
 - Original resume and target handoff are explicit action intents:
   `original_resume` for `open`, `target_handoff` for `launch`
 - Target selection lives inside the launch flow, with explicit `> [x]` radio-list selection
@@ -170,8 +175,8 @@ The first implementation focuses on the product shell:
 - Hardened verifier checks for Work Capsule version, required fields, handoff context, risk context, capsule size, target branch markers, and execution command preflight
 - First-class `moon` binary alias installed alongside `moonbox`
 - Shell completion generation for `moonbox` and `moon`
-- Non-executing `doctor` diagnostics for config, session discovery, target
-  binaries, and compiler catalog readiness
+- Non-executing `doctor` diagnostics for config, source adapter provenance,
+  session discovery, target binaries, and compiler catalog readiness
 - TUI Doctor panel with refresh and JSON copy for the same non-executing
   diagnostics
 - Hidden fixture-only `docs-snapshot` maintenance command for regenerating the
@@ -227,14 +232,22 @@ cargo run -- verify --target hermes --session <session-id> --capsule ./capsule.j
 cargo run -- verify --target hermes --session hermes-cxcp-502 --json
 ```
 
+`sessions` text output prints the active source filter plus each row's
+`real`/`fixture` provenance. JSON output remains an array for compatibility and
+adds per-session `source_provenance`, `source_path`, and `parse_skip_count`
+fields.
+
 `open` and `launch` are dry-run by default. Dry-runs may omit `--session` and
 will preview the newest discovered session. Passing `--execute` runs the
 original CLI resume command or verified target command and therefore requires an
 explicit `--session`, so automation cannot accidentally open the newest active
 session. `verify` never resumes or launches a real process. `doctor` is also
-non-executing: it checks config resolution, session summary discovery, target
-binary availability, and compiler catalog readiness without loading timelines,
-resuming sessions, or spawning targets. Target binaries can be overridden with `MOONBOX_CODEX_BIN`,
+non-executing: it checks config resolution, source adapter provenance, session
+summary discovery, target binary availability, and compiler catalog readiness
+without loading timelines, resuming sessions, or spawning targets. Its JSON
+output includes `source_adapters` entries with provenance, active/missing state,
+store path, session count, skipped record count, last indexed timestamp, and
+adapter filter status. Target binaries can be overridden with `MOONBOX_CODEX_BIN`,
 `MOONBOX_CLAUDE_BIN`, or `MOONBOX_HERMES_BIN` for local testing and custom
 installs.
 
@@ -342,9 +355,10 @@ the same verifier policy as the CLI, so `moon verify` and the TUI cannot
 disagree on target readiness. The selected target also shows readiness detail
 rows from the verifier report, with blocking failures and warnings prioritized
 over pass checks. Press `D` or run `:doctor` to open the environment Doctor
-panel; `r` refreshes diagnostics and `y` copies the JSON report. The panel is
-read-only and does not load timelines, resume sessions, launch targets, or
-spawn target binaries.
+panel; `r` refreshes diagnostics and `y` copies the JSON report. The panel shows
+adapter provenance, store path, session count, skipped record count, and last
+indexed timestamp. It is read-only and does not load timelines, resume sessions,
+launch targets, or spawn target binaries.
 
 Session search matches id, title, cwd, source, branch, and health reason. When a
 different session becomes selected by movement, source filter, or search,
@@ -456,6 +470,7 @@ Stable interfaces matter more than any single framework:
 - M37: generated docs screenshot pipeline with a hidden fixture-only `docs-snapshot` command that renders the real Ratatui Launch Review buffer to SVG, compares the generated output byte-for-byte in `docs-assets-smoke`, and keeps the command hidden from normal help while covered by CLI contract tests.
 - M38: release artifact staging with source, Cargo crate, and host binary archives, generated shell completions, `SHA256SUMS`, `release-manifest.json`, Homebrew source archive URL/checksum guidance, and CI smoke validation without publishing.
 - M39: real-session index hardening with fixture fallback only when no real stores exist, CLI `sessions --filter <source>` support, and execute-time guards requiring explicit `--session` before original resume or target handoff can spawn a process.
+- M40: adapter health reporting with per-session provenance fields, structured `doctor.source_adapters`, TUI source badges, missing-store reports when real adapters are active, and single-scan inventory plumbing to avoid duplicate source discovery during diagnostics.
 
 ### Can Build Now
 

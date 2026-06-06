@@ -36,7 +36,7 @@
   <text x="46" y="114" class="mono" font-size="14" font-weight="500" fill="#e6be53">╭ Sessions · All ─────────────────────╮</text>
   <text x="397" y="114" class="mono" font-size="14" font-weight="500" fill="#374452">╭ Timeline ──────────────────────────────────────────────────────────╮╭ Work Capsule Preview ───────────────────────╮</text>
   <text x="46" y="132" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="64" y="132" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">▸ ● [Codex] Moonbox session rewind</text>
+  <text x="64" y="132" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">▸ ● [Codex F] Moonbox session rewin</text>
   <text x="388" y="132" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="397" y="132" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="415" y="132" class="mono" font-size="14" font-weight="500" fill="#8b949e">│  16:04</text>
@@ -64,8 +64,10 @@
   <text x="1441" y="186" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="204" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="82" y="204" class="mono" font-size="14" font-weight="500" fill="#e6be53">▲</text>
-  <text x="100" y="204" class="mono" font-size="14" font-weight="800" fill="#47c9da">[Claude]</text>
-  <text x="181" y="204" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">QC p</text>
+  <text x="100" y="204" class="mono" font-size="14" font-weight="800" fill="#47c9da">[Claude</text>
+  <text x="172" y="204" class="mono" font-size="14" font-weight="500" fill="#5c91f5">F</text>
+  <text x="181" y="204" class="mono" font-size="14" font-weight="800" fill="#47c9da">]</text>
+  <text x="199" y="204" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">QC</text>
   <text x="217" y="204" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="235" y="204" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Action:</text>
   <text x="307" y="204" class="mono" font-size="14" font-weight="800" fill="#47c9da">target handoff</text>
@@ -98,8 +100,10 @@
   <text x="1441" y="258" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="276" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="82" y="276" class="mono" font-size="14" font-weight="800" fill="#f16565">!</text>
-  <text x="100" y="276" class="mono" font-size="14" font-weight="800" fill="#47c9da">[Hermes]</text>
-  <text x="181" y="276" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">cxcp</text>
+  <text x="100" y="276" class="mono" font-size="14" font-weight="800" fill="#47c9da">[Hermes</text>
+  <text x="172" y="276" class="mono" font-size="14" font-weight="500" fill="#5c91f5">F</text>
+  <text x="181" y="276" class="mono" font-size="14" font-weight="800" fill="#47c9da">]</text>
+  <text x="199" y="276" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">cx</text>
   <text x="217" y="276" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="235" y="276" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Validation:</text>
   <text x="343" y="276" class="mono" font-size="14" font-weight="800" fill="#5cd689">READY</text>
