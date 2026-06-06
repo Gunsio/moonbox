@@ -1,6 +1,6 @@
 use std::{
-    env, fs,
-    io::{BufRead, BufReader},
+    env,
+    io::BufRead,
     path::{Path, PathBuf},
 };
 
@@ -9,13 +9,17 @@ use serde_json::Value;
 
 use super::{
     adapter::{AdapterError, SourceAdapter},
+    local_jsonl::{
+        collect_jsonl_files, configured_session_limit, display_time, event_id, find_token_count,
+        human_timestamp, max_timestamp, open_reader, read_error, replace_time_dashes, string_field,
+        text_from_value, title_case, truncate,
+    },
     model::{
         CanonicalTimeline, CliTool, SessionStatus, SessionSummary, TimelineEvent, TimelineKind,
     },
 };
 
 const CODEX_TOOL: CliTool = CliTool::Codex;
-const DEFAULT_SESSION_LIMIT: usize = 200;
 
 #[derive(Debug, Clone)]
 pub struct CodexSourceAdapter {
@@ -50,7 +54,7 @@ impl CodexSourceAdapter {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self {
             root: root.into(),
-            list_limit: session_limit(),
+            list_limit: configured_session_limit(),
         }
     }
 
@@ -89,7 +93,7 @@ impl CodexSourceAdapter {
         }
 
         let mut files = Vec::new();
-        collect_jsonl_files(&sessions_dir, &mut files)?;
+        collect_jsonl_files(CODEX_TOOL, &sessions_dir, &mut files)?;
         files.sort_by(|left, right| right.cmp(left));
         if let Some(limit) = limit {
             files.truncate(limit);
@@ -107,10 +111,10 @@ impl CodexSourceAdapter {
 
     fn parse_summary(&self, path: &Path) -> Result<SessionSummary, AdapterError> {
         let mut builder = SummaryBuilder::new(path);
-        let reader = open_reader(path)?;
+        let reader = open_reader(CODEX_TOOL, path)?;
 
         for line in reader.lines() {
-            let line = line.map_err(|error| read_error(path, error))?;
+            let line = line.map_err(|error| read_error(CODEX_TOOL, path, error))?;
             if line.trim().is_empty() {
                 continue;
             }
@@ -138,11 +142,11 @@ impl CodexSourceAdapter {
         session_id: &str,
         path: &Path,
     ) -> Result<CanonicalTimeline, AdapterError> {
-        let reader = open_reader(path)?;
+        let reader = open_reader(CODEX_TOOL, path)?;
         let mut events = Vec::new();
 
         for (line_index, line) in reader.lines().enumerate() {
-            let line = line.map_err(|error| read_error(path, error))?;
+            let line = line.map_err(|error| read_error(CODEX_TOOL, path, error))?;
             if line.trim().is_empty() {
                 continue;
             }
@@ -326,49 +330,6 @@ impl SummaryBuilder {
     }
 }
 
-fn collect_jsonl_files(root: &Path, files: &mut Vec<PathBuf>) -> Result<(), AdapterError> {
-    let entries = fs::read_dir(root).map_err(|error| read_error(root, error))?;
-    for entry in entries {
-        let entry = entry.map_err(|error| read_error(root, error))?;
-        let path = entry.path();
-        if path.is_dir() {
-            collect_jsonl_files(&path, files)?;
-        } else if path
-            .extension()
-            .is_some_and(|extension| extension == "jsonl")
-        {
-            files.push(path);
-        }
-    }
-    Ok(())
-}
-
-fn session_limit() -> Option<usize> {
-    match env::var("MOONBOX_SESSION_LIMIT") {
-        Ok(value) if value.trim() == "0" => None,
-        Ok(value) => value
-            .trim()
-            .parse::<usize>()
-            .ok()
-            .filter(|limit| *limit > 0)
-            .or(Some(DEFAULT_SESSION_LIMIT)),
-        Err(_) => Some(DEFAULT_SESSION_LIMIT),
-    }
-}
-
-fn open_reader(path: &Path) -> Result<BufReader<fs::File>, AdapterError> {
-    let file = fs::File::open(path).map_err(|error| read_error(path, error))?;
-    Ok(BufReader::new(file))
-}
-
-fn read_error(path: &Path, error: impl ToString) -> AdapterError {
-    AdapterError::ReadSource {
-        tool: CODEX_TOOL,
-        path: path.to_string_lossy().into_owned(),
-        reason: error.to_string(),
-    }
-}
-
 fn timeline_event(record: CodexRecord, number: usize) -> Option<TimelineEvent> {
     let record_type = record.record_type.as_deref().unwrap_or_default();
     let payload_type = string_field(&record.payload, "type").unwrap_or_default();
@@ -451,86 +412,14 @@ fn timeline_detail(payload: &Value, record_type: &str, payload_type: &str) -> St
         .unwrap_or_default()
 }
 
-fn text_from_value(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => normalize_text(text),
-        Value::Array(items) => {
-            let text = items
-                .iter()
-                .filter_map(text_from_value)
-                .collect::<Vec<_>>()
-                .join(" ");
-            normalize_text(&text)
-        }
-        Value::Object(object) => {
-            for key in [
-                "text",
-                "message",
-                "cmd",
-                "command",
-                "name",
-                "last_agent_message",
-            ] {
-                if let Some(value) = object.get(key)
-                    && let Some(text) = text_from_value(value)
-                {
-                    return Some(text);
-                }
-            }
-            None
-        }
-        _ => None,
-    }
-}
-
-fn normalize_text(text: &str) -> Option<String> {
-    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if normalized.is_empty() {
-        None
-    } else {
-        Some(normalized)
-    }
-}
-
-fn find_token_count(value: &Value) -> Option<usize> {
-    match value {
-        Value::Number(number) => number
-            .as_u64()
-            .and_then(|count| usize::try_from(count).ok()),
-        Value::Array(items) => items.iter().find_map(find_token_count),
-        Value::Object(object) => {
-            for key in ["total_tokens", "total_token_count", "used_tokens"] {
-                if let Some(value) = object.get(key)
-                    && let Some(count) = find_token_count(value)
-                {
-                    return Some(count);
-                }
-            }
-            object.values().find_map(find_token_count)
-        }
-        _ => None,
-    }
-}
-
-fn string_field<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
-    value.get(key).and_then(Value::as_str)
-}
-
 fn is_error_record(record_type: &str, payload_type: &str) -> bool {
     record_type.contains("error") || payload_type.contains("error")
-}
-
-fn max_timestamp(current: Option<String>, candidate: &str) -> String {
-    match current {
-        Some(current) if current.as_str() > candidate => current,
-        _ => candidate.into(),
-    }
 }
 
 fn timestamp_from_filename(path: &Path) -> Option<String> {
     let stem = path.file_stem()?.to_str()?;
     let timestamp = stem.strip_prefix("rollout-")?.get(..19)?;
-    Some(format!("{}+00:00", timestamp.replace_time_dashes()))
+    Some(format!("{}+00:00", replace_time_dashes(timestamp)))
 }
 
 fn id_from_path(path: &Path) -> String {
@@ -544,80 +433,10 @@ fn short_id(id: &str) -> String {
     id.chars().take(8).collect()
 }
 
-fn human_timestamp(timestamp: &str) -> String {
-    let normalized = timestamp.replace_time_dashes();
-    normalized
-        .get(..16)
-        .map(|prefix| prefix.replace('T', " "))
-        .unwrap_or_else(|| normalized)
-}
-
-fn display_time(timestamp: Option<&str>) -> String {
-    let Some(timestamp) = timestamp else {
-        return "??:??".into();
-    };
-    let normalized = timestamp.replace_time_dashes();
-    normalized
-        .split('T')
-        .nth(1)
-        .and_then(|time| time.get(..5))
-        .unwrap_or("??:??")
-        .into()
-}
-
-fn event_id(number: usize) -> String {
-    format!("evt-{number:03}")
-}
-
-fn truncate(text: &str, max_chars: usize) -> String {
-    let mut output = String::new();
-    for (index, character) in text.chars().enumerate() {
-        if index == max_chars {
-            output.push_str("...");
-            return output;
-        }
-        output.push(character);
-    }
-    output
-}
-
-fn title_case(value: &str) -> String {
-    value
-        .split('_')
-        .filter(|part| !part.is_empty())
-        .map(|part| {
-            let mut chars = part.chars();
-            match chars.next() {
-                Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.as_str()),
-                None => String::new(),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-trait TimeDashReplace {
-    fn replace_time_dashes(&self) -> String;
-}
-
-impl TimeDashReplace for str {
-    fn replace_time_dashes(&self) -> String {
-        let Some((date, rest)) = self.split_once('T') else {
-            return self.into();
-        };
-        let mut chars = rest.chars().collect::<Vec<_>>();
-        if chars.len() >= 8 {
-            chars[2] = ':';
-            chars[5] = ':';
-        }
-        format!("{date}T{}", chars.into_iter().collect::<String>())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
+    use std::{fs, io::Write};
 
     #[test]
     fn lists_codex_sessions_from_jsonl_store() {

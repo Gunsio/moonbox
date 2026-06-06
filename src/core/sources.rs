@@ -6,6 +6,8 @@ use super::{
 };
 
 #[cfg(not(test))]
+use super::claude::ClaudeSourceAdapter;
+#[cfg(not(test))]
 use super::codex::CodexSourceAdapter;
 
 pub fn list_sessions() -> Result<Vec<SessionSummary>, CoreError> {
@@ -63,7 +65,14 @@ fn runtime_adapters() -> Vec<Box<dyn SourceAdapter>> {
         adapters.push(Box::new(FixtureSourceAdapter::new(CliTool::Codex)));
     }
 
-    adapters.push(Box::new(FixtureSourceAdapter::new(CliTool::Claude)));
+    if let Some(claude) =
+        ClaudeSourceAdapter::from_default_home().filter(|adapter| adapter.has_session_store())
+    {
+        adapters.push(Box::new(claude));
+    } else {
+        adapters.push(Box::new(FixtureSourceAdapter::new(CliTool::Claude)));
+    }
+
     adapters.push(Box::new(FixtureSourceAdapter::new(CliTool::Hermes)));
     adapters
 }
