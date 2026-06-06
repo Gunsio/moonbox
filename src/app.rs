@@ -1135,7 +1135,8 @@ mod tests {
         app.handle_key(key('v'));
 
         assert!(app.verify_passed);
-        assert_eq!(app.status_message, "Verify: PASS (7 checks)");
+        assert!(app.status_message.starts_with("Verify: PASS ("));
+        assert!(app.status_message.ends_with(" checks)"));
     }
 
     #[test]

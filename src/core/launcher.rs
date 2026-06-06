@@ -10,6 +10,7 @@ use super::{
         CliTool, LaunchExecution, LaunchExecutionStatus, LaunchPlan, OriginalSessionExecution,
         OriginalSessionPlan, SessionSummary, TargetLaunchCommand, WorkCapsule,
     },
+    verifier,
 };
 
 pub fn target_command(
@@ -36,6 +37,9 @@ pub fn execute_plan(mut plan: LaunchPlan) -> Result<LaunchExecution, CoreError> 
         return Err(CoreError::LaunchBlocked {
             reason: format!("verification status {}", plan.verification.status),
         });
+    }
+    if let Some(reason) = verifier::execution_command_blocker(&plan.target_command) {
+        return Err(CoreError::LaunchBlocked { reason });
     }
 
     plan.dry_run = false;
@@ -232,7 +236,7 @@ fn shell_quote(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::data;
+    use crate::core::{data, workbench};
 
     #[test]
     fn codex_command_uses_prompt_argument_and_workspace() {
@@ -330,5 +334,19 @@ mod tests {
             original_command(hermes).args,
             ["--resume", "hermes-cxcp-502"]
         );
+    }
+
+    #[test]
+    fn execute_plan_blocks_missing_target_binary_before_spawn() {
+        let mut plan = workbench::launch_plan(Some("codex-cxcp-design"), CliTool::Hermes, None)
+            .expect("launch plan result")
+            .expect("launch plan");
+        plan.target_command.program = format!("/tmp/moonbox-missing-target-{}", std::process::id());
+        plan.target_command.display = plan.target_command.program.clone();
+
+        let error = execute_plan(plan).expect_err("missing target should block");
+
+        assert!(matches!(error, CoreError::LaunchBlocked { .. }));
+        assert!(error.to_string().contains("not found"));
     }
 }
