@@ -138,6 +138,7 @@ The first implementation focuses on the product shell:
   binaries, and compiler catalog readiness
 - TUI Doctor panel with refresh and JSON copy for the same non-executing
   diagnostics
+- Fixture-safe TUI render regression tests for main, Doctor, and Launch views
 - Deterministic fixture-only replay eval for the Codex/Claude/Hermes source-target matrix
 - Fixture-safe public CLI contract tests for the installed `moonbox` and `moon` command surfaces
 - Full local quality gate through `scripts/ci/full-gate.sh`
