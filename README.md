@@ -77,6 +77,10 @@ scripts/ci/release-artifacts-smoke.sh
 scripts/ci/install-smoke.sh
 ```
 
+Production builds deny `unsafe`, `unwrap()`, `expect()`, `panic!`, `todo!`, and
+`unimplemented!` through crate-level lint policy. Tests may still use explicit
+`expect` messages for fixture setup and assertions.
+
 ### Homebrew
 
 Homebrew distribution is planned, but not published yet. After the accepted
@@ -210,6 +214,8 @@ The first implementation focuses on the product shell:
 - Fixture-safe public CLI contract tests for the installed `moonbox` and `moon` command surfaces
 - Full local quality gate through `scripts/ci/full-gate.sh`
 - Cargo-deny supply-chain policy for advisories, duplicate versions, licenses, and crate sources
+- Non-test Rust builds deny panic-prone primitives and unsafe code through
+  crate-level lint policy
 - README screenshot and install-command smoke coverage through `scripts/ci/docs-assets-smoke.sh`
 - Draft Homebrew formula template plus fixture-safe Homebrew docs smoke coverage
 - Release artifact staging with source, Cargo crate, host binary archive,
@@ -540,6 +546,11 @@ Stable interfaces matter more than any single framework:
   Hermes `source = cli` default listing; zero-event resume-index rows now
   hydrate from `source_path`, while truly empty timelines get a pending capsule
   instead of running a compiler against a missing rewind id.
+- M43: production panic-boundary hardening with crate-level non-test denies for
+  `unsafe`, `unwrap()`, `expect()`, `panic!`, `todo!`, and `unimplemented!`;
+  the replay-eval fixture invariants now return structured `CoreError`
+  failures, and generated SVG docs snapshot code no longer relies on infallible
+  string-write `expect` calls.
 
 ### Can Build Now
 

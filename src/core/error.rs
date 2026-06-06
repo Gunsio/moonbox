@@ -12,6 +12,7 @@ pub enum CoreError {
     LaunchPrepare { reason: String },
     LaunchBlocked { reason: String },
     LaunchStart { command: String, reason: String },
+    ReplayEval { reason: String },
 }
 
 impl fmt::Display for CoreError {
@@ -36,6 +37,7 @@ impl fmt::Display for CoreError {
             Self::LaunchStart { command, reason } => {
                 write!(f, "cannot start target launch `{command}`: {reason}")
             }
+            Self::ReplayEval { reason } => write!(f, "replay eval failed: {reason}"),
         }
     }
 }

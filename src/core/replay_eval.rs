@@ -96,7 +96,7 @@ pub fn evaluate_fixture_replay() -> Result<ReplayEvalReport, CoreError> {
 
     let mut cases = Vec::new();
     for session in &sessions {
-        let adapter = adapter_for(&adapters, session.cli);
+        let adapter = adapter_for(&adapters, session.cli)?;
         let (timeline, rewind_event_id, capsule) =
             compile_fixture_capsule(adapter, session, session.cli)?;
 
@@ -174,8 +174,10 @@ fn synthetic_cases(
         .iter()
         .find(|session| session.id == "codex-cxcp-design")
         .or_else(|| sessions.first())
-        .expect("fixture replay has at least one session");
-    let adapter = adapter_for(adapters, session.cli);
+        .ok_or_else(|| CoreError::ReplayEval {
+            reason: "fixture replay corpus has no sessions".into(),
+        })?;
+    let adapter = adapter_for(adapters, session.cli)?;
     let (timeline, rewind_event_id, healthy_capsule) =
         compile_fixture_capsule(adapter, session, CliTool::Hermes)?;
 
@@ -383,11 +385,16 @@ fn check_details(checks: &[VerificationCheck], status: VerificationStatus) -> Ve
         .collect()
 }
 
-fn adapter_for(adapters: &[FixtureSourceAdapter], tool: CliTool) -> &FixtureSourceAdapter {
+fn adapter_for(
+    adapters: &[FixtureSourceAdapter],
+    tool: CliTool,
+) -> Result<&FixtureSourceAdapter, CoreError> {
     adapters
         .iter()
         .find(|adapter| adapter.tool() == tool)
-        .expect("fixture adapter exists for every CliTool")
+        .ok_or_else(|| CoreError::ReplayEval {
+            reason: format!("missing fixture adapter for {tool}"),
+        })
 }
 
 fn rewind_event_id_for_session(

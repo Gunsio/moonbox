@@ -51,6 +51,11 @@ scripts/ci/install-smoke.sh
 `moonbox` and `moon` binaries. Those tests redirect source homes into
 `target/cli-contract-home` and must stay fixture-safe.
 
+`cargo clippy --locked -- -D warnings` enforces the production panic boundary.
+Non-test builds deny `unsafe`, `unwrap()`, `expect()`, `panic!`, `todo!`, and
+`unimplemented!`. Use structured errors for recoverable production failures;
+reserve `expect` for test fixture setup and assertions.
+
 `cargo doc --locked --no-deps` must pass with `RUSTDOCFLAGS="-D warnings"` so
 public Rust documentation stays buildable as the library surface evolves.
 
@@ -103,8 +108,8 @@ semantics.
   `src/core`.
 - Do not add fake parameters or placeholder outputs. If an argument accepts a
   file, read and validate that file.
-- Return structured errors for recoverable failures. Avoid panics outside tests
-  and impossible invariants.
+- Return structured errors for recoverable failures. Production code must not
+  introduce panic-prone primitives; the non-test clippy policy enforces this.
 - Keep fixture data deterministic and representative enough to protect future
   real adapters.
 - Keep tests and smoke scripts from opening or resuming recent active sessions.
