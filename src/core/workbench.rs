@@ -1,34 +1,32 @@
 use std::fs;
 
 use super::{
-    demo,
+    data,
     error::CoreError,
     model::{
-        CapsuleCompileOutput, CapsuleCompileRequest, CliTool, DemoData, LaunchPlan, SessionSummary,
-        VerificationReport, WorkCapsule,
+        CapsuleCompileOutput, CapsuleCompileRequest, CliTool, LaunchPlan, SessionSummary,
+        VerificationReport, WorkCapsule, WorkbenchData,
     },
     verifier,
 };
 
-pub fn load_demo_workbench(source: CliTool, target: CliTool) -> Result<DemoData, CoreError> {
-    demo::demo_data(source, target)
+pub fn load_workbench(source: CliTool, target: CliTool) -> Result<WorkbenchData, CoreError> {
+    data::workbench_data(source, target)
 }
 
-pub fn load_demo_workbench_for_session(
+pub fn load_workbench_for_session(
     session_id: &str,
     target: CliTool,
-) -> Result<Option<DemoData>, CoreError> {
-    demo::demo_data_for_session(session_id, target)
+) -> Result<Option<WorkbenchData>, CoreError> {
+    data::workbench_data_for_session(session_id, target)
 }
 
 pub fn list_sessions() -> Result<Vec<SessionSummary>, CoreError> {
-    demo::demo_sessions()
+    data::sessions()
 }
 
 pub fn find_session(session_id: &str) -> Result<Option<SessionSummary>, CoreError> {
-    Ok(list_sessions()?
-        .into_iter()
-        .find(|session| session.id == session_id))
+    data::find_session(session_id)
 }
 
 pub fn default_session() -> Result<Option<SessionSummary>, CoreError> {
@@ -41,7 +39,7 @@ pub fn open_command(session_id: Option<&str>) -> Result<Option<String>, CoreErro
 }
 
 pub fn capsule(source: CliTool, target: CliTool) -> Result<WorkCapsule, CoreError> {
-    Ok(load_demo_workbench(source, target)?.capsule)
+    Ok(load_workbench(source, target)?.capsule)
 }
 
 pub fn compile_request(
@@ -49,11 +47,11 @@ pub fn compile_request(
     target: CliTool,
     rewind_event_id: &str,
 ) -> Result<CapsuleCompileRequest, CoreError> {
-    demo::demo_compile_request(source, target, rewind_event_id)
+    data::compile_request(source, target, rewind_event_id)
 }
 
 pub fn compile_output(source: CliTool, target: CliTool) -> Result<CapsuleCompileOutput, CoreError> {
-    demo::demo_compile_output(source, target)
+    data::compile_output(source, target)
 }
 
 pub fn launch_plan(
@@ -64,7 +62,7 @@ pub fn launch_plan(
     let Some(source_session) = selected_session(session_id)? else {
         return Ok(None);
     };
-    let Some(data) = load_demo_workbench_for_session(&source_session.id, target)? else {
+    let Some(data) = load_workbench_for_session(&source_session.id, target)? else {
         return Ok(None);
     };
     let (capsule, capsule_path) = capsule_for_plan(&data.capsule, capsule_path)?;

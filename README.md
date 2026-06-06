@@ -85,7 +85,8 @@ The first implementation focuses on the product shell:
 - Time-sorted global session list with source tags
 - Real Codex session discovery from `~/.codex/sessions`
 - Runtime Codex home override via `MOONBOX_CODEX_HOME` or `CODEX_HOME`
-- Runtime Codex list limit defaults to the newest 200 sessions; set `MOONBOX_SESSION_LIMIT=0` for unlimited discovery
+- Runtime Codex list limit defaults to the newest 200 sessions; explicit session lookup still searches the full Codex store
+- Set `MOONBOX_SESSION_LIMIT=0` for unlimited Codex list discovery
 - Source filter defaults to `All`; `Source` is a session-list filter, not a global handoff mode
 - Target selection lives inside the launch flow, with explicit `> [x]` radio-list selection
 - Target picker validates each target as `READY`, `WARN`, or `BLOCKED`; blocked targets cannot confirm or copy launch commands
@@ -101,10 +102,10 @@ The first implementation focuses on the product shell:
 - Timeline auto-scroll, Capsule/modal scroll, and small-terminal modal polish
 - Copyable launch/original commands via `y` with OSC52 clipboard support
 - Serializable core models for future adapters
-- `SourceAdapter` contract and demo adapter fixture layer
+- `SourceAdapter` contract and fixture-backed adapter fallback layer
 - Fallible adapter discovery; bad source data returns structured errors instead of panics
 - File-backed adapter fixtures for Codex, Claude, and Hermes session/timeline parsing
-- `CapsuleCompiler` trait with a demo fixture compiler implementation
+- `CapsuleCompiler` trait with a fixture compiler implementation
 - Canonical Timeline and compiler request/output JSON contract fixtures
 - Target launch dry-run plans with Work Capsule verification reports
 - Single core verifier policy shared by CLI and TUI target validation
@@ -203,7 +204,7 @@ Source Adapter -> Canonical Timeline -> Rewind Engine
 Stable interfaces matter more than any single framework:
 
 - `SourceAdapter`: read-only session parsing
-- `CapsuleCompiler`: snapshot to Work Capsule; demo fixture compiler exists now
+- `CapsuleCompiler`: snapshot to Work Capsule; fixture compiler exists now
 - `Verifier`: schema, token, capability, and handoff checks; shared by CLI/TUI
 - `SkillRunner`: JSON input/output compiler skill execution, next real backend
 - `TargetLauncher`: create target CLI new branch, next real backend
@@ -215,13 +216,14 @@ Stable interfaces matter more than any single framework:
 - M0: action feedback, contextual keybar, visible rewind marker, clearer timeline selection.
 - M1: modal/capsule scroll, copyable launch/original commands, small-terminal polish.
 - M2: serializable core models, `SourceAdapter`, Canonical Timeline, compiler request/output fixtures.
-- M3: session-driven detail panes with per-source demo fixtures and searchable branch/health metadata.
+- M3: session-driven detail panes with per-source fixtures and searchable branch/health metadata.
 - M4: launch validation with target picker READY/WARN/BLOCKED states and blocked command confirmation/copy guards.
 - M5: file-backed adapter fixture snapshots for Codex, Claude, and Hermes session/timeline parsing.
 - M6: target launcher dry-run plus Work Capsule verification loop.
 - M7: core boundary hardening with fallible adapters, shared verifier policy, real `--capsule` file validation, and a `CapsuleCompiler` trait.
 - M8: open-source hygiene with CI, dependency automation, contribution docs, security policy, changelog, and GitHub templates.
 - M9: real Codex `SourceAdapter` for `~/.codex/sessions`, runtime source registry, and bounded real-session discovery.
+- M10: source architecture hardening with `WorkbenchData` naming, non-demo workbench APIs, and unbounded explicit Codex session lookup.
 
 ### Can Build Now
 
@@ -232,7 +234,7 @@ Stable interfaces matter more than any single framework:
 ### Prototype Now, Improve With Real Data
 
 - Launch preview: keep the command structure now, generate exact commands after real adapters exist.
-- Session health badges: demo status now, compute from real resume errors and compatibility signals later.
+- Session health badges: basic adapter status now, compute from real resume errors and compatibility signals later.
 
 ### Best After Real Session Data
 

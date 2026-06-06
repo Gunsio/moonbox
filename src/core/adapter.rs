@@ -41,6 +41,12 @@ impl Error for AdapterError {}
 pub trait SourceAdapter {
     fn tool(&self) -> CliTool;
     fn list_sessions(&self) -> Result<Vec<SessionSummary>, AdapterError>;
+    fn find_session(&self, session_id: &str) -> Result<Option<SessionSummary>, AdapterError> {
+        Ok(self
+            .list_sessions()?
+            .into_iter()
+            .find(|session| session.id == session_id))
+    }
     fn load_timeline(&self, session_id: &str) -> Result<CanonicalTimeline, AdapterError>;
 }
 

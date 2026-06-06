@@ -190,11 +190,11 @@ fn check(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{demo, model::CliTool};
+    use crate::core::{data, model::CliTool};
 
     #[test]
     fn healthy_cross_cli_capsule_passes() {
-        let data = demo::demo_data(CliTool::Codex, CliTool::Hermes).expect("demo");
+        let data = data::workbench_data(CliTool::Codex, CliTool::Hermes).expect("data");
         let session = data
             .sessions
             .iter()
@@ -209,7 +209,7 @@ mod tests {
 
     #[test]
     fn failed_same_cli_capsule_fails_target_support() {
-        let data = demo::demo_data(CliTool::Hermes, CliTool::Hermes).expect("demo");
+        let data = data::workbench_data(CliTool::Hermes, CliTool::Hermes).expect("data");
         let session = data
             .sessions
             .iter()
@@ -227,7 +227,7 @@ mod tests {
 
     #[test]
     fn healthy_same_cli_capsule_warns_target_support() {
-        let data = demo::demo_data(CliTool::Codex, CliTool::Codex).expect("demo");
+        let data = data::workbench_data(CliTool::Codex, CliTool::Codex).expect("data");
         let session = data
             .sessions
             .iter()
@@ -245,7 +245,7 @@ mod tests {
 
     #[test]
     fn mismatched_requested_target_fails() {
-        let data = demo::demo_data(CliTool::Codex, CliTool::Hermes).expect("demo");
+        let data = data::workbench_data(CliTool::Codex, CliTool::Hermes).expect("data");
         let session = data
             .sessions
             .iter()

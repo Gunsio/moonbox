@@ -34,9 +34,9 @@ pub trait CapsuleCompiler {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct DemoCapsuleCompiler;
+pub struct FixtureCapsuleCompiler;
 
-impl CapsuleCompiler for DemoCapsuleCompiler {
+impl CapsuleCompiler for FixtureCapsuleCompiler {
     fn compile(
         &self,
         request: &CapsuleCompileRequest,
@@ -146,14 +146,14 @@ fn session_profile(session_id: &str) -> (&'static str, &'static str, Vec<String>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{demo, model::CliTool};
+    use crate::core::{data, model::CliTool};
 
     #[test]
-    fn demo_compiler_rejects_missing_rewind() {
-        let request = demo::demo_compile_request(CliTool::Codex, CliTool::Hermes, "missing")
-            .expect("request");
+    fn fixture_compiler_rejects_missing_rewind() {
+        let request =
+            data::compile_request(CliTool::Codex, CliTool::Hermes, "missing").expect("request");
 
-        let error = DemoCapsuleCompiler
+        let error = FixtureCapsuleCompiler
             .compile(&request)
             .expect_err("missing rewind");
 

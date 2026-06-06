@@ -2,7 +2,7 @@ pub mod adapter;
 pub mod codex;
 pub mod compiler;
 pub mod config;
-pub mod demo;
+pub mod data;
 pub mod error;
 pub mod fixture;
 pub mod model;
