@@ -1,5 +1,5 @@
 use super::{
-    adapter::{SourceAdapter, collect_sessions},
+    adapter::{SourceAdapter, collect_sessions, report_from_sessions},
     compiler::{
         CapsuleCompiler, DEFAULT_COMPILER_ID, FixtureCapsuleCompiler,
         compile_with_configured_runner, compiler_catalog, default_compiler_id,
@@ -9,29 +9,33 @@ use super::{
     fixture::FixtureSourceAdapter,
     model::{
         BranchNode, CanonicalTimeline, CapsuleCompileOutput, CapsuleCompileRequest, CliTool,
-        SessionStatus, SessionSummary, TimelineEvent, WorkCapsule, WorkbenchData,
+        SessionStatus, SessionSummary, SourceAdapterReport, SourceProvenance, TimelineEvent,
+        WorkCapsule, WorkbenchData,
     },
     sources,
 };
 
 pub fn workbench_data(source: CliTool, target: CliTool) -> Result<WorkbenchData, CoreError> {
-    let sessions = sessions()?;
+    let inventory = sources::source_inventory()?;
+    let sessions = inventory.sessions;
+    let source_adapters = inventory.adapter_reports;
     let source_session = sessions
         .iter()
         .find(|session| session.cli == source)
         .cloned()
         .unwrap_or_else(|| fallback_session(source));
     let source_session_id = source_session.id.clone();
-    if let Some(data) = workbench_data_for_session(&source_session_id, target)? {
-        return Ok(data);
-    }
-
-    let timeline = CanonicalTimeline {
-        version: 1,
-        source_cli: source,
-        source_session: source_session_id.clone(),
-        events: Vec::new(),
+    let timeline = if source_session.event_count == 0 {
+        CanonicalTimeline {
+            version: 1,
+            source_cli: source,
+            source_session: source_session_id.clone(),
+            events: Vec::new(),
+        }
+    } else {
+        canonical_timeline_for_session(&source_session)?
     };
+
     let rewind_event_id = rewind_event_id_for_timeline(&source_session_id, &timeline);
     let compiler = default_compiler_id();
     let capsule = compile_capsule_for_session(
@@ -44,6 +48,7 @@ pub fn workbench_data(source: CliTool, target: CliTool) -> Result<WorkbenchData,
     Ok(build_workbench_data(
         source,
         target,
+        source_adapters,
         sessions,
         timeline.events,
         capsule,
@@ -55,7 +60,9 @@ pub fn workbench_data_for_session(
     session_id: &str,
     target: CliTool,
 ) -> Result<Option<WorkbenchData>, CoreError> {
-    let sessions = sessions()?;
+    let inventory = sources::source_inventory()?;
+    let sessions = inventory.sessions;
+    let source_adapters = inventory.adapter_reports;
     let source_session = if let Some(session) = sessions
         .iter()
         .find(|session| session.id == session_id)
@@ -83,6 +90,7 @@ pub fn workbench_data_for_session(
     Ok(Some(build_workbench_data(
         source_session.cli,
         target,
+        source_adapters,
         sessions,
         timeline.events,
         capsule,
@@ -95,6 +103,7 @@ pub fn fixture_workbench_data(
     target: CliTool,
 ) -> Result<WorkbenchData, CoreError> {
     let sessions = fixture_sessions()?;
+    let source_adapters = fixture_source_adapter_reports()?;
     let source_session = sessions
         .iter()
         .find(|session| session.cli == source)
@@ -112,6 +121,7 @@ pub fn fixture_workbench_data(
     Ok(build_workbench_data(
         source,
         target,
+        source_adapters,
         sessions,
         timeline.events,
         capsule,
@@ -122,6 +132,7 @@ pub fn fixture_workbench_data(
 fn build_workbench_data(
     source: CliTool,
     target: CliTool,
+    source_adapters: Vec<SourceAdapterReport>,
     sessions: Vec<SessionSummary>,
     timeline: Vec<TimelineEvent>,
     capsule: WorkCapsule,
@@ -157,6 +168,7 @@ fn build_workbench_data(
     WorkbenchData {
         source,
         target,
+        source_adapters,
         sessions,
         timeline,
         capsule,
@@ -344,6 +356,24 @@ fn fixture_sessions() -> Result<Vec<SessionSummary>, CoreError> {
     collect_sessions(&adapter_refs).map_err(CoreError::from)
 }
 
+fn fixture_source_adapter_reports() -> Result<Vec<SourceAdapterReport>, CoreError> {
+    let adapters = CliTool::ALL.map(FixtureSourceAdapter::new);
+    let mut reports = Vec::new();
+    for adapter in &adapters {
+        let sessions = adapter.list_sessions()?;
+        reports.push(report_from_sessions(
+            adapter.tool(),
+            adapter.provenance(),
+            true,
+            adapter.store_path(),
+            "included_fixture_snapshot",
+            "fixture workbench snapshot",
+            &sessions,
+        ));
+    }
+    Ok(reports)
+}
+
 fn fixture_timeline_for_session(session: &SessionSummary) -> Result<CanonicalTimeline, CoreError> {
     FixtureSourceAdapter::new(session.cli)
         .load_timeline(&session.id)
@@ -397,6 +427,9 @@ fn fallback_session(source: CliTool) -> SessionSummary {
         health_reason: Some("synthetic fallback".into()),
         event_count: 0,
         resume_command: fallback_resume_command(source),
+        source_provenance: SourceProvenance::Fixture,
+        source_path: None,
+        parse_skip_count: 0,
     }
 }
 

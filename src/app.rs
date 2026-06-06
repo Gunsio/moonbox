@@ -109,7 +109,7 @@ impl App {
             .position(|session| session.id == data.capsule.source_session)
             .unwrap_or(0);
         let selected_event = rewind_event_index(&data, &rewind_event_id);
-        let doctor_report = doctor::diagnose_with_session_summaries(&data.sessions);
+        let doctor_report = doctor::diagnose_with_inventory(&data.sessions, &data.source_adapters);
         Self {
             data,
             focus: Focus::Sessions,

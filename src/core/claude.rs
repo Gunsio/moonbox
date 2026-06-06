@@ -15,7 +15,8 @@ use super::{
         sort_paths_by_modified_desc, text_from_value, title_case, truncate,
     },
     model::{
-        CanonicalTimeline, CliTool, SessionStatus, SessionSummary, TimelineEvent, TimelineKind,
+        CanonicalTimeline, CliTool, SessionStatus, SessionSummary, SourceProvenance, TimelineEvent,
+        TimelineKind,
     },
 };
 
@@ -95,6 +96,11 @@ impl ClaudeSourceAdapter {
     #[cfg(not(test))]
     pub fn has_session_store(&self) -> bool {
         self.projects_dir().is_dir()
+    }
+
+    #[cfg(not(test))]
+    pub(crate) fn session_store_path(&self) -> PathBuf {
+        self.projects_dir()
     }
 
     fn projects_dir(&self) -> PathBuf {
@@ -194,6 +200,14 @@ impl ClaudeSourceAdapter {
 impl SourceAdapter for ClaudeSourceAdapter {
     fn tool(&self) -> CliTool {
         CLAUDE_TOOL
+    }
+
+    fn provenance(&self) -> SourceProvenance {
+        SourceProvenance::Real
+    }
+
+    fn store_path(&self) -> Option<String> {
+        Some(self.projects_dir().display().to_string())
     }
 
     fn list_sessions(&self) -> Result<Vec<SessionSummary>, AdapterError> {
@@ -308,6 +322,9 @@ impl SummaryBuilder {
             health_reason: Some(health_reason),
             event_count: self.event_count,
             resume_command: format!("claude --resume {id}"),
+            source_provenance: SourceProvenance::Real,
+            source_path: Some(self.path.display().to_string()),
+            parse_skip_count: self.malformed_lines,
         }
     }
 }

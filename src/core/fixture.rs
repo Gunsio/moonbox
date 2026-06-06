@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 use super::{
     adapter::{AdapterError, SourceAdapter},
-    model::{CanonicalTimeline, CliTool, SessionSummary},
+    model::{CanonicalTimeline, CliTool, SessionSummary, SourceProvenance},
 };
 
 #[derive(Debug, Deserialize)]
@@ -38,7 +38,18 @@ impl FixtureSourceAdapter {
 
     fn parse_sessions(&self) -> Result<Vec<SessionSummary>, AdapterError> {
         serde_json::from_str::<SessionsFixture>(self.fixture.sessions_json)
-            .map(|fixture| fixture.sessions)
+            .map(|fixture| {
+                fixture
+                    .sessions
+                    .into_iter()
+                    .map(|mut session| {
+                        session.source_provenance = SourceProvenance::Fixture;
+                        session.source_path = Some(self.fixture.sessions_path.into());
+                        session.parse_skip_count = 0;
+                        session
+                    })
+                    .collect()
+            })
             .map_err(|error| AdapterError::InvalidFixture {
                 tool: self.fixture.tool,
                 path: self.fixture.sessions_path.into(),
@@ -60,6 +71,14 @@ impl FixtureSourceAdapter {
 impl SourceAdapter for FixtureSourceAdapter {
     fn tool(&self) -> CliTool {
         self.fixture.tool
+    }
+
+    fn provenance(&self) -> SourceProvenance {
+        SourceProvenance::Fixture
+    }
+
+    fn store_path(&self) -> Option<String> {
+        Some(self.fixture.sessions_path.into())
     }
 
     fn list_sessions(&self) -> Result<Vec<SessionSummary>, AdapterError> {

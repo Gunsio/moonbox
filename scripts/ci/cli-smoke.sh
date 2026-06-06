@@ -59,6 +59,9 @@ MOONBOX_CODEX_BIN="$moonbox" \
   MOONBOX_HERMES_BIN="$moonbox" \
   "$moonbox" doctor --json > "$output_dir/doctor.json"
 grep -q '"ready": true' "$output_dir/doctor.json"
+grep -q '"source_adapters"' "$output_dir/doctor.json"
+grep -q '"provenance": "fixture"' "$output_dir/doctor.json"
+grep -q '"name": "source_codex_adapter"' "$output_dir/doctor.json"
 grep -q '"name": "session_discovery"' "$output_dir/doctor.json"
 grep -q '"name": "target_codex_binary"' "$output_dir/doctor.json"
 

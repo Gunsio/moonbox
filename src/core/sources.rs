@@ -1,8 +1,8 @@
 use super::{
-    adapter::{SourceAdapter, collect_sessions},
+    adapter::{SourceAdapter, collect_sessions, report_from_sessions},
     error::CoreError,
     fixture::FixtureSourceAdapter,
-    model::{CanonicalTimeline, CliTool, SessionSummary},
+    model::{CanonicalTimeline, CliTool, SessionSummary, SourceAdapterReport, SourceProvenance},
 };
 
 #[cfg(not(test))]
@@ -27,6 +27,12 @@ pub struct SessionModeState {
     pub valid: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct SourceInventory {
+    pub sessions: Vec<SessionSummary>,
+    pub adapter_reports: Vec<SourceAdapterReport>,
+}
+
 impl SessionMode {
     pub fn id(self) -> &'static str {
         match self {
@@ -45,12 +51,47 @@ pub fn session_mode() -> SessionMode {
 }
 
 pub fn list_sessions() -> Result<Vec<SessionSummary>, CoreError> {
+    Ok(source_inventory()?.sessions)
+}
+
+pub fn adapter_reports() -> Result<Vec<SourceAdapterReport>, CoreError> {
+    Ok(source_inventory()?.adapter_reports)
+}
+
+pub fn source_inventory() -> Result<SourceInventory, CoreError> {
     let adapters = runtime_adapters();
-    let adapter_refs = adapters
-        .iter()
-        .map(|adapter| adapter.as_ref())
-        .collect::<Vec<_>>();
-    collect_sessions(&adapter_refs).map_err(CoreError::from)
+    collect_inventory(&adapters).map_err(CoreError::from)
+}
+
+fn collect_inventory(
+    adapters: &[Box<dyn SourceAdapter>],
+) -> Result<SourceInventory, super::adapter::AdapterError> {
+    let mut sessions = Vec::new();
+    let mut reports = Vec::new();
+
+    for adapter in adapters {
+        let adapter_sessions = adapter.list_sessions()?;
+        reports.push(report_from_sessions(
+            adapter.tool(),
+            adapter.provenance(),
+            true,
+            adapter.store_path(),
+            included_filter_status(adapter.provenance()),
+            included_reason(adapter.provenance()),
+            &adapter_sessions,
+        ));
+        sessions.extend(adapter_sessions.into_iter().inspect(|session| {
+            debug_assert_eq!(session.cli, adapter.tool());
+        }));
+    }
+
+    append_missing_reports(&mut reports);
+    sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+    reports.sort_by_key(|report| tool_order(report.cli));
+    Ok(SourceInventory {
+        sessions,
+        adapter_reports: reports,
+    })
 }
 
 pub fn find_session(session_id: &str) -> Result<Option<SessionSummary>, CoreError> {
@@ -108,6 +149,84 @@ fn fixture_adapters() -> Vec<Box<dyn SourceAdapter>> {
         .into_iter()
         .map(|tool| Box::new(FixtureSourceAdapter::new(tool)) as Box<dyn SourceAdapter>)
         .collect()
+}
+
+fn included_filter_status(provenance: SourceProvenance) -> &'static str {
+    match provenance {
+        SourceProvenance::Real => "included_real_store",
+        SourceProvenance::Fixture => {
+            if session_mode() == SessionMode::Fixture {
+                "included_fixture_mode"
+            } else {
+                "included_fixture_fallback"
+            }
+        }
+        SourceProvenance::Missing => "excluded_missing_store",
+    }
+}
+
+fn included_reason(provenance: SourceProvenance) -> &'static str {
+    match provenance {
+        SourceProvenance::Real => "real source store discovered",
+        SourceProvenance::Fixture => {
+            if session_mode() == SessionMode::Fixture {
+                "fixture mode selected; real source stores are disabled"
+            } else {
+                "no real source stores discovered; using fixture fallback"
+            }
+        }
+        SourceProvenance::Missing => "source store missing",
+    }
+}
+
+fn tool_order(tool: CliTool) -> usize {
+    CliTool::ALL
+        .iter()
+        .position(|candidate| *candidate == tool)
+        .unwrap_or(usize::MAX)
+}
+
+#[cfg(test)]
+fn append_missing_reports(_reports: &mut Vec<SourceAdapterReport>) {}
+
+#[cfg(not(test))]
+fn append_missing_reports(reports: &mut Vec<SourceAdapterReport>) {
+    if session_mode() != SessionMode::Auto {
+        return;
+    }
+    if !reports
+        .iter()
+        .any(|report| report.provenance == SourceProvenance::Real)
+    {
+        return;
+    }
+
+    for tool in CliTool::ALL {
+        if reports.iter().any(|report| report.cli == tool) {
+            continue;
+        }
+        reports.push(report_from_sessions(
+            tool,
+            SourceProvenance::Missing,
+            false,
+            configured_store_path(tool),
+            "excluded_missing_store",
+            "real store not found; fixture source is not mixed while another real store is active",
+            &[],
+        ));
+    }
+}
+
+#[cfg(not(test))]
+fn configured_store_path(tool: CliTool) -> Option<String> {
+    match tool {
+        CliTool::Codex => CodexSourceAdapter::from_default_home()
+            .map(|adapter| adapter.session_store_path().display().to_string()),
+        CliTool::Claude => ClaudeSourceAdapter::from_default_home()
+            .map(|adapter| adapter.session_store_path().display().to_string()),
+        CliTool::Hermes => HermesSourceAdapter::from_default_home()
+            .map(|adapter| adapter.session_store_path().display().to_string()),
+    }
 }
 
 #[cfg(test)]
