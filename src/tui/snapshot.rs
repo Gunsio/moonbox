@@ -1,5 +1,3 @@
-use std::fmt::Write as _;
-
 use color_eyre::Result;
 use ratatui::{
     Terminal,
@@ -48,8 +46,7 @@ fn buffer_to_svg(buffer: &Buffer) -> String {
     let height = terminal_height + PADDING * 2;
 
     let mut svg = String::new();
-    write!(
-        svg,
+    svg.push_str(&format!(
         r##"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-labelledby="title desc">
   <title id="title">Moonbox TUI screenshot</title>
   <desc id="desc">A generated terminal screenshot of Moonbox showing Launch Review, verifier readiness details, and Vim-style key hints.</desc>
@@ -63,8 +60,7 @@ fn buffer_to_svg(buffer: &Buffer) -> String {
   </defs>
   <rect x="{PADDING}" y="{PADDING}" width="{terminal_width}" height="{terminal_height}" rx="8" fill="{TERMINAL_BG}" stroke="#58616f" stroke-width="2" filter="url(#shadow)"/>
 "##
-    )
-    .expect("write svg header");
+    ));
 
     for y in 0..buffer.area.height {
         write_svg_row(buffer, y, &mut svg);
@@ -107,13 +103,12 @@ fn write_svg_run(x: u16, y: u16, cell: &Cell, text: &str, svg: &mut String) {
     let py = PADDING + (y as usize + 1) * CELL_HEIGHT - 4;
     let width = text.chars().count() * CELL_WIDTH;
     if cell.bg != Color::Reset {
-        writeln!(
-            svg,
-            r##"  <rect x="{px}" y="{}" width="{width}" height="{CELL_HEIGHT}" fill="{}"/>"##,
-            py.saturating_sub(CELL_HEIGHT - 3),
-            color_hex(cell.bg, TERMINAL_BG)
-        )
-        .expect("write bg");
+        let y = py.saturating_sub(CELL_HEIGHT - 3);
+        let fill = color_hex(cell.bg, TERMINAL_BG);
+        svg.push_str(&format!(
+            r##"  <rect x="{px}" y="{y}" width="{width}" height="{CELL_HEIGHT}" fill="{fill}"/>
+"##
+        ));
     }
 
     let weight = if cell.modifier.contains(Modifier::BOLD) {
@@ -121,13 +116,12 @@ fn write_svg_run(x: u16, y: u16, cell: &Cell, text: &str, svg: &mut String) {
     } else {
         "500"
     };
-    writeln!(
-        svg,
-        r##"  <text x="{px}" y="{py}" class="mono" font-size="14" font-weight="{weight}" fill="{}">{}</text>"##,
-        color_hex(cell.fg, DEFAULT_FG),
-        escape_xml(text)
-    )
-    .expect("write text");
+    let fill = color_hex(cell.fg, DEFAULT_FG);
+    let text = escape_xml(text);
+    svg.push_str(&format!(
+        r##"  <text x="{px}" y="{py}" class="mono" font-size="14" font-weight="{weight}" fill="{fill}">{text}</text>
+"##
+    ));
 }
 
 fn same_text_style(left: &Cell, right: &Cell) -> bool {

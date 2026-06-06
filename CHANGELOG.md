@@ -104,6 +104,8 @@ and this project uses semantic versioning once tagged releases start.
 - Shared verifier policy for CLI and TUI launch validation.
 - Real `--capsule` file parsing and target mismatch verification.
 - README screenshot, installation notes, and Homebrew release planning docs.
+- Production panic-boundary lint policy for non-test builds, denying `unsafe`,
+  `unwrap()`, `expect()`, `panic!`, `todo!`, and `unimplemented!`.
 
 ### Changed
 
@@ -168,6 +170,9 @@ and this project uses semantic versioning once tagged releases start.
   discovery and adapter health reporting, avoiding duplicate real-store scans.
 - TUI session rows now include REAL/FIXTURE provenance badges, while the Doctor
   overlay exposes full adapter path and skip-count details.
+- Replay-eval fixture invariants now return structured `CoreError` failures
+  instead of panicking, and generated SVG docs snapshot code no longer relies on
+  infallible string-write `expect` calls.
 
 ### Not Yet Released
 
