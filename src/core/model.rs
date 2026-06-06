@@ -269,3 +269,19 @@ pub struct LaunchExecution {
     pub exit_code: Option<i32>,
     pub plan: LaunchPlan,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OriginalSessionPlan {
+    pub version: u16,
+    pub dry_run: bool,
+    pub source_session: SessionSummary,
+    pub command: TargetLaunchCommand,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OriginalSessionExecution {
+    pub version: u16,
+    pub status: LaunchExecutionStatus,
+    pub exit_code: Option<i32>,
+    pub plan: OriginalSessionPlan,
+}

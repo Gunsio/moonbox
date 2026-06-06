@@ -136,6 +136,8 @@ cargo run -- tui --target codex
 cargo run -- sessions --json
 MOONBOX_SESSION_LIMIT=50 cargo run -- sessions --json
 cargo run -- open --session <session-id>
+cargo run -- open --session <session-id> --json
+cargo run -- open --execute --session <session-id>
 cargo run -- capsule --json
 cargo run -- compile-request --json
 cargo run -- compile-output --json
@@ -146,11 +148,11 @@ cargo run -- verify --target hermes --session <session-id> --capsule ./capsule.j
 cargo run -- verify --target hermes --session hermes-cxcp-502 --json
 ```
 
-`open` and `verify` print or validate plans without resuming a real process.
-`launch` is still dry-run by default. Passing `--execute` runs the verified
-target command after all verification checks pass. Target binaries can be
-overridden with `MOONBOX_CODEX_BIN`, `MOONBOX_CLAUDE_BIN`, or
-`MOONBOX_HERMES_BIN` for local testing and custom installs.
+`open` and `launch` are dry-run by default. Passing `--execute` runs the
+original CLI resume command or verified target command. `verify` never resumes
+or launches a real process. Target binaries can be overridden with
+`MOONBOX_CODEX_BIN`, `MOONBOX_CLAUDE_BIN`, or `MOONBOX_HERMES_BIN` for local
+testing and custom installs.
 
 External compiler skills are optional. When configured, Moonbox sends a
 `CapsuleCompileRequest` JSON object to the process stdin and expects a
@@ -252,10 +254,13 @@ Stable interfaces matter more than any single framework:
 - M12: real Claude `SourceAdapter` for `~/.claude/projects`, shared local JSONL adapter utilities, bounded Claude discovery, unbounded explicit Claude session lookup, and real Claude timeline parsing.
 - M13: real Hermes `SourceAdapter` for `~/.hermes/state.db`, optional `sessions.json` enrichment, SQLite message timeline parsing, id-based explicit lookup routing, and lightweight CLI launch/verify artifacts for large real stores.
 - M14: guarded target launcher execution with `launch --execute`, target-specific Codex/Claude/Hermes command generation, structured `target_command` JSON, binary overrides, verification blocking before spawn, and TUI copy commands that execute through Moonbox.
+- M15: guarded original-session execution with `open --execute`, structured original open plan JSON, source-specific Codex/Claude/Hermes resume commands, corrected Hermes resume command generation, binary overrides, and TUI copy commands that execute through Moonbox.
 
 ### Can Build Now
 
-- Real original-session launching instead of command preview/printing only.
+- Real compiler skill presets and quality evaluation.
+- Verifier hardening.
+- Replay eval.
 
 ### Prototype Now, Improve With Real Data
 

@@ -244,7 +244,7 @@ impl HermesSourceAdapter {
             token_count,
             health_reason: Some(health_reason),
             event_count: row.active_message_count.max(row.message_count),
-            resume_command: format!("hermes resume {}", row.id),
+            resume_command: format!("hermes --resume {}", row.id),
         }
     }
 }
@@ -612,7 +612,7 @@ mod tests {
         assert_eq!(sessions[0].title, "Ops Room");
         assert_eq!(sessions[0].cwd, "feishu/dm agent:main:feishu:dm:chat");
         assert_eq!(sessions[0].token_count, Some(88));
-        assert_eq!(sessions[0].resume_command, "hermes resume hermes-feishu");
+        assert_eq!(sessions[0].resume_command, "hermes --resume hermes-feishu");
         assert_eq!(sessions[1].id, "hermes-cli");
         assert_eq!(sessions[1].title, "CLI bugfix");
     }

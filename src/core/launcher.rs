@@ -7,8 +7,8 @@ use std::{
 use super::{
     error::CoreError,
     model::{
-        CliTool, LaunchExecution, LaunchExecutionStatus, LaunchPlan, SessionSummary,
-        TargetLaunchCommand, WorkCapsule,
+        CliTool, LaunchExecution, LaunchExecutionStatus, LaunchPlan, OriginalSessionExecution,
+        OriginalSessionPlan, SessionSummary, TargetLaunchCommand, WorkCapsule,
     },
 };
 
@@ -52,6 +52,37 @@ pub fn execute_plan(mut plan: LaunchPlan) -> Result<LaunchExecution, CoreError> 
     })
 }
 
+pub fn original_command(session: &SessionSummary) -> TargetLaunchCommand {
+    let program = configured_target_binary(session.cli);
+    let args = original_args(session);
+    let cwd = usable_cwd(&session.cwd);
+    let display = shell_command(&program, &args);
+
+    TargetLaunchCommand {
+        program,
+        args,
+        cwd,
+        display,
+    }
+}
+
+pub fn execute_original_plan(
+    mut plan: OriginalSessionPlan,
+) -> Result<OriginalSessionExecution, CoreError> {
+    plan.dry_run = false;
+    let status = run_target_command(&plan.command)?;
+    Ok(OriginalSessionExecution {
+        version: 1,
+        status: if status.success() {
+            LaunchExecutionStatus::Success
+        } else {
+            LaunchExecutionStatus::Failed
+        },
+        exit_code: status.code(),
+        plan,
+    })
+}
+
 fn run_target_command(
     command: &TargetLaunchCommand,
 ) -> Result<std::process::ExitStatus, CoreError> {
@@ -64,6 +95,14 @@ fn run_target_command(
         command: command.display.clone(),
         reason: error.to_string(),
     })
+}
+
+fn original_args(session: &SessionSummary) -> Vec<String> {
+    match session.cli {
+        CliTool::Codex => vec!["resume".into(), session.id.clone()],
+        CliTool::Claude => vec!["--resume".into(), session.id.clone()],
+        CliTool::Hermes => vec!["--resume".into(), session.id.clone()],
+    }
 }
 
 fn target_args(target: CliTool, cwd: Option<&str>, prompt: String) -> Vec<String> {
@@ -258,5 +297,38 @@ mod tests {
         assert_eq!(shell_quote("abc-123"), "abc-123");
         assert_eq!(shell_quote("hello world"), "'hello world'");
         assert_eq!(shell_quote("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn original_commands_use_source_cli_resume_entrypoints() {
+        let data = data::workbench_data(CliTool::Codex, CliTool::Hermes).expect("data");
+        let codex = data
+            .sessions
+            .iter()
+            .find(|session| session.cli == CliTool::Codex)
+            .expect("codex");
+        let claude = data
+            .sessions
+            .iter()
+            .find(|session| session.cli == CliTool::Claude)
+            .expect("claude");
+        let hermes = data
+            .sessions
+            .iter()
+            .find(|session| session.cli == CliTool::Hermes)
+            .expect("hermes");
+
+        assert_eq!(
+            original_command(codex).args,
+            ["resume", "codex-cxcp-design"]
+        );
+        assert_eq!(
+            original_command(claude).args,
+            ["--resume", "claude-qc-platform"]
+        );
+        assert_eq!(
+            original_command(hermes).args,
+            ["--resume", "hermes-cxcp-502"]
+        );
     }
 }

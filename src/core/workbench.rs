@@ -6,7 +6,8 @@ use super::{
     launcher,
     model::{
         CapsuleCompileOutput, CapsuleCompileRequest, CliTool, LaunchExecution, LaunchPlan,
-        SessionSummary, VerificationReport, WorkCapsule, WorkbenchData,
+        OriginalSessionExecution, OriginalSessionPlan, SessionSummary, VerificationReport,
+        WorkCapsule, WorkbenchData,
     },
     verifier,
 };
@@ -35,8 +36,29 @@ pub fn default_session() -> Result<Option<SessionSummary>, CoreError> {
 }
 
 pub fn open_command(session_id: Option<&str>) -> Result<Option<String>, CoreError> {
-    let session = selected_session(session_id)?;
-    Ok(session.map(|session| session.resume_command))
+    Ok(open_plan(session_id)?.map(|plan| plan.command.display))
+}
+
+pub fn open_plan(session_id: Option<&str>) -> Result<Option<OriginalSessionPlan>, CoreError> {
+    let Some(source_session) = selected_session(session_id)? else {
+        return Ok(None);
+    };
+    let command = launcher::original_command(&source_session);
+    Ok(Some(OriginalSessionPlan {
+        version: 1,
+        dry_run: true,
+        source_session,
+        command,
+    }))
+}
+
+pub fn execute_open(
+    session_id: Option<&str>,
+) -> Result<Option<OriginalSessionExecution>, CoreError> {
+    let Some(plan) = open_plan(session_id)? else {
+        return Ok(None);
+    };
+    launcher::execute_original_plan(plan).map(Some)
 }
 
 pub fn capsule(source: CliTool, target: CliTool) -> Result<WorkCapsule, CoreError> {
@@ -173,6 +195,10 @@ pub fn moonbox_execute_command(
     }
 }
 
+pub fn moonbox_open_execute_command(session_id: &str) -> String {
+    format!("moonbox open --execute --session {session_id}")
+}
+
 #[cfg(test)]
 mod tests {
     use std::{env, fs};
@@ -190,6 +216,18 @@ mod tests {
         assert!(!plan.command.contains("--capsule"));
         assert!(plan.command.starts_with("hermes chat "));
         assert_eq!(plan.verification.status, VerificationStatus::Pass);
+    }
+
+    #[test]
+    fn open_plan_uses_structured_original_command() {
+        let plan = open_plan(Some("codex-cxcp-design"))
+            .expect("open plan result")
+            .expect("open plan");
+
+        assert!(plan.dry_run);
+        assert_eq!(plan.command.program, "codex");
+        assert_eq!(plan.command.args, ["resume", "codex-cxcp-design"]);
+        assert_eq!(plan.command.display, "codex resume codex-cxcp-design");
     }
 
     #[test]
