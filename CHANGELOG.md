@@ -40,6 +40,8 @@ and this project uses semantic versioning once tagged releases start.
 - Fixture-only replay evaluation through `moonbox replay-eval`, covering every
   Codex/Claude/Hermes source-target pair without scanning or opening local
   session stores.
+- Synthetic fixture replay regressions for target mismatch, oversized capsule,
+  and missing-tool preflight, with explicit scenario coverage in replay output.
 - CI gates for fixture replay evaluation and `cargo package --locked`
   verification.
 - Fixture-safe CLI smoke script for non-executing command surfaces, with source
@@ -96,6 +98,8 @@ and this project uses semantic versioning once tagged releases start.
 - TUI verify status no longer hard-codes the verifier check count.
 - CLI runtime now lives behind a shared library entrypoint used by both
   `moonbox` and `moon`.
+- Replay eval JSON now separates matrix and synthetic case counts, labels each
+  case with `case_kind` and `scenario`, and reports expected scenario coverage.
 
 ### Not Yet Released
 

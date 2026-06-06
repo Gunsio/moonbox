@@ -160,7 +160,7 @@ The first implementation focuses on the product shell:
 - Fixture session mode for demos, CI, release smoke, and other environments
   that must not read real local session stores
 - Fixture-safe TUI render regression tests for main, Doctor, and Launch views
-- Deterministic fixture-only replay eval for the Codex/Claude/Hermes source-target matrix
+- Deterministic fixture-only replay eval for the Codex/Claude/Hermes source-target matrix plus synthetic verifier regressions
 - Fixture-safe public CLI contract tests for the installed `moonbox` and `moon` command surfaces
 - Full local quality gate through `scripts/ci/full-gate.sh`
 - Cargo-deny supply-chain policy for advisories, duplicate versions, licenses, and crate sources
@@ -215,7 +215,9 @@ installs.
 
 `replay-eval` is also non-executing. It uses only embedded fixtures, does not
 scan local session stores, and reports verifier signals across every
-source-target pair.
+source-target pair plus safe synthetic regressions for target mismatch,
+oversized capsules, and missing target commands. The JSON output includes
+matrix and synthetic case counts plus a coverage table for expected scenarios.
 
 For demos, release smoke, or any automation that must not touch real local
 session stores, force fixture mode:
@@ -417,12 +419,10 @@ Stable interfaces matter more than any single framework:
 - M31: release docs hardening with local install commands, a draft Homebrew formula template, and a fixture-safe Homebrew docs smoke gate.
 - M32: explicit fixture session mode through `MOONBOX_SESSION_MODE=fixture`, surfaced in Doctor diagnostics and wired into smoke scripts to prevent accidental real-session discovery.
 - M33: action intent hardening with `original_resume` / `target_handoff` dry-run discriminators, two-stage TUI launch review, original-preview copy-only behavior, and contract/render tests for both paths.
+- M34: fixture replay corpus expansion with 9 source-target matrix cases plus 3 synthetic regressions for target mismatch, oversized capsule, and missing-tool preflight; replay output now includes case kind, scenario, capsule target, coverage rows, and updated fixture-safe CLI smoke/contract checks.
 
 ### Can Build Now
 
-- Expand fixture replay corpus with safe, synthetic histories that cover
-  successful handoff, failed raw resume, target mismatch, oversized capsule,
-  and missing-tool scenarios.
 - Add target readiness explanation rows in the TUI using existing verifier
   signals, without reading or launching real sessions.
 - Finalize README screenshots and install docs for the pre-release branch.
