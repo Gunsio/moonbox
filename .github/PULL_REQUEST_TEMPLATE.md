@@ -8,6 +8,8 @@ Describe the change and why it matters.
 
 ## Verification
 
+- [ ] `scripts/ci/full-gate.sh`
+- [ ] `git diff --check`
 - [ ] `cargo fmt --check`
 - [ ] `cargo check --locked`
 - [ ] `cargo test --locked`

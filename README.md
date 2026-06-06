@@ -36,6 +36,18 @@ cargo run --locked -- tui
 For local development:
 
 ```bash
+scripts/ci/full-gate.sh
+```
+
+That script runs patch hygiene plus the CI/release gates. It expects a clean
+worktree for `cargo package --locked`; during pre-commit iteration use
+`MOONBOX_PACKAGE_ALLOW_DIRTY=1 scripts/ci/full-gate.sh`, then rerun it without
+the override after committing.
+
+Individual gates:
+
+```bash
+git diff --check
 cargo fmt --check
 cargo check --locked
 cargo test --locked
@@ -120,6 +132,7 @@ The first implementation focuses on the product shell:
 - First-class `moon` binary alias installed alongside `moonbox`
 - Deterministic fixture-only replay eval for the Codex/Claude/Hermes source-target matrix
 - Fixture-safe public CLI contract tests for the installed `moonbox` and `moon` command surfaces
+- Full local quality gate through `scripts/ci/full-gate.sh`
 - GitHub Actions CI for Rust quality gates, documentation build, fixture replay eval, fixture-safe CLI smoke, package verification, install smoke, and README screenshot validation
 - Dependabot configuration for Cargo and GitHub Actions updates
 - Contributing, security, changelog, issue template, and PR template docs
@@ -305,6 +318,7 @@ Stable interfaces matter more than any single framework:
 - M22: fixture-safe install smoke gate that runs `cargo install --path . --root target/moonbox-install-smoke --locked --offline --force`, verifies installed `moonbox` and `moon`, and checks installed `moon replay-eval --json` without scanning or opening real sessions.
 - M23: fixture-safe integration tests for public CLI contracts, covering `moonbox`/`moon` version parity, fixture-only replay eval, fixture fallback session listing, and dry-run open/launch/verify JSON behavior.
 - M24: documentation build gate with `RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps` in CI, PR checklist, README, and contributor docs.
+- M25: full local quality gate script that runs patch hygiene plus CI/release checks, with dirty-worktree package verification available during pre-commit iteration.
 
 ### Can Build Now
 
