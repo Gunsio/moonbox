@@ -1,9 +1,11 @@
 pub mod adapter;
+pub mod codex;
 pub mod compiler;
 pub mod config;
 pub mod demo;
 pub mod error;
 pub mod fixture;
 pub mod model;
+pub mod sources;
 pub mod verifier;
 pub mod workbench;

@@ -8,6 +8,11 @@ pub enum AdapterError {
         tool: CliTool,
         session_id: String,
     },
+    ReadSource {
+        tool: CliTool,
+        path: String,
+        reason: String,
+    },
     InvalidFixture {
         tool: CliTool,
         path: String,
@@ -20,6 +25,9 @@ impl fmt::Display for AdapterError {
         match self {
             Self::SessionNotFound { tool, session_id } => {
                 write!(f, "{tool} session not found: {session_id}")
+            }
+            Self::ReadSource { tool, path, reason } => {
+                write!(f, "cannot read {tool} source {path}: {reason}")
             }
             Self::InvalidFixture { tool, path, reason } => {
                 write!(f, "{tool} fixture {path} is invalid: {reason}")

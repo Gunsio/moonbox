@@ -17,15 +17,15 @@ pub struct Cli {
 pub enum Command {
     /// Open the Moonbox TUI workbench.
     Tui(TuiArgs),
-    /// List discovered sessions. Currently uses demo data.
+    /// List discovered sessions.
     Sessions(JsonArgs),
     /// Print the command for opening an original session.
     Open(OpenArgs),
-    /// Print the current Work Capsule. Currently uses demo data.
+    /// Print the current Work Capsule.
     Capsule(JsonArgs),
-    /// Print the compiler request contract fixture. Currently uses demo data.
+    /// Print the compiler request contract fixture.
     CompileRequest(JsonArgs),
-    /// Print the compiler output contract fixture. Currently uses demo data.
+    /// Print the compiler output contract fixture.
     CompileOutput(JsonArgs),
     /// Dry-run a target launch plan and verification report.
     Launch(LaunchArgs),
@@ -60,7 +60,7 @@ pub struct JsonArgs {
 
 #[derive(Debug, Args, Clone)]
 pub struct OpenArgs {
-    /// Session id to open. Defaults to the first demo session.
+    /// Session id to open. Defaults to the newest discovered session.
     #[arg(long)]
     pub session: Option<String>,
 }
