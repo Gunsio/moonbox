@@ -10,6 +10,7 @@ pub mod hermes;
 pub mod launcher;
 pub mod local_jsonl;
 pub mod model;
+pub mod replay_eval;
 pub mod sources;
 pub mod verifier;
 pub mod workbench;
