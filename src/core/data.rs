@@ -244,6 +244,26 @@ pub fn compile_capsule_for_session_id(
     .map(Some)
 }
 
+pub fn launch_artifacts_for_session_id(
+    session_id: &str,
+    target: CliTool,
+) -> Result<Option<(SessionSummary, CanonicalTimeline, WorkCapsule)>, CoreError> {
+    let Some(source_session) = find_session(session_id)? else {
+        return Ok(None);
+    };
+    let timeline = canonical_timeline_for_session(&source_session)?;
+    let rewind_event_id = rewind_event_id_for_timeline(&source_session.id, &timeline);
+    let compiler = default_compiler_id();
+    let capsule = compile_capsule_for_session(
+        &source_session,
+        target,
+        &timeline,
+        &rewind_event_id,
+        &compiler,
+    )?;
+    Ok(Some((source_session, timeline, capsule)))
+}
+
 fn compile_capsule_for_session(
     session: &SessionSummary,
     target: CliTool,

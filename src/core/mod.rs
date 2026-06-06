@@ -6,6 +6,7 @@ pub mod config;
 pub mod data;
 pub mod error;
 pub mod fixture;
+pub mod hermes;
 pub mod local_jsonl;
 pub mod model;
 pub mod sources;

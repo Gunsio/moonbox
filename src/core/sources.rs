@@ -9,6 +9,8 @@ use super::{
 use super::claude::ClaudeSourceAdapter;
 #[cfg(not(test))]
 use super::codex::CodexSourceAdapter;
+#[cfg(not(test))]
+use super::hermes::HermesSourceAdapter;
 
 pub fn list_sessions() -> Result<Vec<SessionSummary>, CoreError> {
     let adapters = runtime_adapters();
@@ -20,7 +22,35 @@ pub fn list_sessions() -> Result<Vec<SessionSummary>, CoreError> {
 }
 
 pub fn find_session(session_id: &str) -> Result<Option<SessionSummary>, CoreError> {
-    for adapter in runtime_adapters() {
+    let adapters = runtime_adapters();
+    let preferred_tool = preferred_tool_for_session_id(session_id);
+
+    if let Some(preferred_tool) = preferred_tool {
+        for adapter in adapters
+            .iter()
+            .filter(|adapter| adapter.tool() == preferred_tool)
+        {
+            if let Some(session) = adapter.find_session(session_id)? {
+                return Ok(Some(session));
+            }
+        }
+    }
+
+    let adapter_refs = adapters
+        .iter()
+        .map(|adapter| adapter.as_ref())
+        .collect::<Vec<_>>();
+    if let Some(session) = collect_sessions(&adapter_refs)?
+        .into_iter()
+        .find(|session| session.id == session_id)
+    {
+        return Ok(Some(session));
+    }
+
+    for adapter in adapters
+        .iter()
+        .filter(|adapter| Some(adapter.tool()) != preferred_tool)
+    {
         if let Some(session) = adapter.find_session(session_id)? {
             return Ok(Some(session));
         }
@@ -73,8 +103,54 @@ fn runtime_adapters() -> Vec<Box<dyn SourceAdapter>> {
         adapters.push(Box::new(FixtureSourceAdapter::new(CliTool::Claude)));
     }
 
-    adapters.push(Box::new(FixtureSourceAdapter::new(CliTool::Hermes)));
+    if let Some(hermes) =
+        HermesSourceAdapter::from_default_home().filter(|adapter| adapter.has_session_store())
+    {
+        adapters.push(Box::new(hermes));
+    } else {
+        adapters.push(Box::new(FixtureSourceAdapter::new(CliTool::Hermes)));
+    }
     adapters
+}
+
+fn preferred_tool_for_session_id(session_id: &str) -> Option<CliTool> {
+    if session_id.starts_with("codex-") || session_id.starts_with("rollout-") {
+        return Some(CliTool::Codex);
+    }
+    if session_id.starts_with("claude-") || looks_like_uuid(session_id) {
+        return Some(CliTool::Claude);
+    }
+    if session_id.starts_with("hermes-")
+        || session_id.starts_with("cron_")
+        || looks_like_hermes_timestamp_id(session_id)
+    {
+        return Some(CliTool::Hermes);
+    }
+    None
+}
+
+fn looks_like_uuid(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 36 {
+        return false;
+    }
+    for index in [8, 13, 18, 23] {
+        if bytes[index] != b'-' {
+            return false;
+        }
+    }
+    bytes
+        .iter()
+        .enumerate()
+        .all(|(index, byte)| matches!(index, 8 | 13 | 18 | 23) || byte.is_ascii_hexdigit())
+}
+
+fn looks_like_hermes_timestamp_id(value: &str) -> bool {
+    let Some(prefix) = value.get(..9) else {
+        return false;
+    };
+    let (date, separator) = prefix.split_at(8);
+    separator == "_" && date.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 #[cfg(test)]
@@ -110,5 +186,25 @@ mod tests {
             .expect("session");
 
         assert_eq!(session.cli, CliTool::Codex);
+    }
+
+    #[test]
+    fn session_id_heuristics_prioritize_expensive_lookup() {
+        assert_eq!(
+            preferred_tool_for_session_id("20260605_142114_9609f348"),
+            Some(CliTool::Hermes)
+        );
+        assert_eq!(
+            preferred_tool_for_session_id("cron_2ceb18b7c4db_20260605_190259"),
+            Some(CliTool::Hermes)
+        );
+        assert_eq!(
+            preferred_tool_for_session_id("09606d04-f303-418a-ae24-8921389bbe54"),
+            Some(CliTool::Claude)
+        );
+        assert_eq!(
+            preferred_tool_for_session_id("codex-cxcp-design"),
+            Some(CliTool::Codex)
+        );
     }
 }
