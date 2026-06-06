@@ -21,7 +21,7 @@ pub enum Command {
     /// Open the Moonbox TUI workbench.
     Tui(TuiArgs),
     /// List discovered sessions.
-    Sessions(JsonArgs),
+    Sessions(SessionListArgs),
     /// Print the command for opening an original session.
     Open(OpenArgs),
     /// Print the current Work Capsule.
@@ -73,6 +73,18 @@ pub struct JsonArgs {
 }
 
 #[derive(Debug, Args, Clone, Default)]
+pub struct SessionListArgs {
+    #[arg(long)]
+    pub json: bool,
+    /// Filter listed sessions by source CLI. Defaults to all sources.
+    #[arg(long, value_enum)]
+    pub filter: Option<CliTool>,
+    /// Backward-compatible alias for --filter.
+    #[arg(long, value_enum, hide = true)]
+    pub source: Option<CliTool>,
+}
+
+#[derive(Debug, Args, Clone, Default)]
 pub struct DocsSnapshotArgs {
     /// Snapshot terminal width in cells.
     #[arg(long, default_value_t = 160)]
@@ -121,7 +133,7 @@ impl CompletionBinary {
 
 #[derive(Debug, Args, Clone)]
 pub struct OpenArgs {
-    /// Session id to open. Defaults to the newest discovered session.
+    /// Session id to open. Dry-runs default to the newest discovered session; --execute requires it.
     #[arg(long)]
     pub session: Option<String>,
     /// Execute the original CLI resume command instead of printing a dry-run plan.
@@ -134,7 +146,7 @@ pub struct OpenArgs {
 
 #[derive(Debug, Args, Clone, Default)]
 pub struct LaunchArgs {
-    /// Source session id. Defaults to the newest discovered session.
+    /// Source session id. Dry-runs default to the newest discovered session; --execute requires it.
     #[arg(long)]
     pub session: Option<String>,
     /// Target CLI. Defaults to the last confirmed target.

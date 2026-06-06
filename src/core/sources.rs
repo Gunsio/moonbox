@@ -126,24 +126,22 @@ fn runtime_adapters() -> Vec<Box<dyn SourceAdapter>> {
         CodexSourceAdapter::from_default_home().filter(|adapter| adapter.has_session_store())
     {
         adapters.push(Box::new(codex));
-    } else {
-        adapters.push(Box::new(FixtureSourceAdapter::new(CliTool::Codex)));
     }
 
     if let Some(claude) =
         ClaudeSourceAdapter::from_default_home().filter(|adapter| adapter.has_session_store())
     {
         adapters.push(Box::new(claude));
-    } else {
-        adapters.push(Box::new(FixtureSourceAdapter::new(CliTool::Claude)));
     }
 
     if let Some(hermes) =
         HermesSourceAdapter::from_default_home().filter(|adapter| adapter.has_session_store())
     {
         adapters.push(Box::new(hermes));
-    } else {
-        adapters.push(Box::new(FixtureSourceAdapter::new(CliTool::Hermes)));
+    }
+
+    if adapters.is_empty() {
+        return fixture_adapters();
     }
     adapters
 }

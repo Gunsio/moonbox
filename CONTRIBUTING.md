@@ -88,6 +88,9 @@ semantics.
 ## Engineering Standards
 
 - Keep source sessions read-only.
+- Keep real-session automation explicit: commands that spawn source or target
+  CLIs must require an explicit session id rather than defaulting to the newest
+  discovered session.
 - Prefer stable core contracts over UI-only behavior.
 - Do not duplicate business policy between CLI and TUI. Shared rules belong in
   `src/core`.

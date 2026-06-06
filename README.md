@@ -135,7 +135,9 @@ The first implementation focuses on the product shell:
 - Runtime list limit defaults to the newest 200 sessions per real adapter; explicit session lookup still searches the full store
 - Set `MOONBOX_SESSION_LIMIT=0` for unlimited real-session list discovery
 - Set `MOONBOX_SESSION_MODE=fixture` to disable real source stores and force embedded fixture sessions
+- Auto discovery only falls back to fixture sessions when no real source stores are present; real and fixture sources are not mixed
 - Source filter defaults to `All`; `Source` is a session-list filter, not a global handoff mode
+- `moonbox sessions --filter <source>` lists one source while keeping default output as the time-sorted global session index
 - Original resume and target handoff are explicit action intents:
   `original_resume` for `open`, `target_handoff` for `launch`
 - Target selection lives inside the launch flow, with explicit `> [x]` radio-list selection
@@ -205,6 +207,7 @@ moon tui
 cargo run -- tui --filter claude
 cargo run -- tui --target codex
 cargo run -- sessions --json
+MOONBOX_SESSION_MODE=fixture cargo run -- sessions --filter hermes --json
 MOONBOX_SESSION_LIMIT=50 cargo run -- sessions --json
 cargo run -- open --session <session-id>
 cargo run -- open --session <session-id> --json
@@ -224,12 +227,14 @@ cargo run -- verify --target hermes --session <session-id> --capsule ./capsule.j
 cargo run -- verify --target hermes --session hermes-cxcp-502 --json
 ```
 
-`open` and `launch` are dry-run by default. Passing `--execute` runs the
-original CLI resume command or verified target command. `verify` never resumes
-or launches a real process. `doctor` is also non-executing: it checks config
-resolution, session summary discovery, target binary availability, and compiler
-catalog readiness without loading timelines, resuming sessions, or spawning
-targets. Target binaries can be overridden with `MOONBOX_CODEX_BIN`,
+`open` and `launch` are dry-run by default. Dry-runs may omit `--session` and
+will preview the newest discovered session. Passing `--execute` runs the
+original CLI resume command or verified target command and therefore requires an
+explicit `--session`, so automation cannot accidentally open the newest active
+session. `verify` never resumes or launches a real process. `doctor` is also
+non-executing: it checks config resolution, session summary discovery, target
+binary availability, and compiler catalog readiness without loading timelines,
+resuming sessions, or spawning targets. Target binaries can be overridden with `MOONBOX_CODEX_BIN`,
 `MOONBOX_CLAUDE_BIN`, or `MOONBOX_HERMES_BIN` for local testing and custom
 installs.
 
@@ -251,6 +256,10 @@ Fixture mode disables real Codex, Claude, and Hermes source adapters even if
 their default stores or `MOONBOX_*_HOME` overrides exist. Supported values are
 `auto` and `fixture`; `real` is accepted as an alias for `auto`, and `demo` /
 `fixtures` are accepted as aliases for `fixture`.
+
+In auto mode, Moonbox uses real source stores when any are present. Fixture
+sessions are used only when no real Codex, Claude, or Hermes store is available,
+which keeps local real-session indexes from being mixed with demo data.
 
 External compiler skills are optional. When configured, Moonbox sends a
 `CapsuleCompileRequest` JSON object to the process stdin and expects a
@@ -446,6 +455,7 @@ Stable interfaces matter more than any single framework:
 - M36: README screenshot/install polish with a Launch Review readiness screenshot, transparent SVG canvas, and `docs-assets-smoke` coverage for screenshot semantics, install commands, and unpublished Homebrew wording in both local and GitHub Actions gates.
 - M37: generated docs screenshot pipeline with a hidden fixture-only `docs-snapshot` command that renders the real Ratatui Launch Review buffer to SVG, compares the generated output byte-for-byte in `docs-assets-smoke`, and keeps the command hidden from normal help while covered by CLI contract tests.
 - M38: release artifact staging with source, Cargo crate, and host binary archives, generated shell completions, `SHA256SUMS`, `release-manifest.json`, Homebrew source archive URL/checksum guidance, and CI smoke validation without publishing.
+- M39: real-session index hardening with fixture fallback only when no real stores exist, CLI `sessions --filter <source>` support, and execute-time guards requiring explicit `--session` before original resume or target handoff can spawn a process.
 
 ### Can Build Now
 
