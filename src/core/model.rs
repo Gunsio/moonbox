@@ -285,3 +285,31 @@ pub struct OriginalSessionExecution {
     pub exit_code: Option<i32>,
     pub plan: OriginalSessionPlan,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompilerPresetKind {
+    Builtin,
+    Environment,
+    Config,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompilerPresetStatus {
+    Ready,
+    Warning,
+    Disabled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompilerPresetInfo {
+    pub id: String,
+    pub kind: CompilerPresetKind,
+    pub status: CompilerPresetStatus,
+    pub score: u8,
+    pub command: Option<String>,
+    pub args: Vec<String>,
+    pub timeout_ms: Option<u64>,
+    pub reason: String,
+}

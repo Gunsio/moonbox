@@ -27,6 +27,8 @@ pub enum Command {
     CompileRequest(CompileArgs),
     /// Print the compiler output contract.
     CompileOutput(CompileArgs),
+    /// List configured compiler skill presets.
+    Compilers(JsonArgs),
     /// Dry-run a target launch plan and verification report.
     Launch(LaunchArgs),
     /// Verify the selected Work Capsule without launching.

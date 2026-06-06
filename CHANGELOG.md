@@ -28,6 +28,9 @@ and this project uses semantic versioning once tagged releases start.
   `target_command` plan output.
 - Guarded original-session execution through `open --execute`.
 - Structured original open plan output through `open --json`.
+- Configurable compiler skill presets in `~/.config/moonbox/config.json`.
+- Compiler catalog output through `moonbox compilers`, including source,
+  status, score, command, arguments, timeout, and quality reason.
 - Shared verifier policy for CLI and TUI launch validation.
 - Real `--capsule` file parsing and target mismatch verification.
 - README screenshot, installation notes, and Homebrew release planning docs.
@@ -49,8 +52,14 @@ and this project uses semantic versioning once tagged releases start.
 - Original-session execution is opt-in and uses source-specific resume
   entrypoints; Hermes resume commands now use `hermes --resume <session>`.
 - TUI original-session copy now points at `moonbox open --execute`.
+- Compiler execution precedence is now explicit: environment override, config
+  preset, then built-in fixture compiler.
+- Unknown compiler ids and disabled compiler presets now return structured
+  configuration errors instead of silently compiling through the fixture path.
+- Saving the last selected target now preserves compiler presets and
+  `default_compiler` in the user config file.
 
 ### Not Yet Released
 
 - Homebrew formula and release archives are planned but not published.
-- Real compiler presets, verifier hardening, and replay evaluation are planned.
+- Verifier hardening and replay evaluation are planned.
