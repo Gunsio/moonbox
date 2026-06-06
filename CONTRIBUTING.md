@@ -31,6 +31,7 @@ Expanded gates:
 
 ```bash
 git diff --check
+scripts/ci/supply-chain.sh
 cargo fmt --check
 cargo check --locked
 cargo test --locked
@@ -49,6 +50,11 @@ scripts/ci/install-smoke.sh
 
 `cargo doc --locked --no-deps` must pass with `RUSTDOCFLAGS="-D warnings"` so
 public Rust documentation stays buildable as the library surface evolves.
+
+`scripts/ci/supply-chain.sh` requires `cargo-deny`. Install it with
+`cargo install --locked cargo-deny`, or set `CARGO_DENY=/path/to/cargo-deny`
+when using a downloaded binary. It checks advisories, duplicate-version policy,
+licenses, and crate sources against `deny.toml`.
 
 For README screenshot changes:
 

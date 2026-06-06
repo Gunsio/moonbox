@@ -10,6 +10,7 @@ Describe the change and why it matters.
 
 - [ ] `scripts/ci/full-gate.sh`
 - [ ] `git diff --check`
+- [ ] `scripts/ci/supply-chain.sh`
 - [ ] `cargo fmt --check`
 - [ ] `cargo check --locked`
 - [ ] `cargo test --locked`

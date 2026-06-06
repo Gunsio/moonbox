@@ -49,6 +49,8 @@ and this project uses semantic versioning once tagged releases start.
   `moon` binaries.
 - Documentation build gate with rustdoc warnings treated as errors.
 - Full local quality gate script for patch hygiene plus CI/release checks.
+- Supply-chain gate with cargo-deny advisories, duplicate-version, license, and
+  source checks.
 - Shared verifier policy for CLI and TUI launch validation.
 - Real `--capsule` file parsing and target mismatch verification.
 - README screenshot, installation notes, and Homebrew release planning docs.
