@@ -55,11 +55,17 @@ jobs:
       - name: Run tests
         run: cargo test --locked
 
+      - name: Run fixture replay evaluation
+        run: cargo run --locked -- replay-eval --json
+
       - name: Run clippy
         run: cargo clippy --locked -- -D warnings
 
       - name: Build release binary
         run: cargo build --release --locked
+
+      - name: Verify package
+        run: cargo package --locked
 
   docs:
     name: Documentation assets

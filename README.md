@@ -71,9 +71,9 @@ checklist and formula shape.
 - [Changelog](CHANGELOG.md)
 - [Homebrew release notes](docs/release/homebrew.md)
 
-Pull requests are expected to pass formatting, check, test, clippy, and release
-build gates. GitHub Actions runs the same Rust quality gates and validates the
-README screenshot asset.
+Pull requests are expected to pass formatting, check, test, fixture replay
+eval, clippy, release build, and package verification gates. GitHub Actions
+runs the same Rust quality gates and validates the README screenshot asset.
 
 ## Current State
 
@@ -118,7 +118,7 @@ The first implementation focuses on the product shell:
 - `--capsule` reads a real Work Capsule JSON file when provided; generated dry-run capsules do not pretend to have a file path
 - Hardened verifier checks for Work Capsule version, required fields, handoff context, risk context, capsule size, target branch markers, and execution command preflight
 - Deterministic fixture-only replay eval for the Codex/Claude/Hermes source-target matrix
-- GitHub Actions CI for Rust quality gates and README screenshot validation
+- GitHub Actions CI for Rust quality gates, fixture replay eval, package verification, and README screenshot validation
 - Dependabot configuration for Cargo and GitHub Actions updates
 - Contributing, security, changelog, issue template, and PR template docs
 
@@ -297,6 +297,7 @@ Stable interfaces matter more than any single framework:
 - M16: configurable compiler skill presets with `default_compiler`, catalog status/score signals, `moonbox compilers`, environment override precedence, and stricter unknown/disabled compiler errors.
 - M17: verifier hardening with Work Capsule version and required-field checks, handoff-context actionability, risk-context warnings, capsule-size thresholds, stricter target-branch validation, and execute-time target command preflight before spawn.
 - M18: deterministic fixture-only replay eval covering the Codex/Claude/Hermes source-target matrix, with JSON/text CLI output and verifier signal counts without scanning or opening real sessions.
+- M19: release gate hardening with fixture replay eval and `cargo package --locked` wired into GitHub Actions and the PR verification checklist.
 
 ### Can Build Now
 
