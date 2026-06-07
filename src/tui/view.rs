@@ -11,8 +11,8 @@ use ratatui::{
 use crate::{
     app::{App, Focus},
     core::model::{
-        CliTool, LaunchValidationState, SessionStatus, SourceProvenance, TimelineKind,
-        VerificationReport, VerificationStatus,
+        CliTool, LaunchValidationState, SessionStatus, SourceProvenance, TimelineEvent,
+        TimelineKind, VerificationReport, VerificationStatus,
     },
 };
 
@@ -262,10 +262,6 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
                         status,
                         Span::raw(" "),
                         Span::styled(source_pill(session.cli), source_tool_style(session.cli)),
-                        Span::styled(
-                            format!(" {}", source_provenance_label(session.source_provenance)),
-                            source_provenance_style(session.source_provenance),
-                        ),
                         Span::raw("  "),
                         Span::styled(&session.title, Style::default().fg(theme::TEXT)),
                     ]),
@@ -285,18 +281,24 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     let title = if app.search_query.is_empty() {
-        format!(
-            " Sessions · {} {} ",
-            app.session_filter.label(),
-            session_position_label(visible.len(), selected)
+        stable_panel_title(
+            format!(
+                "Sessions · {} {}",
+                app.session_filter.label(),
+                session_position_label(visible.len(), selected)
+            ),
+            area,
         )
     } else if area.width < 28 {
-        format!(" Sessions /{} ", app.search_query)
+        stable_panel_title(format!("Sessions /{}", app.search_query), area)
     } else {
-        format!(
-            " Sessions · {} {} ",
-            filter_label(app),
-            session_position_label(visible.len(), selected)
+        stable_panel_title(
+            format!(
+                "Sessions · {} {}",
+                filter_label(app),
+                session_position_label(visible.len(), selected)
+            ),
+            area,
         )
     };
 
@@ -384,14 +386,6 @@ fn session_health_style(status: SessionStatus) -> Style {
     }
 }
 
-fn source_provenance_label(provenance: SourceProvenance) -> &'static str {
-    match provenance {
-        SourceProvenance::Real => "R",
-        SourceProvenance::Fixture => "F",
-        SourceProvenance::Missing => "M",
-    }
-}
-
 fn source_provenance_style(provenance: SourceProvenance) -> Style {
     match provenance {
         SourceProvenance::Real => Style::default()
@@ -417,9 +411,11 @@ fn session_health_detail(session: &crate::core::model::SessionSummary) -> String
 }
 
 fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
+    let visible_events = visible_timeline_events(app);
+    let selected_visible = selected_visible_timeline_position(&visible_events, app.selected_event);
     let mut lines = Vec::new();
-    for (idx, event) in app.data.timeline.iter().enumerate() {
-        let selected = idx == app.selected_event;
+    for (visible_idx, (_, event)) in visible_events.iter().enumerate() {
+        let selected = visible_idx == selected_visible;
         let active = selected && app.focus == Focus::Timeline;
         let is_rewind = event.id == app.rewind_event_id;
         let (label, color) = if is_rewind {
@@ -495,6 +491,13 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
         lines.push(Line::raw(""));
     }
 
+    if lines.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No user or assistant turns loaded",
+            Style::default().fg(theme::MUTED),
+        )));
+    }
+
     frame.render_widget(
         Paragraph::new(lines)
             .block(panel_block(" Timeline ", app.focus == Focus::Timeline))
@@ -506,8 +509,37 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
 
 fn timeline_scroll(app: &App, area: Rect) -> u16 {
     let viewport = area.height.saturating_sub(2).max(1);
-    let selected_line = app.selected_event.saturating_mul(3) as u16;
+    let visible_events = visible_timeline_events(app);
+    let selected_visible = selected_visible_timeline_position(&visible_events, app.selected_event);
+    let selected_line = selected_visible.saturating_mul(3) as u16;
     selected_line.saturating_sub(viewport / 2)
+}
+
+fn visible_timeline_events(app: &App) -> Vec<(usize, &TimelineEvent)> {
+    app.data
+        .timeline
+        .iter()
+        .enumerate()
+        .filter(|(_, event)| event.id == app.rewind_event_id || event.kind != TimelineKind::Tool)
+        .collect()
+}
+
+fn selected_visible_timeline_position(
+    visible_events: &[(usize, &TimelineEvent)],
+    selected_event: usize,
+) -> usize {
+    visible_events
+        .iter()
+        .position(|(index, _)| *index == selected_event)
+        .or_else(|| {
+            visible_events
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(_, (index, _))| *index <= selected_event)
+                .map(|(position, _)| position)
+        })
+        .unwrap_or(0)
 }
 
 fn render_capsule(frame: &mut Frame, area: Rect, app: &App) {
@@ -546,14 +578,18 @@ fn render_capsule(frame: &mut Frame, area: Rect, app: &App) {
     lines.extend([
         Line::raw(""),
         Line::from(Span::styled(
-            "Work Capsule Preview",
+            capsule_preview_title(&capsule.state),
             Style::default()
                 .fg(theme::BLUE)
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
-            "  Compiler-generated handoff context. Verify before launch.",
-            Style::default().fg(theme::MUTED),
+            capsule_preview_note(&capsule.state),
+            Style::default().fg(if capsule.state.contains("builtin") {
+                theme::GOLD
+            } else {
+                theme::MUTED
+            }),
         )),
         Line::raw(""),
         label_line("Goal", &capsule.goal, theme::BLUE),
@@ -631,11 +667,27 @@ fn render_capsule(frame: &mut Frame, area: Rect, app: &App) {
     );
 }
 
+fn capsule_preview_note(state: &str) -> &'static str {
+    if state.contains("builtin") {
+        "  Draft guidance. Real fields: session, cwd, title, selected rewind, source health."
+    } else {
+        "  Compiler-generated handoff context. Verify before launch."
+    }
+}
+
+fn capsule_preview_title(state: &str) -> &'static str {
+    if state.contains("builtin") {
+        "Draft Work Capsule Preview"
+    } else {
+        "Work Capsule Preview"
+    }
+}
+
 fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
     let Some(session) = app.current_session() else {
         return vec![
             Line::from(Span::styled(
-                "Session Metadata",
+                "Real Session Metadata",
                 Style::default()
                     .fg(theme::BLUE)
                     .add_modifier(Modifier::BOLD),
@@ -649,7 +701,7 @@ fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
 
     let mut lines = vec![
         Line::from(Span::styled(
-            "Session Metadata",
+            "Real Session Metadata",
             Style::default()
                 .fg(theme::BLUE)
                 .add_modifier(Modifier::BOLD),
@@ -872,7 +924,8 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("[ ]", "Source"),
             ("a", "Clear"),
             ("o", "Original"),
-            ("enter", "Target"),
+            ("enter", "Open"),
+            ("H", "Handoff"),
             ("tab", "Next"),
         ],
         Focus::Timeline => vec![
@@ -897,7 +950,8 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("q", "Quit"),
         ],
         Focus::Branches => vec![
-            ("enter", "Target"),
+            ("enter", "Open"),
+            ("H", "Handoff"),
             ("o", "Original"),
             ("space", "Rewind"),
             ("D", "Doctor"),
@@ -962,11 +1016,12 @@ fn render_help(frame: &mut Frame, root: Rect, app: &App) {
         Line::raw("a               clear source and text filters"),
         Line::raw("/text           filter sessions by text"),
         Line::raw("o               open original session with original CLI"),
+        Line::raw("enter           open selected session with original CLI"),
+        Line::raw("H               choose target and review handoff"),
         Line::raw("D               open environment doctor"),
         Line::raw("[ / ]           previous / next session source filter"),
         Line::raw("space           set rewind point"),
         Line::raw("c, v, d, s      compile, verify, diff, switch skill"),
-        Line::raw("enter           choose target and review handoff"),
         Line::raw(":               command mode"),
         Line::raw("q / Esc         close or quit"),
     ];
@@ -1395,11 +1450,11 @@ fn render_open_original(frame: &mut Frame, root: Rect, app: &App) {
             )),
             Line::raw(""),
             Line::from(Span::styled(
-                "Action: Moonbox closes first, then resumes the original CLI.",
+                "Action: Moonbox hands this terminal to the original CLI.",
                 Style::default().fg(theme::MUTED),
             )),
             Line::from(Span::styled(
-                "enter resume   y copy wrapper command   Esc close",
+                "enter hand off   y copy wrapper command   Esc close",
                 Style::default().fg(theme::MUTED),
             )),
         ]
@@ -1490,6 +1545,12 @@ fn dynamic_panel_block(title: String, focused: bool) -> Block<'static> {
         .border_style(Style::default().fg(color))
         .style(Style::default().fg(theme::TEXT))
         .padding(Padding::horizontal(1))
+}
+
+fn stable_panel_title(content: String, area: Rect) -> String {
+    let width = usize::from(area.width.saturating_sub(4)).clamp(18, 30);
+    let clipped = content.chars().take(width).collect::<String>();
+    format!(" {clipped:<width$} ")
 }
 
 fn label_line<'a>(label: &'a str, value: &'a str, color: ratatui::style::Color) -> Line<'a> {
@@ -1612,6 +1673,39 @@ mod tests {
         let (start, end) = session_list_window(5_000, 4_999, 22);
         assert!(start <= 4_999 && end == 5_000);
         assert!(end - start <= 14);
+    }
+
+    #[test]
+    fn session_panel_title_keeps_stable_width_across_filters() {
+        let area = Rect::new(0, 0, 36, 10);
+        let all = stable_panel_title("Sessions · All (2/231)".into(), area);
+        let codex = stable_panel_title("Sessions · Codex (12/128)".into(), area);
+        let hermes = stable_panel_title("Sessions · Hermes (1/2)".into(), area);
+
+        assert_eq!(all.len(), codex.len());
+        assert_eq!(codex.len(), hermes.len());
+    }
+
+    #[test]
+    fn main_timeline_hides_low_signal_tool_events() {
+        let app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        let screen = render_text(&app, 140, 40);
+
+        assert_screen_contains(&screen, "ASSISTANT");
+        assert_screen_contains(&screen, "REWIND");
+        assert!(!screen.contains("Tool: rg"), "{screen}");
+    }
+
+    #[test]
+    fn builtin_capsule_preview_is_labeled_as_draft_not_mock_project_todo() {
+        let app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        let screen = render_text(&app, 140, 40);
+
+        assert_screen_contains(&screen, "Real Session Metadata");
+        assert_screen_contains(&screen, "Draft Work Capsule Preview");
+        assert_screen_contains(&screen, "Real fields:");
+        assert_screen_contains(&screen, "draft_from_builtin_compiler");
+        assert!(!screen.contains("Define canonical timeline"), "{screen}");
     }
 
     #[test]

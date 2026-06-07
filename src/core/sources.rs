@@ -35,15 +35,6 @@ pub struct SourceInventory {
     pub adapter_reports: Vec<SourceAdapterReport>,
 }
 
-impl SessionMode {
-    pub fn id(self) -> &'static str {
-        match self {
-            Self::Auto => "auto",
-            Self::Fixture => "fixture",
-        }
-    }
-}
-
 pub fn session_mode_state() -> SessionModeState {
     parse_session_mode(std::env::var(SESSION_MODE_ENV).ok().as_deref())
 }
@@ -54,10 +45,6 @@ pub fn session_mode() -> SessionMode {
 
 pub fn list_sessions() -> Result<Vec<SessionSummary>, CoreError> {
     Ok(source_inventory()?.sessions)
-}
-
-pub fn adapter_reports() -> Result<Vec<SourceAdapterReport>, CoreError> {
-    Ok(source_inventory()?.adapter_reports)
 }
 
 pub fn source_inventory() -> Result<SourceInventory, CoreError> {

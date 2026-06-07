@@ -10,7 +10,7 @@ use super::{
     model::{
         BranchNode, CanonicalTimeline, CapsuleCompileOutput, CapsuleCompileRequest, CliTool,
         SessionStatus, SessionSummary, SourceAdapterReport, SourceProvenance, TimelineEvent,
-        WorkCapsule, WorkbenchData,
+        TimelineKind, WorkCapsule, WorkbenchData,
     },
     sources,
 };
@@ -457,14 +457,26 @@ fn fixture_timeline_for_session(session: &SessionSummary) -> Result<CanonicalTim
 
 fn rewind_event_id_for_timeline(session_id: &str, timeline: &CanonicalTimeline) -> String {
     let preferred = default_rewind_event_id(session_id);
-    if timeline.events.iter().any(|event| event.id == preferred) {
+    if is_fixture_session_id(session_id)
+        && timeline.events.iter().any(|event| event.id == preferred)
+    {
         return preferred.into();
     }
     timeline
         .events
-        .last()
+        .iter()
+        .rev()
+        .find(|event| event.kind != TimelineKind::Tool)
+        .or_else(|| timeline.events.last())
         .map(|event| event.id.clone())
         .unwrap_or_default()
+}
+
+fn is_fixture_session_id(session_id: &str) -> bool {
+    matches!(
+        session_id,
+        "codex-cxcp-design" | "claude-qc-platform" | "hermes-cxcp-502"
+    )
 }
 
 fn default_source_session(source: CliTool) -> Result<SessionSummary, CoreError> {
@@ -617,5 +629,35 @@ mod tests {
         assert!(timeline.events.is_empty());
         assert_eq!(capsule.state, "pending_rewind");
         assert!(capsule.rewind_point.starts_with("pending /"));
+    }
+
+    #[test]
+    fn real_session_default_rewind_prefers_high_signal_event_over_tool() {
+        let timeline = CanonicalTimeline {
+            version: 1,
+            source_cli: CliTool::Codex,
+            source_session: "real-codex-session".into(),
+            events: vec![
+                TimelineEvent {
+                    id: "evt-001".into(),
+                    time: "10:00".into(),
+                    kind: TimelineKind::User,
+                    title: "User".into(),
+                    detail: "real request".into(),
+                },
+                TimelineEvent {
+                    id: "evt-091".into(),
+                    time: "10:01".into(),
+                    kind: TimelineKind::Tool,
+                    title: "exec_command".into(),
+                    detail: "low signal tool call".into(),
+                },
+            ],
+        };
+
+        assert_eq!(
+            rewind_event_id_for_timeline("real-codex-session", &timeline),
+            "evt-001"
+        );
     }
 }

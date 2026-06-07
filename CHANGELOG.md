@@ -56,6 +56,9 @@ and this project uses semantic versioning once tagged releases start.
   `moon` binaries.
 - Documentation build gate with rustdoc warnings treated as errors.
 - Full local quality gate script for patch hygiene plus CI/release checks.
+- Cargo package hygiene gate that validates expected package contents and
+  rejects editor backups, rejected patches, temporary files, and build
+  directories before release packaging.
 - Supply-chain gate with cargo-deny advisories, duplicate-version, license, and
   source checks.
 - Shell completion generation for Bash, Zsh, Fish, PowerShell, and Elvish.
@@ -106,6 +109,10 @@ and this project uses semantic versioning once tagged releases start.
 - README screenshot, installation notes, and Homebrew release planning docs.
 - Production panic-boundary lint policy for non-test builds, denying `unsafe`,
   `unwrap()`, `expect()`, `panic!`, `todo!`, and `unimplemented!`.
+- Minimal documented Rust library entrypoint through `moonbox::run()`, with
+  CLI internals kept crate-private until a deliberate library API is stabilized.
+- TUI real-vs-draft labeling that separates real source metadata from built-in
+  Work Capsule draft guidance.
 
 ### Changed
 
@@ -124,8 +131,8 @@ and this project uses semantic versioning once tagged releases start.
   a full TUI workbench for explicit session ids.
 - Target launch execution is opt-in and refuses to spawn a target command when
   verification fails.
-- TUI target handoff now uses a two-stage flow: choose a target, review the
-  guarded execute command, then copy with `y`.
+- TUI target handoff now uses a dedicated `H` shortcut and a two-stage flow:
+  choose a target, review the guarded execute command, then copy with `y`.
 - TUI launch key hints now distinguish target selection from Launch Review, so
   `y` is shown as unavailable until review.
 - TUI launch copy now points at `moonbox launch --execute`, keeping long
@@ -135,8 +142,12 @@ and this project uses semantic versioning once tagged releases start.
 - Original-session execution is opt-in and uses source-specific resume
   entrypoints; Hermes resume commands now use `hermes --resume <session>`.
 - TUI original-session copy now points at `moonbox open --execute`.
-- TUI original-session review `enter` now restores the terminal and then runs
-  the original CLI resume command; `y` still copies the guarded Moonbox wrapper.
+- TUI original-session review `enter` now restores the terminal, prints the
+  exact original resume command, and on Unix replaces the Moonbox process with
+  the source CLI so the terminal is handed off without Moonbox waiting in the
+  foreground; `y` still copies the guarded Moonbox wrapper.
+- Main-list `enter` now directly opens the selected session with its original
+  CLI; target handoff moved to the explicit `H` shortcut.
 - Compiler execution precedence is now explicit: environment override, config
   preset, then built-in fixture compiler.
 - Unknown compiler ids and disabled compiler presets now return structured
@@ -173,6 +184,17 @@ and this project uses semantic versioning once tagged releases start.
 - Replay-eval fixture invariants now return structured `CoreError` failures
   instead of panicking, and generated SVG docs snapshot code no longer relies on
   infallible string-write `expect` calls.
+- Internal adapters, compiler runners, source stores, and TUI state no longer
+  leak through the public Rust crate API.
+- TUI session-list panel titles use stable-width slots so source/filter
+  switching no longer shifts the top border line.
+- TUI timeline rendering folds low-signal tool/function-call rows by default,
+  and timeline navigation/rewind selection skip hidden tool events.
+- Real-session default rewind selection now prefers high-signal non-tool events
+  instead of arbitrary fixed fixture rewind ids such as `evt-091`.
+- Built-in compiler output is labeled as deterministic draft guidance; real
+  fields are limited to session id, title, cwd, selected rewind, and source
+  health until an external compiler skill is configured.
 
 ### Not Yet Released
 

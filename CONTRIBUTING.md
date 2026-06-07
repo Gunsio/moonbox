@@ -42,6 +42,7 @@ scripts/ci/docs-assets-smoke.sh
 scripts/ci/homebrew-docs-smoke.sh
 cargo clippy --locked -- -D warnings
 cargo build --release --locked
+scripts/ci/package-hygiene.sh
 cargo package --locked
 scripts/ci/release-artifacts-smoke.sh
 scripts/ci/install-smoke.sh
@@ -58,6 +59,15 @@ reserve `expect` for test fixture setup and assertions.
 
 `cargo doc --locked --no-deps` must pass with `RUSTDOCFLAGS="-D warnings"` so
 public Rust documentation stays buildable as the library surface evolves.
+The stable library surface is intentionally limited to the documented
+`moonbox::run()` entrypoint while Moonbox is CLI-first; do not expose internal
+modules without committing to documentation and compatibility policy.
+
+`scripts/ci/package-hygiene.sh` validates Cargo package contents before
+`cargo package --locked`, allowing Cargo's standard generated entries while
+failing on editor backups, rejected patches, temporary files, and build
+directories. Use `MOONBOX_PACKAGE_ALLOW_DIRTY=1` during local iteration, then
+rerun from a clean worktree before merging.
 
 `scripts/ci/supply-chain.sh` requires `cargo-deny`. Install it with
 `cargo install --locked cargo-deny`, or set `CARGO_DENY=/path/to/cargo-deny`
@@ -100,10 +110,20 @@ semantics.
   path, skipped record count, indexed-session counts, list limits, scan limits,
   visited scan entries, and truncation state belong in structured diagnostics,
   not only in prose or debug logs.
+- Keep TUI data provenance explicit. Real source metadata, indexed timeline
+  events, generated draft capsule guidance, and externally compiled handoff
+  output must be labeled so users can tell which fields are real.
 - Keep TUI interaction paths bounded. Startup, session switching, filtering,
   list rendering, and modal refreshes must not synchronously parse unbounded
   local session history or format every indexed row on every frame.
+- Keep interactive launch handoffs prompt and observable. When the TUI opens
+  an original or target CLI, restore the terminal and surface the exact command
+  before control leaves Moonbox; tests must cover plans and prompts without
+  opening real sessions.
 - Prefer stable core contracts over UI-only behavior.
+- Keep the Rust crate API narrow and documented. The CLI is the product surface;
+  internal adapters, compiler runners, source stores, and TUI state stay
+  crate-private until a deliberate library API is designed.
 - Do not duplicate business policy between CLI and TUI. Shared rules belong in
   `src/core`.
 - Do not add fake parameters or placeholder outputs. If an argument accepts a

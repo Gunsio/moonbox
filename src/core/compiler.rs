@@ -281,8 +281,24 @@ impl CapsuleCompiler for FixtureCapsuleCompiler {
         };
 
         let session = &request.source_session;
-        let (goal, state, risks) = session_profile(&session.id);
         let rewind_point = format!("{} / {}", request.rewind_event_id, rewind_event.detail);
+        let title = truncate(&session.title, 96);
+        let rewind_detail = truncate(&rewind_event.detail, 140);
+        let source_health = session
+            .health_reason
+            .clone()
+            .unwrap_or_else(|| "source session indexed successfully".into());
+        let mut risks = vec![
+            "Built-in draft compiler may omit tool outputs, attachments, and hidden provider state."
+                .into(),
+            format!(
+                "{} target may need a stronger external compiler skill before execution.",
+                request.target_cli
+            ),
+        ];
+        if session.status != super::model::SessionStatus::Healthy {
+            risks.push(format!("Source health needs review: {source_health}"));
+        }
 
         Ok(CapsuleCompileOutput {
             version: 1,
@@ -298,34 +314,36 @@ impl CapsuleCompiler for FixtureCapsuleCompiler {
                     request.target_cli.id(),
                     request.rewind_event_id
                 ),
-                goal: goal.into(),
-                state: state.into(),
+                goal: format!("Continue {title} from selected rewind point."),
+                state: "draft_from_builtin_compiler".into(),
                 decisions: vec![
-                    "Source sessions are read-only.".into(),
-                    "Compression and compatibility live in replaceable compiler skills.".into(),
-                    "TUI is a first-class workbench, not an fzf picker.".into(),
+                    "Source session is read-only; Moonbox only builds a handoff plan.".into(),
+                    "This preview uses the built-in deterministic draft compiler.".into(),
+                    "Production handoff should use a configured external compiler skill.".into(),
                 ],
                 todo: vec![
                     ChecklistItem {
                         done: true,
-                        text: "Define canonical timeline and capsule schema.".into(),
+                        text: format!("Selected rewind point {}", request.rewind_event_id),
                     },
                     ChecklistItem {
                         done: false,
-                        text: "Implement source adapters for Codex, Claude, Hermes.".into(),
+                        text: "Compile with an external skill for high-fidelity context.".into(),
                     },
                     ChecklistItem {
                         done: false,
-                        text: "Implement target launcher and verification loop.".into(),
+                        text: format!(
+                            "Review verifier output before launching {}",
+                            request.target_cli
+                        ),
                     },
                 ],
                 evidence: vec![
                     format!("session: {} ({})", session.id, session.cli),
+                    format!("title: {title}"),
                     format!("cwd: {}", session.cwd),
-                    session
-                        .health_reason
-                        .clone()
-                        .unwrap_or_else(|| "no health reason".into()),
+                    format!("rewind: {rewind_detail}"),
+                    format!("source health: {source_health}"),
                 ],
                 risks,
             },
@@ -585,7 +603,7 @@ fn builtin_info(id: &str) -> CompilerPresetInfo {
         command: None,
         args: Vec::new(),
         timeout_ms: None,
-        reason: "built-in deterministic fixture compiler".into(),
+        reason: "built-in deterministic draft compiler; configure an external skill for production handoff".into(),
     }
 }
 
@@ -690,35 +708,6 @@ fn truncate(text: &str, max_chars: usize) -> String {
         output.push(character);
     }
     output
-}
-
-fn session_profile(session_id: &str) -> (&'static str, &'static str, Vec<String>) {
-    match session_id {
-        "claude-qc-platform" => (
-            "Continue QC trace propagation repair without losing staging context.",
-            "Trace propagation patch is drafted; staging verification is still pending.",
-            vec![
-                "Gateway fallback may hide upstream request_id bugs.".into(),
-                "Staging traffic volume may not cover async retry paths.".into(),
-            ],
-        ),
-        "hermes-cxcp-502" => (
-            "Recover the cxcp investigation by avoiding raw copied-session resume.",
-            "Raw resume failed with 502. The target path is Work Capsule handoff.",
-            vec![
-                "Copied session rows can miss hidden provider state.".into(),
-                "Target CLI resume protocol may reject raw source metadata.".into(),
-            ],
-        ),
-        _ => (
-            "Build Moonbox as a cross-CLI session rewind workbench.",
-            "Raw resume is rejected. The target path is new branch + Work Capsule.",
-            vec![
-                "Tool outputs and attachments can exceed target token budget.".into(),
-                "Target CLI injection protocol may differ per tool.".into(),
-            ],
-        ),
-    }
 }
 
 #[cfg(test)]

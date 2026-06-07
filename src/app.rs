@@ -13,8 +13,8 @@ use crate::core::{
     launcher,
     model::{
         CliTool, DoctorReport, LaunchPlan, LaunchValidation, LaunchValidationState,
-        OriginalSessionPlan, SessionAction, SessionSummary, VerificationReport, WorkCapsule,
-        WorkbenchData,
+        OriginalSessionPlan, SessionAction, SessionSummary, TimelineKind, VerificationReport,
+        WorkCapsule, WorkbenchData,
     },
     verifier, workbench,
 };
@@ -252,6 +252,7 @@ impl App {
             KeyCode::Char('f') => self.cycle_session_filter(true),
             KeyCode::Char('a') => self.clear_session_filters(),
             KeyCode::Char('o') => self.open_original(),
+            KeyCode::Char('H') => self.open_launch_picker(),
             KeyCode::Char('D') => self.open_doctor(),
             KeyCode::Char(':') => {
                 self.command_mode = true;
@@ -275,7 +276,7 @@ impl App {
             KeyCode::Char('d') => self.toggle_diff(),
             KeyCode::Char('s') => self.cycle_compiler(),
             KeyCode::Char('y') => self.copy_focused_command(),
-            KeyCode::Enter => self.open_launch_picker(),
+            KeyCode::Enter => self.queue_original_resume(),
             _ => self.pending_g = false,
         }
     }
@@ -512,8 +513,11 @@ impl App {
         match self.focus {
             Focus::Sessions => self.move_session(true),
             Focus::Timeline => {
-                self.selected_event =
-                    (self.selected_event + 1).min(self.data.timeline.len().saturating_sub(1));
+                self.selected_event = next_visible_timeline_event(
+                    &self.data,
+                    &self.rewind_event_id,
+                    self.selected_event,
+                );
             }
             Focus::Capsule => self.scroll_capsule(true, 1),
             Focus::Branches => {}
@@ -524,7 +528,13 @@ impl App {
     fn move_up(&mut self) {
         match self.focus {
             Focus::Sessions => self.move_session(false),
-            Focus::Timeline => self.selected_event = self.selected_event.saturating_sub(1),
+            Focus::Timeline => {
+                self.selected_event = previous_visible_timeline_event(
+                    &self.data,
+                    &self.rewind_event_id,
+                    self.selected_event,
+                );
+            }
             Focus::Capsule => self.scroll_capsule(false, 1),
             Focus::Branches => {}
         }
@@ -539,7 +549,10 @@ impl App {
                     self.request_selected_session_details();
                 }
             }
-            Focus::Timeline => self.selected_event = 0,
+            Focus::Timeline => {
+                self.selected_event =
+                    first_visible_timeline_event(&self.data, &self.rewind_event_id)
+            }
             Focus::Capsule => self.capsule_scroll = 0,
             Focus::Branches => {}
         }
@@ -554,7 +567,9 @@ impl App {
                     self.request_selected_session_details();
                 }
             }
-            Focus::Timeline => self.selected_event = self.data.timeline.len().saturating_sub(1),
+            Focus::Timeline => {
+                self.selected_event = last_visible_timeline_event(&self.data, &self.rewind_event_id)
+            }
             Focus::Capsule => self.scroll_capsule(true, 999),
             Focus::Branches => {}
         }
@@ -573,6 +588,8 @@ impl App {
         if !self.ensure_session_details_ready("Rewind") {
             return;
         }
+        self.selected_event =
+            nearest_visible_timeline_event(&self.data, &self.rewind_event_id, self.selected_event);
         if let Some((id, title)) = self
             .data
             .timeline
@@ -1223,6 +1240,64 @@ fn rewind_event_index(data: &WorkbenchData, rewind_event_id: &str) -> usize {
         .unwrap_or_else(|| data.timeline.len().saturating_sub(1))
 }
 
+fn timeline_event_is_visible(data: &WorkbenchData, rewind_event_id: &str, index: usize) -> bool {
+    data.timeline
+        .get(index)
+        .is_some_and(|event| event.id == rewind_event_id || event.kind != TimelineKind::Tool)
+}
+
+fn first_visible_timeline_event(data: &WorkbenchData, rewind_event_id: &str) -> usize {
+    (0..data.timeline.len())
+        .find(|index| timeline_event_is_visible(data, rewind_event_id, *index))
+        .unwrap_or(0)
+}
+
+fn last_visible_timeline_event(data: &WorkbenchData, rewind_event_id: &str) -> usize {
+    (0..data.timeline.len())
+        .rev()
+        .find(|index| timeline_event_is_visible(data, rewind_event_id, *index))
+        .unwrap_or_else(|| data.timeline.len().saturating_sub(1))
+}
+
+fn nearest_visible_timeline_event(
+    data: &WorkbenchData,
+    rewind_event_id: &str,
+    selected_event: usize,
+) -> usize {
+    if timeline_event_is_visible(data, rewind_event_id, selected_event) {
+        return selected_event;
+    }
+    (selected_event.saturating_add(1)..data.timeline.len())
+        .find(|index| timeline_event_is_visible(data, rewind_event_id, *index))
+        .or_else(|| {
+            (0..selected_event)
+                .rev()
+                .find(|index| timeline_event_is_visible(data, rewind_event_id, *index))
+        })
+        .unwrap_or_else(|| selected_event.min(data.timeline.len().saturating_sub(1)))
+}
+
+fn next_visible_timeline_event(
+    data: &WorkbenchData,
+    rewind_event_id: &str,
+    selected_event: usize,
+) -> usize {
+    (selected_event.saturating_add(1)..data.timeline.len())
+        .find(|index| timeline_event_is_visible(data, rewind_event_id, *index))
+        .unwrap_or_else(|| nearest_visible_timeline_event(data, rewind_event_id, selected_event))
+}
+
+fn previous_visible_timeline_event(
+    data: &WorkbenchData,
+    rewind_event_id: &str,
+    selected_event: usize,
+) -> usize {
+    (0..selected_event)
+        .rev()
+        .find(|index| timeline_event_is_visible(data, rewind_event_id, *index))
+        .unwrap_or_else(|| nearest_visible_timeline_event(data, rewind_event_id, selected_event))
+}
+
 fn session_matches_query(session: &SessionSummary, query: &str) -> bool {
     query.is_empty()
         || session.id.to_ascii_lowercase().contains(query)
@@ -1274,6 +1349,30 @@ mod tests {
         assert_eq!(app.rewind_event_id, "evt-001");
         assert!(app.data.capsule.rewind_point.contains("evt-001"));
         assert!(app.data.capsule.target_branch.contains("evt-001"));
+    }
+
+    #[test]
+    fn timeline_navigation_skips_hidden_tool_events() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.focus = Focus::Timeline;
+        app.selected_event = 0;
+
+        app.handle_key(key('j'));
+        assert_eq!(app.selected_event, 2);
+
+        app.handle_key(key('k'));
+        assert_eq!(app.selected_event, 0);
+    }
+
+    #[test]
+    fn rewind_selection_from_hidden_tool_event_uses_nearest_visible_turn() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.selected_event = 1;
+
+        app.handle_key(key(' '));
+
+        assert_eq!(app.rewind_event_id, "evt-034");
+        assert!(app.data.capsule.rewind_point.contains("Assistant"));
     }
 
     #[test]
@@ -1463,7 +1562,7 @@ mod tests {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
 
         app.handle_key(key('j'));
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        app.handle_key(key('H'));
 
         assert!(app.is_session_load_pending());
         assert!(!app.show_launch);
@@ -1472,7 +1571,7 @@ mod tests {
             "Launch waits for selected session to load"
         );
         settle_session_load(&mut app);
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        app.handle_key(key('H'));
         assert!(app.show_launch);
         assert_eq!(app.status_message, "Choose target CLI");
     }
@@ -1480,7 +1579,7 @@ mod tests {
     #[test]
     fn target_cycles_inside_launch_picker() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        app.handle_key(key('H'));
         assert!(app.show_launch);
         assert_eq!(app.status_message, "Choose target CLI");
 
@@ -1506,7 +1605,7 @@ mod tests {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.selected_event = 0;
         app.handle_key(key(' '));
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        app.handle_key(key('H'));
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
         assert_eq!(app.rewind_event_id, "evt-001");
@@ -1517,7 +1616,7 @@ mod tests {
     #[test]
     fn launch_picker_cancel_discards_pending_target() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        app.handle_key(key('H'));
         app.handle_key(key('j'));
         app.handle_key(key('q'));
 
@@ -1547,7 +1646,7 @@ mod tests {
     fn target_picker_blocks_failed_same_cli_resume_path() {
         let mut app = new_app(CliTool::Hermes, CliTool::Hermes);
 
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        app.handle_key(key('H'));
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
         assert!(app.show_launch);
@@ -1561,7 +1660,7 @@ mod tests {
     fn blocked_target_cannot_copy_launch_command() {
         let mut app = new_app(CliTool::Hermes, CliTool::Hermes);
 
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        app.handle_key(key('H'));
         app.handle_key(key('y'));
 
         assert!(app.take_clipboard_text().is_none());
@@ -1575,7 +1674,7 @@ mod tests {
         app.refresh_visible_sessions();
         app.clamp_selected_session();
 
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        app.handle_key(key('H'));
 
         assert!(!app.show_launch);
         assert_eq!(app.status_message, "No session selected");
@@ -1595,7 +1694,7 @@ mod tests {
     #[test]
     fn launch_copy_queues_clipboard_text() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        app.handle_key(key('H'));
 
         app.handle_key(key('y'));
         assert!(app.take_clipboard_text().is_none());
@@ -1615,7 +1714,7 @@ mod tests {
     #[test]
     fn launch_review_enter_queues_target_handoff_without_executing_in_tests() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        app.handle_key(key('H'));
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
@@ -1626,6 +1725,21 @@ mod tests {
         assert_eq!(plan.source_session.id, "codex-cxcp-design");
         assert_eq!(plan.target_cli, CliTool::Hermes);
         assert!(plan.dry_run);
+    }
+
+    #[test]
+    fn main_enter_queues_original_resume_without_opening_handoff_picker() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(app.should_quit());
+        assert!(!app.show_launch);
+        let Some(TuiExitAction::OriginalResume(plan)) = app.take_exit_action() else {
+            panic!("expected original resume action");
+        };
+        assert_eq!(plan.source_session.id, "codex-cxcp-design");
+        assert_eq!(plan.command.display, "codex resume codex-cxcp-design");
     }
 
     #[test]

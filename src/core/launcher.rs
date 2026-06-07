@@ -1,7 +1,7 @@
 use std::{
     env,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, ExitStatus},
 };
 
 use super::{
@@ -87,18 +87,52 @@ pub fn execute_original_plan(
     })
 }
 
-fn run_target_command(
-    command: &TargetLaunchCommand,
-) -> Result<std::process::ExitStatus, CoreError> {
+pub(crate) fn handoff_original_plan(mut plan: OriginalSessionPlan) -> Result<(), CoreError> {
+    plan.dry_run = false;
+    exec_interactive_command(&plan.command)
+}
+
+pub(crate) fn original_handoff_notice(plan: &OriginalSessionPlan) -> String {
+    format!(
+        "Opening original session: {} {}\nCommand: {}\n",
+        plan.source_session.cli, plan.source_session.id, plan.command.display
+    )
+}
+
+fn run_target_command(command: &TargetLaunchCommand) -> Result<ExitStatus, CoreError> {
+    command_process(command)
+        .status()
+        .map_err(|error| launch_start_error(command, error))
+}
+
+#[cfg(unix)]
+fn exec_interactive_command(command: &TargetLaunchCommand) -> Result<(), CoreError> {
+    use std::os::unix::process::CommandExt;
+
+    let error = command_process(command).exec();
+    Err(launch_start_error(command, error))
+}
+
+#[cfg(not(unix))]
+fn exec_interactive_command(command: &TargetLaunchCommand) -> Result<(), CoreError> {
+    let _ = run_target_command(command)?;
+    Ok(())
+}
+
+fn command_process(command: &TargetLaunchCommand) -> Command {
     let mut process = Command::new(&command.program);
     process.args(&command.args);
     if let Some(cwd) = command.cwd.as_deref().filter(|cwd| Path::new(cwd).is_dir()) {
         process.current_dir(cwd);
     }
-    process.status().map_err(|error| CoreError::LaunchStart {
+    process
+}
+
+fn launch_start_error(command: &TargetLaunchCommand, error: std::io::Error) -> CoreError {
+    CoreError::LaunchStart {
         command: command.display.clone(),
         reason: error.to_string(),
-    })
+    }
 }
 
 fn original_args(session: &SessionSummary) -> Vec<String> {
@@ -334,6 +368,30 @@ mod tests {
             original_command(hermes).args,
             ["--resume", "hermes-cxcp-502"]
         );
+    }
+
+    #[test]
+    fn original_handoff_notice_names_session_and_command() {
+        let data = data::workbench_data(CliTool::Codex, CliTool::Hermes).expect("data");
+        let session = data
+            .sessions
+            .iter()
+            .find(|session| session.cli == CliTool::Codex)
+            .expect("codex")
+            .clone();
+        let command = original_command(&session);
+        let plan = OriginalSessionPlan {
+            version: 1,
+            action: crate::core::model::SessionAction::OriginalResume,
+            dry_run: true,
+            source_session: session,
+            command,
+        };
+
+        let notice = original_handoff_notice(&plan);
+
+        assert!(notice.contains("Opening original session: Codex codex-cxcp-design"));
+        assert!(notice.contains("Command: codex resume codex-cxcp-design"));
     }
 
     #[test]

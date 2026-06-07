@@ -24,6 +24,7 @@ run scripts/ci/docs-assets-smoke.sh
 run scripts/ci/homebrew-docs-smoke.sh
 run cargo clippy --locked -- -D warnings
 run cargo build --release --locked
+run scripts/ci/package-hygiene.sh
 
 if [[ "${MOONBOX_PACKAGE_ALLOW_DIRTY:-0}" == "1" ]]; then
   run cargo package --locked --allow-dirty

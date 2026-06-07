@@ -73,6 +73,9 @@ jobs:
       - name: Build release binary
         run: cargo build --release --locked
 
+      - name: Verify package hygiene
+        run: scripts/ci/package-hygiene.sh
+
       - name: Verify package
         run: cargo package --locked
 
