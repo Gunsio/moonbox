@@ -1261,15 +1261,16 @@ fn timeline_event_is_rewind_anchor(event: &crate::core::model::TimelineEvent) ->
 }
 
 fn first_visible_timeline_event(data: &WorkbenchData, rewind_event_id: &str) -> usize {
-    (0..data.timeline.len())
-        .find(|index| timeline_event_is_visible(data, rewind_event_id, *index))
+    visible_timeline_group_heads(data, rewind_event_id)
+        .first()
+        .copied()
         .unwrap_or(0)
 }
 
 fn last_visible_timeline_event(data: &WorkbenchData, rewind_event_id: &str) -> usize {
-    (0..data.timeline.len())
-        .rev()
-        .find(|index| timeline_event_is_visible(data, rewind_event_id, *index))
+    visible_timeline_group_heads(data, rewind_event_id)
+        .last()
+        .copied()
         .unwrap_or_else(|| data.timeline.len().saturating_sub(1))
 }
 
@@ -1296,8 +1297,16 @@ fn next_visible_timeline_event(
     rewind_event_id: &str,
     selected_event: usize,
 ) -> usize {
-    (selected_event.saturating_add(1)..data.timeline.len())
-        .find(|index| timeline_event_is_visible(data, rewind_event_id, *index))
+    let group_heads = visible_timeline_group_heads(data, rewind_event_id);
+    let current = selected_visible_timeline_group_position(
+        data,
+        rewind_event_id,
+        selected_event,
+        &group_heads,
+    );
+    group_heads
+        .get(current.saturating_add(1))
+        .copied()
         .unwrap_or_else(|| nearest_visible_timeline_event(data, rewind_event_id, selected_event))
 }
 
@@ -1306,10 +1315,54 @@ fn previous_visible_timeline_event(
     rewind_event_id: &str,
     selected_event: usize,
 ) -> usize {
-    (0..selected_event)
-        .rev()
-        .find(|index| timeline_event_is_visible(data, rewind_event_id, *index))
+    let group_heads = visible_timeline_group_heads(data, rewind_event_id);
+    let current = selected_visible_timeline_group_position(
+        data,
+        rewind_event_id,
+        selected_event,
+        &group_heads,
+    );
+    current
+        .checked_sub(1)
+        .and_then(|index| group_heads.get(index))
+        .copied()
         .unwrap_or_else(|| nearest_visible_timeline_event(data, rewind_event_id, selected_event))
+}
+
+fn visible_timeline_group_heads(data: &WorkbenchData, rewind_event_id: &str) -> Vec<usize> {
+    let mut heads = Vec::new();
+    let mut previous_kind = None;
+    for (index, event) in data.timeline.iter().enumerate() {
+        if !timeline_event_is_visible(data, rewind_event_id, index) {
+            continue;
+        }
+        let continues_ai_group =
+            event.kind == TimelineKind::Assistant && previous_kind == Some(TimelineKind::Assistant);
+        if !continues_ai_group {
+            heads.push(index);
+        }
+        previous_kind = Some(event.kind);
+    }
+    heads
+}
+
+fn selected_visible_timeline_group_position(
+    data: &WorkbenchData,
+    rewind_event_id: &str,
+    selected_event: usize,
+    group_heads: &[usize],
+) -> usize {
+    if group_heads.is_empty() {
+        return 0;
+    }
+    let visible_event = nearest_visible_timeline_event(data, rewind_event_id, selected_event);
+    group_heads
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, head)| **head <= visible_event)
+        .map(|(position, _)| position)
+        .unwrap_or(0)
 }
 
 fn session_matches_query(session: &SessionSummary, query: &str) -> bool {
@@ -1376,6 +1429,57 @@ mod tests {
 
         app.handle_key(key('k'));
         assert_eq!(app.selected_event, 0);
+    }
+
+    #[test]
+    fn timeline_navigation_moves_by_visible_ai_groups() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.focus = Focus::Timeline;
+        app.data.timeline = vec![
+            crate::core::model::TimelineEvent {
+                id: "evt-001".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::User,
+                title: "User".into(),
+                detail: "分析下 cxcp".into(),
+            },
+            crate::core::model::TimelineEvent {
+                id: "evt-002".into(),
+                time: "10:01".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "先定位项目。".into(),
+            },
+            crate::core::model::TimelineEvent {
+                id: "evt-003".into(),
+                time: "10:02".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "继续分析缓存。".into(),
+            },
+            crate::core::model::TimelineEvent {
+                id: "evt-004".into(),
+                time: "10:03".into(),
+                kind: TimelineKind::User,
+                title: "User".into(),
+                detail: "下一步".into(),
+            },
+        ];
+        app.selected_event = 0;
+        app.rewind_event_id = "evt-001".into();
+
+        app.handle_key(key('j'));
+        assert_eq!(app.selected_event, 1);
+
+        app.handle_key(key('j'));
+        assert_eq!(app.selected_event, 3);
+
+        app.selected_event = 2;
+        app.handle_key(key('j'));
+        assert_eq!(app.selected_event, 3);
+
+        app.handle_key(key('k'));
+        assert_eq!(app.selected_event, 1);
     }
 
     #[test]

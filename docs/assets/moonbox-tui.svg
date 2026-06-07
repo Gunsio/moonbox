@@ -39,9 +39,7 @@
   <text x="64" y="132" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">▸   Cdx  Moonbox session rewind des</text>
   <text x="388" y="132" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="397" y="132" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
-  <text x="415" y="132" class="mono" font-size="14" font-weight="500" fill="#5c91f5">│  16:02</text>
-  <text x="505" y="132" class="mono" font-size="14" font-weight="800" fill="#5c91f5">USER</text>
-  <text x="559" y="132" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">User</text>
+  <text x="442" y="132" class="mono" font-size="14" font-weight="500" fill="#8b949e">Conclusion: raw session copy is the wrong abstraction.</text>
   <text x="1018" y="132" class="mono" font-size="14" font-weight="500" fill="#374452">││</text>
   <text x="1045" y="132" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Real Session Metadata</text>
   <text x="1441" y="132" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>

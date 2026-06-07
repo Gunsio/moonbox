@@ -204,7 +204,8 @@ The first implementation focuses on the product shell:
 - Timeline parsing folds adjacent duplicate events across Codex, Claude, and
   Hermes so provider double-writes do not render repeated rows
 - Timeline rendering folds low-signal tool/function-call rows by default while
-  keeping rewind selection on user turns or explicit rewind markers
+  grouping consecutive AI output and keeping rewind selection on user turns or
+  explicit rewind markers
 - Timeline auto-scroll, Capsule/modal scroll, and small-terminal modal polish
 - Copyable launch/original wrapper commands via `y` with OSC52 clipboard
   support; main-list `enter` hands control directly to the selected session's
@@ -481,8 +482,8 @@ Moonbox immediately marks the selected session as loading, then hydrates that
 session's timeline, capsule preview, branch preview, and recommended rewind
 point in the background. Timeline rendering hides provider-injected context
 rows such as `<environment_context>`, folds low-signal tool rows by default,
-right-aligns event times, and scrolls by wrapped row height so the selected
-event stays visible.
+groups consecutive AI output into one readable block, right-aligns event times,
+and scrolls by wrapped row height so the selected event stays visible.
 
 The target CLI receives a concise, human-readable Work Capsule Summary as its
 first prompt. It includes source metadata, selected rewind, goal, state,
@@ -646,6 +647,9 @@ Stable interfaces matter more than any single framework:
 - M48.1: timeline polish; provider-injected environment context no longer
   appears as a user turn, event times move to the right side of rows, and
   timeline scrolling accounts for wrapped detail height.
+- M48.2: timeline visual grouping; consecutive assistant messages render as
+  one `AI xN` block, and Timeline navigation moves by visible groups so `j/k`
+  never appear to stall inside a folded AI burst.
 
 ### Can Build Now
 

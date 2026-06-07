@@ -155,6 +155,9 @@ and this project uses semantic versioning once tagged releases start.
 - TUI timeline hides provider-injected context rows such as
   `<environment_context>`, right-aligns event times, and scrolls by actual
   wrapped row height so the selected event stays visible.
+- TUI timeline visually groups consecutive assistant messages into one `AI xN`
+  block, and `j/k` navigation now moves by those visible groups instead of
+  silently stepping through folded AI events.
 - Compiler execution precedence is now explicit: environment override, config
   preset, then built-in fixture compiler.
 - Unknown compiler ids and disabled compiler presets now return structured

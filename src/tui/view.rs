@@ -411,26 +411,14 @@ fn session_health_detail(session: &crate::core::model::SessionSummary) -> String
 }
 
 fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
-    let visible_events = visible_timeline_events(app);
-    let selected_visible = selected_visible_timeline_position(&visible_events, app.selected_event);
+    let visible_groups = visible_timeline_groups(app);
+    let selected_group = selected_timeline_group_position(&visible_groups, app.selected_event);
     let mut lines = Vec::new();
-    for (visible_idx, (_, event)) in visible_events.iter().enumerate() {
-        let selected = visible_idx == selected_visible;
+    for (group_idx, group) in visible_groups.iter().enumerate() {
+        let selected = group_idx == selected_group;
         let active = selected && app.focus == Focus::Timeline;
-        let is_rewind = event.id == app.rewind_event_id;
-        let (label, color) = if is_rewind {
-            ("REWIND", theme::GOLD)
-        } else {
-            match event.kind {
-                TimelineKind::User => ("USER", theme::BLUE),
-                TimelineKind::Assistant => ("ASSISTANT", theme::GOLD),
-                TimelineKind::Tool => ("TOOL", theme::MUTED),
-                TimelineKind::Compact => ("COMPACT", theme::CYAN),
-                TimelineKind::Error => ("ERROR", theme::RED),
-                TimelineKind::GitDiff => ("GIT DIFF", theme::GREEN),
-                TimelineKind::RewindPoint => ("REWIND", theme::GOLD),
-            }
-        };
+        let is_rewind = group.is_rewind(&app.rewind_event_id);
+        let (label, color) = timeline_group_label(group, is_rewind);
         let marker = if active && is_rewind {
             "▶◆"
         } else if active {
@@ -464,13 +452,17 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             Style::default().fg(theme::TEXT)
         };
+        let time = timeline_group_time(group);
         lines.push(timeline_header_line(
-            event,
-            marker,
-            label,
-            time_style,
-            label_style,
-            title_style,
+            TimelineHeader {
+                title: timeline_group_title(group),
+                time: &time,
+                marker,
+                label: &label,
+                time_style,
+                label_style,
+                title_style,
+            },
             area.width,
         ));
 
@@ -478,31 +470,28 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
             Style::default()
                 .fg(theme::TEXT)
                 .add_modifier(Modifier::BOLD)
-        } else if is_rewind || event.kind == TimelineKind::RewindPoint {
+        } else if is_rewind || group.kind() == TimelineKind::RewindPoint {
             Style::default()
                 .fg(theme::GOLD)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme::MUTED)
         };
-        for (line_index, detail) in timeline_detail_lines(&event.detail, area.width)
-            .into_iter()
-            .enumerate()
-        {
-            let prefix = if active && line_index == 0 {
-                "  └ "
-            } else if active {
-                "    "
-            } else {
-                "   "
-            };
-            lines.push(Line::from(vec![
-                Span::styled(
-                    prefix,
-                    Style::default().fg(if active { theme::GOLD } else { theme::MUTED }),
-                ),
-                Span::styled(detail, detail_style),
-            ]));
+        for (event_offset, (_, event)) in group.events().enumerate() {
+            for (line_index, detail) in timeline_detail_lines(&event.detail, area.width)
+                .into_iter()
+                .enumerate()
+            {
+                let prefix =
+                    timeline_detail_prefix(active, group.is_ai_group(), event_offset, line_index);
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        prefix,
+                        Style::default().fg(if active { theme::GOLD } else { theme::MUTED }),
+                    ),
+                    Span::styled(detail, detail_style),
+                ]));
+            }
         }
         lines.push(Line::raw(""));
     }
@@ -524,31 +513,39 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
 
 fn timeline_scroll(app: &App, area: Rect) -> u16 {
     let viewport = usize::from(area.height.saturating_sub(2).max(1));
-    let visible_events = visible_timeline_events(app);
-    let selected_visible = selected_visible_timeline_position(&visible_events, app.selected_event);
-    let selected_top = visible_events
+    let visible_groups = visible_timeline_groups(app);
+    let selected_group = selected_timeline_group_position(&visible_groups, app.selected_event);
+    let selected_top = visible_groups
         .iter()
-        .take(selected_visible)
-        .map(|(_, event)| timeline_event_line_count(event, area.width))
+        .take(selected_group)
+        .map(|group| timeline_group_line_count(group, area.width))
         .sum::<usize>();
-    let selected_height = visible_events
-        .get(selected_visible)
-        .map(|(_, event)| timeline_event_line_count(event, area.width))
+    let selected_height = visible_groups
+        .get(selected_group)
+        .map(|group| timeline_group_line_count(group, area.width))
         .unwrap_or(1);
     let center_padding = viewport.saturating_sub(selected_height) / 2;
     usize_to_u16(selected_top.saturating_sub(center_padding))
 }
 
-fn timeline_header_line(
-    event: &TimelineEvent,
-    marker: &str,
-    label: &str,
+struct TimelineHeader<'a> {
+    title: Option<&'a str>,
+    time: &'a str,
+    marker: &'a str,
+    label: &'a str,
     time_style: Style,
     label_style: Style,
     title_style: Style,
-    area_width: u16,
-) -> Line<'static> {
-    let title = timeline_display_title(event);
+}
+
+fn timeline_header_line(header: TimelineHeader<'_>, area_width: u16) -> Line<'static> {
+    let title = header.title;
+    let time = header.time;
+    let marker = header.marker;
+    let label = header.label;
+    let time_style = header.time_style;
+    let label_style = header.label_style;
+    let title_style = header.title_style;
     let inner_width = usize::from(area_width.saturating_sub(4)).max(20);
     let left_width = display_width(marker)
         + 1
@@ -556,7 +553,7 @@ fn timeline_header_line(
         + 2
         + title.map(|title| 1 + display_width(title)).unwrap_or(0);
     let padding = inner_width
-        .saturating_sub(left_width + display_width(&event.time))
+        .saturating_sub(left_width + display_width(time))
         .max(1);
     let mut spans = vec![
         Span::styled(format!("{marker} "), time_style),
@@ -566,20 +563,46 @@ fn timeline_header_line(
         spans.push(Span::styled(format!(" {title}"), title_style));
     }
     spans.push(Span::raw(" ".repeat(padding)));
-    spans.push(Span::styled(event.time.clone(), time_style));
+    spans.push(Span::styled(time.to_owned(), time_style));
     Line::from(spans)
 }
 
-fn timeline_display_title(event: &TimelineEvent) -> Option<&str> {
-    match event.kind {
+fn timeline_group_title<'a>(group: &TimelineGroup<'a>) -> Option<&'a str> {
+    let event = group.primary_event();
+    match group.kind() {
         TimelineKind::User if event.title == "User" => None,
         TimelineKind::Assistant if event.title == "Assistant" => None,
         _ => Some(event.title.as_str()).filter(|title| !title.trim().is_empty()),
     }
 }
 
-fn timeline_event_line_count(event: &TimelineEvent, area_width: u16) -> usize {
-    1 + timeline_detail_lines(&event.detail, area_width).len() + 1
+fn timeline_group_line_count(group: &TimelineGroup<'_>, area_width: u16) -> usize {
+    1 + group
+        .events()
+        .map(|(_, event)| timeline_detail_lines(&event.detail, area_width).len())
+        .sum::<usize>()
+        + 1
+}
+
+fn timeline_detail_prefix(
+    active: bool,
+    ai_group: bool,
+    event_offset: usize,
+    line_index: usize,
+) -> &'static str {
+    if active && event_offset == 0 && line_index == 0 {
+        return "  └ ";
+    }
+    if active && ai_group && line_index == 0 {
+        return "  • ";
+    }
+    if active {
+        return "    ";
+    }
+    if ai_group && event_offset > 0 && line_index == 0 {
+        return "  · ";
+    }
+    "   "
 }
 
 fn timeline_detail_lines(detail: &str, area_width: u16) -> Vec<String> {
@@ -663,6 +686,123 @@ fn usize_to_u16(value: usize) -> u16 {
     value.min(usize::from(u16::MAX)) as u16
 }
 
+struct TimelineGroup<'a> {
+    first: (usize, &'a TimelineEvent),
+    rest: Vec<(usize, &'a TimelineEvent)>,
+}
+
+impl<'a> TimelineGroup<'a> {
+    fn new(event: (usize, &'a TimelineEvent)) -> Self {
+        Self {
+            first: event,
+            rest: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, event: (usize, &'a TimelineEvent)) {
+        self.rest.push(event);
+    }
+
+    fn events(&self) -> impl Iterator<Item = (usize, &'a TimelineEvent)> + '_ {
+        std::iter::once(self.first).chain(self.rest.iter().copied())
+    }
+
+    fn len(&self) -> usize {
+        1 + self.rest.len()
+    }
+
+    fn primary_event(&self) -> &'a TimelineEvent {
+        self.first.1
+    }
+
+    fn last_event(&self) -> &'a TimelineEvent {
+        self.rest
+            .last()
+            .map(|(_, event)| *event)
+            .unwrap_or(self.first.1)
+    }
+
+    fn last_event_index(&self) -> usize {
+        self.rest
+            .last()
+            .map(|(index, _)| *index)
+            .unwrap_or(self.first.0)
+    }
+
+    fn kind(&self) -> TimelineKind {
+        self.primary_event().kind
+    }
+
+    fn is_ai_group(&self) -> bool {
+        self.kind() == TimelineKind::Assistant
+    }
+
+    fn is_rewind(&self, rewind_event_id: &str) -> bool {
+        self.events().any(|(_, event)| event.id == rewind_event_id)
+    }
+}
+
+fn visible_timeline_groups(app: &App) -> Vec<TimelineGroup<'_>> {
+    let mut groups: Vec<TimelineGroup<'_>> = Vec::new();
+    for event in visible_timeline_events(app) {
+        if event.1.kind == TimelineKind::Assistant
+            && let Some(group) = groups.last_mut()
+            && group.is_ai_group()
+        {
+            group.push(event);
+            continue;
+        }
+        groups.push(TimelineGroup::new(event));
+    }
+    groups
+}
+
+fn selected_timeline_group_position(
+    visible_groups: &[TimelineGroup<'_>],
+    selected_event: usize,
+) -> usize {
+    visible_groups
+        .iter()
+        .position(|group| group.events().any(|(index, _)| index == selected_event))
+        .or_else(|| {
+            visible_groups
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(_, group)| group.last_event_index() <= selected_event)
+                .map(|(position, _)| position)
+        })
+        .unwrap_or(0)
+}
+
+fn timeline_group_label(group: &TimelineGroup<'_>, is_rewind: bool) -> (String, Color) {
+    if is_rewind {
+        return ("REWIND".into(), theme::GOLD);
+    }
+    match group.kind() {
+        TimelineKind::User => ("USER".into(), theme::BLUE),
+        TimelineKind::Assistant if group.len() > 1 => (format!("AI x{}", group.len()), theme::GOLD),
+        TimelineKind::Assistant => ("AI".into(), theme::GOLD),
+        TimelineKind::Tool => ("TOOL".into(), theme::MUTED),
+        TimelineKind::Compact => ("COMPACT".into(), theme::CYAN),
+        TimelineKind::Error => ("ERROR".into(), theme::RED),
+        TimelineKind::GitDiff => ("GIT DIFF".into(), theme::GREEN),
+        TimelineKind::RewindPoint => ("REWIND".into(), theme::GOLD),
+    }
+}
+
+fn timeline_group_time(group: &TimelineGroup<'_>) -> String {
+    let first = &group.primary_event().time;
+    let last = &group.last_event().time;
+    if group.len() == 1 {
+        first.clone()
+    } else if first == last {
+        format!("{first} x{}", group.len())
+    } else {
+        format!("{first}-{last}")
+    }
+}
+
 fn visible_timeline_events(app: &App) -> Vec<(usize, &TimelineEvent)> {
     app.data
         .timeline
@@ -670,24 +810,6 @@ fn visible_timeline_events(app: &App) -> Vec<(usize, &TimelineEvent)> {
         .enumerate()
         .filter(|(_, event)| event.id == app.rewind_event_id || event.kind != TimelineKind::Tool)
         .collect()
-}
-
-fn selected_visible_timeline_position(
-    visible_events: &[(usize, &TimelineEvent)],
-    selected_event: usize,
-) -> usize {
-    visible_events
-        .iter()
-        .position(|(index, _)| *index == selected_event)
-        .or_else(|| {
-            visible_events
-                .iter()
-                .enumerate()
-                .rev()
-                .find(|(_, (index, _))| *index <= selected_event)
-                .map(|(position, _)| position)
-        })
-        .unwrap_or(0)
 }
 
 fn render_capsule(frame: &mut Frame, area: Rect, app: &App) {
@@ -1870,6 +1992,52 @@ mod tests {
         let scroll = timeline_scroll(&app, Rect::new(0, 0, 48, 8));
 
         assert!(scroll > 6, "scroll should include wrapped detail height");
+    }
+
+    #[test]
+    fn timeline_visually_groups_consecutive_assistant_events() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.data.timeline = vec![
+            TimelineEvent {
+                id: "evt-001".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::User,
+                title: "User".into(),
+                detail: "分析下 cxcp".into(),
+            },
+            TimelineEvent {
+                id: "evt-002".into(),
+                time: "10:01".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "先定位项目。".into(),
+            },
+            TimelineEvent {
+                id: "evt-003".into(),
+                time: "10:02".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "继续分析缓存。".into(),
+            },
+            TimelineEvent {
+                id: "evt-004".into(),
+                time: "10:03".into(),
+                kind: TimelineKind::User,
+                title: "User".into(),
+                detail: "下一步".into(),
+            },
+        ];
+        app.selected_event = 1;
+        app.rewind_event_id = "evt-001".into();
+
+        let screen = render_text(&app, 120, 28);
+
+        assert_screen_contains(&screen, "AI x2");
+        assert_screen_contains(&screen, "先定位项目");
+        assert_screen_contains(&screen, "继续分析缓存");
+        assert_eq!(screen.matches("AI x2").count(), 1, "{screen}");
+        assert!(!screen.contains("ASSISTANT  Assistant"), "{screen}");
     }
 
     #[test]
