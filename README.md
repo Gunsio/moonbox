@@ -194,6 +194,9 @@ The first implementation focuses on the product shell:
   rewind markers instead of assistant/tool output
 - Animated TUI loading screen while source sessions are indexed in the background
 - Session movement, source filtering, and search keep the list responsive while the selected session preview hydrates in the background
+- Session list secondary rows use relative resume-picker timestamps such as
+  `16s ago` / `3m ago`, while exact timestamps stay in the right Session
+  Details panel
 - Resume-index rows with unknown event counts still hydrate their real timeline
   from `source_path`; sessions with no loadable rewind event stay as pending
   capsules instead of crashing the TUI at startup
@@ -654,6 +657,9 @@ Stable interfaces matter more than any single framework:
 - M48.3: timeline selected-state polish; active user rows keep the blue user
   accent, active AI groups keep the gold AI accent, and rewind selection still
   overrides to the gold rewind accent.
+- M48.4: session-list timestamp polish; left list secondary rows now use
+  resume-picker style relative time while the right Session Details panel keeps
+  the exact `updated` timestamp.
 
 ### Can Build Now
 

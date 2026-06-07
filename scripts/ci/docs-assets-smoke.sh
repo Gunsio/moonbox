@@ -16,12 +16,13 @@ export MOONBOX_HERMES_HOME="$smoke_home/hermes"
 export MOONBOX_CONFIG="$smoke_home/config.json"
 export MOONBOX_SESSION_MODE=fixture
 export MOONBOX_SESSION_LIMIT=50
+export MOONBOX_TUI_NOW_UNIX=1780650000
 
 cargo run --locked -- docs-snapshot --output "$generated"
 
 if ! cmp -s "$generated" "$svg"; then
   diff -u "$generated" "$svg"
-  echo "README screenshot asset is stale; regenerate with: cargo run --locked -- docs-snapshot --output docs/assets/moonbox-tui.svg" >&2
+  echo "README screenshot asset is stale; regenerate with: MOONBOX_TUI_NOW_UNIX=1780650000 cargo run --locked -- docs-snapshot --output docs/assets/moonbox-tui.svg" >&2
   exit 1
 fi
 

@@ -175,6 +175,9 @@ and this project uses semantic versioning once tagged releases start.
   Raw Title and Source Health in the right Session Details panel, and hydrate
   the timeline/capsule preview in the background from the current session index
   snapshot.
+- TUI session-list secondary rows now use relative resume-picker timestamps
+  such as `16s ago` / `3m ago`; exact timestamps remain available in the right
+  Session Details panel.
 - Resume-index rows whose event count is unknown now still hydrate their real
   timeline from `source_path`; truly empty timelines build a pending capsule
   instead of crashing the TUI by compiling a missing rewind id.

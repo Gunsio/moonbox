@@ -1,3 +1,5 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -327,14 +329,132 @@ fn session_list_window(total: usize, selected: usize, area_height: u16) -> (usiz
 }
 
 fn session_list_secondary(session: &crate::core::model::SessionSummary) -> String {
+    session_list_secondary_at(session, current_unix_timestamp())
+}
+
+fn session_list_secondary_at(
+    session: &crate::core::model::SessionSummary,
+    now_unix_seconds: i64,
+) -> String {
+    let updated = relative_time_label(&session.updated_at, now_unix_seconds)
+        .unwrap_or_else(|| session.updated.clone());
     match session
         .branch
         .as_deref()
         .filter(|branch| !branch.is_empty())
     {
-        Some(branch) => format!("      {}  ·  {}", session.updated, branch),
-        None => format!("      {}", session.updated),
+        Some(branch) => format!("      {updated}  ·  {branch}"),
+        None => format!("      {updated}"),
     }
+}
+
+fn current_unix_timestamp() -> i64 {
+    if let Ok(value) = std::env::var("MOONBOX_TUI_NOW_UNIX")
+        && let Ok(timestamp) = value.parse()
+    {
+        return timestamp;
+    }
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs().min(i64::MAX as u64) as i64)
+        .unwrap_or(0)
+}
+
+fn relative_time_label(timestamp: &str, now_unix_seconds: i64) -> Option<String> {
+    let timestamp_unix_seconds = parse_session_timestamp(timestamp)?;
+    let elapsed = now_unix_seconds
+        .saturating_sub(timestamp_unix_seconds)
+        .max(0);
+    Some(match elapsed {
+        0..=59 => format!("{elapsed}s ago"),
+        60..=3_599 => format!("{}m ago", elapsed / 60),
+        3_600..=86_399 => format!("{}h ago", elapsed / 3_600),
+        86_400..=604_799 => format!("{}d ago", elapsed / 86_400),
+        604_800..=2_591_999 => format!("{}w ago", elapsed / 604_800),
+        2_592_000..=31_535_999 => format!("{}mo ago", elapsed / 2_592_000),
+        _ => format!("{}y ago", elapsed / 31_536_000),
+    })
+}
+
+fn parse_session_timestamp(timestamp: &str) -> Option<i64> {
+    let timestamp = crate::core::local_jsonl::replace_time_dashes(timestamp);
+    let date_time = timestamp.get(..19)?;
+    let year = parse_i32(date_time.get(0..4)?)?;
+    let month = parse_u32(date_time.get(5..7)?)?;
+    let day = parse_u32(date_time.get(8..10)?)?;
+    let hour = parse_u32(date_time.get(11..13)?)?;
+    let minute = parse_u32(date_time.get(14..16)?)?;
+    let second = parse_u32(date_time.get(17..19)?)?;
+    if !valid_timestamp_parts(month, day, hour, minute, second) {
+        return None;
+    }
+    let offset = parse_timezone_offset(timestamp.get(19..).unwrap_or_default())?;
+    let local_seconds = days_from_civil(year, month, day)
+        .saturating_mul(86_400)
+        .saturating_add(i64::from(hour) * 3_600)
+        .saturating_add(i64::from(minute) * 60)
+        .saturating_add(i64::from(second));
+    Some(local_seconds.saturating_sub(offset))
+}
+
+fn parse_timezone_offset(mut suffix: &str) -> Option<i64> {
+    if let Some(rest) = suffix.strip_prefix('.') {
+        let fraction_len = rest
+            .char_indices()
+            .find(|(_, ch)| !ch.is_ascii_digit())
+            .map(|(index, _)| index)
+            .unwrap_or(rest.len());
+        suffix = &rest[fraction_len..];
+    }
+    if suffix.is_empty() || suffix.starts_with('Z') {
+        return Some(0);
+    }
+    let sign = match suffix.as_bytes().first().copied()? {
+        b'+' => 1,
+        b'-' => -1,
+        _ => return None,
+    };
+    let hour = parse_u32(suffix.get(1..3)?)?;
+    let minute = if suffix.get(3..4) == Some(":") {
+        parse_u32(suffix.get(4..6)?)?
+    } else {
+        parse_u32(suffix.get(3..5)?)?
+    };
+    if hour > 23 || minute > 59 {
+        return None;
+    }
+    Some(i64::from(sign) * (i64::from(hour) * 3_600 + i64::from(minute) * 60))
+}
+
+fn valid_timestamp_parts(month: u32, day: u32, hour: u32, minute: u32, second: u32) -> bool {
+    (1..=12).contains(&month)
+        && (1..=31).contains(&day)
+        && hour <= 23
+        && minute <= 59
+        && second <= 60
+}
+
+fn parse_i32(value: &str) -> Option<i32> {
+    value.parse().ok()
+}
+
+fn parse_u32(value: &str) -> Option<u32> {
+    value.parse().ok()
+}
+
+fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
+    let adjusted_year = year - i32::from(month <= 2);
+    let era = if adjusted_year >= 0 {
+        adjusted_year
+    } else {
+        adjusted_year - 399
+    } / 400;
+    let year_of_era = adjusted_year - era * 400;
+    let month = i32::try_from(month).unwrap_or_default();
+    let day = i32::try_from(day).unwrap_or_default();
+    let day_of_year = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    i64::from(era) * 146_097 + i64::from(day_of_era) - 719_468
 }
 
 fn source_pill(tool: CliTool) -> &'static str {
@@ -1888,7 +2008,10 @@ mod tests {
     use super::*;
     use crate::{
         app::App,
-        core::model::{CliTool, TimelineEvent, TimelineKind, VerificationStatus},
+        core::model::{
+            CliTool, SessionStatus, SourceProvenance, TimelineEvent, TimelineKind,
+            VerificationStatus,
+        },
     };
 
     fn render_text(app: &App, width: u16, height: u16) -> String {
@@ -1963,6 +2086,55 @@ mod tests {
 
         assert_eq!(all.len(), codex.len());
         assert_eq!(codex.len(), hermes.len());
+    }
+
+    #[test]
+    fn session_list_secondary_uses_relative_time_with_branch() {
+        let now = parse_session_timestamp("2026-06-07T13:34:00+08:00").expect("now");
+        let session = test_session("2026-06-07T13:33:44+08:00", Some("dev"));
+
+        assert_eq!(
+            session_list_secondary_at(&session, now),
+            "      16s ago  ·  dev"
+        );
+    }
+
+    #[test]
+    fn relative_time_label_matches_resume_picker_style() {
+        let now = parse_session_timestamp("2026-06-07T13:34:00Z").expect("now");
+
+        assert_eq!(
+            relative_time_label("2026-06-07T13:30:00Z", now).as_deref(),
+            Some("4m ago")
+        );
+        assert_eq!(
+            relative_time_label("2026-06-07T04:34:00Z", now).as_deref(),
+            Some("9h ago")
+        );
+        assert_eq!(
+            relative_time_label("2026-06-05T13:34:00Z", now).as_deref(),
+            Some("2d ago")
+        );
+    }
+
+    fn test_session(updated_at: &str, branch: Option<&str>) -> crate::core::model::SessionSummary {
+        crate::core::model::SessionSummary {
+            id: "session-id".into(),
+            cli: CliTool::Codex,
+            title: "Session".into(),
+            cwd: "/repo".into(),
+            updated_at: updated_at.into(),
+            updated: "2026-06-07 13:33".into(),
+            status: SessionStatus::Healthy,
+            branch: branch.map(str::to_owned),
+            token_count: None,
+            health_reason: None,
+            event_count: 0,
+            resume_command: "codex resume session-id".into(),
+            source_provenance: SourceProvenance::Real,
+            source_path: None,
+            parse_skip_count: 0,
+        }
     }
 
     #[test]
