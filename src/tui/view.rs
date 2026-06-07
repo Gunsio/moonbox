@@ -925,7 +925,7 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("a", "Clear"),
             ("o", "Original"),
             ("enter", "Open"),
-            ("t", "Target"),
+            ("x/H", "Handoff"),
             ("tab", "Next"),
         ],
         Focus::Timeline => vec![
@@ -951,7 +951,7 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
         ],
         Focus::Branches => vec![
             ("enter", "Open"),
-            ("t", "Target"),
+            ("x/H", "Handoff"),
             ("o", "Original"),
             ("space", "Rewind"),
             ("D", "Doctor"),
@@ -1017,7 +1017,7 @@ fn render_help(frame: &mut Frame, root: Rect, app: &App) {
         Line::raw("/text           filter sessions by text"),
         Line::raw("o               open original session with original CLI"),
         Line::raw("enter           open selected session with original CLI"),
-        Line::raw("t               choose target and review handoff"),
+        Line::raw("x / H           choose target and review handoff"),
         Line::raw("D               open environment doctor"),
         Line::raw("[ / ]           previous / next session source filter"),
         Line::raw("space           set rewind point"),

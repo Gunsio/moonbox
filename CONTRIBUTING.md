@@ -123,6 +123,10 @@ semantics.
 - Keep target handoff prompts readable. The target CLI first screen should show
   a structured summary, not an unformatted JSON dump; machine-readable data can
   stay in dry-run JSON outputs and explicit capsule commands.
+- Keep inspection surfaces parameterized. User-facing capsule, compile-request,
+  compile-output, launch, verify, and open commands should accept explicit
+  session/target/rewind inputs where the model needs them; do not hard-code
+  fixture source-target pairs in production command paths.
 - Prefer stable core contracts over UI-only behavior.
 - Keep the Rust crate API narrow and documented. The CLI is the product surface;
   internal adapters, compiler runners, source stores, and TUI state stay

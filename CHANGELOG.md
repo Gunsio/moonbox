@@ -131,8 +131,8 @@ and this project uses semantic versioning once tagged releases start.
   a full TUI workbench for explicit session ids.
 - Target launch execution is opt-in and refuses to spawn a target command when
   verification fails.
-- TUI target handoff now uses a dedicated `t` shortcut, with `H` kept as a
-  compatibility alias, and a two-stage flow: choose a target, review the
+- TUI target handoff now uses a dedicated `x` shortcut, with `H` and `t` kept
+  as compatibility aliases, and a two-stage flow: choose a target, review the
   guarded execute command, then copy with `y`.
 - TUI launch key hints now distinguish target selection from Launch Review, so
   `y` is shown as unavailable until review.
@@ -148,7 +148,7 @@ and this project uses semantic versioning once tagged releases start.
   the source CLI so the terminal is handed off without Moonbox waiting in the
   foreground; `y` still copies the guarded Moonbox wrapper.
 - Main-list `enter` now directly opens the selected session with its original
-  CLI; target handoff moved to the explicit `t` shortcut.
+  CLI; target handoff moved to the explicit `x` shortcut.
 - Compiler execution precedence is now explicit: environment override, config
   preset, then built-in fixture compiler.
 - Unknown compiler ids and disabled compiler presets now return structured
@@ -200,6 +200,15 @@ and this project uses semantic versioning once tagged releases start.
   source, target, goal, state, decisions, todo, evidence, risks, and
   instructions instead of dumping the capsule as raw JSON into the target CLI
   first screen.
+- TUI target handoff also accepts `x` as the primary cross-CLI handoff
+  shortcut, while `H` and `t` remain compatibility aliases.
+- `capsule`, `compile-request`, and `compile-output` now accept explicit
+  `--session`, `--target`, `--rewind`, and `--compiler` options, replacing the
+  old hard-coded Codex-to-Hermes inspection defaults with the same selected
+  session/rewind model used by launch and the TUI.
+- CLI smoke coverage now calls those inspection surfaces with explicit fixture
+  session, target, and rewind arguments, so the gate cannot depend on a user's
+  persisted last-target setting.
 
 ### Not Yet Released
 

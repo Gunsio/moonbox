@@ -42,13 +42,15 @@ grep -q "codex-cxcp-design" "$output_dir/sessions.json"
 grep -q "claude-qc-platform" "$output_dir/sessions.json"
 grep -q "hermes-cxcp-502" "$output_dir/sessions.json"
 
-"$moonbox" capsule --json > "$output_dir/capsule.json"
+"$moonbox" capsule --session codex-cxcp-design --target hermes --rewind evt-091 --json > "$output_dir/capsule.json"
 grep -q '"source_cli": "codex"' "$output_dir/capsule.json"
+grep -q '"target_cli": "hermes"' "$output_dir/capsule.json"
 
-"$moonbox" compile-request --json > "$output_dir/compile-request.json"
+"$moonbox" compile-request --session codex-cxcp-design --target hermes --rewind evt-091 --json > "$output_dir/compile-request.json"
 grep -q '"compiler": "engineering-handoff"' "$output_dir/compile-request.json"
+grep -q '"target_cli": "hermes"' "$output_dir/compile-request.json"
 
-"$moonbox" compile-output --json > "$output_dir/compile-output.json"
+"$moonbox" compile-output --session codex-cxcp-design --target hermes --rewind evt-091 --json > "$output_dir/compile-output.json"
 grep -q '"target_branch": "moonbox/hermes-rewind-evt-091"' "$output_dir/compile-output.json"
 
 "$moonbox" compilers --json > "$output_dir/compilers.json"

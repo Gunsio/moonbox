@@ -24,8 +24,8 @@ pub enum Command {
     Sessions(SessionListArgs),
     /// Print the command for opening an original session.
     Open(OpenArgs),
-    /// Print the current Work Capsule.
-    Capsule(JsonArgs),
+    /// Print the selected Work Capsule.
+    Capsule(CompileArgs),
     /// Print the compiler request contract.
     CompileRequest(CompileArgs),
     /// Print the compiler output contract.
@@ -101,6 +101,15 @@ pub struct DocsSnapshotArgs {
 pub struct CompileArgs {
     #[arg(long)]
     pub json: bool,
+    /// Source session id. Defaults to the newest discovered session.
+    #[arg(long)]
+    pub session: Option<String>,
+    /// Target CLI. Defaults to the last confirmed target.
+    #[arg(long, value_enum)]
+    pub target: Option<CliTool>,
+    /// Rewind event id. Defaults to Moonbox's recommended rewind point.
+    #[arg(long)]
+    pub rewind: Option<String>,
     /// Compiler id to use. Defaults to the configured external compiler or engineering-handoff.
     #[arg(long)]
     pub compiler: Option<String>,

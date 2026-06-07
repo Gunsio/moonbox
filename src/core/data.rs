@@ -227,6 +227,7 @@ fn preview_timeline_for_workbench(
     preview_timeline_for_session(source_session)
 }
 
+#[cfg(test)]
 pub fn compile_request(
     source: CliTool,
     target: CliTool,
@@ -235,6 +236,7 @@ pub fn compile_request(
     compile_request_with_compiler(source, target, rewind_event_id, &default_compiler_id())
 }
 
+#[cfg(test)]
 pub fn compile_request_with_compiler(
     source: CliTool,
     target: CliTool,
@@ -243,46 +245,49 @@ pub fn compile_request_with_compiler(
 ) -> Result<CapsuleCompileRequest, CoreError> {
     let source_session = default_source_session(source)?;
     let timeline = timeline_for_compile_request(&source_session)?;
-    Ok(CapsuleCompileRequest {
-        version: 1,
-        source_cli: source,
-        target_cli: target,
+    Ok(compile_request_from_parts(
         source_session,
-        rewind_event_id: rewind_event_id.into(),
-        token_budget: 100_000,
-        compiler: compiler.into(),
-        timeline: CanonicalTimeline {
-            version: 1,
-            source_cli: source,
-            source_session: timeline.source_session,
-            events: timeline.events,
-        },
-    })
-}
-
-pub fn compile_output(source: CliTool, target: CliTool) -> Result<CapsuleCompileOutput, CoreError> {
-    compile_output_with_compiler(source, target, &default_compiler_id())
-}
-
-pub fn compile_output_with_compiler(
-    source: CliTool,
-    target: CliTool,
-    compiler: &str,
-) -> Result<CapsuleCompileOutput, CoreError> {
-    let source_session = default_source_session(source)?;
-    let timeline = timeline_for_compile_request(&source_session)?;
-    let rewind_event_id = rewind_event_id_for_timeline(&source_session.id, &timeline);
-    let request = CapsuleCompileRequest {
-        version: 1,
-        source_cli: source,
-        target_cli: target,
-        source_session,
-        rewind_event_id,
-        token_budget: 100_000,
-        compiler: compiler.into(),
+        target,
         timeline,
+        rewind_event_id.into(),
+        compiler,
+    ))
+}
+
+pub fn compile_request_for_session_id(
+    session_id: &str,
+    target: CliTool,
+    rewind_event_id: Option<&str>,
+    compiler: &str,
+) -> Result<Option<CapsuleCompileRequest>, CoreError> {
+    let Some(source_session) = find_session(session_id)? else {
+        return Ok(None);
     };
-    compile_with_configured_runner(&request).map_err(CoreError::from)
+    let timeline = timeline_for_compile_request(&source_session)?;
+    let rewind_event_id = selected_rewind_event_id(&source_session, &timeline, rewind_event_id);
+    Ok(Some(compile_request_from_parts(
+        source_session,
+        target,
+        timeline,
+        rewind_event_id,
+        compiler,
+    )))
+}
+
+pub fn compile_output_for_session_id(
+    session_id: &str,
+    target: CliTool,
+    rewind_event_id: Option<&str>,
+    compiler: &str,
+) -> Result<Option<CapsuleCompileOutput>, CoreError> {
+    let Some(request) =
+        compile_request_for_session_id(session_id, target, rewind_event_id, compiler)?
+    else {
+        return Ok(None);
+    };
+    compile_with_configured_runner(&request)
+        .map(Some)
+        .map_err(CoreError::from)
 }
 
 pub fn compile_capsule_for_session_id(
@@ -323,6 +328,31 @@ pub fn launch_artifacts_for_session_id(
         &compiler,
     )?;
     Ok(Some((source_session, timeline, capsule)))
+}
+
+fn compile_request_from_parts(
+    source_session: SessionSummary,
+    target: CliTool,
+    timeline: CanonicalTimeline,
+    rewind_event_id: String,
+    compiler: &str,
+) -> CapsuleCompileRequest {
+    let source = source_session.cli;
+    CapsuleCompileRequest {
+        version: 1,
+        source_cli: source,
+        target_cli: target,
+        source_session,
+        rewind_event_id,
+        token_budget: 100_000,
+        compiler: compiler.into(),
+        timeline: CanonicalTimeline {
+            version: 1,
+            source_cli: source,
+            source_session: timeline.source_session,
+            events: timeline.events,
+        },
+    }
 }
 
 fn compile_capsule_for_session(
@@ -472,6 +502,17 @@ fn rewind_event_id_for_timeline(session_id: &str, timeline: &CanonicalTimeline) 
         .unwrap_or_default()
 }
 
+fn selected_rewind_event_id(
+    source_session: &SessionSummary,
+    timeline: &CanonicalTimeline,
+    rewind_event_id: Option<&str>,
+) -> String {
+    rewind_event_id
+        .filter(|rewind_event_id| !rewind_event_id.trim().is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| rewind_event_id_for_timeline(&source_session.id, timeline))
+}
+
 fn is_fixture_session_id(session_id: &str) -> bool {
     matches!(
         session_id,
@@ -479,6 +520,7 @@ fn is_fixture_session_id(session_id: &str) -> bool {
     )
 }
 
+#[cfg(test)]
 fn default_source_session(source: CliTool) -> Result<SessionSummary, CoreError> {
     Ok(sessions()?
         .into_iter()
@@ -588,6 +630,25 @@ mod tests {
         .expect("request");
 
         assert_eq!(request.compiler, "custom-skill");
+    }
+
+    #[test]
+    fn compile_request_for_session_accepts_target_rewind_and_compiler() {
+        let request = compile_request_for_session_id(
+            "claude-qc-platform",
+            CliTool::Codex,
+            Some("evt-074"),
+            "custom-skill",
+        )
+        .expect("request result")
+        .expect("request");
+
+        assert_eq!(request.source_cli, CliTool::Claude);
+        assert_eq!(request.target_cli, CliTool::Codex);
+        assert_eq!(request.source_session.id, "claude-qc-platform");
+        assert_eq!(request.rewind_event_id, "evt-074");
+        assert_eq!(request.compiler, "custom-skill");
+        assert_eq!(request.timeline.source_cli, CliTool::Claude);
     }
 
     #[test]

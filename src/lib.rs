@@ -161,51 +161,79 @@ fn print_open_command(args: cli::OpenArgs) -> Result<()> {
     Ok(())
 }
 
-fn print_capsule(args: cli::JsonArgs) -> Result<()> {
-    let capsule =
-        core::workbench::capsule(core::model::CliTool::Codex, core::model::CliTool::Hermes)?;
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&capsule)?);
+fn print_capsule(args: cli::CompileArgs) -> Result<()> {
+    let target = launch_target(args.target);
+    let capsule = core::workbench::capsule_for_selection(
+        args.session.as_deref(),
+        target,
+        args.rewind.as_deref(),
+        args.compiler.as_deref(),
+    )?;
+    if let Some(capsule) = capsule {
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&capsule)?);
+        } else {
+            println!("source: {}", capsule.source_cli);
+            println!("session: {}", capsule.source_session);
+            println!("target_cli: {}", capsule.target_cli);
+            println!("compiler: {}", capsule.compiler);
+            println!("goal: {}", capsule.goal);
+            println!("state: {}", capsule.state);
+            println!("rewind: {}", capsule.rewind_point);
+            println!("target: {}", capsule.target_branch);
+        }
     } else {
-        println!("goal: {}", capsule.goal);
-        println!("state: {}", capsule.state);
-        println!("rewind: {}", capsule.rewind_point);
-        println!("target: {}", capsule.target_branch);
+        println!("No session selected");
     }
     Ok(())
 }
 
 fn print_compile_request(args: cli::CompileArgs) -> Result<()> {
-    let request = core::workbench::compile_request(
-        core::model::CliTool::Codex,
-        core::model::CliTool::Hermes,
-        "evt-091",
+    let target = launch_target(args.target);
+    let request = core::workbench::compile_request_for_selection(
+        args.session.as_deref(),
+        target,
+        args.rewind.as_deref(),
         args.compiler.as_deref(),
     )?;
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&request)?);
+    if let Some(request) = request {
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&request)?);
+        } else {
+            println!("source: {}", request.source_cli);
+            println!("target: {}", request.target_cli);
+            println!("session: {}", request.source_session.id);
+            println!("rewind: {}", request.rewind_event_id);
+            println!("compiler: {}", request.compiler);
+        }
     } else {
-        println!("source: {}", request.source_cli);
-        println!("target: {}", request.target_cli);
-        println!("session: {}", request.source_session.id);
-        println!("rewind: {}", request.rewind_event_id);
-        println!("compiler: {}", request.compiler);
+        println!("No session selected");
     }
     Ok(())
 }
 
 fn print_compile_output(args: cli::CompileArgs) -> Result<()> {
-    let output = core::workbench::compile_output(
-        core::model::CliTool::Codex,
-        core::model::CliTool::Hermes,
+    let target = launch_target(args.target);
+    let output = core::workbench::compile_output_for_selection(
+        args.session.as_deref(),
+        target,
+        args.rewind.as_deref(),
         args.compiler.as_deref(),
     )?;
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&output)?);
+    if let Some(output) = output {
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        } else {
+            println!("version: {}", output.version);
+            println!("source: {}", output.capsule.source_cli);
+            println!("session: {}", output.capsule.source_session);
+            println!("target_cli: {}", output.capsule.target_cli);
+            println!("compiler: {}", output.capsule.compiler);
+            println!("goal: {}", output.capsule.goal);
+            println!("target: {}", output.capsule.target_branch);
+        }
     } else {
-        println!("version: {}", output.version);
-        println!("goal: {}", output.capsule.goal);
-        println!("target: {}", output.capsule.target_branch);
+        println!("No session selected");
     }
     Ok(())
 }
