@@ -14,9 +14,9 @@ use super::{
     local_jsonl::{
         collect_project_jsonl_files, configured_session_limit, configured_session_scan_entry_limit,
         configured_session_summary_line_limit, discover_project_jsonl_files, display_time,
-        event_id, find_token_count, human_timestamp, max_timestamp, open_reader,
-        push_timeline_event, read_error, sort_paths_by_modified_desc, text_from_value, title_case,
-        truncate,
+        event_id, find_token_count, human_timestamp, is_provider_context_text, max_timestamp,
+        open_reader, push_timeline_event, read_error, sort_paths_by_modified_desc, text_from_value,
+        title_case, truncate,
     },
     model::{
         CanonicalTimeline, CliTool, SessionStatus, SessionSummary, SourceProvenance, TimelineEvent,
@@ -561,7 +561,7 @@ fn claude_project_dir_name(project: &str) -> String {
 fn history_display_title(display: &str) -> Option<String> {
     let title = normalized_text(display)?;
     let title = title.trim();
-    if title.is_empty() || title.starts_with('/') {
+    if title.is_empty() || title.starts_with('/') || is_provider_context_text(title) {
         None
     } else {
         Some(truncate(title, 72))
@@ -609,6 +609,7 @@ impl SummaryBuilder {
             && record_type == "user"
             && !has_tool_result(&record)
             && let Some(text) = message_text(&record)
+            && !is_provider_context_text(&text)
         {
             self.title = Some(truncate(&text, 72));
         }
@@ -674,6 +675,9 @@ fn timeline_event(record: ClaudeRecord, number: usize) -> Option<TimelineEvent> 
     let kind = timeline_kind(record_type, &record)?;
     let detail = timeline_detail(record_type, &record);
     if detail.is_empty() && !matches!(kind, TimelineKind::Error) {
+        return None;
+    }
+    if kind == TimelineKind::User && is_provider_context_text(&detail) {
         return None;
     }
 

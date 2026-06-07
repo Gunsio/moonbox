@@ -93,8 +93,8 @@ pub fn render_loading(frame: &mut Frame, tick: usize) {
         Line::from(vec![
             Span::styled("q", Style::default().fg(theme::BLUE)),
             Span::raw(" quit   "),
-            Span::styled("esc", Style::default().fg(theme::BLUE)),
-            Span::raw(" cancel"),
+            Span::styled("ctrl-c", Style::default().fg(theme::BLUE)),
+            Span::raw(" quit"),
         ]),
     ];
     frame.render_widget(
@@ -464,11 +464,15 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             Style::default().fg(theme::TEXT)
         };
-        lines.push(Line::from(vec![
-            Span::styled(format!("{marker} {} ", event.time), time_style),
-            Span::styled(format!(" {label} "), label_style),
-            Span::styled(format!(" {}", event.title), title_style),
-        ]));
+        lines.push(timeline_header_line(
+            event,
+            marker,
+            label,
+            time_style,
+            label_style,
+            title_style,
+            area.width,
+        ));
 
         let detail_style = if active {
             Style::default()
@@ -481,13 +485,25 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             Style::default().fg(theme::MUTED)
         };
-        lines.push(Line::from(vec![
-            Span::styled(
-                if active { "  └ " } else { "   " },
-                Style::default().fg(if active { theme::GOLD } else { theme::MUTED }),
-            ),
-            Span::styled(&event.detail, detail_style),
-        ]));
+        for (line_index, detail) in timeline_detail_lines(&event.detail, area.width)
+            .into_iter()
+            .enumerate()
+        {
+            let prefix = if active && line_index == 0 {
+                "  └ "
+            } else if active {
+                "    "
+            } else {
+                "   "
+            };
+            lines.push(Line::from(vec![
+                Span::styled(
+                    prefix,
+                    Style::default().fg(if active { theme::GOLD } else { theme::MUTED }),
+                ),
+                Span::styled(detail, detail_style),
+            ]));
+        }
         lines.push(Line::raw(""));
     }
 
@@ -501,18 +517,150 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(
         Paragraph::new(lines)
             .block(panel_block(" Timeline ", app.focus == Focus::Timeline))
-            .scroll((timeline_scroll(app, area), 0))
-            .wrap(Wrap { trim: true }),
+            .scroll((timeline_scroll(app, area), 0)),
         area,
     );
 }
 
 fn timeline_scroll(app: &App, area: Rect) -> u16 {
-    let viewport = area.height.saturating_sub(2).max(1);
+    let viewport = usize::from(area.height.saturating_sub(2).max(1));
     let visible_events = visible_timeline_events(app);
     let selected_visible = selected_visible_timeline_position(&visible_events, app.selected_event);
-    let selected_line = selected_visible.saturating_mul(3) as u16;
-    selected_line.saturating_sub(viewport / 2)
+    let selected_top = visible_events
+        .iter()
+        .take(selected_visible)
+        .map(|(_, event)| timeline_event_line_count(event, area.width))
+        .sum::<usize>();
+    let selected_height = visible_events
+        .get(selected_visible)
+        .map(|(_, event)| timeline_event_line_count(event, area.width))
+        .unwrap_or(1);
+    let center_padding = viewport.saturating_sub(selected_height) / 2;
+    usize_to_u16(selected_top.saturating_sub(center_padding))
+}
+
+fn timeline_header_line(
+    event: &TimelineEvent,
+    marker: &str,
+    label: &str,
+    time_style: Style,
+    label_style: Style,
+    title_style: Style,
+    area_width: u16,
+) -> Line<'static> {
+    let title = timeline_display_title(event);
+    let inner_width = usize::from(area_width.saturating_sub(4)).max(20);
+    let left_width = display_width(marker)
+        + 1
+        + display_width(label)
+        + 2
+        + title.map(|title| 1 + display_width(title)).unwrap_or(0);
+    let padding = inner_width
+        .saturating_sub(left_width + display_width(&event.time))
+        .max(1);
+    let mut spans = vec![
+        Span::styled(format!("{marker} "), time_style),
+        Span::styled(format!(" {label} "), label_style),
+    ];
+    if let Some(title) = title {
+        spans.push(Span::styled(format!(" {title}"), title_style));
+    }
+    spans.push(Span::raw(" ".repeat(padding)));
+    spans.push(Span::styled(event.time.clone(), time_style));
+    Line::from(spans)
+}
+
+fn timeline_display_title(event: &TimelineEvent) -> Option<&str> {
+    match event.kind {
+        TimelineKind::User if event.title == "User" => None,
+        TimelineKind::Assistant if event.title == "Assistant" => None,
+        _ => Some(event.title.as_str()).filter(|title| !title.trim().is_empty()),
+    }
+}
+
+fn timeline_event_line_count(event: &TimelineEvent, area_width: u16) -> usize {
+    1 + timeline_detail_lines(&event.detail, area_width).len() + 1
+}
+
+fn timeline_detail_lines(detail: &str, area_width: u16) -> Vec<String> {
+    wrap_timeline_text(detail, timeline_detail_width(area_width))
+}
+
+fn timeline_detail_width(area_width: u16) -> usize {
+    usize::from(area_width.saturating_sub(10)).max(12)
+}
+
+fn wrap_timeline_text(text: &str, width: usize) -> Vec<String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return vec![String::new()];
+    }
+    let mut lines = Vec::new();
+    for raw_line in text.lines() {
+        wrap_timeline_line(raw_line, width, &mut lines);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
+}
+
+fn wrap_timeline_line(line: &str, width: usize, lines: &mut Vec<String>) {
+    let mut current = String::new();
+    for word in line.split_whitespace() {
+        let word_width = display_width(word);
+        if word_width > width {
+            if !current.is_empty() {
+                lines.push(std::mem::take(&mut current));
+            }
+            lines.extend(split_display_width(word, width));
+            continue;
+        }
+
+        if current.is_empty() {
+            current.push_str(word);
+        } else if display_width(&current) + 1 + word_width <= width {
+            current.push(' ');
+            current.push_str(word);
+        } else {
+            lines.push(std::mem::take(&mut current));
+            current.push_str(word);
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+}
+
+fn split_display_width(text: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut used = 0;
+    for character in text.chars() {
+        let character_width = character_display_width(character);
+        if used + character_width > width && !current.is_empty() {
+            lines.push(std::mem::take(&mut current));
+            used = 0;
+        }
+        current.push(character);
+        used += character_width;
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    lines
+}
+
+fn display_width(text: &str) -> usize {
+    text.chars().map(character_display_width).sum()
+}
+
+fn character_display_width(character: char) -> usize {
+    if character.is_ascii() { 1 } else { 2 }
+}
+
+fn usize_to_u16(value: usize) -> u16 {
+    value.min(usize::from(u16::MAX)) as u16
 }
 
 fn visible_timeline_events(app: &App) -> Vec<(usize, &TimelineEvent)> {
@@ -1023,7 +1171,8 @@ fn render_help(frame: &mut Frame, root: Rect, app: &App) {
         Line::raw("space           set rewind point"),
         Line::raw("c, v, d, s      compile, verify, diff, switch skill"),
         Line::raw(":               command mode"),
-        Line::raw("q / Esc         close or quit"),
+        Line::raw("q / Ctrl-C      quit"),
+        Line::raw("Esc             cancel command/search or close overlay"),
     ];
     frame.render_widget(
         Paragraph::new(lines)
@@ -1609,7 +1758,7 @@ mod tests {
     use super::*;
     use crate::{
         app::App,
-        core::model::{CliTool, VerificationStatus},
+        core::model::{CliTool, TimelineEvent, TimelineKind, VerificationStatus},
     };
 
     fn render_text(app: &App, width: u16, height: u16) -> String {
@@ -1691,9 +1840,36 @@ mod tests {
         let app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
         let screen = render_text(&app, 140, 40);
 
-        assert_screen_contains(&screen, "ASSISTANT");
         assert_screen_contains(&screen, "REWIND");
         assert!(!screen.contains("Tool: rg"), "{screen}");
+    }
+
+    #[test]
+    fn timeline_scroll_accounts_for_wrapped_event_details() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.data.timeline = vec![
+            TimelineEvent {
+                id: "evt-001".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::User,
+                title: "User".into(),
+                detail: "very long context ".repeat(40),
+            },
+            TimelineEvent {
+                id: "evt-002".into(),
+                time: "10:01".into(),
+                kind: TimelineKind::User,
+                title: "User".into(),
+                detail: "selected user question".into(),
+            },
+        ];
+        app.selected_event = 1;
+        app.rewind_event_id = "evt-002".into();
+
+        let scroll = timeline_scroll(&app, Rect::new(0, 0, 48, 8));
+
+        assert!(scroll > 6, "scroll should include wrapped detail height");
     }
 
     #[test]

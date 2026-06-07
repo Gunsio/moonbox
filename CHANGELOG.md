@@ -152,6 +152,9 @@ and this project uses semantic versioning once tagged releases start.
   foreground; `y` still copies the guarded Moonbox wrapper.
 - Main-list `enter` now directly opens the selected session with its original
   CLI; target handoff moved to the explicit `x` shortcut.
+- TUI timeline hides provider-injected context rows such as
+  `<environment_context>`, right-aligns event times, and scrolls by actual
+  wrapped row height so the selected event stays visible.
 - Compiler execution precedence is now explicit: environment override, config
   preset, then built-in fixture compiler.
 - Unknown compiler ids and disabled compiler presets now return structured
@@ -202,6 +205,9 @@ and this project uses semantic versioning once tagged releases start.
   ids such as `evt-091`.
 - TUI `space` now rejects assistant/tool rows as rewind anchors while still
   allowing those rows to remain visible for reading context.
+- TUI `Esc` no longer exits from the main workbench or loading screen; exit is
+  reserved for `q`, `Ctrl-C`, or explicit handoff actions. `Esc` still closes
+  overlays and cancels command/search modes.
 - Built-in compiler output is labeled as deterministic draft guidance; real
   fields are limited to session id, title, cwd, selected rewind, and source
   health until an external compiler skill is configured.

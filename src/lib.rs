@@ -266,22 +266,29 @@ fn print_ssh_hosts(args: cli::JsonArgs) -> Result<()> {
     } else {
         println!("SSH hosts: {}", hosts.len());
         for host in hosts {
+            println!("{}", host.name);
             println!(
-                "{:<24} {:<32} {:<16} {:<6} {}{}",
-                host.name,
-                host.host,
-                host.user.unwrap_or_else(|| "-".into()),
-                host.port
-                    .map(|port| port.to_string())
-                    .unwrap_or_else(|| "-".into()),
-                ssh_source_label(host.source),
-                host.source_path
-                    .map(|path| format!("  {path}"))
-                    .unwrap_or_default()
+                "  target {}  source {}",
+                ssh_target_display(&host),
+                ssh_source_label(host.source)
             );
+            if let Some(identity_file) = host.identity_file {
+                println!("  identity {identity_file}");
+            }
         }
     }
     Ok(())
+}
+
+fn ssh_target_display(host: &core::ssh::SshHostEntry) -> String {
+    let target = host
+        .user
+        .as_ref()
+        .map(|user| format!("{user}@{}", host.host))
+        .unwrap_or_else(|| host.host.clone());
+    host.port
+        .map(|port| format!("{target}:{port}"))
+        .unwrap_or(target)
 }
 
 fn ssh_source_label(source: core::ssh::SshHostSource) -> &'static str {

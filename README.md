@@ -479,7 +479,10 @@ Session search matches id, title, cwd, source, branch, and health reason. When a
 different session becomes selected by movement, source filter, or search,
 Moonbox immediately marks the selected session as loading, then hydrates that
 session's timeline, capsule preview, branch preview, and recommended rewind
-point in the background.
+point in the background. Timeline rendering hides provider-injected context
+rows such as `<environment_context>`, folds low-signal tool rows by default,
+right-aligns event times, and scrolls by wrapped row height so the selected
+event stays visible.
 
 The target CLI receives a concise, human-readable Work Capsule Summary as its
 first prompt. It includes source metadata, selected rewind, goal, state,
@@ -507,7 +510,8 @@ the dry-run JSON surfaces and `capsule --json`.
 | `x` / `H` / `t` | Choose target for handoff |
 | `:` | Command mode |
 | `?` | Help |
-| `q` / `Esc` | Back / quit |
+| `q` / `Ctrl-C` | Quit |
+| `Esc` | Cancel command/search or close overlays; does not quit from the main screen |
 
 ### Target Picker Keys
 
@@ -639,6 +643,9 @@ Stable interfaces matter more than any single framework:
 - M48: read-only SSH inventory; `moonbox ssh` / `moon ssh` list Moonbox
   `ssh_hosts` plus concrete OpenSSH `Host` aliases from `~/.ssh/config` or
   `MOONBOX_SSH_CONFIG`, with JSON/text output and fixture-safe smoke coverage.
+- M48.1: timeline polish; provider-injected environment context no longer
+  appears as a user turn, event times move to the right side of rows, and
+  timeline scrolling accounts for wrapped detail height.
 
 ### Can Build Now
 

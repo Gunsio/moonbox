@@ -14,8 +14,9 @@ use super::{
         report_from_sessions_with_scan,
     },
     local_jsonl::{
-        configured_session_limit, display_time, event_id, human_timestamp, push_timeline_event,
-        read_error, text_from_value, timeline_preview_truncated_event, title_case, truncate,
+        configured_session_limit, display_time, event_id, human_timestamp,
+        is_provider_context_text, push_timeline_event, read_error, text_from_value,
+        timeline_preview_truncated_event, title_case, truncate,
     },
     model::{
         CanonicalTimeline, CliTool, SessionStatus, SessionSummary, SourceProvenance, TimelineEvent,
@@ -257,7 +258,8 @@ impl HermesSourceAdapter {
             .or_else(|| supplement.and_then(display_name))
             .or_else(|| {
                 let preview = row.preview.trim();
-                (!preview.is_empty()).then(|| truncate(preview, 72))
+                (!preview.is_empty() && !is_provider_context_text(preview))
+                    .then(|| truncate(preview, 72))
             })
             .unwrap_or_else(|| format!("Hermes {} session {}", row.source, short_id(&row.id)));
 
@@ -597,6 +599,9 @@ fn timeline_event(row: HermesMessageRow, number: usize) -> Option<TimelineEvent>
     let kind = timeline_kind(&row)?;
     let detail = timeline_detail(&row);
     if detail.is_empty() && !matches!(kind, TimelineKind::Error) {
+        return None;
+    }
+    if kind == TimelineKind::User && is_provider_context_text(&detail) {
         return None;
     }
 

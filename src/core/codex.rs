@@ -14,8 +14,8 @@ use super::{
         DiscoveryOrder, collect_jsonl_files, configured_session_limit,
         configured_session_scan_entry_limit, configured_session_summary_line_limit,
         discover_jsonl_files, display_time, event_id, find_token_count, human_timestamp,
-        max_timestamp, open_reader, push_timeline_event, read_error, replace_time_dashes,
-        string_field, text_from_value, title_case, truncate,
+        is_provider_context_text, max_timestamp, open_reader, push_timeline_event, read_error,
+        replace_time_dashes, string_field, text_from_value, title_case, truncate,
     },
     model::{
         CanonicalTimeline, CliTool, SessionStatus, SessionSummary, SourceProvenance, TimelineEvent,
@@ -200,6 +200,7 @@ impl CodexSourceAdapter {
         let source_path = row.rollout_path.trim();
         let rollout_exists = !source_path.is_empty() && Path::new(source_path).is_file();
         let title = first_non_empty([&row.title, &row.preview, &row.first_user_message])
+            .filter(|title| !is_provider_context_text(title))
             .map(truncate_thread_title)
             .unwrap_or_else(|| format!("Codex session {}", short_id(&row.id)));
         let status = if !rollout_exists || row.archived {
@@ -558,6 +559,7 @@ impl SummaryBuilder {
         if self.title.is_none()
             && string_field(payload, "role") == Some("user")
             && let Some(text) = text_from_value(payload.get("content").unwrap_or(&Value::Null))
+            && !is_provider_context_text(&text)
         {
             self.title = Some(truncate(&text, 72));
         }
@@ -567,6 +569,7 @@ impl SummaryBuilder {
         if self.title.is_none()
             && string_field(payload, "type") == Some("user_message")
             && let Some(text) = text_from_value(payload)
+            && !is_provider_context_text(&text)
         {
             self.title = Some(truncate(&text, 72));
         }
@@ -636,6 +639,9 @@ fn timeline_event(record: CodexRecord, number: usize) -> Option<TimelineEvent> {
     let title = timeline_title(record_type, payload_type, role);
     let detail = timeline_detail(&record.payload, record_type, payload_type);
     if detail.is_empty() && !matches!(kind, TimelineKind::Error) {
+        return None;
+    }
+    if kind == TimelineKind::User && is_provider_context_text(&detail) {
         return None;
     }
 
@@ -878,6 +884,41 @@ mod tests {
         assert_eq!(timeline.events[1].kind, TimelineKind::User);
         assert_eq!(timeline.events[2].kind, TimelineKind::Assistant);
         assert_eq!(timeline.events[3].kind, TimelineKind::Error);
+    }
+
+    #[test]
+    fn timeline_skips_provider_context_user_messages() {
+        let root = test_root("timeline-provider-context");
+        write_session(
+            &root,
+            "2026/06/06/rollout-2026-06-06T08-00-00-context.jsonl",
+            r#"{"timestamp":"2026-06-06T08:00:00.000Z","type":"session_meta","payload":{"id":"codex-context","cwd":"/repo"}}
+{"timestamp":"2026-06-06T08:01:00.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/repo</cwd>\n  <shell>zsh</shell>\n</environment_context>"}]}}
+{"timestamp":"2026-06-06T08:02:00.000Z","type":"event_msg","payload":{"type":"user_message","message":"分析下 cxcp"}}
+{"timestamp":"2026-06-06T08:03:00.000Z","type":"event_msg","payload":{"type":"agent_message","message":"先定位项目"}}
+"#,
+        );
+
+        let adapter = CodexSourceAdapter::new(&root);
+        let sessions = adapter.list_sessions().expect("sessions");
+        let timeline = adapter.load_timeline("codex-context").expect("timeline");
+
+        assert_eq!(sessions[0].title, "分析下 cxcp");
+        assert!(
+            timeline
+                .events
+                .iter()
+                .all(|event| !event.detail.contains("<environment_context>"))
+        );
+        assert_eq!(
+            timeline
+                .events
+                .iter()
+                .filter(|event| event.kind == TimelineKind::User)
+                .map(|event| event.detail.as_str())
+                .collect::<Vec<_>>(),
+            vec!["分析下 cxcp"]
+        );
     }
 
     #[test]

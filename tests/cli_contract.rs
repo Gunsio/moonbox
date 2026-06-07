@@ -203,7 +203,11 @@ Host *
     );
     assert!(text.contains("SSH hosts: 2"));
     assert!(text.contains("prod-api"));
+    assert!(text.contains("target deploy@prod-api.internal:2222  source moonbox"));
+    assert!(text.contains("identity ~/.ssh/prod-api"));
     assert!(text.contains("dev-box"));
+    assert!(text.contains("target dev@dev-box.internal:2200  source openssh"));
+    assert!(!text.contains("cli-contract-home"));
 }
 
 #[test]

@@ -62,7 +62,7 @@ pub fn run_with_loading(
         }
         if event::poll(Duration::from_millis(120))?
             && let Event::Key(key) = event::read()?
-            && (matches!(key.code, KeyCode::Esc | KeyCode::Char('q'))
+            && (matches!(key.code, KeyCode::Char('q'))
                 || key.modifiers.contains(KeyModifiers::CONTROL)
                     && matches!(key.code, KeyCode::Char('c')))
         {

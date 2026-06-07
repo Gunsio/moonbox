@@ -338,6 +338,13 @@ pub fn truncate(text: &str, max_chars: usize) -> String {
     output
 }
 
+pub fn is_provider_context_text(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    trimmed.starts_with("<environment_context>")
+        || trimmed.starts_with("<system_context>")
+        || trimmed.starts_with("<developer_context>")
+}
+
 pub fn title_case(value: &str) -> String {
     value
         .split(['_', '-'])

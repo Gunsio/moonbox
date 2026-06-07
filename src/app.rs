@@ -244,7 +244,7 @@ impl App {
         }
 
         match key.code {
-            KeyCode::Esc => self.back_or_quit(),
+            KeyCode::Esc => self.cancel_main_escape(),
             KeyCode::Char('q') => self.back_or_quit(),
             KeyCode::Char('?') => self.open_help(),
             KeyCode::Char('[') => self.cycle_session_filter(false),
@@ -489,6 +489,11 @@ impl App {
         } else {
             self.should_quit = true;
         }
+    }
+
+    fn cancel_main_escape(&mut self) {
+        self.pending_g = false;
+        self.set_status("Press q or Ctrl-C to quit");
     }
 
     fn next_focus(&mut self) {
@@ -1474,6 +1479,27 @@ mod tests {
         assert!(!app.command_mode);
         assert_eq!(app.search_query, "5");
         assert_eq!(app.visible_session_indices().len(), 1);
+    }
+
+    #[test]
+    fn main_escape_does_not_quit() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+        assert!(!app.should_quit());
+        assert_eq!(app.status_message, "Press q or Ctrl-C to quit");
+    }
+
+    #[test]
+    fn q_and_ctrl_c_quit_from_main_screen() {
+        let mut q_app = new_app(CliTool::Codex, CliTool::Hermes);
+        q_app.handle_key(key('q'));
+        assert!(q_app.should_quit());
+
+        let mut ctrl_c_app = new_app(CliTool::Codex, CliTool::Hermes);
+        ctrl_c_app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        assert!(ctrl_c_app.should_quit());
     }
 
     #[test]
