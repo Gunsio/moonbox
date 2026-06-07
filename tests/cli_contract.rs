@@ -566,3 +566,66 @@ fn open_launch_and_verify_public_cli_contracts_are_dry_run_by_default() {
     assert_eq!(verify["ready"], true);
     assert_eq!(verify["status"], "pass");
 }
+
+#[test]
+fn capsule_and_compile_surfaces_accept_explicit_session_target_rewind_and_compiler() {
+    let args = [
+        "--session",
+        "claude-qc-platform",
+        "--target",
+        "codex",
+        "--rewind",
+        "evt-074",
+        "--compiler",
+        "engineering-handoff",
+        "--json",
+    ];
+
+    let capsule = output_json(
+        moonbox_command("compile-surface-contract")
+            .arg("capsule")
+            .args(args)
+            .output()
+            .expect("capsule"),
+    );
+    assert_eq!(capsule["source_cli"], "claude");
+    assert_eq!(capsule["target_cli"], "codex");
+    assert_eq!(capsule["source_session"], "claude-qc-platform");
+    assert!(
+        capsule["rewind_point"]
+            .as_str()
+            .expect("rewind")
+            .contains("evt-074")
+    );
+    assert_eq!(capsule["compiler"], "engineering-handoff");
+
+    let request = output_json(
+        moonbox_command("compile-surface-contract")
+            .arg("compile-request")
+            .args(args)
+            .output()
+            .expect("compile request"),
+    );
+    assert_eq!(request["source_cli"], "claude");
+    assert_eq!(request["target_cli"], "codex");
+    assert_eq!(request["source_session"]["id"], "claude-qc-platform");
+    assert_eq!(request["rewind_event_id"], "evt-074");
+    assert_eq!(request["compiler"], "engineering-handoff");
+
+    let output = output_json(
+        moonbox_command("compile-surface-contract")
+            .arg("compile-output")
+            .args(args)
+            .output()
+            .expect("compile output"),
+    );
+    assert_eq!(output["capsule"]["source_cli"], "claude");
+    assert_eq!(output["capsule"]["target_cli"], "codex");
+    assert_eq!(output["capsule"]["source_session"], "claude-qc-platform");
+    assert!(
+        output["capsule"]["rewind_point"]
+            .as_str()
+            .expect("rewind")
+            .contains("evt-074")
+    );
+}

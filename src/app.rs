@@ -252,7 +252,9 @@ impl App {
             KeyCode::Char('f') => self.cycle_session_filter(true),
             KeyCode::Char('a') => self.clear_session_filters(),
             KeyCode::Char('o') => self.open_original(),
-            KeyCode::Char('t') | KeyCode::Char('H') => self.open_launch_picker(),
+            KeyCode::Char('x') | KeyCode::Char('t') | KeyCode::Char('H') => {
+                self.open_launch_picker()
+            }
             KeyCode::Char('D') => self.open_doctor(),
             KeyCode::Char(':') => {
                 self.command_mode = true;
@@ -334,7 +336,7 @@ impl App {
                     }
                     "source" | "source next" => self.cycle_session_filter(true),
                     "source prev" | "source previous" => self.cycle_session_filter(false),
-                    "target" | "launch" => self.open_launch_picker(),
+                    "handoff" | "target" | "launch" | "x" => self.open_launch_picker(),
                     _ => self.set_status(format!("Unknown command: {command}")),
                 }
             }
@@ -1735,6 +1737,17 @@ mod tests {
         assert_eq!(plan.source_session.id, "codex-cxcp-design");
         assert_eq!(plan.target_cli, CliTool::Hermes);
         assert!(plan.dry_run);
+    }
+
+    #[test]
+    fn x_shortcut_opens_target_handoff_picker() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+
+        app.handle_key(key('x'));
+
+        assert!(app.show_launch);
+        assert!(!app.launch_review);
+        assert_eq!(app.status_message, "Choose target CLI");
     }
 
     #[test]

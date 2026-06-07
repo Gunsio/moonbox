@@ -173,7 +173,8 @@ The first implementation focuses on the product shell:
 - Target selection lives inside the launch flow, with explicit `> [x]` radio-list selection
 - Target picker validates each target as `READY`, `WARN`, or `BLOCKED`; blocked targets cannot confirm or copy launch commands
 - Target picker and Launch Review show verifier-backed readiness rows so users can see the exact PASS/WARN/FAIL signal behind each target state
-- Target handoff uses a dedicated `t` shortcut, with `H` kept as a compatibility alias, and a three-stage TUI flow:
+- Target handoff uses a dedicated `x` shortcut, with `H` and `t` kept as
+  compatibility aliases, and a three-stage TUI flow:
   choose target, review the command, then press `enter` to restore the terminal
   and launch, or `y` to copy it
 - Target CLI first prompt is a readable Work Capsule Summary with source,
@@ -202,7 +203,7 @@ The first implementation focuses on the product shell:
 - Timeline auto-scroll, Capsule/modal scroll, and small-terminal modal polish
 - Copyable launch/original wrapper commands via `y` with OSC52 clipboard
   support; main-list `enter` hands control directly to the selected session's
-  original CLI, while `t` opens the target handoff flow
+  original CLI, while `x` opens the target handoff flow
 - Serializable core models for future adapters
 - `SourceAdapter` contract and fixture-backed adapter fallback layer
 - Fallible adapter discovery; bad source data returns structured errors instead of panics
@@ -210,6 +211,9 @@ The first implementation focuses on the product shell:
 - `CapsuleCompiler` trait with fixture and process-backed compiler implementations
 - External compiler skill runner via `MOONBOX_COMPILER`, JSON stdin/stdout, structured errors, and timeout handling
 - Configurable compiler skill presets with catalog status and quality scores
+- `capsule`, `compile-request`, and `compile-output` support explicit
+  `--session`, `--target`, `--rewind`, and `--compiler`, so CLI automation can
+  inspect the same selected session and rewind as the TUI and launch flow
 - Canonical Timeline and compiler request/output JSON contract fixtures
 - Target launch dry-run plans with Work Capsule verification reports
 - `open --json` and `launch --json` include an `action` discriminator so tooling can distinguish original resume from target handoff
@@ -267,10 +271,9 @@ MOONBOX_TIMELINE_EVENT_LIMIT=100 cargo run -- tui
 cargo run -- open --session <session-id>
 cargo run -- open --session <session-id> --json
 cargo run -- open --execute --session <session-id>
-cargo run -- capsule --json
-cargo run -- compile-request --json
-cargo run -- compile-output --json
-cargo run -- compile-output --compiler <compiler-id> --json
+cargo run -- capsule --session <session-id> --target hermes --rewind <event-id> --json
+cargo run -- compile-request --session <session-id> --target hermes --rewind <event-id> --json
+cargo run -- compile-output --session <session-id> --target hermes --rewind <event-id> --compiler <compiler-id> --json
 cargo run -- compilers --json
 cargo run -- doctor --json
 cargo run -- completions bash
@@ -287,11 +290,16 @@ cargo run -- verify --target hermes --session hermes-cxcp-502 --json
 adds per-session `source_provenance`, `source_path`, and `parse_skip_count`
 fields.
 
-`open` and `launch` are dry-run by default. Dry-runs may omit `--session` and
-will preview the newest discovered session. Passing `--execute` runs the
-original CLI resume command or verified target command and therefore requires an
-explicit `--session`, so automation cannot accidentally open the newest active
-session. `verify` never resumes or launches a real process. `doctor` is also
+`open`, `launch`, `capsule`, `compile-request`, and `compile-output` are dry-run
+by default. Dry-runs may omit `--session` and will preview the newest discovered
+session. Passing `--execute` runs the original CLI resume command or verified
+target command and therefore requires an explicit `--session`, so automation
+cannot accidentally open the newest active session. `verify`, `capsule`,
+`compile-request`, and `compile-output` never resume or launch a real process.
+`capsule`, `compile-request`, and `compile-output` accept `--session`,
+`--target`, `--rewind`, and `--compiler`, so scripts can inspect an exact
+selected rewind without relying on the old Codex-to-Hermes fixture defaults.
+`doctor` is also
 non-executing: it checks config resolution, source adapter provenance, session
 summary discovery, target binary availability, and compiler catalog readiness
 without loading timelines, resuming sessions, or spawning targets. Its JSON
@@ -385,7 +393,7 @@ MOONBOX_COMPILER=/path/to/compiler \
 MOONBOX_COMPILER_ID=engineering-handoff \
 MOONBOX_COMPILER_ARGS='["--mode","handoff"]' \
 MOONBOX_COMPILER_TIMEOUT_MS=30000 \
-cargo run -- compile-output --compiler engineering-handoff --json
+cargo run -- compile-output --session <session-id> --target hermes --rewind <event-id> --compiler engineering-handoff --json
 ```
 
 Without configured presets or `MOONBOX_COMPILER`, Moonbox uses the built-in
@@ -416,8 +424,8 @@ Moonbox has two separate actions for a selected session:
   original CLI, then press `enter` to hand the terminal to that CLI. Moonbox
   prints the exact command before handoff and, on Unix, replaces itself with
   the source CLI instead of waiting as a parent process.
-- `t`: choose a target CLI, then review a `target_handoff` command before
-  launching or copying it. `H` remains a compatibility alias.
+- `x`: choose a target CLI, then review a `target_handoff` command before
+  launching or copying it. `H` and `t` remain compatibility aliases.
 
 The main screen is a global session entry point. Sessions are sorted by time and
 tagged by source CLI. Source filtering is controlled by `f` or `[` / `]` and
@@ -468,7 +476,7 @@ the dry-run JSON surfaces and `capsule --json`.
 | `d` | Toggle diff preview |
 | `s` | Cycle compiler skill |
 | `enter` | Open selected session with original CLI |
-| `t` / `H` | Choose target for handoff |
+| `x` / `H` / `t` | Choose target for handoff |
 | `:` | Command mode |
 | `?` | Help |
 | `q` / `Esc` | Back / quit |
@@ -586,11 +594,16 @@ Stable interfaces matter more than any single framework:
   validation, stable-width TUI panel titles, real-vs-draft capsule labeling,
   low-signal tool-row folding, and high-signal default rewind selection for
   real sessions; original-session resume now prints the command and execs the
-  source CLI on Unix, with main-list `enter` opening original sessions and `t`
-  reserved for target handoff while `H` remains a compatibility alias.
+  source CLI on Unix, with main-list `enter` opening original sessions and `x`
+  reserved for target handoff while `H` and `t` remain compatibility aliases.
 - M45: readable target handoff prompt hardening; target CLIs now receive a
   structured Work Capsule Summary instead of a raw JSON blob, and public CLI
   contracts assert that dry-run launch plans keep this prompt readable.
+- M46: parameterized compiler inspection surfaces; `capsule`,
+  `compile-request`, and `compile-output` now accept explicit `--session`,
+  `--target`, `--rewind`, and `--compiler`, with public CLI contract coverage
+  proving they no longer fall back to hard-coded Codex / Hermes / `evt-091`
+  defaults.
 
 ### Can Build Now
 

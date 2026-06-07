@@ -1,7 +1,7 @@
 use std::fs;
 
 use super::{
-    data,
+    compiler, data,
     error::CoreError,
     launcher,
     model::{
@@ -79,33 +79,44 @@ pub fn execute_open(
     launcher::execute_original_plan(plan).map(Some)
 }
 
-pub fn capsule(source: CliTool, target: CliTool) -> Result<WorkCapsule, CoreError> {
-    Ok(load_workbench(source, target)?.capsule)
+pub fn capsule_for_selection(
+    session_id: Option<&str>,
+    target: CliTool,
+    rewind_event_id: Option<&str>,
+    compiler: Option<&str>,
+) -> Result<Option<WorkCapsule>, CoreError> {
+    let Some(source_session) = selected_session(session_id)? else {
+        return Ok(None);
+    };
+    let compiler = selected_compiler(compiler);
+    data::compile_output_for_session_id(&source_session.id, target, rewind_event_id, &compiler)
+        .map(|output| output.map(|output| output.capsule))
 }
 
-pub fn compile_request(
-    source: CliTool,
+pub fn compile_request_for_selection(
+    session_id: Option<&str>,
     target: CliTool,
-    rewind_event_id: &str,
+    rewind_event_id: Option<&str>,
     compiler: Option<&str>,
-) -> Result<CapsuleCompileRequest, CoreError> {
-    if let Some(compiler) = compiler {
-        data::compile_request_with_compiler(source, target, rewind_event_id, compiler)
-    } else {
-        data::compile_request(source, target, rewind_event_id)
-    }
+) -> Result<Option<CapsuleCompileRequest>, CoreError> {
+    let Some(source_session) = selected_session(session_id)? else {
+        return Ok(None);
+    };
+    let compiler = selected_compiler(compiler);
+    data::compile_request_for_session_id(&source_session.id, target, rewind_event_id, &compiler)
 }
 
-pub fn compile_output(
-    source: CliTool,
+pub fn compile_output_for_selection(
+    session_id: Option<&str>,
     target: CliTool,
+    rewind_event_id: Option<&str>,
     compiler: Option<&str>,
-) -> Result<CapsuleCompileOutput, CoreError> {
-    if let Some(compiler) = compiler {
-        data::compile_output_with_compiler(source, target, compiler)
-    } else {
-        data::compile_output(source, target)
-    }
+) -> Result<Option<CapsuleCompileOutput>, CoreError> {
+    let Some(source_session) = selected_session(session_id)? else {
+        return Ok(None);
+    };
+    let compiler = selected_compiler(compiler);
+    data::compile_output_for_session_id(&source_session.id, target, rewind_event_id, &compiler)
 }
 
 pub fn compile_capsule(
@@ -188,6 +199,13 @@ fn selected_session(session_id: Option<&str>) -> Result<Option<SessionSummary>, 
     }
 }
 
+fn selected_compiler(compiler_id: Option<&str>) -> String {
+    compiler_id
+        .filter(|compiler_id| !compiler_id.trim().is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(compiler::default_compiler_id)
+}
+
 fn capsule_for_plan(
     generated: &WorkCapsule,
     capsule_path: Option<&str>,
@@ -261,6 +279,38 @@ mod tests {
     }
 
     #[test]
+    fn compile_surfaces_accept_explicit_session_target_rewind_and_compiler() {
+        let request = compile_request_for_selection(
+            Some("claude-qc-platform"),
+            CliTool::Codex,
+            Some("evt-074"),
+            Some("engineering-handoff"),
+        )
+        .expect("request result")
+        .expect("request");
+
+        assert_eq!(request.source_cli, CliTool::Claude);
+        assert_eq!(request.target_cli, CliTool::Codex);
+        assert_eq!(request.source_session.id, "claude-qc-platform");
+        assert_eq!(request.rewind_event_id, "evt-074");
+        assert_eq!(request.compiler, "engineering-handoff");
+
+        let capsule = capsule_for_selection(
+            Some("claude-qc-platform"),
+            CliTool::Codex,
+            Some("evt-074"),
+            Some("engineering-handoff"),
+        )
+        .expect("capsule result")
+        .expect("capsule");
+
+        assert_eq!(capsule.source_cli, CliTool::Claude);
+        assert_eq!(capsule.target_cli, CliTool::Codex);
+        assert_eq!(capsule.source_session, "claude-qc-platform");
+        assert!(capsule.rewind_point.contains("evt-074"));
+    }
+
+    #[test]
     fn execute_open_requires_explicit_session() {
         let error = execute_open(None).expect_err("implicit execute should be blocked");
 
@@ -295,7 +345,14 @@ mod tests {
             "moonbox-target-mismatch-{}.json",
             std::process::id()
         ));
-        let capsule = capsule(CliTool::Codex, CliTool::Hermes).expect("capsule");
+        let capsule = capsule_for_selection(
+            Some("codex-cxcp-design"),
+            CliTool::Hermes,
+            Some("evt-091"),
+            None,
+        )
+        .expect("capsule result")
+        .expect("capsule");
         fs::write(&path, serde_json::to_string_pretty(&capsule).expect("json"))
             .expect("write capsule");
 
@@ -320,7 +377,14 @@ mod tests {
             "moonbox-target-execute-mismatch-{}.json",
             std::process::id()
         ));
-        let capsule = capsule(CliTool::Codex, CliTool::Hermes).expect("capsule");
+        let capsule = capsule_for_selection(
+            Some("codex-cxcp-design"),
+            CliTool::Hermes,
+            Some("evt-091"),
+            None,
+        )
+        .expect("capsule result")
+        .expect("capsule");
         fs::write(&path, serde_json::to_string_pretty(&capsule).expect("json"))
             .expect("write capsule");
 
