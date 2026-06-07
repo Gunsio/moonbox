@@ -131,8 +131,9 @@ and this project uses semantic versioning once tagged releases start.
   a full TUI workbench for explicit session ids.
 - Target launch execution is opt-in and refuses to spawn a target command when
   verification fails.
-- TUI target handoff now uses a dedicated `H` shortcut and a two-stage flow:
-  choose a target, review the guarded execute command, then copy with `y`.
+- TUI target handoff now uses a dedicated `t` shortcut, with `H` kept as a
+  compatibility alias, and a two-stage flow: choose a target, review the
+  guarded execute command, then copy with `y`.
 - TUI launch key hints now distinguish target selection from Launch Review, so
   `y` is shown as unavailable until review.
 - TUI launch copy now points at `moonbox launch --execute`, keeping long
@@ -147,7 +148,7 @@ and this project uses semantic versioning once tagged releases start.
   the source CLI so the terminal is handed off without Moonbox waiting in the
   foreground; `y` still copies the guarded Moonbox wrapper.
 - Main-list `enter` now directly opens the selected session with its original
-  CLI; target handoff moved to the explicit `H` shortcut.
+  CLI; target handoff moved to the explicit `t` shortcut.
 - Compiler execution precedence is now explicit: environment override, config
   preset, then built-in fixture compiler.
 - Unknown compiler ids and disabled compiler presets now return structured
@@ -195,6 +196,10 @@ and this project uses semantic versioning once tagged releases start.
 - Built-in compiler output is labeled as deterministic draft guidance; real
   fields are limited to session id, title, cwd, selected rewind, and source
   health until an external compiler skill is configured.
+- Target handoff prompts now render a readable Work Capsule Summary with
+  source, target, goal, state, decisions, todo, evidence, risks, and
+  instructions instead of dumping the capsule as raw JSON into the target CLI
+  first screen.
 
 ### Not Yet Released
 

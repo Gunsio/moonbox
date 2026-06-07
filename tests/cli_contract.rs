@@ -538,6 +538,17 @@ fn open_launch_and_verify_public_cli_contracts_are_dry_run_by_default() {
     assert_eq!(launch["action"], "target_handoff");
     assert_eq!(launch["verification"]["ready"], true);
     assert_eq!(launch["target_command"]["program"], "hermes");
+    let target_args = launch["target_command"]["args"]
+        .as_array()
+        .expect("target command args");
+    let handoff_prompt = target_args
+        .last()
+        .and_then(|value| value.as_str())
+        .expect("handoff prompt");
+    assert!(handoff_prompt.contains("Work Capsule Summary"));
+    assert!(handoff_prompt.contains("Instructions\n- Continue from the selected rewind point"));
+    assert!(!handoff_prompt.contains("Work Capsule JSON"));
+    assert!(!handoff_prompt.contains("\"source_cli\""));
 
     let verify = output_json(
         moonbox_command("dry-run-contract")

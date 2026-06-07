@@ -9,7 +9,6 @@ pub enum CoreError {
     CapsuleRead { path: String, reason: String },
     CapsuleParse { path: String, reason: String },
     ExecuteRequiresSession { action: &'static str },
-    LaunchPrepare { reason: String },
     LaunchBlocked { reason: String },
     LaunchStart { command: String, reason: String },
     ReplayEval { reason: String },
@@ -30,9 +29,6 @@ impl fmt::Display for CoreError {
                 f,
                 "{action} execution requires an explicit --session; run a dry-run first or pass --session to avoid opening the newest active session by accident"
             ),
-            Self::LaunchPrepare { reason } => {
-                write!(f, "cannot prepare target launch: {reason}")
-            }
             Self::LaunchBlocked { reason } => write!(f, "target launch blocked: {reason}"),
             Self::LaunchStart { command, reason } => {
                 write!(f, "cannot start target launch `{command}`: {reason}")

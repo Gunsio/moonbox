@@ -116,10 +116,13 @@ semantics.
 - Keep TUI interaction paths bounded. Startup, session switching, filtering,
   list rendering, and modal refreshes must not synchronously parse unbounded
   local session history or format every indexed row on every frame.
-- Keep interactive launch handoffs prompt and observable. When the TUI opens
+- Keep interactive launch handoff prompts observable. When the TUI opens
   an original or target CLI, restore the terminal and surface the exact command
   before control leaves Moonbox; tests must cover plans and prompts without
   opening real sessions.
+- Keep target handoff prompts readable. The target CLI first screen should show
+  a structured summary, not an unformatted JSON dump; machine-readable data can
+  stay in dry-run JSON outputs and explicit capsule commands.
 - Prefer stable core contracts over UI-only behavior.
 - Keep the Rust crate API narrow and documented. The CLI is the product surface;
   internal adapters, compiler runners, source stores, and TUI state stay

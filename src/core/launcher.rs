@@ -7,8 +7,9 @@ use std::{
 use super::{
     error::CoreError,
     model::{
-        CliTool, LaunchExecution, LaunchExecutionStatus, LaunchPlan, OriginalSessionExecution,
-        OriginalSessionPlan, SessionSummary, TargetLaunchCommand, WorkCapsule,
+        ChecklistItem, CliTool, LaunchExecution, LaunchExecutionStatus, LaunchPlan,
+        OriginalSessionExecution, OriginalSessionPlan, SessionSummary, TargetLaunchCommand,
+        WorkCapsule,
     },
     verifier,
 };
@@ -19,7 +20,7 @@ pub fn target_command(
     capsule: &WorkCapsule,
 ) -> Result<TargetLaunchCommand, CoreError> {
     let program = configured_target_binary(target);
-    let prompt = handoff_prompt(session, capsule)?;
+    let prompt = handoff_prompt(session, capsule);
     let cwd = usable_cwd(&session.cwd);
     let args = target_args(target, cwd.as_deref(), prompt);
     let display = shell_command(&program, &args);
@@ -181,35 +182,119 @@ fn target_args(target: CliTool, cwd: Option<&str>, prompt: String) -> Vec<String
     }
 }
 
-fn handoff_prompt(session: &SessionSummary, capsule: &WorkCapsule) -> Result<String, CoreError> {
-    let capsule_json =
-        serde_json::to_string(capsule).map_err(|error| CoreError::LaunchPrepare {
-            reason: error.to_string(),
-        })?;
-    Ok(format!(
+fn handoff_prompt(session: &SessionSummary, capsule: &WorkCapsule) -> String {
+    format!(
         "\
 You are receiving a Moonbox cross-CLI handoff.
 
-Source session: {} {}
-Source title: {}
-Source cwd: {}
-Target CLI: {}
-Rewind point: {}
+Source
+- CLI: {}
+- Session: {}
+- Title: {}
+- Cwd: {}
+- Source health: {}
 
-Continue from the rewind point using the Work Capsule below. Do not try raw
-session resume unless Moonbox explicitly asked for original-session resume.
+Target
+- CLI: {}
+- Branch: {}
+- Rewind point: {}
 
-Work Capsule JSON:
+Work Capsule Summary
+
+Goal:
 {}
+
+State:
+{}
+
+Decisions:
+{}
+
+Todo:
+{}
+
+Evidence:
+{}
+
+Risks:
+{}
+
+Instructions
+- Continue from the selected rewind point using this capsule.
+- Treat the source session as read-only.
+- Do not raw-resume the source session unless Moonbox explicitly asks for original-session resume.
+- Start by briefly restating the goal, current state, next step, and risks before making changes.
 ",
         session.cli,
         session.id,
-        session.title,
-        session.cwd,
+        prompt_value(&session.title),
+        prompt_value(&session.cwd),
+        session_health_prompt(session),
         capsule.target_cli,
+        prompt_value(&capsule.target_branch),
         capsule.rewind_point,
-        capsule_json
-    ))
+        prompt_value(&capsule.goal),
+        prompt_value(&capsule.state),
+        bullet_lines(&capsule.decisions),
+        todo_lines(&capsule.todo),
+        bullet_lines(&capsule.evidence),
+        bullet_lines(&capsule.risks)
+    )
+}
+
+fn session_health_prompt(session: &SessionSummary) -> String {
+    match session.health_reason.as_deref() {
+        Some(reason) if !reason.trim().is_empty() => {
+            format!(
+                "{} - {}",
+                session_status_label(session.status),
+                prompt_value(reason)
+            )
+        }
+        _ => session_status_label(session.status).into(),
+    }
+}
+
+fn session_status_label(status: super::model::SessionStatus) -> &'static str {
+    match status {
+        super::model::SessionStatus::Healthy => "healthy",
+        super::model::SessionStatus::Warning => "warning",
+        super::model::SessionStatus::Failed => "failed",
+    }
+}
+
+fn bullet_lines(items: &[String]) -> String {
+    if items.is_empty() {
+        return "- None recorded.".into();
+    }
+    items
+        .iter()
+        .map(|item| format!("- {}", prompt_value(item)))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn todo_lines(items: &[ChecklistItem]) -> String {
+    if items.is_empty() {
+        return "- [ ] No todo items recorded.".into();
+    }
+    items
+        .iter()
+        .map(|item| {
+            let marker = if item.done { "x" } else { " " };
+            format!("- [{marker}] {}", prompt_value(&item.text))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn prompt_value(value: &str) -> String {
+    let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.is_empty() {
+        "-".into()
+    } else {
+        normalized
+    }
 }
 
 pub(crate) fn configured_target_binary(target: CliTool) -> String {
@@ -285,7 +370,31 @@ mod tests {
 
         assert_eq!(command.program, "codex");
         assert!(command.display.starts_with("codex "));
-        assert!(command.display.contains("Work Capsule JSON"));
+        assert!(command.display.contains("Work Capsule Summary"));
+        assert!(!command.display.contains("Work Capsule JSON"));
+    }
+
+    #[test]
+    fn target_handoff_prompt_is_readable_summary_not_raw_json() {
+        let data = data::workbench_data(CliTool::Claude, CliTool::Codex).expect("data");
+        let session = data
+            .sessions
+            .iter()
+            .find(|session| session.id == data.capsule.source_session)
+            .expect("session");
+
+        let command = target_command(CliTool::Codex, session, &data.capsule).expect("command");
+        let prompt = command.args.last().expect("prompt");
+
+        assert!(prompt.contains("Source\n- CLI: Claude"));
+        assert!(prompt.contains("Work Capsule Summary"));
+        assert!(prompt.contains("Decisions:\n- "));
+        assert!(prompt.contains("Todo:\n- ["));
+        assert!(prompt.contains("Risks:\n- "));
+        assert!(prompt.contains("Instructions\n- Continue from the selected rewind point"));
+        assert!(!prompt.contains("Work Capsule JSON"));
+        assert!(!prompt.contains("\"source_cli\""));
+        assert!(!prompt.contains("{\"version\""));
     }
 
     #[test]

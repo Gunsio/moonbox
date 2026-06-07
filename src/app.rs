@@ -252,7 +252,7 @@ impl App {
             KeyCode::Char('f') => self.cycle_session_filter(true),
             KeyCode::Char('a') => self.clear_session_filters(),
             KeyCode::Char('o') => self.open_original(),
-            KeyCode::Char('H') => self.open_launch_picker(),
+            KeyCode::Char('t') | KeyCode::Char('H') => self.open_launch_picker(),
             KeyCode::Char('D') => self.open_doctor(),
             KeyCode::Char(':') => {
                 self.command_mode = true;
@@ -1579,7 +1579,7 @@ mod tests {
     #[test]
     fn target_cycles_inside_launch_picker() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
-        app.handle_key(key('H'));
+        app.handle_key(key('t'));
         assert!(app.show_launch);
         assert_eq!(app.status_message, "Choose target CLI");
 
@@ -1598,6 +1598,16 @@ mod tests {
         assert_eq!(app.data.capsule.source_session, "codex-cxcp-design");
         assert!(app.data.capsule.target_branch.contains("codex"));
         assert!(app.data.branches[2].label.contains("codex"));
+    }
+
+    #[test]
+    fn uppercase_h_remains_launch_picker_compatibility_alias() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+
+        app.handle_key(key('H'));
+
+        assert!(app.show_launch);
+        assert_eq!(app.status_message, "Choose target CLI");
     }
 
     #[test]
