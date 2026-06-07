@@ -675,6 +675,9 @@ Stable interfaces matter more than any single framework:
   `Star` immediately before `All`, the right panel is reduced to a compact
   Handoff Snapshot, fake `/ 100K` token budget text is removed, and `Action
   Path` replaces the misleading branch-tree copy.
+- M49.1: session-list marker spacing polish; selection arrows now render inside
+  the row, and star/status markers only appear when meaningful, removing the
+  large empty gap before `Cdx` / `Clu` / `Hms` source badges.
 
 ### Remaining Milestones
 

@@ -249,34 +249,29 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
             .map(|index| {
                 let session = &app.data.sessions[*index];
                 let selected_row = *index == app.selected_session;
-                let status = match session.status {
-                    SessionStatus::Healthy => Span::raw(" "),
-                    SessionStatus::Warning => Span::styled("▲", Style::default().fg(theme::GOLD)),
-                    SessionStatus::Failed => Span::styled(
-                        "!",
-                        Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
-                    ),
-                };
-                let star = if app.is_session_starred(session) {
+                let selector = if selected_row {
                     Span::styled(
-                        "*",
+                        "▸",
                         Style::default()
-                            .fg(theme::GOLD)
+                            .fg(theme::TEXT)
                             .add_modifier(Modifier::BOLD),
                     )
                 } else {
                     Span::raw(" ")
                 };
+                let marker = session_row_marker(session, app.is_session_starred(session));
+                let mut title_spans = vec![selector, Span::raw(" ")];
+                if let Some(marker) = marker {
+                    title_spans.push(marker);
+                    title_spans.push(Span::raw(" "));
+                }
+                title_spans.extend([
+                    Span::styled(source_pill(session.cli), source_tool_style(session.cli)),
+                    Span::raw("  "),
+                    Span::styled(&session.title, session_title_style(selected_row)),
+                ]);
                 ListItem::new(vec![
-                    Line::from(vec![
-                        status,
-                        Span::raw(" "),
-                        star,
-                        Span::raw(" "),
-                        Span::styled(source_pill(session.cli), source_tool_style(session.cli)),
-                        Span::raw("  "),
-                        Span::styled(&session.title, session_title_style(selected_row)),
-                    ]),
+                    Line::from(title_spans),
                     Line::from(vec![Span::styled(
                         session_list_secondary(session),
                         Style::default().fg(theme::MUTED),
@@ -316,7 +311,7 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
 
     let list = List::new(items)
         .block(dynamic_panel_block(title, app.focus == Focus::Sessions))
-        .highlight_symbol("▸ ")
+        .highlight_symbol("")
         .highlight_style(
             Style::default()
                 .fg(theme::TEXT)
@@ -336,6 +331,26 @@ fn session_title_style(selected: bool) -> Style {
             .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme::MUTED)
+    }
+}
+
+fn session_row_marker(
+    session: &crate::core::model::SessionSummary,
+    starred: bool,
+) -> Option<Span<'static>> {
+    match session.status {
+        SessionStatus::Warning => Some(Span::styled("▲", Style::default().fg(theme::GOLD))),
+        SessionStatus::Failed => Some(Span::styled(
+            "!",
+            Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+        )),
+        SessionStatus::Healthy if starred => Some(Span::styled(
+            "*",
+            Style::default()
+                .fg(theme::GOLD)
+                .add_modifier(Modifier::BOLD),
+        )),
+        SessionStatus::Healthy => None,
     }
 }
 

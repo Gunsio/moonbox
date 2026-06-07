@@ -190,6 +190,9 @@ and this project uses semantic versioning once tagged releases start.
   session titles so only the active row reads as highlighted.
 - The right Session Details panel now shows a compact Handoff Snapshot; full
   capsule decisions, todo, evidence, and risks move to Handoff Review.
+- TUI session rows now render the selection arrow inline and only show the
+  star/status marker when needed, removing the large blank gap before `Cdx` /
+  `Clu` / `Hms` source badges.
 - Resume-index rows whose event count is unknown now still hydrate their real
   timeline from `source_path`; truly empty timelines build a pending capsule
   instead of crashing the TUI by compiling a missing rewind id.
