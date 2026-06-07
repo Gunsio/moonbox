@@ -8,7 +8,7 @@ use std::{
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::core::{
-    config, doctor,
+    compiler, config, doctor,
     error::CoreError,
     launcher,
     model::{
@@ -116,11 +116,13 @@ pub struct App {
     pub launch_review: bool,
     pub show_open_original: bool,
     pub show_doctor: bool,
+    pub show_skill_picker: bool,
     pub session_filter: SessionFilter,
     pub starred_sessions: Vec<String>,
     pub search_query: String,
     visible_session_indices: Vec<usize>,
     pub pending_target: CliTool,
+    pub pending_compiler: usize,
     pub status_message: String,
     pub rewind_event_id: String,
     pub capsule_scroll: u16,
@@ -169,10 +171,12 @@ impl App {
             launch_review: false,
             show_open_original: false,
             show_doctor: false,
+            show_skill_picker: false,
             session_filter: SessionFilter::All,
             starred_sessions: config::load_starred_sessions(),
             search_query: String::new(),
             pending_target: target,
+            pending_compiler: 0,
             status_message: "Ready".into(),
             rewind_event_id,
             capsule_scroll: 0,
@@ -283,7 +287,7 @@ impl App {
             KeyCode::Char(' ') => self.set_rewind_point(),
             KeyCode::Char('c') => self.review_capsule(),
             KeyCode::Char('v') => self.toggle_verify(),
-            KeyCode::Char('S') => self.cycle_compiler(),
+            KeyCode::Char('S') => self.open_skill_picker(),
             KeyCode::Char('y') => self.copy_focused_command(),
             KeyCode::Enter => self.queue_original_resume(),
             _ => self.pending_g = false,
@@ -346,7 +350,7 @@ impl App {
                     "source" | "source next" => self.cycle_session_filter(true),
                     "source prev" | "source previous" => self.cycle_session_filter(false),
                     "star" | "s" | "*" => self.toggle_starred_session(),
-                    "skill" | "compiler" => self.cycle_compiler(),
+                    "skill" | "compiler" => self.open_skill_picker(),
                     "handoff" | "target" | "launch" | "x" => self.open_launch_picker(),
                     _ => self.set_status(format!("Unknown command: {command}")),
                 }
@@ -455,6 +459,10 @@ impl App {
     }
 
     fn handle_overlay_key(&mut self, key: KeyEvent) {
+        if self.show_skill_picker {
+            self.handle_skill_picker_key(key);
+            return;
+        }
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => self.back_or_quit(),
             KeyCode::Char('r') if self.show_doctor => self.refresh_doctor(),
@@ -476,7 +484,12 @@ impl App {
     }
 
     fn back_or_quit(&mut self) {
-        if self.show_doctor {
+        if self.show_skill_picker {
+            self.show_skill_picker = false;
+            self.modal_scroll = 0;
+            self.pending_compiler = self.selected_compiler;
+            self.set_status("Skill picker closed");
+        } else if self.show_doctor {
             self.show_doctor = false;
             self.modal_scroll = 0;
             self.set_status("Doctor closed");
@@ -621,10 +634,79 @@ impl App {
         self.pending_g = false;
     }
 
-    fn cycle_compiler(&mut self) {
-        self.selected_compiler = (self.selected_compiler + 1) % self.data.compilers.len();
+    fn open_skill_picker(&mut self) {
+        self.pending_compiler = self
+            .selected_compiler
+            .min(self.data.compilers.len().saturating_sub(1));
+        self.show_skill_picker = true;
+        self.modal_scroll = 0;
+        self.set_status("Choose compiler skill");
+        self.pending_g = false;
+    }
+
+    fn handle_skill_picker_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => self.back_or_quit(),
+            KeyCode::Enter => self.confirm_skill_picker(),
+            KeyCode::Char('j') | KeyCode::Char('l') | KeyCode::Down | KeyCode::Right => {
+                self.move_skill_picker(true)
+            }
+            KeyCode::Char('k') | KeyCode::Char('h') | KeyCode::Up | KeyCode::Left => {
+                self.move_skill_picker(false)
+            }
+            KeyCode::Char('y') => self.copy_pending_skill_reference(),
+            _ => {}
+        }
+    }
+
+    fn move_skill_picker(&mut self, forward: bool) {
+        if self.data.compilers.is_empty() {
+            self.pending_compiler = 0;
+            self.set_status("No compiler skills configured");
+            return;
+        }
+        if forward {
+            self.pending_compiler = (self.pending_compiler + 1) % self.data.compilers.len();
+        } else {
+            self.pending_compiler = if self.pending_compiler == 0 {
+                self.data.compilers.len() - 1
+            } else {
+                self.pending_compiler - 1
+            };
+        }
+        self.set_status(format!(
+            "Skill candidate: {}",
+            self.data.compilers[self.pending_compiler]
+        ));
+    }
+
+    fn confirm_skill_picker(&mut self) {
+        if self.data.compilers.is_empty() {
+            self.show_skill_picker = false;
+            self.set_status("No compiler skills configured");
+            return;
+        }
+        self.selected_compiler = self.pending_compiler.min(self.data.compilers.len() - 1);
         self.data.capsule.compiler = self.data.compilers[self.selected_compiler].clone();
+        self.show_skill_picker = false;
+        self.modal_scroll = 0;
         self.set_status(format!("Skill: {}", self.data.capsule.compiler));
+        self.pending_g = false;
+    }
+
+    fn copy_pending_skill_reference(&mut self) {
+        let Some(skill) = self.data.compilers.get(self.pending_compiler) else {
+            self.set_status("No compiler skill selected");
+            return;
+        };
+        let info = compiler::compiler_catalog_entries()
+            .into_iter()
+            .find(|entry| entry.id == *skill);
+        let copied = info
+            .and_then(|entry| entry.homepage.or(entry.command))
+            .unwrap_or_else(|| skill.clone());
+        self.clipboard_text = Some(copied);
+        self.set_status(format!("Copied skill reference: {skill}"));
         self.pending_g = false;
     }
 
@@ -848,7 +930,7 @@ impl App {
     }
 
     fn has_overlay(&self) -> bool {
-        self.show_help || self.show_open_original || self.show_doctor
+        self.show_help || self.show_open_original || self.show_doctor || self.show_skill_picker
     }
 
     fn cycle_target(&mut self, forward: bool) {
@@ -1547,17 +1629,24 @@ mod tests {
     }
 
     #[test]
-    fn compiler_cycles() {
+    fn skill_picker_applies_selected_compiler() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         let first = app.data.capsule.compiler.clone();
         app.handle_key(key('S'));
+        assert!(app.show_skill_picker);
+        assert_eq!(app.data.capsule.compiler, first);
+        app.handle_key(key('j'));
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
         assert_ne!(app.data.capsule.compiler, first);
+        assert!(!app.show_skill_picker);
     }
 
     #[test]
     fn review_key_refreshes_capsule_and_opens_handoff_review() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.handle_key(key('S'));
+        app.handle_key(key('j'));
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
         let compiler = app.data.capsule.compiler.clone();
 
         app.handle_key(key('c'));

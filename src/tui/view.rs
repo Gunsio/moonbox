@@ -12,9 +12,11 @@ use ratatui::{
 
 use crate::{
     app::{App, Focus},
+    core::compiler,
     core::model::{
-        CliTool, LaunchValidationState, SessionStatus, SourceProvenance, TimelineEvent,
-        TimelineKind, VerificationReport, VerificationStatus, WorkCapsule,
+        CliTool, CompilerPresetInfo, CompilerPresetKind, CompilerPresetStatus,
+        LaunchValidationState, SessionStatus, SourceProvenance, TimelineEvent, TimelineKind,
+        VerificationReport, VerificationStatus, WorkCapsule,
     },
 };
 
@@ -58,6 +60,9 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
     if app.show_doctor {
         render_doctor(frame, root, app);
+    }
+    if app.show_skill_picker {
+        render_skill_picker(frame, root, app);
     }
 }
 
@@ -577,7 +582,7 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
         let selected = group_idx == selected_group;
         let active = selected && app.focus == Focus::Timeline;
         let is_rewind = group.is_rewind(&app.rewind_event_id);
-        let (label, color) = timeline_group_label(group, is_rewind);
+        let (label, color) = timeline_group_label(group, is_rewind, app.data.source);
         let accent = timeline_group_accent(color, is_rewind);
         let marker = if active && is_rewind {
             "▶◆"
@@ -942,19 +947,34 @@ fn selected_timeline_group_position(
         .unwrap_or(0)
 }
 
-fn timeline_group_label(group: &TimelineGroup<'_>, is_rewind: bool) -> (String, Color) {
+fn timeline_group_label(
+    group: &TimelineGroup<'_>,
+    is_rewind: bool,
+    source: CliTool,
+) -> (String, Color) {
     if is_rewind {
         return ("REWIND".into(), theme::GOLD);
     }
     match group.kind() {
         TimelineKind::User => ("USER".into(), theme::BLUE),
-        TimelineKind::Assistant if group.len() > 1 => (format!("AI x{}", group.len()), theme::GOLD),
-        TimelineKind::Assistant => ("AI".into(), theme::GOLD),
+        TimelineKind::Assistant if group.len() > 1 => (
+            format!("{} x{}", assistant_source_label(source), group.len()),
+            theme::GOLD,
+        ),
+        TimelineKind::Assistant => (assistant_source_label(source).into(), theme::GOLD),
         TimelineKind::Tool => ("TOOL".into(), theme::MUTED),
         TimelineKind::Compact => ("COMPACT".into(), theme::CYAN),
         TimelineKind::Error => ("ERROR".into(), theme::RED),
         TimelineKind::GitDiff => ("GIT DIFF".into(), theme::GREEN),
         TimelineKind::RewindPoint => ("REWIND".into(), theme::GOLD),
+    }
+}
+
+fn assistant_source_label(source: CliTool) -> &'static str {
+    match source {
+        CliTool::Codex => "Codex",
+        CliTool::Claude => "Claude Code",
+        CliTool::Hermes => "Hermes",
     }
 }
 
@@ -1162,21 +1182,49 @@ fn render_branch_tree(frame: &mut Frame, area: Rect, app: &App) {
     let lines = if area.height < 4 {
         vec![Line::from(spans)]
     } else {
-        vec![
-            Line::from(spans),
-            Line::from(vec![
-                Span::styled("   next: ", Style::default().fg(theme::MUTED)),
-                Span::styled(
-                    "c review handoff  |  enter open original  |  s star",
-                    Style::default().fg(theme::CYAN),
-                ),
-            ]),
-        ]
+        vec![Line::from(spans), cwd_inventory_line(app, area.width)]
     };
     frame.render_widget(
         Paragraph::new(lines).block(panel_block(" Action Path ", app.focus == Focus::Branches)),
         area,
     );
+}
+
+fn cwd_inventory_line(app: &App, width: u16) -> Line<'static> {
+    let Some(session) = app.current_session() else {
+        return Line::from(Span::styled(
+            "   cwd: no session",
+            Style::default().fg(theme::MUTED),
+        ));
+    };
+    let codex = cwd_session_count(app, &session.cwd, CliTool::Codex);
+    let claude = cwd_session_count(app, &session.cwd, CliTool::Claude);
+    let hermes = cwd_session_count(app, &session.cwd, CliTool::Hermes);
+    let max_path_chars = usize::from(width.saturating_sub(56)).clamp(12, 64);
+    Line::from(vec![
+        Span::styled("   cwd: ", Style::default().fg(theme::MUTED)),
+        Span::styled(
+            review_snippet(&session.cwd, max_path_chars),
+            Style::default().fg(theme::TEXT),
+        ),
+        Span::styled(" · ", Style::default().fg(theme::BORDER)),
+        Span::styled(format!("Codex {codex}"), Style::default().fg(theme::BLUE)),
+        Span::styled(" · ", Style::default().fg(theme::BORDER)),
+        Span::styled(format!("Claude {claude}"), Style::default().fg(theme::CYAN)),
+        Span::styled(" · ", Style::default().fg(theme::BORDER)),
+        Span::styled(
+            format!("Hermes {hermes}"),
+            Style::default().fg(theme::ORANGE),
+        ),
+    ])
+}
+
+fn cwd_session_count(app: &App, cwd: &str, tool: CliTool) -> usize {
+    app.data
+        .sessions
+        .iter()
+        .filter(|session| session.cwd == cwd && session.cli == tool)
+        .count()
 }
 
 fn short_identifier(value: &str, keep: usize) -> String {
@@ -1275,6 +1323,14 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("Esc", "Close"),
         ];
     }
+    if app.show_skill_picker {
+        return vec![
+            ("j/k", "Skill"),
+            ("enter", "Apply"),
+            ("y", "Copy Ref"),
+            ("q", "Close"),
+        ];
+    }
     if app.show_doctor {
         return vec![
             ("r", "Refresh"),
@@ -1300,6 +1356,7 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("[ ]", "Source"),
             ("a", "Clear"),
             ("s", "Star"),
+            ("S", "Skill"),
             ("o", "Original"),
             ("enter", "Open"),
             ("x/H", "Handoff"),
@@ -1488,6 +1545,166 @@ fn render_doctor(frame: &mut Frame, root: Rect, app: &App) {
             .wrap(Wrap { trim: true }),
         area,
     );
+}
+
+fn render_skill_picker(frame: &mut Frame, root: Rect, app: &App) {
+    let area = modal_area(root, 78, 72);
+    frame.render_widget(Clear, area);
+    let catalog = compiler::compiler_catalog_entries();
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "Choose compiler skill",
+            Style::default()
+                .fg(theme::GOLD)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "Compression and compatibility live in replaceable compiler skills.",
+            Style::default().fg(theme::MUTED),
+        )),
+        Line::raw(""),
+    ];
+
+    for (index, id) in app.data.compilers.iter().enumerate() {
+        let info = catalog
+            .iter()
+            .find(|entry| entry.id == *id)
+            .cloned()
+            .unwrap_or_else(|| fallback_compiler_info(id));
+        let pending = index == app.pending_compiler;
+        let active = index == app.selected_compiler;
+        let status_color = compiler_status_color(info.status);
+        let row_style = if pending {
+            Style::default()
+                .fg(Color::Black)
+                .bg(status_color)
+                .add_modifier(Modifier::BOLD)
+        } else if active {
+            Style::default()
+                .fg(theme::TEXT)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme::TEXT)
+        };
+        let muted_style = if pending {
+            Style::default().fg(theme::TEXT)
+        } else {
+            Style::default().fg(theme::MUTED)
+        };
+        let cursor = if pending { ">" } else { " " };
+        let active_mark = if active { "active" } else { "      " };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{cursor} "), row_style),
+            Span::styled(format!("{:<24}", info.id), row_style),
+            Span::styled("  ", row_style),
+            Span::styled(
+                format!("{:<7}", compiler_status_label(info.status)),
+                row_style,
+            ),
+            Span::styled("  ", row_style),
+            Span::styled(format!("{:<11}", compiler_kind_label(info.kind)), row_style),
+            Span::styled("  ", row_style),
+            Span::styled(active_mark, row_style),
+        ]));
+        lines.push(Line::from(vec![
+            Span::raw("    "),
+            Span::styled(compiler_description(&info), muted_style),
+        ]));
+        lines.push(Line::from(vec![
+            Span::raw("    "),
+            Span::styled("stars: ", Style::default().fg(theme::MUTED)),
+            Span::styled(
+                format_star_count(info.github_stars),
+                Style::default().fg(theme::GOLD),
+            ),
+            Span::styled("  link: ", Style::default().fg(theme::MUTED)),
+            Span::styled(compiler_reference(&info), Style::default().fg(theme::CYAN)),
+        ]));
+        lines.push(Line::raw(""));
+    }
+
+    if app.data.compilers.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No compiler skills configured.",
+            Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+        )));
+    }
+    lines.push(Line::from(Span::styled(
+        "j/k choose   enter apply   y copy link/command   q close",
+        Style::default().fg(theme::MUTED),
+    )));
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(panel_block(" Skill Picker ", true))
+            .scroll((app.modal_scroll, 0))
+            .wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
+fn fallback_compiler_info(id: &str) -> CompilerPresetInfo {
+    CompilerPresetInfo {
+        id: id.into(),
+        kind: CompilerPresetKind::Config,
+        status: CompilerPresetStatus::Warning,
+        score: 0,
+        command: None,
+        args: Vec::new(),
+        timeout_ms: None,
+        reason: "compiler id is listed but missing from catalog".into(),
+        description: None,
+        homepage: None,
+        github_stars: None,
+    }
+}
+
+fn compiler_status_label(status: CompilerPresetStatus) -> &'static str {
+    match status {
+        CompilerPresetStatus::Ready => "READY",
+        CompilerPresetStatus::Warning => "WARN",
+        CompilerPresetStatus::Disabled => "DISABLE",
+    }
+}
+
+fn compiler_status_color(status: CompilerPresetStatus) -> Color {
+    match status {
+        CompilerPresetStatus::Ready => theme::GREEN,
+        CompilerPresetStatus::Warning => theme::GOLD,
+        CompilerPresetStatus::Disabled => theme::MUTED,
+    }
+}
+
+fn compiler_kind_label(kind: CompilerPresetKind) -> &'static str {
+    match kind {
+        CompilerPresetKind::Builtin => "builtin",
+        CompilerPresetKind::Environment => "env",
+        CompilerPresetKind::Config => "config",
+    }
+}
+
+fn compiler_description(info: &CompilerPresetInfo) -> String {
+    info.description
+        .clone()
+        .unwrap_or_else(|| review_snippet(&info.reason, 96))
+}
+
+fn compiler_reference(info: &CompilerPresetInfo) -> String {
+    info.homepage
+        .clone()
+        .or_else(|| info.command.clone())
+        .unwrap_or_else(|| "built-in".into())
+}
+
+fn format_star_count(stars: Option<u64>) -> String {
+    let Some(stars) = stars else {
+        return "unknown".into();
+    };
+    if stars >= 1_000 {
+        format!("{:.1}k", stars as f64 / 1_000.0)
+    } else {
+        stars.to_string()
+    }
 }
 
 fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
@@ -2241,11 +2458,61 @@ mod tests {
 
         let screen = render_text(&app, 120, 28);
 
-        assert_screen_contains(&screen, "AI x2");
+        assert_screen_contains(&screen, "Codex x2");
         assert_screen_contains(&screen, "先定位项目");
         assert_screen_contains(&screen, "继续分析缓存");
-        assert_eq!(screen.matches("AI x2").count(), 1, "{screen}");
+        assert_eq!(screen.matches("Codex x2").count(), 1, "{screen}");
         assert!(!screen.contains("ASSISTANT  Assistant"), "{screen}");
+    }
+
+    #[test]
+    fn timeline_assistant_group_label_uses_source_cli() {
+        let mut app = App::new(CliTool::Claude, CliTool::Codex).expect("app");
+        app.focus = Focus::Timeline;
+        app.data.timeline = vec![
+            TimelineEvent {
+                id: "evt-001".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::User,
+                title: "User".into(),
+                detail: "start".into(),
+            },
+            TimelineEvent {
+                id: "evt-002".into(),
+                time: "10:01".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "first".into(),
+            },
+            TimelineEvent {
+                id: "evt-003".into(),
+                time: "10:02".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "second".into(),
+            },
+        ];
+        app.selected_event = 1;
+        app.rewind_event_id = "evt-001".into();
+
+        let screen = render_text(&app, 120, 28);
+
+        assert_screen_contains(&screen, "Claude Code x2");
+        assert!(!screen.contains("AI x2"), "{screen}");
+    }
+
+    #[test]
+    fn skill_picker_renders_compiler_metadata() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.show_skill_picker = true;
+
+        let screen = render_text(&app, 140, 40);
+
+        assert_screen_contains(&screen, "Skill Picker");
+        assert_screen_contains(&screen, "Choose compiler skill");
+        assert_screen_contains(&screen, "engineering-handoff");
+        assert_screen_contains(&screen, "stars:");
+        assert_screen_contains(&screen, "j/k choose");
     }
 
     #[test]

@@ -379,4 +379,7 @@ pub struct CompilerPresetInfo {
     pub args: Vec<String>,
     pub timeout_ms: Option<u64>,
     pub reason: String,
+    pub description: Option<String>,
+    pub homepage: Option<String>,
+    pub github_stars: Option<u64>,
 }

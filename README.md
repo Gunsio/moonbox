@@ -387,7 +387,10 @@ External compiler skills are optional. When configured, Moonbox sends a
       "command": "/path/to/moonbox-handoff-compiler",
       "args": ["--mode", "handoff"],
       "timeout_ms": 30000,
-      "enabled": true
+      "enabled": true,
+      "description": "Compresses source timelines for safe target-CLI continuation.",
+      "homepage": "https://github.com/example/moonbox-handoff-compiler",
+      "github_stars": 1200
     }
   ],
   "ssh_hosts": [
@@ -519,7 +522,7 @@ the dry-run JSON surfaces and `capsule --json`.
 | `space` | Set rewind point |
 | `c` | Refresh capsule and open Handoff Review |
 | `v` | Verify capsule |
-| `S` | Cycle compiler skill |
+| `S` | Open Skill Picker |
 | `enter` | Open selected session with original CLI |
 | `x` / `H` / `t` | Choose target for handoff |
 | `:` | Command mode |
@@ -661,8 +664,9 @@ Stable interfaces matter more than any single framework:
   appears as a user turn, event times move to the right side of rows, and
   timeline scrolling accounts for wrapped detail height.
 - M48.2: timeline visual grouping; consecutive assistant messages render as
-  one `AI xN` block, and Timeline navigation moves by visible groups so `j/k`
-  never appear to stall inside a folded AI burst.
+  one source-specific block such as `Codex xN`, `Claude Code xN`, or
+  `Hermes xN`, and Timeline navigation moves by visible groups so `j/k` never
+  appear to stall inside a folded assistant burst.
 - M48.3: timeline selected-state polish; active user rows keep the blue user
   accent, active AI groups keep the gold AI accent, and rewind selection still
   overrides to the gold rewind accent.
@@ -678,6 +682,10 @@ Stable interfaces matter more than any single framework:
 - M49.1: session-list marker spacing polish; selection arrows now render inside
   the row, and star/status markers only appear when meaningful, removing the
   large empty gap before `Cdx` / `Clu` / `Hms` source badges.
+- M49.2: timeline and skill-picker polish; folded assistant groups now name the
+  source CLI instead of generic `AI`, `S` opens a metadata-rich Skill Picker
+  with status, description, stars, and link/command reference, and `Action
+  Path` shows the selected cwd plus per-tool session counts.
 
 ### Remaining Milestones
 

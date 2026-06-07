@@ -16,6 +16,9 @@ pub struct CompilerPresetConfig {
     pub timeout_ms: Option<u64>,
     #[serde(default = "enabled_by_default")]
     pub enabled: bool,
+    pub description: Option<String>,
+    pub homepage: Option<String>,
+    pub github_stars: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -165,7 +168,7 @@ mod tests {
             r#"{
   "default_compiler": "handoff",
   "compiler_presets": [
-    {"id": "handoff", "command": "/bin/moonbox-handoff", "args": ["--mode", "handoff"], "timeout_ms": 12000}
+    {"id": "handoff", "command": "/bin/moonbox-handoff", "args": ["--mode", "handoff"], "timeout_ms": 12000, "description": "Compresses source timelines for target CLIs.", "homepage": "https://github.com/example/handoff", "github_stars": 42}
   ],
   "ssh_hosts": [
     {"name": "dev", "hostname": "dev.example.com", "user": "moon", "port": 2222, "identity_file": "~/.ssh/dev", "tags": ["dev"]}
@@ -179,6 +182,15 @@ mod tests {
         assert_eq!(config.compiler_presets[0].id, "handoff");
         assert!(config.compiler_presets[0].enabled);
         assert_eq!(config.compiler_presets[0].args, ["--mode", "handoff"]);
+        assert_eq!(
+            config.compiler_presets[0].description.as_deref(),
+            Some("Compresses source timelines for target CLIs.")
+        );
+        assert_eq!(
+            config.compiler_presets[0].homepage.as_deref(),
+            Some("https://github.com/example/handoff")
+        );
+        assert_eq!(config.compiler_presets[0].github_stars, Some(42));
         assert_eq!(config.ssh_hosts[0].name, "dev");
         assert_eq!(config.ssh_hosts[0].host, "dev.example.com");
         assert_eq!(config.starred_sessions, ["codex:session-1"]);

@@ -235,8 +235,14 @@
   <text x="217" y="708" class="mono" font-size="14" font-weight="500" fill="#e6be53">╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
   <text x="1441" y="708" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="726" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
-  <text x="91" y="726" class="mono" font-size="14" font-weight="500" fill="#8b949e">next:</text>
-  <text x="145" y="726" class="mono" font-size="14" font-weight="500" fill="#47c9da">c review handoff  |  enter open original  |  s star</text>
+  <text x="91" y="726" class="mono" font-size="14" font-weight="500" fill="#8b949e">cwd:</text>
+  <text x="136" y="726" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">~/coding/moonbox</text>
+  <text x="289" y="726" class="mono" font-size="14" font-weight="500" fill="#374452">·</text>
+  <text x="307" y="726" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Codex 1</text>
+  <text x="379" y="726" class="mono" font-size="14" font-weight="500" fill="#374452">·</text>
+  <text x="397" y="726" class="mono" font-size="14" font-weight="500" fill="#47c9da">Claude 0</text>
+  <text x="478" y="726" class="mono" font-size="14" font-weight="500" fill="#374452">·</text>
+  <text x="496" y="726" class="mono" font-size="14" font-weight="500" fill="#f59756">Hermes 0</text>
   <text x="1441" y="726" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="744" class="mono" font-size="14" font-weight="500" fill="#374452">╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
   <text x="46" y="762" class="mono" font-size="14" font-weight="500" fill="#374452">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>

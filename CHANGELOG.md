@@ -34,7 +34,9 @@ and this project uses semantic versioning once tagged releases start.
 - `action` discriminators in dry-run `open --json` and `launch --json`
   output, using `original_resume` and `target_handoff`.
 - First-class `moon` binary alias installed alongside `moonbox`.
-- Configurable compiler skill presets in `~/.config/moonbox/config.json`.
+- Configurable compiler skill presets in `~/.config/moonbox/config.json`,
+  including optional description, homepage, and GitHub stars metadata for the
+  TUI Skill Picker.
 - Compiler catalog output through `moonbox compilers`, including source,
   status, score, command, arguments, timeout, and quality reason.
 - Hardened verification checks for Work Capsule version, required fields,
@@ -155,9 +157,15 @@ and this project uses semantic versioning once tagged releases start.
 - TUI timeline hides provider-injected context rows such as
   `<environment_context>`, right-aligns event times, and scrolls by actual
   wrapped row height so the selected event stays visible.
-- TUI timeline visually groups consecutive assistant messages into one `AI xN`
-  block, and `j/k` navigation now moves by those visible groups instead of
-  silently stepping through folded AI events.
+- TUI timeline visually groups consecutive assistant messages into one
+  source-specific `Codex xN` / `Claude Code xN` / `Hermes xN` block, and `j/k`
+  navigation now moves by those visible groups instead of silently stepping
+  through folded assistant events.
+- TUI `S` now opens a Skill Picker instead of blindly cycling compiler skills;
+  the picker shows status, kind, description, stars, and link/command metadata
+  before `enter` applies the pending selection.
+- Action Path now shows the selected cwd plus Codex / Claude / Hermes session
+  counts for that same path.
 - Selected Timeline rows now preserve role accent colors, so active user turns
   stay blue and active AI groups stay gold instead of collapsing into one
   selected-state color.

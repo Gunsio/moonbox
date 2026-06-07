@@ -386,6 +386,9 @@ pub fn compiler_catalog_entries() -> Vec<CompilerPresetInfo> {
                 args: Vec::new(),
                 timeout_ms: None,
                 reason: "environment compiler is configured but invalid".into(),
+                description: Some("Environment-provided compiler skill.".into()),
+                homepage: None,
+                github_stars: None,
             },
         );
     }
@@ -527,14 +530,18 @@ fn process_compiler_info(compiler: &ProcessCapsuleCompiler) -> CompilerPresetInf
 }
 
 fn preset_info(preset: &CompilerPresetConfig) -> CompilerPresetInfo {
-    process_info(
+    let mut info = process_info(
         preset.id.clone(),
         CompilerPresetKind::Config,
         preset.command.clone(),
         preset.args.clone(),
         preset.timeout_ms,
         preset.enabled,
-    )
+    );
+    info.description = preset.description.clone();
+    info.homepage = preset.homepage.clone();
+    info.github_stars = preset.github_stars;
+    info
 }
 
 fn process_info(
@@ -555,6 +562,9 @@ fn process_info(
             args,
             timeout_ms,
             reason: "disabled in config".into(),
+            description: None,
+            homepage: None,
+            github_stars: None,
         };
     }
     if timeout_ms == Some(0) {
@@ -567,6 +577,9 @@ fn process_info(
             args,
             timeout_ms,
             reason: "timeout_ms must be greater than zero".into(),
+            description: None,
+            homepage: None,
+            github_stars: None,
         };
     }
     if command_available(&command) {
@@ -579,6 +592,9 @@ fn process_info(
             args,
             timeout_ms,
             reason: "process compiler is available".into(),
+            description: None,
+            homepage: None,
+            github_stars: None,
         }
     } else {
         CompilerPresetInfo {
@@ -590,6 +606,9 @@ fn process_info(
             args,
             timeout_ms,
             reason: "compiler command was not found on disk or PATH".into(),
+            description: None,
+            homepage: None,
+            github_stars: None,
         }
     }
 }
@@ -604,6 +623,14 @@ fn builtin_info(id: &str) -> CompilerPresetInfo {
         args: Vec::new(),
         timeout_ms: None,
         reason: "built-in deterministic draft compiler; configure an external skill for production handoff".into(),
+        description: Some(match id {
+            DEFAULT_COMPILER_ID => "Draft handoff capsule for general cross-CLI continuation.",
+            "bugfix-continuation" => "Draft capsule tuned for continuing bugfix work from a selected rewind point.",
+            "design-review" => "Draft capsule tuned for design review and architecture follow-up.",
+            _ => "Built-in draft capsule compiler.",
+        }.into()),
+        homepage: None,
+        github_stars: None,
     }
 }
 
@@ -843,6 +870,9 @@ cat >/dev/null
             args: vec!["--mode".into(), "handoff".into()],
             timeout_ms: Some(12_000),
             enabled: true,
+            description: None,
+            homepage: None,
+            github_stars: None,
         };
 
         let info = preset_info(&preset);
@@ -862,6 +892,9 @@ cat >/dev/null
             args: Vec::new(),
             timeout_ms: None,
             enabled: false,
+            description: None,
+            homepage: None,
+            github_stars: None,
         };
 
         let info = preset_info(&preset);
@@ -879,6 +912,9 @@ cat >/dev/null
             args: Vec::new(),
             timeout_ms: Some(30_000),
             enabled: true,
+            description: None,
+            homepage: None,
+            github_stars: None,
         };
 
         let info = preset_info(&preset);
@@ -896,6 +932,9 @@ cat >/dev/null
             args: Vec::new(),
             timeout_ms: Some(0),
             enabled: true,
+            description: None,
+            homepage: None,
+            github_stars: None,
         };
 
         let error = ProcessCapsuleCompiler::from_preset(&preset).expect_err("invalid timeout");
@@ -922,6 +961,9 @@ JSON
             args: Vec::new(),
             timeout_ms: Some(5_000),
             enabled: true,
+            description: None,
+            homepage: None,
+            github_stars: None,
         };
         let compiler = ProcessCapsuleCompiler::from_preset(&preset).expect("preset compiler");
         let request = data::compile_request_with_compiler(
