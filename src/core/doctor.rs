@@ -39,18 +39,6 @@ pub fn diagnose() -> DoctorReport {
     report(checks, source_adapters)
 }
 
-pub fn diagnose_with_session_summaries(sessions: &[SessionSummary]) -> DoctorReport {
-    let mut checks = Vec::new();
-    checks.push(config_check());
-    checks.push(session_mode_check());
-    let source_adapters = source_adapter_reports(&mut checks);
-    checks.push(session_summaries_check(sessions));
-    checks.extend(CliTool::ALL.into_iter().map(target_binary_check));
-    checks.push(compiler_catalog_check());
-
-    report(checks, source_adapters)
-}
-
 pub fn diagnose_with_inventory(
     sessions: &[SessionSummary],
     source_adapters: &[SourceAdapterReport],
@@ -148,23 +136,6 @@ fn config_check() -> VerificationCheck {
             VerificationStatus::Fail,
             format!("{display} cannot be read: {error}"),
         ),
-    }
-}
-
-fn source_adapter_reports(checks: &mut Vec<VerificationCheck>) -> Vec<SourceAdapterReport> {
-    match sources::adapter_reports() {
-        Ok(reports) => {
-            checks.extend(reports.iter().map(source_adapter_check));
-            reports
-        }
-        Err(error) => {
-            checks.push(check(
-                "source_adapters",
-                VerificationStatus::Fail,
-                format!("cannot inspect source adapters: {error}"),
-            ));
-            Vec::new()
-        }
     }
 }
 

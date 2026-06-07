@@ -72,6 +72,7 @@ scripts/ci/docs-assets-smoke.sh
 scripts/ci/homebrew-docs-smoke.sh
 cargo clippy --locked -- -D warnings
 cargo build --release --locked
+scripts/ci/package-hygiene.sh
 cargo package --locked
 scripts/ci/release-artifacts-smoke.sh
 scripts/ci/install-smoke.sh
@@ -80,6 +81,11 @@ scripts/ci/install-smoke.sh
 Production builds deny `unsafe`, `unwrap()`, `expect()`, `panic!`, `todo!`, and
 `unimplemented!` through crate-level lint policy. Tests may still use explicit
 `expect` messages for fixture setup and assertions.
+
+The Rust library surface is intentionally minimal: downstream users should treat
+the installed `moonbox` and `moon` commands as the stable public API. Internal
+adapters, compiler plumbing, and TUI state remain crate-private until a library
+API is explicitly designed and documented.
 
 ### Homebrew
 
@@ -119,12 +125,13 @@ The staging script writes source, Cargo crate, and host binary archives plus
 
 Pull requests are expected to pass formatting, check, test, fixture replay
 eval, documentation build, fixture-safe CLI smoke, docs asset smoke, Homebrew
-docs smoke, clippy, release build, package verification, release artifact
-staging smoke, install smoke, and cargo-deny supply-chain gates. GitHub Actions
-runs the same Rust quality gates and validates that the README screenshot,
-install commands, Homebrew planned-state wording, and release artifact staging
-stay in sync. Smoke gates set `MOONBOX_SESSION_MODE=fixture`, redirect source
-homes to `target/`, and never open or resume real local sessions.
+docs smoke, clippy, release build, package hygiene, package verification,
+release artifact staging smoke, install smoke, and cargo-deny supply-chain
+gates. GitHub Actions runs the same Rust quality gates and validates that the
+README screenshot, install commands, Homebrew planned-state wording, release
+artifact staging, and Cargo package contents stay in sync. Smoke gates set
+`MOONBOX_SESSION_MODE=fixture`, redirect source homes to `target/`, and never
+open or resume real local sessions.
 
 ## Current State
 
@@ -166,13 +173,18 @@ The first implementation focuses on the product shell:
 - Target selection lives inside the launch flow, with explicit `> [x]` radio-list selection
 - Target picker validates each target as `READY`, `WARN`, or `BLOCKED`; blocked targets cannot confirm or copy launch commands
 - Target picker and Launch Review show verifier-backed readiness rows so users can see the exact PASS/WARN/FAIL signal behind each target state
-- Target handoff uses a three-stage TUI flow: choose target, review the command,
-  then press `enter` to restore the terminal and launch, or `y` to copy it
+- Target handoff uses a dedicated `H` shortcut and a three-stage TUI flow:
+  choose target, review the command, then press `enter` to restore the terminal
+  and launch, or `y` to copy it
 - Last confirmed target is persisted in `~/.config/moonbox/config.json`
 - Real Codex, Claude, and Hermes resume-surface listing plus timeline parsing
 - Original-session open command, Work Capsule, and branch tree previews
 - Live `/` session search, combined filter display, and one-key clear with `a`
 - Selected/filtered session drives timeline, Work Capsule, branch preview, token budget, and default rewind point
+- Real-session metadata is labeled separately from draft Work Capsule guidance,
+  so source store facts are not confused with built-in compiler placeholders
+- Default rewind selection for real sessions prefers high-signal non-tool
+  timeline events instead of arbitrary tool calls
 - Animated TUI loading screen while source sessions are indexed in the background
 - Session movement, source filtering, and search keep the list responsive while the selected session preview hydrates in the background
 - Resume-index rows with unknown event counts still hydrate their real timeline
@@ -182,10 +194,12 @@ The first implementation focuses on the product shell:
 - Fixed status line for action feedback
 - Context-aware key bar for the current panel or modal
 - Visible rewind marker in the timeline, plus rewind-aware branch and launch preview
+- Timeline rendering folds low-signal tool/function-call rows by default while
+  keeping rewind and navigation on visible high-signal events
 - Timeline auto-scroll, Capsule/modal scroll, and small-terminal modal polish
 - Copyable launch/original wrapper commands via `y` with OSC52 clipboard
-  support; `enter` restores the terminal before handing control to the original
-  or target CLI
+  support; main-list `enter` hands control directly to the selected session's
+  original CLI, while `H` opens the target handoff flow
 - Serializable core models for future adapters
 - `SourceAdapter` contract and fixture-backed adapter fallback layer
 - Fallible adapter discovery; bad source data returns structured errors instead of panics
@@ -216,7 +230,9 @@ The first implementation focuses on the product shell:
 - Cargo-deny supply-chain policy for advisories, duplicate versions, licenses, and crate sources
 - Non-test Rust builds deny panic-prone primitives and unsafe code through
   crate-level lint policy
+- Minimal documented Rust library API with CLI internals kept crate-private
 - README screenshot and install-command smoke coverage through `scripts/ci/docs-assets-smoke.sh`
+- Cargo package hygiene smoke coverage through `scripts/ci/package-hygiene.sh`
 - Draft Homebrew formula template plus fixture-safe Homebrew docs smoke coverage
 - Release artifact staging with source, Cargo crate, host binary archive,
   `SHA256SUMS`, and `release-manifest.json`, covered by fixture-safe smoke
@@ -390,9 +406,14 @@ be overridden with `--bin moonbox` or `--bin moon`.
 
 Moonbox has two separate actions for a selected session:
 
+- `enter`: hand the terminal directly to the selected session's original CLI.
+  Moonbox prints the exact command before handoff and, on Unix, replaces itself
+  with the source CLI instead of waiting as a parent process.
 - `o`: preview an `original_resume` command for the selected session's
-  original CLI, then press `enter` to close Moonbox and resume it.
-- `enter`: choose a target CLI, then review a `target_handoff` command before
+  original CLI, then press `enter` to hand the terminal to that CLI. Moonbox
+  prints the exact command before handoff and, on Unix, replaces itself with
+  the source CLI instead of waiting as a parent process.
+- `H`: choose a target CLI, then review a `target_handoff` command before
   launching or copying it.
 
 The main screen is a global session entry point. Sessions are sorted by time and
@@ -437,7 +458,8 @@ point in the background.
 | `v` | Verify capsule |
 | `d` | Toggle diff preview |
 | `s` | Cycle compiler skill |
-| `enter` | Choose target for handoff |
+| `enter` | Open selected session with original CLI |
+| `H` | Choose target for handoff |
 | `:` | Command mode |
 | `?` | Help |
 | `q` / `Esc` | Back / quit |
@@ -464,7 +486,7 @@ point in the background.
 | Key | Action |
 | --- | --- |
 | `y` | Copy guarded `moonbox open --execute` command |
-| `enter` | Restore terminal and resume original CLI |
+| `enter` | Hand terminal directly to the original CLI |
 | `q` / `Esc` | Close preview |
 
 ## Architecture Direction
@@ -546,11 +568,17 @@ Stable interfaces matter more than any single framework:
   Hermes `source = cli` default listing; zero-event resume-index rows now
   hydrate from `source_path`, while truly empty timelines get a pending capsule
   instead of running a compiler against a missing rewind id.
-- M43: production panic-boundary hardening with crate-level non-test denies for
-  `unsafe`, `unwrap()`, `expect()`, `panic!`, `todo!`, and `unimplemented!`;
-  the replay-eval fixture invariants now return structured `CoreError`
-  failures, and generated SVG docs snapshot code no longer relies on infallible
-  string-write `expect` calls.
+- M43: production panic-boundary enforcement with crate-level lint policy for
+  non-test builds, structured replay-eval invariant errors, and panic-free docs
+  snapshot rendering.
+- M44: public API and package hygiene hardening with crate-private internals,
+  documented `moonbox::run()` as the only stable Rust entrypoint, dead-code
+  cleanup exposed by the tighter API boundary, Cargo package contents smoke
+  validation, stable-width TUI panel titles, real-vs-draft capsule labeling,
+  low-signal tool-row folding, and high-signal default rewind selection for
+  real sessions; original-session resume now prints the command and execs the
+  source CLI on Unix, with main-list `enter` opening original sessions and `H`
+  reserved for target handoff.
 
 ### Can Build Now
 

@@ -183,16 +183,6 @@ pub fn verify_capsule(
     }
 }
 
-pub fn validate_launch(
-    capsule: &WorkCapsule,
-    session: &SessionSummary,
-    timeline: &[TimelineEvent],
-    requested_target: CliTool,
-) -> LaunchValidation {
-    let report = verify_capsule(capsule, session, timeline, requested_target);
-    validation_from_report(&report)
-}
-
 pub fn validation_from_report(report: &VerificationReport) -> LaunchValidation {
     let blockers = report
         .checks

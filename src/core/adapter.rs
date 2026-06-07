@@ -98,23 +98,6 @@ pub trait SourceAdapter {
     }
 }
 
-pub fn adapter_report(
-    adapter: &dyn SourceAdapter,
-    filter_status: impl Into<String>,
-    reason: impl Into<String>,
-) -> Result<SourceAdapterReport, AdapterError> {
-    let sessions = adapter.list_sessions()?;
-    Ok(report_from_sessions(
-        adapter.tool(),
-        adapter.provenance(),
-        true,
-        adapter.store_path(),
-        filter_status,
-        reason,
-        &sessions,
-    ))
-}
-
 pub fn report_from_sessions(
     cli: CliTool,
     provenance: SourceProvenance,

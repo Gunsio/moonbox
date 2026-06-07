@@ -9,17 +9,29 @@
         clippy::unwrap_used
     )
 )]
+#![warn(missing_docs)]
+
+//! Moonbox command-line entrypoint.
+//!
+//! Moonbox is a CLI-first project. The stable public surface is the installed
+//! `moonbox` and `moon` commands; Rust internals remain crate-private until an
+//! API is intentionally stabilized.
 
 mod app;
 mod cli;
-pub mod core;
+pub(crate) mod core;
 mod tui;
 
 use clap::{CommandFactory, Parser};
 use cli::{Cli, Command};
 use color_eyre::Result;
-use std::{fs, io, path::Path};
+use std::{
+    fs,
+    io::{self, Write},
+    path::Path,
+};
 
+/// Run the Moonbox command-line application.
 pub fn run() -> Result<()> {
     color_eyre::install()?;
 
@@ -57,7 +69,9 @@ fn run_tui(args: cli::TuiArgs) -> Result<()> {
 fn execute_tui_exit_action(action: Option<app::TuiExitAction>) -> Result<()> {
     match action {
         Some(app::TuiExitAction::OriginalResume(plan)) => {
-            core::launcher::execute_original_plan(plan)?;
+            print!("{}", core::launcher::original_handoff_notice(&plan));
+            io::stdout().flush()?;
+            core::launcher::handoff_original_plan(plan)?;
         }
         Some(app::TuiExitAction::TargetHandoff(plan)) => {
             core::launcher::execute_plan(plan)?;

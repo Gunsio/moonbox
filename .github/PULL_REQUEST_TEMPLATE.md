@@ -20,6 +20,7 @@ Describe the change and why it matters.
 - [ ] `scripts/ci/homebrew-docs-smoke.sh`
 - [ ] `cargo clippy --locked -- -D warnings`
 - [ ] `cargo build --release --locked`
+- [ ] `scripts/ci/package-hygiene.sh`
 - [ ] `cargo package --locked`
 - [ ] `scripts/ci/release-artifacts-smoke.sh`
 - [ ] `scripts/ci/install-smoke.sh`
