@@ -49,6 +49,7 @@ pub enum Focus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionFilter {
+    Starred,
     All,
     Tool(CliTool),
 }
@@ -56,6 +57,7 @@ pub enum SessionFilter {
 impl SessionFilter {
     pub fn label(self) -> &'static str {
         match self {
+            Self::Starred => "Star",
             Self::All => "All",
             Self::Tool(CliTool::Codex) => "Codex",
             Self::Tool(CliTool::Claude) => "Claude",
@@ -63,8 +65,11 @@ impl SessionFilter {
         }
     }
 
-    fn matches(self, session: &SessionSummary) -> bool {
+    fn matches(self, session: &SessionSummary, starred_sessions: &[String]) -> bool {
         match self {
+            Self::Starred => starred_sessions
+                .iter()
+                .any(|key| key == &session_star_key(session)),
             Self::All => true,
             Self::Tool(tool) => session.cli == tool,
         }
@@ -72,16 +77,18 @@ impl SessionFilter {
 
     fn next(self) -> Self {
         match self {
+            Self::Starred => Self::All,
             Self::All => Self::Tool(CliTool::Codex),
             Self::Tool(CliTool::Codex) => Self::Tool(CliTool::Claude),
             Self::Tool(CliTool::Claude) => Self::Tool(CliTool::Hermes),
-            Self::Tool(CliTool::Hermes) => Self::All,
+            Self::Tool(CliTool::Hermes) => Self::Starred,
         }
     }
 
     fn previous(self) -> Self {
         match self {
-            Self::All => Self::Tool(CliTool::Hermes),
+            Self::Starred => Self::Tool(CliTool::Hermes),
+            Self::All => Self::Starred,
             Self::Tool(CliTool::Codex) => Self::All,
             Self::Tool(CliTool::Claude) => Self::Tool(CliTool::Codex),
             Self::Tool(CliTool::Hermes) => Self::Tool(CliTool::Claude),
@@ -109,8 +116,8 @@ pub struct App {
     pub launch_review: bool,
     pub show_open_original: bool,
     pub show_doctor: bool,
-    pub show_diff: bool,
     pub session_filter: SessionFilter,
+    pub starred_sessions: Vec<String>,
     pub search_query: String,
     visible_session_indices: Vec<usize>,
     pub pending_target: CliTool,
@@ -162,8 +169,8 @@ impl App {
             launch_review: false,
             show_open_original: false,
             show_doctor: false,
-            show_diff: false,
             session_filter: SessionFilter::All,
+            starred_sessions: config::load_starred_sessions(),
             search_query: String::new(),
             pending_target: target,
             status_message: "Ready".into(),
@@ -251,6 +258,7 @@ impl App {
             KeyCode::Char(']') => self.cycle_session_filter(true),
             KeyCode::Char('f') => self.cycle_session_filter(true),
             KeyCode::Char('a') => self.clear_session_filters(),
+            KeyCode::Char('s') | KeyCode::Char('*') => self.toggle_starred_session(),
             KeyCode::Char('o') => self.open_original(),
             KeyCode::Char('x') | KeyCode::Char('t') | KeyCode::Char('H') => {
                 self.open_launch_picker()
@@ -273,10 +281,9 @@ impl App {
                 self.command_input = format!("/{}", self.search_query);
             }
             KeyCode::Char(' ') => self.set_rewind_point(),
-            KeyCode::Char('c') => self.compile_capsule(),
+            KeyCode::Char('c') => self.review_capsule(),
             KeyCode::Char('v') => self.toggle_verify(),
-            KeyCode::Char('d') => self.toggle_diff(),
-            KeyCode::Char('s') => self.cycle_compiler(),
+            KeyCode::Char('S') => self.cycle_compiler(),
             KeyCode::Char('y') => self.copy_focused_command(),
             KeyCode::Enter => self.queue_original_resume(),
             _ => self.pending_g = false,
@@ -311,13 +318,15 @@ impl App {
                     "q" | "quit" => self.should_quit = true,
                     "" => self.set_status("Command cancelled"),
                     "open" | "o" => self.open_original(),
-                    "compile" | "c" => self.compile_capsule(),
+                    "review" | "compile" | "c" => self.review_capsule(),
                     "verify" | "v" => self.mark_verify_passed(),
                     "help" | "?" => self.open_help(),
                     "doctor" | "diag" | "health" => self.open_doctor(),
-                    "diff" | "d" => self.toggle_diff(),
                     "filter" | "filter next" => self.cycle_session_filter(true),
                     "filter prev" | "filter previous" => self.cycle_session_filter(false),
+                    "filter star" | "filter starred" | "starred" => {
+                        self.apply_session_filter(SessionFilter::Starred)
+                    }
                     "filter all" | "filter clear" | "clear" | "all" => self.clear_session_filters(),
                     "filter codex" | "source codex" => {
                         self.apply_session_filter(SessionFilter::Tool(CliTool::Codex))
@@ -336,6 +345,8 @@ impl App {
                     }
                     "source" | "source next" => self.cycle_session_filter(true),
                     "source prev" | "source previous" => self.cycle_session_filter(false),
+                    "star" | "s" | "*" => self.toggle_starred_session(),
+                    "skill" | "compiler" => self.cycle_compiler(),
                     "handoff" | "target" | "launch" | "x" => self.open_launch_picker(),
                     _ => self.set_status(format!("Unknown command: {command}")),
                 }
@@ -465,11 +476,7 @@ impl App {
     }
 
     fn back_or_quit(&mut self) {
-        if self.show_diff {
-            self.show_diff = false;
-            self.modal_scroll = 0;
-            self.set_status("Diff closed");
-        } else if self.show_doctor {
+        if self.show_doctor {
             self.show_doctor = false;
             self.modal_scroll = 0;
             self.set_status("Doctor closed");
@@ -614,40 +621,6 @@ impl App {
         self.pending_g = false;
     }
 
-    fn compile_capsule(&mut self) {
-        if !self.ensure_session_details_ready("Compile") {
-            return;
-        }
-        let compiler = self.data.compilers[self.selected_compiler].clone();
-        let Some(session_id) = self.current_session().map(|session| session.id.clone()) else {
-            self.compile_status = "FAILED";
-            self.set_status("Compile failed: no session selected");
-            self.pending_g = false;
-            return;
-        };
-        match workbench::compile_capsule(
-            &session_id,
-            self.data.target,
-            &self.rewind_event_id,
-            &compiler,
-        ) {
-            Ok(Some(capsule)) => {
-                self.compile_status = "COMPILED";
-                self.data.capsule = capsule;
-                self.set_status(format!("Capsule compiled: {compiler}"));
-            }
-            Ok(None) => {
-                self.compile_status = "FAILED";
-                self.set_status("Compile failed: session not found");
-            }
-            Err(error) => {
-                self.compile_status = "FAILED";
-                self.set_status(format!("Compile failed: {error}"));
-            }
-        }
-        self.pending_g = false;
-    }
-
     fn cycle_compiler(&mut self) {
         self.selected_compiler = (self.selected_compiler + 1) % self.data.compilers.len();
         self.data.capsule.compiler = self.data.compilers[self.selected_compiler].clone();
@@ -689,17 +662,6 @@ impl App {
             report.status,
             report.checks.len()
         ));
-    }
-
-    fn toggle_diff(&mut self) {
-        self.show_diff = !self.show_diff;
-        self.modal_scroll = 0;
-        if self.show_diff {
-            self.set_status("Diff opened");
-        } else {
-            self.set_status("Diff closed");
-        }
-        self.pending_g = false;
     }
 
     fn open_help(&mut self) {
@@ -770,6 +732,11 @@ impl App {
         &self.visible_session_indices
     }
 
+    pub fn is_session_starred(&self, session: &SessionSummary) -> bool {
+        let key = session_star_key(session);
+        self.starred_sessions.iter().any(|item| item == &key)
+    }
+
     fn refresh_visible_sessions(&mut self) {
         let query = self.search_query.trim().to_ascii_lowercase();
         self.visible_session_indices = self
@@ -777,7 +744,7 @@ impl App {
             .sessions
             .iter()
             .enumerate()
-            .filter(|(_, session)| self.session_filter.matches(session))
+            .filter(|(_, session)| self.session_filter.matches(session, &self.starred_sessions))
             .filter(|(_, session)| session_matches_query(session, &query))
             .map(|(index, _)| index)
             .collect();
@@ -840,6 +807,35 @@ impl App {
         self.pending_g = false;
     }
 
+    fn toggle_starred_session(&mut self) {
+        let Some(session) = self.current_session() else {
+            self.set_status("No session selected");
+            self.pending_g = false;
+            return;
+        };
+        let key = session_star_key(session);
+        let starred =
+            if let Some(index) = self.starred_sessions.iter().position(|item| item == &key) {
+                self.starred_sessions.remove(index);
+                false
+            } else {
+                self.starred_sessions.push(key);
+                self.starred_sessions.sort();
+                self.starred_sessions.dedup();
+                true
+            };
+        if let Err(error) = config::save_starred_sessions(&self.starred_sessions) {
+            self.set_status(format!("Star save failed: {error}"));
+        } else if starred {
+            self.set_status("Session starred");
+        } else {
+            self.set_status("Session unstarred");
+        }
+        self.refresh_visible_sessions();
+        self.clamp_selected_session();
+        self.pending_g = false;
+    }
+
     fn clamp_selected_session(&mut self) {
         if self.visible_session_indices.is_empty() {
             self.selected_session = 0;
@@ -852,7 +848,7 @@ impl App {
     }
 
     fn has_overlay(&self) -> bool {
-        self.show_help || self.show_open_original || self.show_doctor || self.show_diff
+        self.show_help || self.show_open_original || self.show_doctor
     }
 
     fn cycle_target(&mut self, forward: bool) {
@@ -917,6 +913,51 @@ impl App {
             self.set_status(format!("Review launch: {target}"));
         }
         self.pending_g = false;
+    }
+
+    fn review_capsule(&mut self) {
+        if self.compile_capsule_for_review() {
+            self.pending_target = self.data.target;
+            self.show_launch = true;
+            self.launch_review = true;
+            self.modal_scroll = 0;
+            self.set_status("Capsule refreshed");
+        }
+        self.pending_g = false;
+    }
+
+    fn compile_capsule_for_review(&mut self) -> bool {
+        if !self.ensure_session_details_ready("Review") {
+            return false;
+        }
+        let compiler = self.data.compilers[self.selected_compiler].clone();
+        let Some(session_id) = self.current_session().map(|session| session.id.clone()) else {
+            self.compile_status = "FAILED";
+            self.set_status("Review failed: no session selected");
+            return false;
+        };
+        match workbench::compile_capsule(
+            &session_id,
+            self.data.target,
+            &self.rewind_event_id,
+            &compiler,
+        ) {
+            Ok(Some(capsule)) => {
+                self.compile_status = "COMPILED";
+                self.data.capsule = capsule;
+                true
+            }
+            Ok(None) => {
+                self.compile_status = "FAILED";
+                self.set_status("Review failed: session not found");
+                false
+            }
+            Err(error) => {
+                self.compile_status = "FAILED";
+                self.set_status(format!("Review failed: {error}"));
+                false
+            }
+        }
     }
 
     fn replace_data_for_target(&mut self, target: CliTool) -> Result<(), CoreError> {
@@ -1212,7 +1253,7 @@ impl App {
         ))
     }
 
-    fn launch_capsule_for_target(&self, target: CliTool) -> WorkCapsule {
+    pub(crate) fn launch_capsule_for_target(&self, target: CliTool) -> WorkCapsule {
         let mut capsule = self.data.capsule.clone();
         capsule.target_cli = target;
         capsule.target_branch = format!("moonbox/{}-rewind-{}", target.id(), self.rewind_event_id);
@@ -1258,6 +1299,10 @@ fn timeline_event_is_visible(data: &WorkbenchData, rewind_event_id: &str, index:
 
 fn timeline_event_is_rewind_anchor(event: &crate::core::model::TimelineEvent) -> bool {
     matches!(event.kind, TimelineKind::User | TimelineKind::RewindPoint)
+}
+
+fn session_star_key(session: &SessionSummary) -> String {
+    format!("{}:{}", session.cli.id(), session.id)
 }
 
 fn first_visible_timeline_event(data: &WorkbenchData, rewind_event_id: &str) -> usize {
@@ -1370,6 +1415,10 @@ fn session_matches_query(session: &SessionSummary, query: &str) -> bool {
         || session.id.to_ascii_lowercase().contains(query)
         || session.title.to_ascii_lowercase().contains(query)
         || session.cwd.to_ascii_lowercase().contains(query)
+        || session
+            .source_path
+            .as_ref()
+            .is_some_and(|path| path.to_ascii_lowercase().contains(query))
         || session.cli.id().contains(query)
         || session
             .branch
@@ -1390,7 +1439,10 @@ mod tests {
     }
 
     fn new_app(source: CliTool, target: CliTool) -> App {
-        App::new(source, target).expect("app")
+        let mut app = App::new(source, target).expect("app");
+        app.starred_sessions.clear();
+        app.refresh_visible_sessions();
+        app
     }
 
     fn settle_session_load(app: &mut App) {
@@ -1498,21 +1550,24 @@ mod tests {
     fn compiler_cycles() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         let first = app.data.capsule.compiler.clone();
-        app.handle_key(key('s'));
+        app.handle_key(key('S'));
         assert_ne!(app.data.capsule.compiler, first);
     }
 
     #[test]
-    fn compile_key_runs_selected_compiler() {
+    fn review_key_refreshes_capsule_and_opens_handoff_review() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
-        app.handle_key(key('s'));
+        app.handle_key(key('S'));
         let compiler = app.data.capsule.compiler.clone();
 
         app.handle_key(key('c'));
 
         assert_eq!(app.compile_status, "COMPILED");
         assert_eq!(app.data.capsule.compiler, compiler);
-        assert!(app.status_message.contains("Capsule compiled"));
+        assert!(app.show_launch);
+        assert!(app.launch_review);
+        assert_eq!(app.pending_target, app.data.target);
+        assert_eq!(app.status_message, "Capsule refreshed");
     }
 
     #[test]
@@ -1537,6 +1592,48 @@ mod tests {
                 .iter()
                 .all(|index| app.data.sessions[*index].cli == CliTool::Codex)
         );
+    }
+
+    #[test]
+    fn session_filter_cycles_starred_before_all() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+
+        app.handle_key(key('['));
+
+        assert_eq!(app.session_filter, SessionFilter::Starred);
+        assert_eq!(app.status_message, "Filter: Star");
+
+        app.handle_key(key(']'));
+
+        assert_eq!(app.session_filter, SessionFilter::All);
+    }
+
+    #[test]
+    fn star_shortcut_toggles_current_session_and_filter() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        let session_id = app.current_session().expect("session").id.clone();
+
+        app.handle_key(key('s'));
+
+        assert_eq!(app.status_message, "Session starred");
+        assert!(
+            app.starred_sessions
+                .iter()
+                .any(|key| key.ends_with(session_id.as_str()))
+        );
+
+        app.apply_session_filter(SessionFilter::Starred);
+
+        assert_eq!(app.visible_session_indices().len(), 1);
+        assert_eq!(
+            app.current_session().map(|session| session.id.as_str()),
+            Some(session_id.as_str())
+        );
+
+        app.handle_key(key('*'));
+
+        assert_eq!(app.status_message, "Session unstarred");
+        assert!(app.visible_session_indices().is_empty());
     }
 
     #[test]
@@ -1570,6 +1667,25 @@ mod tests {
         assert_eq!(app.data.source, CliTool::Hermes);
         assert_eq!(app.data.capsule.source_session, "hermes-cxcp-502");
         assert_eq!(app.rewind_event_id, "evt-052");
+    }
+
+    #[test]
+    fn slash_search_matches_source_path() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        let session = app.data.sessions.get_mut(1).expect("fixture session");
+        session.source_path = Some("/tmp/moonbox/raw-title-source.jsonl".into());
+
+        app.handle_key(key('/'));
+        for ch in "raw-title-source".chars() {
+            app.handle_key(key(ch));
+        }
+
+        assert_eq!(app.visible_session_indices().len(), 1);
+        assert_eq!(
+            app.current_session()
+                .and_then(|session| session.source_path.as_deref()),
+            Some("/tmp/moonbox/raw-title-source.jsonl")
+        );
     }
 
     #[test]

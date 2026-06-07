@@ -561,7 +561,7 @@ impl SummaryBuilder {
             && let Some(text) = text_from_value(payload.get("content").unwrap_or(&Value::Null))
             && !is_provider_context_text(&text)
         {
-            self.title = Some(truncate(&text, 72));
+            self.title = Some(truncate(&text, 160));
         }
     }
 
@@ -571,7 +571,7 @@ impl SummaryBuilder {
             && let Some(text) = text_from_value(payload)
             && !is_provider_context_text(&text)
         {
-            self.title = Some(truncate(&text, 72));
+            self.title = Some(truncate(&text, 160));
         }
         if self.token_count.is_none()
             && string_field(payload, "type") == Some("token_count")
@@ -767,7 +767,7 @@ fn first_non_empty<'a>(values: impl IntoIterator<Item = &'a String>) -> Option<&
 }
 
 fn truncate_thread_title(title: &str) -> String {
-    truncate(&title.split_whitespace().collect::<Vec<_>>().join(" "), 72)
+    truncate(&title.split_whitespace().collect::<Vec<_>>().join(" "), 160)
 }
 
 fn normalized_token_count(token_count: usize) -> Option<usize> {

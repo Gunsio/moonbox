@@ -70,11 +70,11 @@ and this project uses semantic versioning once tagged releases start.
   the same non-executing diagnostics.
 - Fixture-safe TUI render regression tests for main, Doctor, and Launch views.
 - Verifier-backed TUI target readiness explanation rows in the launch picker
-  and Launch Review.
+  and Handoff Review.
 - Documentation asset smoke coverage for README screenshot semantics,
   installation commands, and unpublished Homebrew wording.
 - Hidden fixture-only `docs-snapshot` maintenance command that renders the real
-  Ratatui Launch Review buffer to SVG for the README screenshot asset.
+  Ratatui Handoff Review buffer to SVG for the README screenshot asset.
 - Draft Homebrew formula template plus a fixture-safe Homebrew docs smoke gate.
 - Release artifact staging script that produces source, Cargo crate, and host
   binary archives, generated shell completions, `SHA256SUMS`, and
@@ -137,11 +137,11 @@ and this project uses semantic versioning once tagged releases start.
 - TUI target handoff now uses a dedicated `x` shortcut, with `H` and `t` kept
   as compatibility aliases, and a two-stage flow: choose a target, review the
   guarded execute command, then copy with `y`.
-- TUI launch key hints now distinguish target selection from Launch Review, so
+- TUI launch key hints now distinguish target selection from Handoff Review, so
   `y` is shown as unavailable until review.
 - TUI launch copy now points at `moonbox launch --execute`, keeping long
   handoff prompts out of the modal while preserving guarded execution.
-- TUI Launch Review `enter` now restores the terminal and then launches the
+- TUI Handoff Review `enter` now restores the terminal and then launches the
   verified target CLI, while `y` still copies the guarded wrapper command.
 - Original-session execution is opt-in and uses source-specific resume
   entrypoints; Hermes resume commands now use `hermes --resume <session>`.
@@ -178,6 +178,18 @@ and this project uses semantic versioning once tagged releases start.
 - TUI session-list secondary rows now use relative resume-picker timestamps
   such as `16s ago` / `3m ago`; exact timestamps remain available in the right
   Session Details panel.
+- TUI `c` now refreshes the Work Capsule and opens Handoff Review directly; the
+  old TUI-only `d Diff` surface was removed to keep the handoff flow linear.
+- TUI sessions can now be starred with `s` (`*` remains an alias), persisted in
+  user config, and filtered through the `Star` source filter before `All`.
+- Session titles captured from Codex, Claude, and Hermes real stores now keep a
+  longer preview for the right Session Details panel while the list remains
+  windowed and clipped by the TUI.
+- TUI header no longer shows a fake `/ 100K` token budget, keeps compiler status
+  width stable across `ACTIVE` / `LOADING` / `COMPILED`, and mutes unselected
+  session titles so only the active row reads as highlighted.
+- The right Session Details panel now shows a compact Handoff Snapshot; full
+  capsule decisions, todo, evidence, and risks move to Handoff Review.
 - Resume-index rows whose event count is unknown now still hydrate their real
   timeline from `source_path`; truly empty timelines build a pending capsule
   instead of crashing the TUI by compiling a missing rewind id.
@@ -185,7 +197,7 @@ and this project uses semantic versioning once tagged releases start.
   `moonbox` and `moon`.
 - Replay eval JSON now separates matrix and synthetic case counts, labels each
   case with `case_kind` and `scenario`, and reports expected scenario coverage.
-- README screenshot now shows the current Launch Review readiness-details flow
+- README screenshot now shows the current Handoff Review readiness-details flow
   on a transparent SVG canvas, generated from the real TUI render path.
 - Draft Homebrew formula now points at a staged GitHub release source archive
   instead of a GitHub auto-generated tag archive.

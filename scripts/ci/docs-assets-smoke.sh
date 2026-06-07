@@ -34,12 +34,15 @@ grep -Fq 'cargo install --path . --locked' README.md
 grep -Fq 'brew tap Gunsio/tap' README.md
 grep -Fq 'Homebrew distribution is planned, but not published yet.' README.md
 
-grep -Fq 'Launch Review' "$svg"
+grep -Fq 'Handoff Review' "$svg"
+grep -Fq 'Capsule Review' "$svg"
+grep -Fq 'Prepared content' "$svg"
 grep -Fq 'Readiness details' "$svg"
 grep -Fq 'Real Session Metadata' "$svg"
 grep -Fq 'Cdx  Moonbox session rewind' "$svg"
 grep -Fq 'moonbox launch --execute' "$svg"
-grep -Fq 'enter launch after restore' "$svg"
-grep -Fq 'copy execute command' "$svg"
+grep -Fq 'enter handoff' "$svg"
+grep -Fq 'y copy command' "$svg"
+grep -Fq 'Action Path' "$svg"
 
 echo "moonbox docs asset smoke passed"

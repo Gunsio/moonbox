@@ -564,7 +564,7 @@ fn history_display_title(display: &str) -> Option<String> {
     if title.is_empty() || title.starts_with('/') || is_provider_context_text(title) {
         None
     } else {
-        Some(truncate(title, 72))
+        Some(truncate(title, 160))
     }
 }
 
@@ -600,7 +600,7 @@ impl SummaryBuilder {
             self.branch = record.git_branch.clone();
         }
         if let Some(title) = record.ai_title.as_deref().and_then(normalized_text) {
-            self.title = Some(truncate(&title, 72));
+            self.title = Some(truncate(&title, 160));
         }
 
         let record_type = record.record_type.as_deref().unwrap_or_default();
@@ -611,7 +611,7 @@ impl SummaryBuilder {
             && let Some(text) = message_text(&record)
             && !is_provider_context_text(&text)
         {
-            self.title = Some(truncate(&text, 72));
+            self.title = Some(truncate(&text, 160));
         }
         if record_type == "assistant"
             && let Some(count) = usage_token_count(&record.message)

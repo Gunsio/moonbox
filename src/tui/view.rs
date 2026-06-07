@@ -14,7 +14,7 @@ use crate::{
     app::{App, Focus},
     core::model::{
         CliTool, LaunchValidationState, SessionStatus, SourceProvenance, TimelineEvent,
-        TimelineKind, VerificationReport, VerificationStatus,
+        TimelineKind, VerificationReport, VerificationStatus, WorkCapsule,
     },
 };
 
@@ -58,9 +58,6 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
     if app.show_doctor {
         render_doctor(frame, root, app);
-    }
-    if app.show_diff {
-        render_diff(frame, root, app);
     }
 }
 
@@ -140,7 +137,7 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
         ),
         Span::raw("   Compiler: "),
         Span::styled(
-            app.compile_status,
+            compile_status_label(app.compile_status),
             Style::default()
                 .fg(theme::GREEN)
                 .add_modifier(Modifier::BOLD),
@@ -150,8 +147,8 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
     ]);
     let token_budget = app
         .current_session()
-        .map(|session| format!("{} / 100K", format_token_count(session.token_count)))
-        .unwrap_or_else(|| "- / 100K".into());
+        .map(|session| format_token_count(session.token_count))
+        .unwrap_or_else(|| "-".into());
     let budget = Line::from(vec![
         Span::raw("Tokens: "),
         Span::styled(
@@ -251,6 +248,7 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
             .iter()
             .map(|index| {
                 let session = &app.data.sessions[*index];
+                let selected_row = *index == app.selected_session;
                 let status = match session.status {
                     SessionStatus::Healthy => Span::raw(" "),
                     SessionStatus::Warning => Span::styled("▲", Style::default().fg(theme::GOLD)),
@@ -259,13 +257,25 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
                         Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
                     ),
                 };
+                let star = if app.is_session_starred(session) {
+                    Span::styled(
+                        "*",
+                        Style::default()
+                            .fg(theme::GOLD)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    Span::raw(" ")
+                };
                 ListItem::new(vec![
                     Line::from(vec![
                         status,
                         Span::raw(" "),
+                        star,
+                        Span::raw(" "),
                         Span::styled(source_pill(session.cli), source_tool_style(session.cli)),
                         Span::raw("  "),
-                        Span::styled(&session.title, Style::default().fg(theme::TEXT)),
+                        Span::styled(&session.title, session_title_style(selected_row)),
                     ]),
                     Line::from(vec![Span::styled(
                         session_list_secondary(session),
@@ -315,6 +325,20 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_stateful_widget(list, area, &mut state);
 }
 
+fn compile_status_label(status: &str) -> String {
+    format!("{status:<8}")
+}
+
+fn session_title_style(selected: bool) -> Style {
+    if selected {
+        Style::default()
+            .fg(theme::TEXT)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::MUTED)
+    }
+}
+
 fn session_list_window(total: usize, selected: usize, area_height: u16) -> (usize, usize) {
     if total == 0 {
         return (0, 0);
@@ -343,8 +367,8 @@ fn session_list_secondary_at(
         .as_deref()
         .filter(|branch| !branch.is_empty())
     {
-        Some(branch) => format!("      {updated}  ·  {branch}"),
-        None => format!("      {updated}"),
+        Some(branch) => format!("        {updated}  ·  {branch}"),
+        None => format!("        {updated}"),
     }
 }
 
@@ -973,85 +997,7 @@ fn render_capsule(frame: &mut Frame, area: Rect, app: &App) {
         return;
     }
 
-    lines.extend([
-        Line::raw(""),
-        Line::from(Span::styled(
-            capsule_preview_title(&capsule.state),
-            Style::default()
-                .fg(theme::BLUE)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(Span::styled(
-            capsule_preview_note(&capsule.state),
-            Style::default().fg(if capsule.state.contains("builtin") {
-                theme::GOLD
-            } else {
-                theme::MUTED
-            }),
-        )),
-        Line::raw(""),
-        label_line("Goal", &capsule.goal, theme::BLUE),
-        Line::raw(""),
-        label_line("State", &capsule.state, theme::GOLD),
-        Line::raw(""),
-        label_line("Rewind", &capsule.rewind_point, theme::GOLD),
-        Line::raw(""),
-        Line::from(Span::styled(
-            "Decisions",
-            Style::default()
-                .fg(theme::BLUE)
-                .add_modifier(Modifier::BOLD),
-        )),
-    ]);
-
-    for decision in &capsule.decisions {
-        lines.push(Line::from(vec![
-            Span::raw("  • "),
-            Span::styled(decision, Style::default().fg(theme::TEXT)),
-        ]));
-    }
-
-    lines.push(Line::raw(""));
-    lines.push(Line::from(Span::styled(
-        "Todo",
-        Style::default()
-            .fg(theme::BLUE)
-            .add_modifier(Modifier::BOLD),
-    )));
-    for todo in &capsule.todo {
-        let mark = if todo.done { "[x]" } else { "[ ]" };
-        let color = if todo.done { theme::GREEN } else { theme::TEXT };
-        lines.push(Line::from(vec![
-            Span::styled(format!("  {mark} "), Style::default().fg(color)),
-            Span::styled(&todo.text, Style::default().fg(color)),
-        ]));
-    }
-
-    lines.push(Line::raw(""));
-    lines.push(Line::from(Span::styled(
-        "Evidence",
-        Style::default()
-            .fg(theme::BLUE)
-            .add_modifier(Modifier::BOLD),
-    )));
-    for evidence in &capsule.evidence {
-        lines.push(Line::from(vec![
-            Span::styled("  > ", Style::default().fg(theme::MUTED)),
-            Span::styled(evidence, Style::default().fg(theme::MUTED)),
-        ]));
-    }
-
-    lines.push(Line::raw(""));
-    lines.push(Line::from(Span::styled(
-        "Risks",
-        Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
-    )));
-    for risk in &capsule.risks {
-        lines.push(Line::from(vec![
-            Span::styled("  ! ", Style::default().fg(theme::RED)),
-            Span::styled(risk, Style::default().fg(theme::GOLD)),
-        ]));
-    }
+    lines.extend(compact_capsule_lines(capsule));
 
     frame.render_widget(
         Paragraph::new(lines)
@@ -1065,20 +1011,37 @@ fn render_capsule(frame: &mut Frame, area: Rect, app: &App) {
     );
 }
 
-fn capsule_preview_note(state: &str) -> &'static str {
-    if state.contains("builtin") {
-        "  Draft guidance. Real fields: session, cwd, title, selected rewind, source health."
-    } else {
-        "  Compiler-generated handoff context. Verify before launch."
-    }
-}
-
-fn capsule_preview_title(state: &str) -> &'static str {
-    if state.contains("builtin") {
-        "Draft Work Capsule Preview"
-    } else {
-        "Work Capsule Preview"
-    }
+fn compact_capsule_lines(capsule: &WorkCapsule) -> Vec<Line<'static>> {
+    vec![
+        Line::raw(""),
+        Line::from(Span::styled(
+            "Handoff Snapshot",
+            Style::default()
+                .fg(theme::BLUE)
+                .add_modifier(Modifier::BOLD),
+        )),
+        review_label_line("State", capsule.state.clone(), theme::GOLD),
+        review_label_line(
+            "Rewind",
+            review_snippet(&capsule.rewind_point, 96),
+            theme::GOLD,
+        ),
+        review_label_line("Goal", review_snippet(&capsule.goal, 96), theme::BLUE),
+        review_label_line(
+            "Risk",
+            capsule
+                .risks
+                .first()
+                .map(|risk| review_snippet(risk, 96))
+                .unwrap_or_else(|| "none".into()),
+            theme::RED,
+        ),
+        Line::raw(""),
+        Line::from(Span::styled(
+            "Press c to refresh and review the full handoff.",
+            Style::default().fg(theme::MUTED),
+        )),
+    ]
 }
 
 fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
@@ -1159,64 +1122,56 @@ fn metadata_line(label: &'static str, value: &str, style: Style) -> Line<'static
 }
 
 fn render_branch_tree(frame: &mut Frame, area: Rect, app: &App) {
-    let original = app
+    let session = app
         .current_session()
-        .map(|session| format!("original/{}", session.id))
-        .unwrap_or_else(|| "original/no-session".into());
-    let rewind = format!("rewind/{}", app.rewind_event_id);
-    let target = format!("handoff/{}", app.data.target.id());
-    let rewind_detail = app
-        .data
-        .timeline
-        .iter()
-        .find(|event| event.id == app.rewind_event_id)
-        .map(|event| event.title.as_str())
-        .unwrap_or("selected rewind point");
+        .map(|session| format!("{} {}", session.cli, short_identifier(&session.id, 10)))
+        .unwrap_or_else(|| "no session".into());
+    let rewind = format!("rewind {}", short_identifier(&app.rewind_event_id, 12));
+    let target = format!("handoff {}", app.data.target);
     let nodes = [
-        (original, false, "original session, read-only"),
-        (rewind, false, rewind_detail),
-        (target, true, "compiled by engineering-handoff"),
+        (session, theme::TEXT),
+        (rewind, theme::GOLD),
+        (target, theme::CYAN),
     ];
 
-    let mut spans = vec![Span::styled(" * ", Style::default().fg(theme::MUTED))];
-    for (idx, (label, active, _)) in nodes.iter().enumerate() {
+    let mut spans = vec![Span::styled("   ", Style::default().fg(theme::MUTED))];
+    for (idx, (label, color)) in nodes.iter().enumerate() {
         if idx > 0 {
             spans.push(Span::styled(" ── ", Style::default().fg(theme::BORDER)));
         }
-        let style = if *active {
-            Style::default()
-                .fg(theme::CYAN)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(theme::TEXT)
-        };
-        let label = if *active {
-            format!(" > {label} ")
-        } else {
-            format!(" {label} ")
-        };
-        spans.push(Span::styled(label, style));
+        spans.push(Span::styled(
+            label.clone(),
+            Style::default().fg(*color).add_modifier(Modifier::BOLD),
+        ));
     }
-    let active = nodes
-        .iter()
-        .find(|(_, active, _)| *active)
-        .map(|(_, _, detail)| *detail)
-        .unwrap_or("no active branch");
     let lines = if area.height < 4 {
         vec![Line::from(spans)]
     } else {
         vec![
             Line::from(spans),
             Line::from(vec![
-                Span::styled("   active: ", Style::default().fg(theme::MUTED)),
-                Span::styled(active, Style::default().fg(theme::CYAN)),
+                Span::styled("   next: ", Style::default().fg(theme::MUTED)),
+                Span::styled(
+                    "c review handoff  |  enter open original  |  s star",
+                    Style::default().fg(theme::CYAN),
+                ),
             ]),
         ]
     };
     frame.render_widget(
-        Paragraph::new(lines).block(panel_block(" Branch Tree ", app.focus == Focus::Branches)),
+        Paragraph::new(lines).block(panel_block(" Action Path ", app.focus == Focus::Branches)),
         area,
     );
+}
+
+fn short_identifier(value: &str, keep: usize) -> String {
+    let mut chars = value.chars();
+    let prefix = chars.by_ref().take(keep).collect::<String>();
+    if chars.next().is_some() {
+        format!("{prefix}...")
+    } else {
+        prefix
+    }
 }
 
 fn render_command_bar(frame: &mut Frame, area: Rect, app: &App) {
@@ -1264,11 +1219,19 @@ type KeyHint = (&'static str, &'static str);
 fn active_key_hints(app: &App) -> Vec<KeyHint> {
     if app.show_launch {
         if app.launch_review {
+            let enter_hint = if app
+                .validate_launch_for_target(app.pending_target)
+                .is_blocked()
+            {
+                "Blocked"
+            } else {
+                "Handoff"
+            };
             return vec![
                 ("y", "Copy"),
-                ("enter", "Disabled"),
+                ("enter", enter_hint),
                 ("PgUp/Dn", "Scroll"),
-                ("Esc", "Close"),
+                ("Esc/q", "Close"),
             ];
         }
         if app.validate_launch_for_target(app.pending_target).state
@@ -1305,7 +1268,7 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("Esc", "Close"),
         ];
     }
-    if app.show_diff || app.show_help {
+    if app.show_help {
         return vec![
             ("j/k", "Scroll"),
             ("PgUp/Dn", "Scroll"),
@@ -1321,6 +1284,7 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("/", "Search"),
             ("[ ]", "Source"),
             ("a", "Clear"),
+            ("s", "Star"),
             ("o", "Original"),
             ("enter", "Open"),
             ("x/H", "Handoff"),
@@ -1330,8 +1294,7 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("j/k", "Events"),
             ("gg/G", "Jump"),
             ("space", "Rewind"),
-            ("c", "Compile"),
-            ("d", "Diff"),
+            ("c", "Review"),
             ("tab", "Next"),
             (":", "Cmd"),
             ("q", "Quit"),
@@ -1339,10 +1302,9 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
         Focus::Capsule => vec![
             ("j/k", "Scroll"),
             ("gg/G", "Top/Bottom"),
-            ("c", "Compile"),
+            ("c", "Review"),
             ("v", "Verify"),
-            ("s", "Skill"),
-            ("d", "Diff"),
+            ("S", "Skill"),
             ("tab", "Next"),
             (":", "Cmd"),
             ("q", "Quit"),
@@ -1381,6 +1343,7 @@ fn status_line(app: &App) -> Line<'_> {
     } else if app.status_message.contains("PASS")
         || app.status_message.contains("saved")
         || app.status_message.contains("compiled")
+        || app.status_message.contains("refreshed")
         || app.status_message.contains("cleared")
     {
         theme::GREEN
@@ -1412,14 +1375,17 @@ fn render_help(frame: &mut Frame, root: Rect, app: &App) {
         Line::raw("tab, shift-tab  switch panel"),
         Line::raw("f               cycle session source filter"),
         Line::raw("a               clear source and text filters"),
+        Line::raw("s               star / unstar selected session"),
+        Line::raw("*               star / unstar selected session alias"),
         Line::raw("/text           filter sessions by text"),
         Line::raw("o               open original session with original CLI"),
         Line::raw("enter           open selected session with original CLI"),
-        Line::raw("x / H           choose target and review handoff"),
+        Line::raw("x / H           choose target for handoff"),
         Line::raw("D               open environment doctor"),
         Line::raw("[ / ]           previous / next session source filter"),
         Line::raw("space           set rewind point"),
-        Line::raw("c, v, d, s      compile, verify, diff, switch skill"),
+        Line::raw("c               refresh capsule and open handoff review"),
+        Line::raw("v, S            verify capsule, switch skill"),
         Line::raw(":               command mode"),
         Line::raw("q / Ctrl-C      quit"),
         Line::raw("Esc             cancel command/search or close overlay"),
@@ -1520,9 +1486,11 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
     let pending_validation = app.validate_launch_for_target(app.pending_target);
     let pending_report = app.launch_verification_for_target(app.pending_target);
     if app.launch_review {
+        let capsule = app.launch_capsule_for_target(app.pending_target);
+        let launch_blocked = pending_validation.state == LaunchValidationState::Blocked;
         let mut lines = vec![
             Line::from(Span::styled(
-                "Review target handoff",
+                "Capsule Review",
                 Style::default()
                     .fg(theme::GOLD)
                     .add_modifier(Modifier::BOLD),
@@ -1531,7 +1499,7 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             Line::from(vec![
                 Span::styled("Action: ", Style::default().fg(theme::BLUE)),
                 Span::styled(
-                    "target handoff",
+                    "handoff",
                     Style::default()
                         .fg(theme::CYAN)
                         .add_modifier(Modifier::BOLD),
@@ -1550,6 +1518,10 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                 Span::raw(target_branch),
             ]),
             Line::from(vec![
+                Span::styled("Rewind: ", Style::default().fg(theme::BLUE)),
+                Span::raw(capsule.rewind_point.clone()),
+            ]),
+            Line::from(vec![
                 Span::styled("Validation: ", Style::default().fg(theme::BLUE)),
                 Span::styled(
                     validation_label(pending_validation.state),
@@ -1563,6 +1535,20 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                     Style::default().fg(theme::MUTED),
                 ),
             ]),
+            Line::from(vec![
+                Span::styled("Command: ", Style::default().fg(theme::BLUE)),
+                Span::styled(app.launch_command(), Style::default().fg(theme::CYAN)),
+            ]),
+            Line::raw(""),
+            Line::from(Span::styled(
+                "Prepared content",
+                Style::default()
+                    .fg(theme::BLUE)
+                    .add_modifier(Modifier::BOLD),
+            )),
+        ];
+        lines.extend(capsule_review_lines(&capsule, 1));
+        lines.extend([
             Line::raw(""),
             Line::from(Span::styled(
                 "Readiness details",
@@ -1570,23 +1556,22 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                     .fg(theme::BLUE)
                     .add_modifier(Modifier::BOLD),
             )),
-        ];
+        ]);
         lines.extend(readiness_lines(pending_report.as_ref(), 6));
         lines.extend([
             Line::raw(""),
             Line::from(Span::styled(
-                app.launch_command(),
-                Style::default().fg(theme::CYAN),
-            )),
-            Line::raw(""),
-            Line::from(Span::styled(
-                "enter launch after restore   y copy execute command   Esc close",
+                if launch_blocked {
+                    "enter disabled   y copy blocked   Esc/q close"
+                } else {
+                    "enter handoff   y copy command   Esc/q close"
+                },
                 Style::default().fg(theme::MUTED),
             )),
         ]);
         frame.render_widget(
             Paragraph::new(lines)
-                .block(panel_block(" Launch Review ", true))
+                .block(panel_block(" Handoff Review ", true))
                 .scroll((app.modal_scroll, 0))
                 .wrap(Wrap { trim: true }),
             area,
@@ -1703,6 +1688,60 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             .wrap(Wrap { trim: true }),
         area,
     );
+}
+
+fn capsule_review_lines(capsule: &WorkCapsule, _max_rows: usize) -> Vec<Line<'static>> {
+    let decision = capsule
+        .decisions
+        .first()
+        .map(|value| review_snippet(value, 88))
+        .unwrap_or_else(|| "none".into());
+    let todo = capsule
+        .todo
+        .first()
+        .map(|item| {
+            let mark = if item.done { "[x]" } else { "[ ]" };
+            review_snippet(&format!("{mark} {}", item.text), 88)
+        })
+        .unwrap_or_else(|| "none".into());
+    let risk = capsule
+        .risks
+        .first()
+        .map(|value| review_snippet(value, 88))
+        .unwrap_or_else(|| "none".into());
+    vec![
+        review_label_line("Goal", review_snippet(&capsule.goal, 88), theme::BLUE),
+        review_label_line("State", capsule.state.clone(), theme::GOLD),
+        review_label_line("Decision", decision, theme::BLUE),
+        review_label_line("Todo", todo, theme::BLUE),
+        review_label_line("Risk", risk, theme::RED),
+    ]
+}
+
+fn review_label_line(
+    label: &'static str,
+    value: String,
+    color: ratatui::style::Color,
+) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(
+            format!("{label}: "),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(value, Style::default().fg(theme::TEXT)),
+    ])
+}
+
+fn review_snippet(value: &str, max_chars: usize) -> String {
+    let mut output = String::new();
+    for (index, ch) in value.chars().enumerate() {
+        if index == max_chars {
+            output.push_str("...");
+            return output;
+        }
+        output.push(ch);
+    }
+    output
 }
 
 fn validation_label(state: LaunchValidationState) -> &'static str {
@@ -1882,48 +1921,6 @@ fn render_open_original(frame: &mut Frame, root: Rect, app: &App) {
     );
 }
 
-fn render_diff(frame: &mut Frame, root: Rect, app: &App) {
-    let area = modal_area(root, 64, 42);
-    frame.render_widget(Clear, area);
-    let lines = vec![
-        Line::from(Span::styled(
-            "Capsule diff preview",
-            Style::default()
-                .fg(theme::GOLD)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::raw(""),
-        Line::from(Span::styled(
-            "+ canonical timeline schema",
-            Style::default().fg(theme::GREEN),
-        )),
-        Line::from(Span::styled(
-            "+ work capsule schema",
-            Style::default().fg(theme::GREEN),
-        )),
-        Line::from(Span::styled(
-            "+ target launcher new-branch mode",
-            Style::default().fg(theme::GREEN),
-        )),
-        Line::from(Span::styled(
-            "- raw session resume",
-            Style::default().fg(theme::RED),
-        )),
-        Line::raw(""),
-        Line::from(Span::styled(
-            "Press Esc to close",
-            Style::default().fg(theme::MUTED),
-        )),
-    ];
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(panel_block(" Diff ", true))
-            .scroll((app.modal_scroll, 0))
-            .wrap(Wrap { trim: true }),
-        area,
-    );
-}
-
 fn panel_block(title: &'static str, focused: bool) -> Block<'static> {
     let color = if focused { theme::GOLD } else { theme::BORDER };
     Block::default()
@@ -1950,16 +1947,6 @@ fn stable_panel_title(content: String, area: Rect) -> String {
     let width = usize::from(area.width.saturating_sub(4)).clamp(18, 30);
     let clipped = content.chars().take(width).collect::<String>();
     format!(" {clipped:<width$} ")
-}
-
-fn label_line<'a>(label: &'a str, value: &'a str, color: ratatui::style::Color) -> Line<'a> {
-    Line::from(vec![
-        Span::styled(
-            format!("{label}: "),
-            Style::default().fg(color).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(value, Style::default().fg(theme::TEXT)),
-    ])
 }
 
 fn key(label: &'static str) -> Span<'static> {
@@ -2089,13 +2076,39 @@ mod tests {
     }
 
     #[test]
+    fn compile_status_label_keeps_header_width_stable() {
+        assert_eq!(compile_status_label("ACTIVE"), "ACTIVE  ");
+        assert_eq!(compile_status_label("LOADING"), "LOADING ");
+        assert_eq!(compile_status_label("COMPILED"), "COMPILED");
+    }
+
+    #[test]
+    fn unselected_session_titles_are_muted() {
+        assert_eq!(session_title_style(false).fg, Some(theme::MUTED));
+        assert_eq!(session_title_style(true).fg, Some(theme::TEXT));
+        assert!(
+            session_title_style(true)
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
+    }
+
+    #[test]
+    fn header_tokens_do_not_show_fake_budget() {
+        let app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        let screen = render_text(&app, 140, 40);
+
+        assert!(!screen.contains("/ 100K"), "{screen}");
+    }
+
+    #[test]
     fn session_list_secondary_uses_relative_time_with_branch() {
         let now = parse_session_timestamp("2026-06-07T13:34:00+08:00").expect("now");
         let session = test_session("2026-06-07T13:33:44+08:00", Some("dev"));
 
         assert_eq!(
             session_list_secondary_at(&session, now),
-            "      16s ago  ·  dev"
+            "        16s ago  ·  dev"
         );
     }
 
@@ -2236,14 +2249,18 @@ mod tests {
     }
 
     #[test]
-    fn builtin_capsule_preview_is_labeled_as_draft_not_mock_project_todo() {
+    fn right_panel_shows_compact_handoff_snapshot_not_full_capsule() {
         let app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
         let screen = render_text(&app, 140, 40);
 
         assert_screen_contains(&screen, "Real Session Metadata");
-        assert_screen_contains(&screen, "Draft Work Capsule Preview");
-        assert_screen_contains(&screen, "Real fields:");
+        assert_screen_contains(&screen, "Handoff Snapshot");
         assert_screen_contains(&screen, "draft_from_builtin_compiler");
+        assert_screen_contains(&screen, "Press c to refresh and review");
+        assert!(
+            !screen.contains("Production handoff should use"),
+            "{screen}"
+        );
         assert!(!screen.contains("Define canonical timeline"), "{screen}");
     }
 
@@ -2286,13 +2303,16 @@ mod tests {
         app.pending_target = CliTool::Hermes;
         let screen = render_text(&app, 120, 36);
 
-        assert_screen_contains(&screen, "Launch Review");
-        assert_screen_contains(&screen, "target handoff");
+        assert_screen_contains(&screen, "Handoff Review");
+        assert_screen_contains(&screen, "Capsule Review");
+        assert_screen_contains(&screen, "handoff");
+        assert_screen_contains(&screen, "Prepared content");
+        assert_screen_contains(&screen, "Goal");
         assert_screen_contains(&screen, "Readiness details");
         assert_screen_contains(&screen, "PASS");
         assert_screen_contains(&screen, "target_cli");
         assert_screen_contains(&screen, "moonbox launch --execute");
-        assert_screen_contains(&screen, "enter launch after restore");
+        assert_screen_contains(&screen, "enter Handoff");
     }
 
     #[test]

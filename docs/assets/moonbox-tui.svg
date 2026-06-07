@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1496" height="848" viewBox="0 0 1496 848" role="img" aria-labelledby="title desc">
   <title id="title">Moonbox TUI screenshot</title>
-  <desc id="desc">A generated terminal screenshot of Moonbox showing Launch Review, verifier readiness details, and Vim-style key hints.</desc>
+  <desc id="desc">A generated terminal screenshot of Moonbox showing Handoff Review, capsule content, verifier readiness details, and Vim-style key hints.</desc>
   <defs>
     <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
       <feDropShadow dx="0" dy="18" stdDeviation="26" flood-color="#000000" flood-opacity="0.40"/>
@@ -23,20 +23,20 @@
   <text x="352" y="78" class="mono" font-size="14" font-weight="800" fill="#5c91f5">All</text>
   <text x="406" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Compiler:</text>
   <text x="496" y="78" class="mono" font-size="14" font-weight="800" fill="#5cd689">ACTIVE</text>
-  <text x="577" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Skill:</text>
-  <text x="640" y="78" class="mono" font-size="14" font-weight="500" fill="#47c9da">engineering-handoff</text>
-  <text x="838" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Tokens:</text>
-  <text x="910" y="78" class="mono" font-size="14" font-weight="800" fill="#e6be53">42K / 100K</text>
-  <text x="1027" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Doctor:</text>
-  <text x="1099" y="78" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
-  <text x="1162" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Verify:</text>
-  <text x="1234" y="78" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
+  <text x="595" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Skill:</text>
+  <text x="658" y="78" class="mono" font-size="14" font-weight="500" fill="#47c9da">engineering-handoff</text>
+  <text x="856" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Tokens:</text>
+  <text x="928" y="78" class="mono" font-size="14" font-weight="800" fill="#e6be53">42K</text>
+  <text x="982" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Doctor:</text>
+  <text x="1054" y="78" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
+  <text x="1117" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Verify:</text>
+  <text x="1189" y="78" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
   <text x="1441" y="78" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="96" class="mono" font-size="14" font-weight="500" fill="#374452">╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
   <text x="46" y="114" class="mono" font-size="14" font-weight="500" fill="#e6be53">╭ Sessions · All (1/3)           ─────╮</text>
   <text x="397" y="114" class="mono" font-size="14" font-weight="500" fill="#374452">╭ Timeline ──────────────────────────────────────────────────────────╮╭ Session Details ────────────────────────────╮</text>
   <text x="46" y="132" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="64" y="132" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">▸   Cdx  Moonbox session rewind des</text>
+  <text x="64" y="132" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">▸     Cdx  Moonbox session rewind d</text>
   <text x="388" y="132" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="397" y="132" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="442" y="132" class="mono" font-size="14" font-weight="500" fill="#8b949e">Conclusion: raw session copy is the wrong abstraction.</text>
@@ -44,35 +44,35 @@
   <text x="1045" y="132" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Real Session Metadata</text>
   <text x="1441" y="132" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="150" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="136" y="150" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">10m ago</text>
-  <text x="217" y="150" class="mono" font-size="14" font-weight="500" fill="#e6be53">╭ Launch Review ─────────────────────────────────────────────────────────────────────────────────────────────────────╮</text>
+  <text x="154" y="150" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">10m ago</text>
+  <text x="217" y="150" class="mono" font-size="14" font-weight="500" fill="#e6be53">╭ Handoff Review ────────────────────────────────────────────────────────────────────────────────────────────────────╮</text>
   <text x="1288" y="150" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">rewind design</text>
   <text x="1441" y="150" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="168" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="82" y="168" class="mono" font-size="14" font-weight="500" fill="#e6be53">▲</text>
-  <text x="100" y="168" class="mono" font-size="14" font-weight="800" fill="#b284ff">Clu</text>
-  <text x="145" y="168" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">QC platf</text>
+  <text x="118" y="168" class="mono" font-size="14" font-weight="800" fill="#b284ff">Clu</text>
+  <text x="163" y="168" class="mono" font-size="14" font-weight="500" fill="#8b949e">QC pla</text>
   <text x="217" y="168" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="168" class="mono" font-size="14" font-weight="800" fill="#e6be53">Review target handoff</text>
+  <text x="235" y="168" class="mono" font-size="14" font-weight="800" fill="#e6be53">Capsule Review</text>
   <text x="1270" y="168" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1441" y="168" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="186" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="136" y="186" class="mono" font-size="14" font-weight="500" fill="#8b949e">2h ago  ·</text>
+  <text x="154" y="186" class="mono" font-size="14" font-weight="500" fill="#8b949e">2h ago</text>
   <text x="217" y="186" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1270" y="186" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1279" y="186" class="mono" font-size="14" font-weight="500" fill="#5c91f5">o</text>
   <text x="1441" y="186" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="204" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="82" y="204" class="mono" font-size="14" font-weight="800" fill="#f16565">!</text>
-  <text x="100" y="204" class="mono" font-size="14" font-weight="800" fill="#f59756">Hms</text>
-  <text x="145" y="204" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">cxcp 502</text>
+  <text x="118" y="204" class="mono" font-size="14" font-weight="800" fill="#f59756">Hms</text>
+  <text x="163" y="204" class="mono" font-size="14" font-weight="500" fill="#8b949e">cxcp 5</text>
   <text x="217" y="204" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="235" y="204" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Action:</text>
-  <text x="307" y="204" class="mono" font-size="14" font-weight="800" fill="#47c9da">target handoff</text>
+  <text x="307" y="204" class="mono" font-size="14" font-weight="800" fill="#47c9da">handoff</text>
   <text x="1270" y="204" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1441" y="204" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="222" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="136" y="222" class="mono" font-size="14" font-weight="500" fill="#8b949e">23h ago</text>
+  <text x="154" y="222" class="mono" font-size="14" font-weight="500" fill="#8b949e">23h ago</text>
   <text x="217" y="222" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="235" y="222" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Session:</text>
   <text x="316" y="222" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Codex / codex-cxcp-design</text>
@@ -92,100 +92,115 @@
   <text x="1441" y="258" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="276" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="276" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="276" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Validation:</text>
-  <text x="343" y="276" class="mono" font-size="14" font-weight="800" fill="#5cd689">READY</text>
-  <text x="406" y="276" class="mono" font-size="14" font-weight="500" fill="#8b949e">Ready</text>
+  <text x="235" y="276" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Rewind:</text>
+  <text x="307" y="276" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">evt-091 / Before raw resume. Compile new Work Capsule for Hermes.</text>
   <text x="1270" y="276" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1279" y="276" class="mono" font-size="14" font-weight="500" fill="#5cd689">eady</text>
   <text x="1441" y="276" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="294" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="294" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="235" y="294" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Validation:</text>
+  <text x="343" y="294" class="mono" font-size="14" font-weight="800" fill="#5cd689">READY</text>
+  <text x="406" y="294" class="mono" font-size="14" font-weight="500" fill="#8b949e">Ready</text>
   <text x="1270" y="294" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1279" y="294" class="mono" font-size="14" font-weight="500" fill="#8b949e">dex/sessions.json</text>
   <text x="1441" y="294" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="312" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="312" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="312" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Readiness details</text>
+  <text x="235" y="312" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Command:</text>
+  <text x="316" y="312" class="mono" font-size="14" font-weight="500" fill="#47c9da">moonbox launch --execute --target hermes --session codex-cxcp-design</text>
   <text x="1270" y="312" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1441" y="312" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="330" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="330" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="330" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
-  <text x="280" y="330" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">capsule_source</text>
-  <text x="424" y="330" class="mono" font-size="14" font-weight="500" fill="#8b949e">capsule source Codex / codex-cxcp-design vs selected Codex / codex-cxcp-design</text>
   <text x="1270" y="330" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1441" y="330" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="348" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="348" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="348" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
-  <text x="280" y="348" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">target_cli</text>
-  <text x="388" y="348" class="mono" font-size="14" font-weight="500" fill="#8b949e">capsule target Hermes vs requested Hermes</text>
-  <text x="1270" y="348" class="mono" font-size="14" font-weight="500" fill="#e6be53">│s: session, cwd,</text>
+  <text x="235" y="348" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Prepared content</text>
+  <text x="1270" y="348" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1279" y="348" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">compiler</text>
   <text x="1441" y="348" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="366" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="366" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="366" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
-  <text x="280" y="366" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">rewind_exists</text>
-  <text x="415" y="366" class="mono" font-size="14" font-weight="500" fill="#8b949e">rewind evt-091 in selected timeline</text>
-  <text x="1270" y="366" class="mono" font-size="14" font-weight="500" fill="#e6be53">│urce health.</text>
+  <text x="235" y="366" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Goal:</text>
+  <text x="289" y="366" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Continue Moonbox session rewind design from selected rewind point.</text>
+  <text x="1270" y="366" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1279" y="366" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">aw resume.</text>
   <text x="1441" y="366" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="384" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="384" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="384" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
-  <text x="280" y="384" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">handoff_context</text>
-  <text x="433" y="384" class="mono" font-size="14" font-weight="500" fill="#8b949e">3 decision(s), 3 todo item(s), 5 evidence item(s)</text>
+  <text x="235" y="384" class="mono" font-size="14" font-weight="800" fill="#e6be53">State:</text>
+  <text x="298" y="384" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">draft_from_builtin_compiler</text>
   <text x="1270" y="384" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1279" y="384" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">or Hermes.</text>
   <text x="1441" y="384" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="402" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="402" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="402" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
-  <text x="280" y="402" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">target_support</text>
-  <text x="424" y="402" class="mono" font-size="14" font-weight="500" fill="#8b949e">Hermes handoff dry-run supported</text>
+  <text x="235" y="402" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Decision:</text>
+  <text x="325" y="402" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Source session is read-only; Moonbox only builds a handoff plan.</text>
   <text x="1270" y="402" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1279" y="402" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">sion rewind</text>
   <text x="1441" y="402" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="420" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="420" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="235" y="420" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Todo:</text>
+  <text x="289" y="420" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">[x] Selected rewind point evt-091</text>
   <text x="1270" y="420" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1279" y="420" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">d point.</text>
   <text x="1441" y="420" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="438" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="438" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="438" class="mono" font-size="14" font-weight="500" fill="#47c9da">moonbox launch --execute --target hermes --session codex-cxcp-design</text>
+  <text x="235" y="438" class="mono" font-size="14" font-weight="800" fill="#f16565">Risk:</text>
+  <text x="289" y="438" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Built-in draft compiler may omit tool outputs, attachments, and hidden provider state.</text>
   <text x="1270" y="438" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1279" y="438" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">ler may omit tool</text>
   <text x="1441" y="438" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="456" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="456" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1270" y="456" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="1279" y="456" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">compiler</text>
+  <text x="1279" y="456" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">hidden provider</text>
   <text x="1441" y="456" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="474" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="474" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="474" class="mono" font-size="14" font-weight="500" fill="#8b949e">enter launch after restore   y copy execute command   Esc close</text>
+  <text x="235" y="474" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Readiness details</text>
   <text x="1270" y="474" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1441" y="474" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="492" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="492" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="235" y="492" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
+  <text x="280" y="492" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">capsule_source</text>
+  <text x="424" y="492" class="mono" font-size="14" font-weight="500" fill="#8b949e">capsule source Codex / codex-cxcp-design vs selected Codex / codex-cxcp-design</text>
   <text x="1270" y="492" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="1279" y="492" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">aw resume.</text>
   <text x="1441" y="492" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="510" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="510" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="235" y="510" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
+  <text x="280" y="510" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">target_cli</text>
+  <text x="388" y="510" class="mono" font-size="14" font-weight="500" fill="#8b949e">capsule target Hermes vs requested Hermes</text>
   <text x="1270" y="510" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="1279" y="510" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">or Hermes.</text>
+  <text x="1279" y="510" class="mono" font-size="14" font-weight="500" fill="#8b949e">iew the full</text>
   <text x="1441" y="510" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="528" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="528" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="235" y="528" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
+  <text x="280" y="528" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">rewind_exists</text>
+  <text x="415" y="528" class="mono" font-size="14" font-weight="500" fill="#8b949e">rewind evt-091 in selected timeline</text>
   <text x="1270" y="528" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1441" y="528" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="546" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="546" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="235" y="546" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
+  <text x="280" y="546" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">handoff_context</text>
+  <text x="433" y="546" class="mono" font-size="14" font-weight="500" fill="#8b949e">3 decision(s), 3 todo item(s), 5 evidence item(s)</text>
   <text x="1270" y="546" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1441" y="546" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="564" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="564" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="235" y="564" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
+  <text x="280" y="564" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">target_support</text>
+  <text x="424" y="564" class="mono" font-size="14" font-weight="500" fill="#8b949e">Hermes handoff dry-run supported</text>
   <text x="1270" y="564" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="1279" y="564" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">nly; Moonbox only</text>
   <text x="1441" y="564" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="582" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="582" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
@@ -193,39 +208,35 @@
   <text x="1441" y="582" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="600" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="600" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="235" y="600" class="mono" font-size="14" font-weight="500" fill="#8b949e">enter handoff   y copy command   Esc/q close</text>
   <text x="1270" y="600" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="1279" y="600" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">ilt-in</text>
   <text x="1441" y="600" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="618" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="618" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1270" y="618" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="1279" y="618" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">er.</text>
   <text x="1441" y="618" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="636" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="636" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1270" y="636" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="1279" y="636" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">d use a</text>
   <text x="1441" y="636" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="654" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="654" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1270" y="654" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="1279" y="654" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">er skill.</text>
   <text x="1441" y="654" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="672" class="mono" font-size="14" font-weight="500" fill="#e6be53">╰──────────────────│</text>
   <text x="1270" y="672" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1279" y="672" class="mono" font-size="14" font-weight="500" fill="#374452">──────────────────╯</text>
-  <text x="46" y="690" class="mono" font-size="14" font-weight="500" fill="#374452">╭ Branch Tree ─────</text>
+  <text x="46" y="690" class="mono" font-size="14" font-weight="500" fill="#374452">╭ Action Path ─────</text>
   <text x="217" y="690" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1270" y="690" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1279" y="690" class="mono" font-size="14" font-weight="500" fill="#374452">──────────────────╮</text>
   <text x="46" y="708" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
-  <text x="73" y="708" class="mono" font-size="14" font-weight="500" fill="#8b949e">*</text>
-  <text x="100" y="708" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">original/code</text>
+  <text x="91" y="708" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">Codex codex-cx</text>
   <text x="217" y="708" class="mono" font-size="14" font-weight="500" fill="#e6be53">╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
   <text x="1441" y="708" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="726" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
-  <text x="91" y="726" class="mono" font-size="14" font-weight="500" fill="#8b949e">active:</text>
-  <text x="163" y="726" class="mono" font-size="14" font-weight="500" fill="#47c9da">compiled by engineering-handoff</text>
+  <text x="91" y="726" class="mono" font-size="14" font-weight="500" fill="#8b949e">next:</text>
+  <text x="145" y="726" class="mono" font-size="14" font-weight="500" fill="#47c9da">c review handoff  |  enter open original  |  s star</text>
   <text x="1441" y="726" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="744" class="mono" font-size="14" font-weight="500" fill="#374452">╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
   <text x="46" y="762" class="mono" font-size="14" font-weight="500" fill="#374452">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
@@ -234,9 +245,9 @@
   <text x="55" y="798" class="mono" font-size="14" font-weight="800" fill="#5c91f5">y</text>
   <text x="73" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">Copy</text>
   <text x="136" y="798" class="mono" font-size="14" font-weight="800" fill="#5c91f5">enter</text>
-  <text x="190" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">Disabled</text>
-  <text x="289" y="798" class="mono" font-size="14" font-weight="800" fill="#5c91f5">PgUp/Dn</text>
-  <text x="361" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">Scroll</text>
-  <text x="442" y="798" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Esc</text>
-  <text x="478" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">Close</text>
+  <text x="190" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">Handoff</text>
+  <text x="280" y="798" class="mono" font-size="14" font-weight="800" fill="#5c91f5">PgUp/Dn</text>
+  <text x="352" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">Scroll</text>
+  <text x="433" y="798" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Esc/q</text>
+  <text x="487" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">Close</text>
 </svg>

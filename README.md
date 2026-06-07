@@ -172,7 +172,9 @@ The first implementation focuses on the product shell:
   `original_resume` for `open`, `target_handoff` for `launch`
 - Target selection lives inside the launch flow, with explicit `> [x]` radio-list selection
 - Target picker validates each target as `READY`, `WARN`, or `BLOCKED`; blocked targets cannot confirm or copy launch commands
-- Target picker and Launch Review show verifier-backed readiness rows so users can see the exact PASS/WARN/FAIL signal behind each target state
+- Target picker and Handoff Review show verifier-backed readiness rows so users can see the exact PASS/WARN/FAIL signal behind each target state
+- `c` refreshes the Work Capsule and opens Handoff Review in one step; the
+  previous TUI-only `d Diff` surface is removed to keep the handoff flow linear
 - Target handoff uses a dedicated `x` shortcut, with `H` and `t` kept as
   compatibility aliases, and a three-stage TUI flow:
   choose target, review the command, then press `enter` to restore the terminal
@@ -187,9 +189,15 @@ The first implementation focuses on the product shell:
 - Real Codex, Claude, and Hermes resume-surface listing plus timeline parsing
 - Original-session open command, Work Capsule, and branch tree previews
 - Live `/` session search, combined filter display, and one-key clear with `a`
+- Starred sessions with `s` toggle and a `Star` source filter immediately before
+  `All` in the filter cycle
 - Selected/filtered session drives timeline, Work Capsule, branch preview, token budget, and default rewind point
 - Real-session metadata is labeled separately from draft Work Capsule guidance,
   so source store facts are not confused with built-in compiler placeholders
+- Right Session Details keeps a compact Handoff Snapshot; full capsule content
+  lives in Handoff Review after pressing `c`
+- Header token display shows only indexed source token count or `-`, not a fake
+  target context budget
 - Default rewind selection for real sessions prefers user turns or explicit
   rewind markers instead of assistant/tool output
 - Animated TUI loading screen while source sessions are indexed in the background
@@ -480,8 +488,8 @@ report. The panel shows adapter provenance, store path, session count, skipped
 record count, and last indexed timestamp. It is read-only and does not load
 timelines, resume sessions, launch targets, or spawn target binaries.
 
-Session search matches id, title, cwd, source, branch, and health reason. When a
-different session becomes selected by movement, source filter, or search,
+Session search matches id, title/raw title, cwd, source path, source, branch,
+and health reason. When a different session becomes selected by movement, source filter, or search,
 Moonbox immediately marks the selected session as loading, then hydrates that
 session's timeline, capsule preview, branch preview, and recommended rewind
 point in the background. Timeline rendering hides provider-injected context
@@ -506,11 +514,12 @@ the dry-run JSON surfaces and `capsule --json`.
 | `f` | Cycle session source filter |
 | `o` | Review original resume command |
 | `[` / `]` | Previous / next session source filter |
+| `s` | Star / unstar selected session |
+| `*` | Star / unstar alias |
 | `space` | Set rewind point |
-| `c` | Compile capsule |
+| `c` | Refresh capsule and open Handoff Review |
 | `v` | Verify capsule |
-| `d` | Toggle diff preview |
-| `s` | Cycle compiler skill |
+| `S` | Cycle compiler skill |
 | `enter` | Open selected session with original CLI |
 | `x` / `H` / `t` | Choose target for handoff |
 | `:` | Command mode |
@@ -527,7 +536,7 @@ the dry-run JSON surfaces and `capsule --json`.
 | `y` | Unavailable before review |
 | `q` / `Esc` | Cancel without changing target |
 
-### Launch Review Keys
+### Handoff Review Keys
 
 | Key | Action |
 | --- | --- |
@@ -605,9 +614,9 @@ Stable interfaces matter more than any single framework:
 - M32: explicit fixture session mode through `MOONBOX_SESSION_MODE=fixture`, surfaced in Doctor diagnostics and wired into smoke scripts to prevent accidental real-session discovery.
 - M33: action intent hardening with `original_resume` / `target_handoff` dry-run discriminators, two-stage TUI launch review, original-preview copy-only behavior, and contract/render tests for both paths.
 - M34: fixture replay corpus expansion with 9 source-target matrix cases plus 3 synthetic regressions for target mismatch, oversized capsule, and missing-tool preflight; replay output now includes case kind, scenario, capsule target, coverage rows, and updated fixture-safe CLI smoke/contract checks.
-- M35: target readiness explanation rows in the TUI launch picker and Launch Review, backed by verifier report checks with FAIL/WARN priority, READY pass-check context, corrected launch key hints, and render/App tests for blocked, warning, and ready states.
-- M36: README screenshot/install polish with a Launch Review readiness screenshot, transparent SVG canvas, and `docs-assets-smoke` coverage for screenshot semantics, install commands, and unpublished Homebrew wording in both local and GitHub Actions gates.
-- M37: generated docs screenshot pipeline with a hidden fixture-only `docs-snapshot` command that renders the real Ratatui Launch Review buffer to SVG, compares the generated output byte-for-byte in `docs-assets-smoke`, and keeps the command hidden from normal help while covered by CLI contract tests.
+- M35: target readiness explanation rows in the TUI launch picker and Handoff Review, backed by verifier report checks with FAIL/WARN priority, READY pass-check context, corrected launch key hints, and render/App tests for blocked, warning, and ready states.
+- M36: README screenshot/install polish with a Handoff Review readiness screenshot, transparent SVG canvas, and `docs-assets-smoke` coverage for screenshot semantics, install commands, and unpublished Homebrew wording in both local and GitHub Actions gates.
+- M37: generated docs screenshot pipeline with a hidden fixture-only `docs-snapshot` command that renders the real Ratatui Handoff Review buffer to SVG, compares the generated output byte-for-byte in `docs-assets-smoke`, and keeps the command hidden from normal help while covered by CLI contract tests.
 - M38: release artifact staging with source, Cargo crate, and host binary archives, generated shell completions, `SHA256SUMS`, `release-manifest.json`, Homebrew source archive URL/checksum guidance, and CI smoke validation without publishing.
 - M39: real-session index hardening with fixture fallback only when no real stores exist, CLI `sessions --filter <source>` support, and execute-time guards requiring explicit `--session` before original resume or target handoff can spawn a process.
 - M40: adapter health reporting with per-session provenance fields, structured `doctor.source_adapters`, TUI source badges, missing-store reports when real adapters are active, and single-scan inventory plumbing to avoid duplicate source discovery during diagnostics.
@@ -660,6 +669,33 @@ Stable interfaces matter more than any single framework:
 - M48.4: session-list timestamp polish; left list secondary rows now use
   resume-picker style relative time while the right Session Details panel keeps
   the exact `updated` timestamp.
+- M49: TUI handoff flow consolidation and starred sessions; `c` now refreshes
+  the capsule and opens Handoff Review, TUI `d Diff` is removed, `s` persists
+  starred session ids (`*` remains an alias), the source filter cycle includes
+  `Star` immediately before `All`, the right panel is reduced to a compact
+  Handoff Snapshot, fake `/ 100K` token budget text is removed, and `Action
+  Path` replaces the misleading branch-tree copy.
+
+### Remaining Milestones
+
+- M50: panel zoom and focus layout. Implement lazygit-style `+` / `-` to expand
+  or restore Sessions, Timeline, Details, and Action Path panels without losing
+  selection, scroll position, or key hints. Acceptance: the active panel can be
+  enlarged and restored, and long timelines/lists keep the selected row visible.
+- M51: local/devbox data-space switching. Replace the standalone SSH inventory
+  mental model with `{` / `}` switching inside the main TUI across Local and
+  configured SSH/devbox data spaces. Acceptance: configured remote spaces appear
+  as normal session inventories with source labels, health, latency, and clear
+  failure messages, without auto-opening recent active sessions.
+- M52: production compiler and verifier chain. Make external compiler skills the
+  default production path, keep the built-in compiler as explicit draft fallback,
+  and split source health, capsule health, and target readiness. Acceptance:
+  Handoff Review shows exactly what the target CLI will receive and blocks
+  unsafe launch states.
+- M53: release and distribution readiness. Finalize README screenshots,
+  installation docs, install smoke, release archives, and the Homebrew tap plan.
+  Acceptance: a clean machine can install and run `moon`; Homebrew publication
+  stays gated until explicit approval.
 
 ### Can Build Now
 

@@ -49,7 +49,7 @@ fn buffer_to_svg(buffer: &Buffer) -> String {
     svg.push_str(&format!(
         r##"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-labelledby="title desc">
   <title id="title">Moonbox TUI screenshot</title>
-  <desc id="desc">A generated terminal screenshot of Moonbox showing Launch Review, verifier readiness details, and Vim-style key hints.</desc>
+  <desc id="desc">A generated terminal screenshot of Moonbox showing Handoff Review, capsule content, verifier readiness details, and Vim-style key hints.</desc>
   <defs>
     <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
       <feDropShadow dx="0" dy="18" stdDeviation="26" flood-color="#000000" flood-opacity="0.40"/>
@@ -189,10 +189,13 @@ mod tests {
     fn docs_screenshot_contains_launch_review_state() {
         let svg = docs_screenshot_svg(120, 36).expect("svg");
 
-        assert!(svg.contains("Launch Review"));
+        assert!(svg.contains("Handoff Review"));
+        assert!(svg.contains("Capsule Review"));
+        assert!(svg.contains("Prepared content"));
         assert!(svg.contains("Readiness details"));
         assert!(svg.contains("moonbox launch --execute"));
-        assert!(svg.contains("enter launch after restore"));
+        assert!(svg.contains("enter"));
+        assert!(svg.contains("Handoff"));
         assert!(svg.contains("<svg"));
     }
 }

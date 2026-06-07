@@ -259,7 +259,7 @@ impl HermesSourceAdapter {
             .or_else(|| {
                 let preview = row.preview.trim();
                 (!preview.is_empty() && !is_provider_context_text(preview))
-                    .then(|| truncate(preview, 72))
+                    .then(|| truncate(preview, 160))
             })
             .unwrap_or_else(|| format!("Hermes {} session {}", row.source, short_id(&row.id)));
 

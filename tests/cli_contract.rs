@@ -228,10 +228,11 @@ fn docs_snapshot_is_hidden_fixture_safe_and_generated() {
     );
 
     assert!(svg.starts_with("<svg "));
-    assert!(svg.contains("Launch Review"));
+    assert!(svg.contains("Handoff Review"));
+    assert!(svg.contains("Capsule Review"));
     assert!(svg.contains("Readiness details"));
     assert!(svg.contains("moonbox launch --execute"));
-    assert!(svg.contains("copy execute command"));
+    assert!(svg.contains("Handoff"));
 }
 
 #[test]
