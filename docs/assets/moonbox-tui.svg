@@ -21,16 +21,18 @@
   <text x="307" y="78" class="mono" font-size="14" font-weight="500" fill="#8b949e">[ ]</text>
   <text x="334" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">:</text>
   <text x="352" y="78" class="mono" font-size="14" font-weight="800" fill="#5c91f5">All</text>
-  <text x="406" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Compiler:</text>
-  <text x="496" y="78" class="mono" font-size="14" font-weight="800" fill="#5cd689">ACTIVE</text>
-  <text x="595" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Skill:</text>
-  <text x="658" y="78" class="mono" font-size="14" font-weight="500" fill="#47c9da">engineering-handoff</text>
-  <text x="856" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Tokens:</text>
-  <text x="928" y="78" class="mono" font-size="14" font-weight="800" fill="#e6be53">42K</text>
-  <text x="982" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Doctor:</text>
-  <text x="1054" y="78" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
-  <text x="1117" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Verify:</text>
-  <text x="1189" y="78" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
+  <text x="406" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Data:</text>
+  <text x="460" y="78" class="mono" font-size="14" font-weight="800" fill="#47c9da">Local</text>
+  <text x="532" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Compiler:</text>
+  <text x="622" y="78" class="mono" font-size="14" font-weight="800" fill="#5cd689">ACTIVE</text>
+  <text x="721" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Skill:</text>
+  <text x="784" y="78" class="mono" font-size="14" font-weight="500" fill="#47c9da">engineering-handoff</text>
+  <text x="982" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Tokens:</text>
+  <text x="1054" y="78" class="mono" font-size="14" font-weight="800" fill="#e6be53">42K</text>
+  <text x="1108" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Doctor:</text>
+  <text x="1180" y="78" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
+  <text x="1243" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Verify:</text>
+  <text x="1315" y="78" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
   <text x="1441" y="78" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="96" class="mono" font-size="14" font-weight="500" fill="#374452">╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
   <text x="46" y="114" class="mono" font-size="14" font-weight="500" fill="#e6be53">╭ Sessions · All (1/3)           ─────╮</text>

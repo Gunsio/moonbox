@@ -443,6 +443,14 @@ The SSH inventory reads Moonbox `ssh_hosts` first, then concrete OpenSSH
 `Host *` and `Host *.internal`, supports simple `Include` files/globs, and
 deduplicates by alias with Moonbox config taking precedence.
 
+In the TUI, `{` and `}` switch the main data space between Local and the
+configured SSH/devbox entries. Remote spaces are read-only inventory sources:
+Moonbox runs `ssh <host> moonbox sessions --json`, imports the returned session
+summaries, and never opens or resumes a remote session during switching. The
+remote host must have `moonbox` on `PATH`; override it with
+`MOONBOX_REMOTE_BIN=/path/to/moonbox` when needed. For local tests, set
+`MOONBOX_SSH_CONFIG=/path/to/ssh_config` to point at a fixture config.
+
 Generate shell completions with:
 
 ```bash
@@ -525,6 +533,7 @@ the dry-run JSON surfaces and `capsule --json`.
 | `S` | Open Skill Picker |
 | `+` / `=` | Zoom focused panel |
 | `-` | Restore panel layout |
+| `{` / `}` | Previous / next data space: Local or configured SSH/devbox |
 | `enter` | Open selected session with original CLI |
 | `x` / `H` / `t` | Choose target for handoff |
 | `:` | Command mode |
@@ -692,14 +701,14 @@ Stable interfaces matter more than any single framework:
   Timeline, Details, or Action Path panel, `-` restores the normal layout, and
   tab navigation keeps zoom attached to the active panel without resetting
   selection or scroll state.
+- M51: local/devbox data-space switching; `{` / `}` cycles the main TUI between
+  Local and configured SSH/devbox data spaces, remote spaces load read-only
+  session inventory through `ssh <host> moonbox sessions --json`, and failures
+  surface as explicit status messages without opening, resuming, or launching
+  sessions.
 
 ### Remaining Milestones
 
-- M51: local/devbox data-space switching. Replace the standalone SSH inventory
-  mental model with `{` / `}` switching inside the main TUI across Local and
-  configured SSH/devbox data spaces. Acceptance: configured remote spaces appear
-  as normal session inventories with source labels, health, latency, and clear
-  failure messages, without auto-opening recent active sessions.
 - M52: production compiler and verifier chain. Make external compiler skills the
   default production path, keep the built-in compiler as explicit draft fallback,
   and split source health, capsule health, and target readiness. Acceptance:

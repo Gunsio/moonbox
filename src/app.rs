@@ -8,7 +8,7 @@ use std::{
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::core::{
-    compiler, config, doctor,
+    compiler, config, dataspace, doctor,
     error::CoreError,
     launcher,
     model::{
@@ -20,6 +20,7 @@ use crate::core::{
 };
 
 type SessionLoadResult = Result<WorkbenchData, CoreError>;
+type DataSpaceLoadResult = Result<WorkbenchData, CoreError>;
 
 struct PendingSessionLoad {
     request_id: u64,
@@ -27,6 +28,24 @@ struct PendingSessionLoad {
     target: CliTool,
     started_at: Instant,
     receiver: mpsc::Receiver<SessionLoadResult>,
+}
+
+struct PendingDataSpaceLoad {
+    request_id: u64,
+    index: usize,
+    space: dataspace::DataSpaceEntry,
+    started_at: Instant,
+    receiver: mpsc::Receiver<DataSpaceLoadResult>,
+}
+
+impl fmt::Debug for PendingDataSpaceLoad {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PendingDataSpaceLoad")
+            .field("request_id", &self.request_id)
+            .field("index", &self.index)
+            .field("space", &self.space.label)
+            .finish_non_exhaustive()
+    }
 }
 
 impl fmt::Debug for PendingSessionLoad {
@@ -133,6 +152,8 @@ pub struct App {
     pub starred_sessions: Vec<String>,
     pub search_query: String,
     visible_session_indices: Vec<usize>,
+    pub data_spaces: Vec<dataspace::DataSpaceEntry>,
+    pub selected_data_space: usize,
     pub pending_target: CliTool,
     pub pending_compiler: usize,
     pub status_message: String,
@@ -145,6 +166,8 @@ pub struct App {
     pub pending_g: bool,
     session_load_request_id: u64,
     pending_session_load: Option<PendingSessionLoad>,
+    data_space_load_request_id: u64,
+    pending_data_space_load: Option<PendingDataSpaceLoad>,
     clipboard_text: Option<String>,
     exit_action: Option<TuiExitAction>,
     should_quit: bool,
@@ -188,6 +211,8 @@ impl App {
             session_filter: SessionFilter::All,
             starred_sessions: config::load_starred_sessions(),
             search_query: String::new(),
+            data_spaces: dataspace::list_data_spaces(),
+            selected_data_space: 0,
             pending_target: target,
             pending_compiler: 0,
             status_message: "Ready".into(),
@@ -200,6 +225,8 @@ impl App {
             pending_g: false,
             session_load_request_id: 0,
             pending_session_load: None,
+            data_space_load_request_id: 0,
+            pending_data_space_load: None,
             clipboard_text: None,
             exit_action: None,
             should_quit: false,
@@ -225,23 +252,53 @@ impl App {
         self.pending_session_load.is_some()
     }
 
+    pub fn current_data_space(&self) -> &dataspace::DataSpaceEntry {
+        self.data_spaces
+            .get(self.selected_data_space)
+            .unwrap_or_else(|| &self.data_spaces[0])
+    }
+
     pub fn poll_background(&mut self) -> bool {
+        let mut changed = false;
         let Some(pending) = self.pending_session_load.take() else {
-            return false;
+            return self.poll_data_space_background();
         };
 
         match pending.receiver.try_recv() {
             Ok(result) => {
                 self.apply_session_load_result(pending, result);
-                true
+                changed = true;
             }
             Err(TryRecvError::Empty) => {
                 self.pending_session_load = Some(pending);
-                false
             }
             Err(TryRecvError::Disconnected) => {
                 self.compile_status = "FAILED";
                 self.set_status(format!("Session load failed: {}", pending.session_id));
+                changed = true;
+            }
+        }
+
+        self.poll_data_space_background() || changed
+    }
+
+    fn poll_data_space_background(&mut self) -> bool {
+        let Some(pending) = self.pending_data_space_load.take() else {
+            return false;
+        };
+
+        match pending.receiver.try_recv() {
+            Ok(result) => {
+                self.apply_data_space_load_result(pending, result);
+                true
+            }
+            Err(TryRecvError::Empty) => {
+                self.pending_data_space_load = Some(pending);
+                false
+            }
+            Err(TryRecvError::Disconnected) => {
+                self.compile_status = "FAILED";
+                self.set_status("Data space load failed: worker disconnected");
                 true
             }
         }
@@ -273,6 +330,8 @@ impl App {
             KeyCode::Char('?') => self.open_help(),
             KeyCode::Char('[') => self.cycle_session_filter(false),
             KeyCode::Char(']') => self.cycle_session_filter(true),
+            KeyCode::Char('{') => self.cycle_data_space(false),
+            KeyCode::Char('}') => self.cycle_data_space(true),
             KeyCode::Char('f') => self.cycle_session_filter(true),
             KeyCode::Char('a') => self.clear_session_filters(),
             KeyCode::Char('s') | KeyCode::Char('*') => self.toggle_starred_session(),
@@ -925,6 +984,53 @@ impl App {
         self.pending_g = false;
     }
 
+    fn cycle_data_space(&mut self, forward: bool) {
+        if self.data_spaces.len() <= 1 {
+            self.set_status("Data space: Local only");
+            self.pending_g = false;
+            return;
+        }
+        let len = self.data_spaces.len();
+        let next = if forward {
+            (self.selected_data_space + 1) % len
+        } else if self.selected_data_space == 0 {
+            len - 1
+        } else {
+            self.selected_data_space - 1
+        };
+        self.load_data_space(next);
+    }
+
+    fn load_data_space(&mut self, index: usize) {
+        let Some(space) = self.data_spaces.get(index).cloned() else {
+            self.set_status("Data space not found");
+            self.pending_g = false;
+            return;
+        };
+        self.data_space_load_request_id = self.data_space_load_request_id.wrapping_add(1);
+        let request_id = self.data_space_load_request_id;
+        let source = self.data.source;
+        let target = self.data.target;
+        let worker_space = space.clone();
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let result = workbench::load_workbench_for_data_space(&worker_space, source, target);
+            let _ = sender.send(result);
+        });
+        self.pending_session_load = None;
+        self.pending_data_space_load = Some(PendingDataSpaceLoad {
+            request_id,
+            index,
+            space: space.clone(),
+            started_at: Instant::now(),
+            receiver,
+        });
+        self.compile_status = "LOADING";
+        self.verify_passed = false;
+        self.set_status(format!("Loading data space: {}", space.label));
+        self.pending_g = false;
+    }
+
     fn toggle_starred_session(&mut self) {
         let Some(session) = self.current_session() else {
             self.set_status("No session selected");
@@ -1116,6 +1222,10 @@ impl App {
             self.pending_session_load = None;
             return;
         };
+        if !self.current_data_space().is_local() {
+            self.apply_readonly_remote_session_snapshot(session);
+            return;
+        }
         let target = self.data.target;
         if self.data.capsule.source_session == session.id
             && self.data.target == target
@@ -1158,6 +1268,77 @@ impl App {
             "Loading session: {} {}",
             session.cli, session.title
         ));
+    }
+
+    fn apply_readonly_remote_session_snapshot(&mut self, session: SessionSummary) {
+        let selected_compiler = self.selected_compiler;
+        let selected_session = self.selected_session;
+        let space = self.current_data_space().clone();
+        let sessions = self.data.sessions.clone();
+        self.data = workbench::load_readonly_workbench_from_session_snapshot(
+            &space,
+            session.clone(),
+            sessions,
+            self.data.target,
+        );
+        self.refresh_visible_sessions();
+        self.selected_session = selected_session.min(self.data.sessions.len().saturating_sub(1));
+        self.clamp_selected_session();
+        self.selected_event = 0;
+        self.selected_compiler = selected_compiler.min(self.data.compilers.len().saturating_sub(1));
+        self.data.capsule.compiler = self.data.compilers[self.selected_compiler].clone();
+        self.rewind_event_id = initial_rewind_event_id(&self.data);
+        self.capsule_scroll = 0;
+        self.compile_status = "ACTIVE";
+        self.verify_passed = false;
+        self.set_status(format!(
+            "Remote session summary: {} {}",
+            session.cli, session.title
+        ));
+    }
+
+    fn apply_data_space_load_result(
+        &mut self,
+        pending: PendingDataSpaceLoad,
+        result: DataSpaceLoadResult,
+    ) {
+        if self.data_space_load_request_id != pending.request_id {
+            return;
+        }
+        let elapsed = pending.started_at.elapsed();
+        match result {
+            Ok(data) => {
+                let selected_compiler = self.selected_compiler;
+                self.data = data;
+                self.selected_data_space = pending.index;
+                self.refresh_visible_sessions();
+                self.clamp_selected_session();
+                self.selected_event =
+                    rewind_event_index(&self.data, &initial_rewind_event_id(&self.data));
+                self.rewind_event_id = initial_rewind_event_id(&self.data);
+                self.selected_compiler =
+                    selected_compiler.min(self.data.compilers.len().saturating_sub(1));
+                self.data.capsule.compiler = self.data.compilers[self.selected_compiler].clone();
+                self.capsule_scroll = 0;
+                self.compile_status = "ACTIVE";
+                self.verify_passed = pending.space.is_local();
+                self.set_status(format!(
+                    "Data space: {} ({} sessions, {} ms)",
+                    pending.space.label,
+                    self.data.sessions.len(),
+                    elapsed.as_millis()
+                ));
+            }
+            Err(error) => {
+                self.compile_status = "FAILED";
+                self.verify_passed = false;
+                self.set_status(format!(
+                    "Data space failed: {} ({} ms)",
+                    error,
+                    elapsed.as_millis()
+                ));
+            }
+        }
     }
 
     fn apply_session_load_result(
@@ -1698,6 +1879,32 @@ mod tests {
 
         assert_eq!(app.zoomed_focus, None);
         assert_eq!(app.status_message, "Zoom restored");
+    }
+
+    #[test]
+    fn data_space_shortcut_loads_selected_inventory() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.data_spaces = vec![
+            dataspace::DataSpaceEntry::local(),
+            dataspace::DataSpaceEntry {
+                id: "local-devbox".into(),
+                label: "Devbox".into(),
+                kind: dataspace::DataSpaceKind::Local,
+                detail: "fixture local data space".into(),
+            },
+        ];
+
+        app.handle_key(key('}'));
+        for _ in 0..20 {
+            if app.poll_background() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+
+        assert_eq!(app.selected_data_space, 1);
+        assert!(app.status_message.contains("Data space: Devbox"));
+        assert!(!app.should_quit());
     }
 
     #[test]

@@ -155,6 +155,13 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
                 .fg(theme::BLUE)
                 .add_modifier(Modifier::BOLD),
         ),
+        Span::raw("   Data: "),
+        Span::styled(
+            app.current_data_space().label.clone(),
+            Style::default()
+                .fg(theme::CYAN)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("   Compiler: "),
         Span::styled(
             compile_status_label(app.compile_status),
@@ -1390,6 +1397,7 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("gg/G", "Jump"),
             ("/", "Search"),
             ("[ ]", "Source"),
+            ("{ }", "Data"),
             ("a", "Clear"),
             ("s", "Star"),
             ("S", "Skill"),
@@ -2375,6 +2383,15 @@ mod tests {
         let screen = render_text(&app, 140, 40);
 
         assert!(!screen.contains("/ 100K"), "{screen}");
+    }
+
+    #[test]
+    fn header_shows_current_data_space() {
+        let app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        let screen = render_text(&app, 160, 40);
+
+        assert_screen_contains(&screen, "Data:");
+        assert_screen_contains(&screen, "Local");
     }
 
     #[test]

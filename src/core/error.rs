@@ -12,6 +12,7 @@ pub enum CoreError {
     LaunchBlocked { reason: String },
     LaunchStart { command: String, reason: String },
     ReplayEval { reason: String },
+    DataSpaceLoad { space: String, reason: String },
     SshConfigRead { path: String, reason: String },
 }
 
@@ -35,6 +36,9 @@ impl fmt::Display for CoreError {
                 write!(f, "cannot start target launch `{command}`: {reason}")
             }
             Self::ReplayEval { reason } => write!(f, "replay eval failed: {reason}"),
+            Self::DataSpaceLoad { space, reason } => {
+                write!(f, "cannot load data space {space}: {reason}")
+            }
             Self::SshConfigRead { path, reason } => {
                 write!(f, "cannot read SSH config {path}: {reason}")
             }

@@ -4,6 +4,7 @@ pub mod codex;
 pub mod compiler;
 pub mod config;
 pub mod data;
+pub mod dataspace;
 pub mod doctor;
 pub mod error;
 pub mod fixture;

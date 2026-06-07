@@ -99,6 +99,29 @@ pub fn workbench_data_from_session_snapshot(
     ))
 }
 
+pub fn workbench_data_from_readonly_inventory(
+    source_session: SessionSummary,
+    sessions: Vec<SessionSummary>,
+    source_adapters: Vec<SourceAdapterReport>,
+    target: CliTool,
+) -> WorkbenchData {
+    let sessions = include_source_session(sessions, &source_session);
+    let source_session_id = source_session.id.clone();
+    let timeline = empty_timeline(&source_session);
+    let rewind_event_id = rewind_event_id_for_timeline(&source_session_id, &timeline);
+    let compiler = default_compiler_id();
+    let capsule = pending_work_capsule(&source_session, target, &rewind_event_id, &compiler);
+    build_workbench_data(
+        source_session.cli,
+        target,
+        source_adapters,
+        sessions,
+        timeline.events,
+        capsule,
+        &source_session_id,
+    )
+}
+
 pub fn fixture_workbench_data(
     source: CliTool,
     target: CliTool,

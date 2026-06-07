@@ -118,6 +118,9 @@ and this project uses semantic versioning once tagged releases start.
 - Read-only SSH inventory through `moonbox ssh` / `moon ssh`, combining
   Moonbox `ssh_hosts` config entries with concrete OpenSSH `Host` aliases from
   `~/.ssh/config` or `MOONBOX_SSH_CONFIG` without opening remote connections.
+- TUI data spaces backed by local session stores plus configured SSH/devbox
+  inventories, switchable with `{` / `}` without opening, resuming, or
+  launching any remote session.
 
 ### Changed
 
@@ -218,6 +221,11 @@ and this project uses semantic versioning once tagged releases start.
   on a transparent SVG canvas, generated from the real TUI render path.
 - Draft Homebrew formula now points at a staged GitHub release source archive
   instead of a GitHub auto-generated tag archive.
+- TUI `{` / `}` now cycles the main session inventory between Local and
+  configured SSH/devbox data spaces. Remote spaces run
+  `ssh <host> moonbox sessions --json`, load the returned sessions as a
+  read-only inventory, and keep failures visible in the status line while
+  preserving the previous local list.
 - Auto session discovery now uses fixture fallback only when no real source
   stores are present, so real local indexes are not mixed with demo sessions.
 - `open --execute` and `launch --execute` now require an explicit `--session`;

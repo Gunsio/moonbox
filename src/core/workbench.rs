@@ -1,7 +1,7 @@
 use std::fs;
 
 use super::{
-    compiler, data,
+    compiler, data, dataspace,
     error::CoreError,
     launcher,
     model::{
@@ -37,6 +37,23 @@ pub fn load_workbench_from_session_snapshot(
     target: CliTool,
 ) -> Result<WorkbenchData, CoreError> {
     data::workbench_data_from_session_snapshot(source_session, sessions, source_adapters, target)
+}
+
+pub fn load_workbench_for_data_space(
+    space: &dataspace::DataSpaceEntry,
+    source: super::model::CliTool,
+    target: super::model::CliTool,
+) -> Result<WorkbenchData, CoreError> {
+    dataspace::load_workbench_for_space(space, source, target)
+}
+
+pub fn load_readonly_workbench_from_session_snapshot(
+    space: &dataspace::DataSpaceEntry,
+    source_session: SessionSummary,
+    sessions: Vec<SessionSummary>,
+    target: super::model::CliTool,
+) -> WorkbenchData {
+    dataspace::workbench_from_remote_sessions(space, source_session, sessions, target)
 }
 
 pub fn list_sessions() -> Result<Vec<SessionSummary>, CoreError> {
