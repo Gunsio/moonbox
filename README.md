@@ -173,9 +173,12 @@ The first implementation focuses on the product shell:
 - Target selection lives inside the launch flow, with explicit `> [x]` radio-list selection
 - Target picker validates each target as `READY`, `WARN`, or `BLOCKED`; blocked targets cannot confirm or copy launch commands
 - Target picker and Launch Review show verifier-backed readiness rows so users can see the exact PASS/WARN/FAIL signal behind each target state
-- Target handoff uses a dedicated `H` shortcut and a three-stage TUI flow:
+- Target handoff uses a dedicated `t` shortcut, with `H` kept as a compatibility alias, and a three-stage TUI flow:
   choose target, review the command, then press `enter` to restore the terminal
   and launch, or `y` to copy it
+- Target CLI first prompt is a readable Work Capsule Summary with source,
+  target, goal, state, decisions, todo, evidence, risks, and instructions
+  instead of a raw single-line JSON blob
 - Last confirmed target is persisted in `~/.config/moonbox/config.json`
 - Real Codex, Claude, and Hermes resume-surface listing plus timeline parsing
 - Original-session open command, Work Capsule, and branch tree previews
@@ -199,7 +202,7 @@ The first implementation focuses on the product shell:
 - Timeline auto-scroll, Capsule/modal scroll, and small-terminal modal polish
 - Copyable launch/original wrapper commands via `y` with OSC52 clipboard
   support; main-list `enter` hands control directly to the selected session's
-  original CLI, while `H` opens the target handoff flow
+  original CLI, while `t` opens the target handoff flow
 - Serializable core models for future adapters
 - `SourceAdapter` contract and fixture-backed adapter fallback layer
 - Fallible adapter discovery; bad source data returns structured errors instead of panics
@@ -413,8 +416,8 @@ Moonbox has two separate actions for a selected session:
   original CLI, then press `enter` to hand the terminal to that CLI. Moonbox
   prints the exact command before handoff and, on Unix, replaces itself with
   the source CLI instead of waiting as a parent process.
-- `H`: choose a target CLI, then review a `target_handoff` command before
-  launching or copying it.
+- `t`: choose a target CLI, then review a `target_handoff` command before
+  launching or copying it. `H` remains a compatibility alias.
 
 The main screen is a global session entry point. Sessions are sorted by time and
 tagged by source CLI. Source filtering is controlled by `f` or `[` / `]` and
@@ -442,6 +445,12 @@ Moonbox immediately marks the selected session as loading, then hydrates that
 session's timeline, capsule preview, branch preview, and recommended rewind
 point in the background.
 
+The target CLI receives a concise, human-readable Work Capsule Summary as its
+first prompt. It includes source metadata, selected rewind, goal, state,
+decisions, todo, evidence, risks, and execution instructions without dumping the
+capsule as raw JSON. Machine-readable capsule data remains available through
+the dry-run JSON surfaces and `capsule --json`.
+
 ## TUI Keys
 
 | Key | Action |
@@ -459,7 +468,7 @@ point in the background.
 | `d` | Toggle diff preview |
 | `s` | Cycle compiler skill |
 | `enter` | Open selected session with original CLI |
-| `H` | Choose target for handoff |
+| `t` / `H` | Choose target for handoff |
 | `:` | Command mode |
 | `?` | Help |
 | `q` / `Esc` | Back / quit |
@@ -577,8 +586,11 @@ Stable interfaces matter more than any single framework:
   validation, stable-width TUI panel titles, real-vs-draft capsule labeling,
   low-signal tool-row folding, and high-signal default rewind selection for
   real sessions; original-session resume now prints the command and execs the
-  source CLI on Unix, with main-list `enter` opening original sessions and `H`
-  reserved for target handoff.
+  source CLI on Unix, with main-list `enter` opening original sessions and `t`
+  reserved for target handoff while `H` remains a compatibility alias.
+- M45: readable target handoff prompt hardening; target CLIs now receive a
+  structured Work Capsule Summary instead of a raw JSON blob, and public CLI
+  contracts assert that dry-run launch plans keep this prompt readable.
 
 ### Can Build Now
 
