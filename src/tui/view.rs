@@ -31,9 +31,24 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     let root = centered(area, 98, 96);
     let header_height = if root.width < 120 { 4 } else { 3 };
-    let body_min = if root.height < 32 { 8 } else { 18 };
-    let branch_height = if root.height < 32 { 3 } else { 4 };
     let command_height = if root.width < 120 { 5 } else { 3 };
+    let zoomed_action_path = app.zoomed_focus == Some(Focus::Branches);
+    let branch_height = if zoomed_action_path {
+        root.height
+            .saturating_sub(header_height + command_height + 8)
+            .max(8)
+    } else if root.height < 32 {
+        3
+    } else {
+        4
+    };
+    let body_min = if zoomed_action_path {
+        6
+    } else if root.height < 32 {
+        8
+    } else {
+        18
+    };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -202,6 +217,27 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_body(frame: &mut Frame, area: Rect, app: &App) {
+    if let Some(focus) = app.zoomed_focus {
+        match focus {
+            Focus::Sessions => render_sessions(frame, area, app),
+            Focus::Timeline => render_timeline(frame, area, app),
+            Focus::Capsule => render_capsule(frame, area, app),
+            Focus::Branches => {
+                let cols = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([
+                        Constraint::Percentage(25),
+                        Constraint::Percentage(45),
+                        Constraint::Percentage(30),
+                    ])
+                    .split(area);
+                render_sessions(frame, cols[0], app);
+                render_timeline(frame, cols[1], app);
+                render_capsule(frame, cols[2], app);
+            }
+        }
+        return;
+    }
     let cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -1357,6 +1393,8 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("a", "Clear"),
             ("s", "Star"),
             ("S", "Skill"),
+            ("+", "Zoom"),
+            ("-", "Restore"),
             ("o", "Original"),
             ("enter", "Open"),
             ("x/H", "Handoff"),
@@ -1367,6 +1405,8 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("gg/G", "Jump"),
             ("space", "Rewind"),
             ("c", "Review"),
+            ("+", "Zoom"),
+            ("-", "Restore"),
             ("tab", "Next"),
             (":", "Cmd"),
             ("q", "Quit"),
@@ -1377,6 +1417,8 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("c", "Review"),
             ("v", "Verify"),
             ("S", "Skill"),
+            ("+", "Zoom"),
+            ("-", "Restore"),
             ("tab", "Next"),
             (":", "Cmd"),
             ("q", "Quit"),
@@ -1387,6 +1429,8 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("o", "Original"),
             ("space", "Rewind"),
             ("D", "Doctor"),
+            ("+", "Zoom"),
+            ("-", "Restore"),
             ("tab", "Next"),
             (":", "Cmd"),
             ("?", "Help"),
@@ -1613,10 +1657,7 @@ fn render_skill_picker(frame: &mut Frame, root: Rect, app: &App) {
         lines.push(Line::from(vec![
             Span::raw("    "),
             Span::styled("stars: ", Style::default().fg(theme::MUTED)),
-            Span::styled(
-                format_star_count(info.github_stars),
-                Style::default().fg(theme::GOLD),
-            ),
+            Span::styled(format_star_count(&info), Style::default().fg(theme::GOLD)),
             Span::styled("  link: ", Style::default().fg(theme::MUTED)),
             Span::styled(compiler_reference(&info), Style::default().fg(theme::CYAN)),
         ]));
@@ -1696,9 +1737,12 @@ fn compiler_reference(info: &CompilerPresetInfo) -> String {
         .unwrap_or_else(|| "built-in".into())
 }
 
-fn format_star_count(stars: Option<u64>) -> String {
-    let Some(stars) = stars else {
-        return "unknown".into();
+fn format_star_count(info: &CompilerPresetInfo) -> String {
+    let Some(stars) = info.github_stars else {
+        return match info.kind {
+            CompilerPresetKind::Builtin => "n/a".into(),
+            CompilerPresetKind::Environment | CompilerPresetKind::Config => "not configured".into(),
+        };
     };
     if stars >= 1_000 {
         format!("{:.1}k", stars as f64 / 1_000.0)
@@ -2512,7 +2556,23 @@ mod tests {
         assert_screen_contains(&screen, "Choose compiler skill");
         assert_screen_contains(&screen, "engineering-handoff");
         assert_screen_contains(&screen, "stars:");
+        assert_screen_contains(&screen, "n/a");
+        assert_screen_contains(&screen, "https://github.com/Gunsio/moonbox");
         assert_screen_contains(&screen, "j/k choose");
+    }
+
+    #[test]
+    fn zoomed_timeline_uses_full_body_without_side_panels() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.zoomed_focus = Some(Focus::Timeline);
+
+        let screen = render_text(&app, 140, 36);
+
+        assert_screen_contains(&screen, "Timeline");
+        assert!(!screen.contains("Sessions ·"), "{screen}");
+        assert!(!screen.contains("Session Details"), "{screen}");
+        assert_screen_contains(&screen, "Action Path");
     }
 
     #[test]

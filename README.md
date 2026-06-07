@@ -523,6 +523,8 @@ the dry-run JSON surfaces and `capsule --json`.
 | `c` | Refresh capsule and open Handoff Review |
 | `v` | Verify capsule |
 | `S` | Open Skill Picker |
+| `+` / `=` | Zoom focused panel |
+| `-` | Restore panel layout |
 | `enter` | Open selected session with original CLI |
 | `x` / `H` / `t` | Choose target for handoff |
 | `:` | Command mode |
@@ -684,15 +686,15 @@ Stable interfaces matter more than any single framework:
   large empty gap before `Cdx` / `Clu` / `Hms` source badges.
 - M49.2: timeline and skill-picker polish; folded assistant groups now name the
   source CLI instead of generic `AI`, `S` opens a metadata-rich Skill Picker
-  with status, description, stars, and link/command reference, and `Action
-  Path` shows the selected cwd plus per-tool session counts.
+  with status, description, stars / `n/a`, and link/command reference, and
+  `Action Path` shows the selected cwd plus per-tool session counts.
+- M50: panel zoom and focus layout; `+` / `=` zooms the focused Sessions,
+  Timeline, Details, or Action Path panel, `-` restores the normal layout, and
+  tab navigation keeps zoom attached to the active panel without resetting
+  selection or scroll state.
 
 ### Remaining Milestones
 
-- M50: panel zoom and focus layout. Implement lazygit-style `+` / `-` to expand
-  or restore Sessions, Timeline, Details, and Action Path panels without losing
-  selection, scroll position, or key hints. Acceptance: the active panel can be
-  enlarged and restored, and long timelines/lists keep the selected row visible.
 - M51: local/devbox data-space switching. Replace the standalone SSH inventory
   mental model with `{` / `}` switching inside the main TUI across Local and
   configured SSH/devbox data spaces. Acceptance: configured remote spaces appear

@@ -47,6 +47,17 @@ pub enum Focus {
     Branches,
 }
 
+impl Focus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Sessions => "Sessions",
+            Self::Timeline => "Timeline",
+            Self::Capsule => "Details",
+            Self::Branches => "Action Path",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionFilter {
     Starred,
@@ -106,6 +117,7 @@ pub enum TuiExitAction {
 pub struct App {
     pub data: WorkbenchData,
     pub focus: Focus,
+    pub zoomed_focus: Option<Focus>,
     pub selected_session: usize,
     pub selected_event: usize,
     pub selected_compiler: usize,
@@ -161,6 +173,7 @@ impl App {
         let mut app = Self {
             data,
             focus: Focus::Sessions,
+            zoomed_focus: None,
             selected_session,
             selected_event,
             selected_compiler: 0,
@@ -288,6 +301,8 @@ impl App {
             KeyCode::Char('c') => self.review_capsule(),
             KeyCode::Char('v') => self.toggle_verify(),
             KeyCode::Char('S') => self.open_skill_picker(),
+            KeyCode::Char('+') | KeyCode::Char('=') => self.zoom_current_panel(),
+            KeyCode::Char('-') => self.restore_zoom(),
             KeyCode::Char('y') => self.copy_focused_command(),
             KeyCode::Enter => self.queue_original_resume(),
             _ => self.pending_g = false,
@@ -523,6 +538,9 @@ impl App {
             Focus::Capsule => Focus::Branches,
             Focus::Branches => Focus::Sessions,
         };
+        if self.zoomed_focus.is_some() {
+            self.zoomed_focus = Some(self.focus);
+        }
         self.pending_g = false;
     }
 
@@ -533,6 +551,24 @@ impl App {
             Focus::Capsule => Focus::Timeline,
             Focus::Branches => Focus::Capsule,
         };
+        if self.zoomed_focus.is_some() {
+            self.zoomed_focus = Some(self.focus);
+        }
+        self.pending_g = false;
+    }
+
+    fn zoom_current_panel(&mut self) {
+        self.zoomed_focus = Some(self.focus);
+        self.set_status(format!("Zoomed {}", self.focus.label()));
+        self.pending_g = false;
+    }
+
+    fn restore_zoom(&mut self) {
+        if self.zoomed_focus.take().is_some() {
+            self.set_status("Zoom restored");
+        } else {
+            self.set_status("No panel zoom active");
+        }
         self.pending_g = false;
     }
 
@@ -1639,6 +1675,29 @@ mod tests {
         app.handle_key(KeyEvent::from(KeyCode::Enter));
         assert_ne!(app.data.capsule.compiler, first);
         assert!(!app.show_skill_picker);
+    }
+
+    #[test]
+    fn zoom_shortcuts_expand_restore_and_follow_focus() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.focus = Focus::Timeline;
+        app.selected_event = 2;
+
+        app.handle_key(key('+'));
+
+        assert_eq!(app.zoomed_focus, Some(Focus::Timeline));
+        assert_eq!(app.selected_event, 2);
+        assert_eq!(app.status_message, "Zoomed Timeline");
+
+        app.handle_key(KeyEvent::from(KeyCode::Tab));
+
+        assert_eq!(app.focus, Focus::Capsule);
+        assert_eq!(app.zoomed_focus, Some(Focus::Capsule));
+
+        app.handle_key(key('-'));
+
+        assert_eq!(app.zoomed_focus, None);
+        assert_eq!(app.status_message, "Zoom restored");
     }
 
     #[test]

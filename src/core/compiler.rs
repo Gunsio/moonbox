@@ -629,7 +629,7 @@ fn builtin_info(id: &str) -> CompilerPresetInfo {
             "design-review" => "Draft capsule tuned for design review and architecture follow-up.",
             _ => "Built-in draft capsule compiler.",
         }.into()),
-        homepage: None,
+        homepage: Some("https://github.com/Gunsio/moonbox".into()),
         github_stars: None,
     }
 }
@@ -853,6 +853,11 @@ sleep 1
         assert_eq!(info.status, CompilerPresetStatus::Ready);
         assert_eq!(info.score, 45);
         assert_eq!(info.command, None);
+        assert_eq!(
+            info.homepage.as_deref(),
+            Some("https://github.com/Gunsio/moonbox")
+        );
+        assert_eq!(info.github_stars, None);
     }
 
     #[cfg(unix)]

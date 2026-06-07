@@ -162,10 +162,16 @@ and this project uses semantic versioning once tagged releases start.
   navigation now moves by those visible groups instead of silently stepping
   through folded assistant events.
 - TUI `S` now opens a Skill Picker instead of blindly cycling compiler skills;
-  the picker shows status, kind, description, stars, and link/command metadata
-  before `enter` applies the pending selection.
+  the picker shows status, kind, description, stars / `n/a`, and link/command
+  metadata before `enter` applies the pending selection.
+- Built-in draft compiler skills now show the Moonbox GitHub repository link in
+  Skill Picker and display stars as `n/a`; external skills without metadata show
+  `not configured` instead of ambiguous `unknown`.
 - Action Path now shows the selected cwd plus Codex / Claude / Hermes session
   counts for that same path.
+- TUI `+` / `=` now zooms the focused panel and `-` restores the default
+  layout; zoom follows tab focus so Sessions, Timeline, Details, and Action
+  Path can each be expanded without resetting selection or scroll state.
 - Selected Timeline rows now preserve role accent colors, so active user turns
   stay blue and active AI groups stay gold instead of collapsing into one
   selected-state color.
