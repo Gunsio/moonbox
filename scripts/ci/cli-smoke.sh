@@ -6,13 +6,30 @@ cd "$repo_root"
 
 smoke_home="${MOONBOX_SMOKE_HOME:-$repo_root/target/moonbox-smoke-home}"
 output_dir="$smoke_home/output"
-mkdir -p "$output_dir"
+mkdir -p "$output_dir" "$smoke_home/.ssh"
 
 export MOONBOX_CODEX_HOME="$smoke_home/codex"
 export MOONBOX_CLAUDE_HOME="$smoke_home/claude"
 export MOONBOX_HERMES_HOME="$smoke_home/hermes"
+export MOONBOX_CONFIG="$smoke_home/config.json"
+export MOONBOX_SSH_CONFIG="$smoke_home/.ssh/config"
 export MOONBOX_SESSION_MODE=fixture
 export MOONBOX_SESSION_LIMIT=50
+
+cat > "$MOONBOX_CONFIG" <<'JSON'
+{
+  "ssh_hosts": [
+    {"name": "smoke-prod", "host": "smoke-prod.internal", "user": "deploy", "port": 2222}
+  ]
+}
+JSON
+
+cat > "$MOONBOX_SSH_CONFIG" <<'SSH'
+Host smoke-dev
+  HostName smoke-dev.internal
+  User dev
+  Port 2200
+SSH
 
 cargo build --locked
 
@@ -55,6 +72,12 @@ grep -q '"target_branch": "moonbox/hermes-rewind-evt-091"' "$output_dir/compile-
 
 "$moonbox" compilers --json > "$output_dir/compilers.json"
 grep -q '"id": "engineering-handoff"' "$output_dir/compilers.json"
+
+"$moonbox" ssh --json > "$output_dir/ssh.json"
+grep -q '"name": "smoke-prod"' "$output_dir/ssh.json"
+grep -q '"source": "moonbox_config"' "$output_dir/ssh.json"
+grep -q '"name": "smoke-dev"' "$output_dir/ssh.json"
+grep -q '"source": "openssh_config"' "$output_dir/ssh.json"
 
 MOONBOX_CODEX_BIN="$moonbox" \
   MOONBOX_CLAUDE_BIN="$moonbox" \

@@ -596,12 +596,15 @@ impl App {
             .data
             .timeline
             .get(self.selected_event)
-            .map(|event| (event.id.clone(), event.title.clone()))
+            .and_then(|event| {
+                timeline_event_is_rewind_anchor(event)
+                    .then(|| (event.id.clone(), event.title.clone()))
+            })
         {
             self.apply_rewind_event(id.clone(), title);
             self.set_status(format!("Rewind set: {id}"));
         } else {
-            self.set_status("No rewind point available");
+            self.set_status("Rewind anchor must be a User turn");
         }
         self.pending_g = false;
     }
@@ -1248,6 +1251,10 @@ fn timeline_event_is_visible(data: &WorkbenchData, rewind_event_id: &str, index:
         .is_some_and(|event| event.id == rewind_event_id || event.kind != TimelineKind::Tool)
 }
 
+fn timeline_event_is_rewind_anchor(event: &crate::core::model::TimelineEvent) -> bool {
+    matches!(event.kind, TimelineKind::User | TimelineKind::RewindPoint)
+}
+
 fn first_visible_timeline_event(data: &WorkbenchData, rewind_event_id: &str) -> usize {
     (0..data.timeline.len())
         .find(|index| timeline_event_is_visible(data, rewind_event_id, *index))
@@ -1367,14 +1374,15 @@ mod tests {
     }
 
     #[test]
-    fn rewind_selection_from_hidden_tool_event_uses_nearest_visible_turn() {
+    fn rewind_selection_from_non_user_event_is_rejected() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
-        app.selected_event = 1;
+        let original_rewind = app.rewind_event_id.clone();
+        app.selected_event = 2;
 
         app.handle_key(key(' '));
 
-        assert_eq!(app.rewind_event_id, "evt-034");
-        assert!(app.data.capsule.rewind_point.contains("Assistant"));
+        assert_eq!(app.rewind_event_id, original_rewind);
+        assert_eq!(app.status_message, "Rewind anchor must be a User turn");
     }
 
     #[test]

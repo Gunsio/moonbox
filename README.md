@@ -181,14 +181,17 @@ The first implementation focuses on the product shell:
   target, goal, state, decisions, todo, evidence, risks, and instructions
   instead of a raw single-line JSON blob
 - Last confirmed target is persisted in `~/.config/moonbox/config.json`
+- Configured SSH hosts can be listed through `moonbox ssh` / `moon ssh`,
+  combining Moonbox `ssh_hosts` entries with concrete `Host` aliases from
+  `~/.ssh/config` without connecting to remote machines
 - Real Codex, Claude, and Hermes resume-surface listing plus timeline parsing
 - Original-session open command, Work Capsule, and branch tree previews
 - Live `/` session search, combined filter display, and one-key clear with `a`
 - Selected/filtered session drives timeline, Work Capsule, branch preview, token budget, and default rewind point
 - Real-session metadata is labeled separately from draft Work Capsule guidance,
   so source store facts are not confused with built-in compiler placeholders
-- Default rewind selection for real sessions prefers high-signal non-tool
-  timeline events instead of arbitrary tool calls
+- Default rewind selection for real sessions prefers user turns or explicit
+  rewind markers instead of assistant/tool output
 - Animated TUI loading screen while source sessions are indexed in the background
 - Session movement, source filtering, and search keep the list responsive while the selected session preview hydrates in the background
 - Resume-index rows with unknown event counts still hydrate their real timeline
@@ -198,8 +201,10 @@ The first implementation focuses on the product shell:
 - Fixed status line for action feedback
 - Context-aware key bar for the current panel or modal
 - Visible rewind marker in the timeline, plus rewind-aware branch and launch preview
+- Timeline parsing folds adjacent duplicate events across Codex, Claude, and
+  Hermes so provider double-writes do not render repeated rows
 - Timeline rendering folds low-signal tool/function-call rows by default while
-  keeping rewind and navigation on visible high-signal events
+  keeping rewind selection on user turns or explicit rewind markers
 - Timeline auto-scroll, Capsule/modal scroll, and small-terminal modal polish
 - Copyable launch/original wrapper commands via `y` with OSC52 clipboard
   support; main-list `enter` hands control directly to the selected session's
@@ -371,6 +376,16 @@ External compiler skills are optional. When configured, Moonbox sends a
       "timeout_ms": 30000,
       "enabled": true
     }
+  ],
+  "ssh_hosts": [
+    {
+      "name": "prod-api",
+      "host": "prod-api.internal",
+      "user": "deploy",
+      "port": 22,
+      "identity_file": "~/.ssh/prod-api",
+      "tags": ["prod"]
+    }
   ]
 }
 ```
@@ -398,6 +413,19 @@ cargo run -- compile-output --session <session-id> --target hermes --rewind <eve
 
 Without configured presets or `MOONBOX_COMPILER`, Moonbox uses the built-in
 fixture compiler.
+
+List configured SSH hosts without opening a connection:
+
+```bash
+moonbox ssh
+moonbox ssh --json
+MOONBOX_SSH_CONFIG=/path/to/ssh_config moon ssh --json
+```
+
+The SSH inventory reads Moonbox `ssh_hosts` first, then concrete OpenSSH
+`Host` aliases from `~/.ssh/config`. It skips wildcard patterns such as
+`Host *` and `Host *.internal`, supports simple `Include` files/globs, and
+deduplicates by alias with Moonbox config taking precedence.
 
 Generate shell completions with:
 
@@ -604,6 +632,13 @@ Stable interfaces matter more than any single framework:
   `--target`, `--rewind`, and `--compiler`, with public CLI contract coverage
   proving they no longer fall back to hard-coded Codex / Hermes / `evt-091`
   defaults.
+- M47: timeline duplicate hardening and user-turn rewind anchors; canonical
+  parsing now drops adjacent duplicate rows from Codex, Claude, and Hermes
+  before rendering, real-session default rewind prefers user turns or explicit
+  rewind markers, and TUI `space` rejects assistant/tool rows as rewind anchors.
+- M48: read-only SSH inventory; `moonbox ssh` / `moon ssh` list Moonbox
+  `ssh_hosts` plus concrete OpenSSH `Host` aliases from `~/.ssh/config` or
+  `MOONBOX_SSH_CONFIG`, with JSON/text output and fixture-safe smoke coverage.
 
 ### Can Build Now
 

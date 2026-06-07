@@ -496,10 +496,21 @@ fn rewind_event_id_for_timeline(session_id: &str, timeline: &CanonicalTimeline) 
         .events
         .iter()
         .rev()
-        .find(|event| event.kind != TimelineKind::Tool)
+        .find(|event| timeline_event_is_rewind_anchor(event))
+        .or_else(|| {
+            timeline
+                .events
+                .iter()
+                .rev()
+                .find(|event| event.kind != TimelineKind::Tool)
+        })
         .or_else(|| timeline.events.last())
         .map(|event| event.id.clone())
         .unwrap_or_default()
+}
+
+fn timeline_event_is_rewind_anchor(event: &TimelineEvent) -> bool {
+    matches!(event.kind, TimelineKind::User | TimelineKind::RewindPoint)
 }
 
 fn selected_rewind_event_id(
@@ -693,7 +704,7 @@ mod tests {
     }
 
     #[test]
-    fn real_session_default_rewind_prefers_high_signal_event_over_tool() {
+    fn real_session_default_rewind_prefers_user_anchor_over_assistant_or_tool() {
         let timeline = CanonicalTimeline {
             version: 1,
             source_cli: CliTool::Codex,
@@ -705,6 +716,13 @@ mod tests {
                     kind: TimelineKind::User,
                     title: "User".into(),
                     detail: "real request".into(),
+                },
+                TimelineEvent {
+                    id: "evt-034".into(),
+                    time: "10:01".into(),
+                    kind: TimelineKind::Assistant,
+                    title: "Assistant".into(),
+                    detail: "implementation details".into(),
                 },
                 TimelineEvent {
                     id: "evt-091".into(),

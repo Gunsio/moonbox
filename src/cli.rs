@@ -32,6 +32,8 @@ pub enum Command {
     CompileOutput(CompileArgs),
     /// List configured compiler skill presets.
     Compilers(JsonArgs),
+    /// List configured SSH hosts without connecting.
+    Ssh(JsonArgs),
     /// Diagnose Moonbox configuration without opening sessions.
     Doctor(JsonArgs),
     /// Generate shell completion scripts.

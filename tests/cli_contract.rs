@@ -29,6 +29,7 @@ fn fixture_safe_command(binary: &str, test_name: &str) -> Command {
         .env("MOONBOX_CLAUDE_HOME", claude_home)
         .env("MOONBOX_HERMES_HOME", hermes_home)
         .env("MOONBOX_CONFIG", home.join("config.json"))
+        .env("MOONBOX_SSH_CONFIG", home.join(".ssh").join("config"))
         .env("MOONBOX_SESSION_LIMIT", "50")
         .env("MOONBOX_SESSION_SCAN_LIMIT", "500")
         .env("MOONBOX_SESSION_SUMMARY_LINE_LIMIT", "800");
@@ -122,6 +123,7 @@ fn completion_generation_uses_requested_or_invoked_binary_name() {
     assert!(bash.contains("moonbox"));
     assert!(bash.contains("replay-eval"));
     assert!(bash.contains("completions"));
+    assert!(bash.contains("ssh"));
 
     let fish = output_text(
         moon_command("completion-moon-fish")
@@ -132,6 +134,7 @@ fn completion_generation_uses_requested_or_invoked_binary_name() {
     assert!(fish.contains("complete -c moon"));
     assert!(fish.contains("replay-eval"));
     assert!(fish.contains("completions"));
+    assert!(fish.contains("ssh"));
 
     let zsh = output_text(
         moonbox_command("completion-explicit-moon-zsh")
@@ -142,6 +145,65 @@ fn completion_generation_uses_requested_or_invoked_binary_name() {
     assert!(zsh.contains("#compdef moon"));
     assert!(zsh.contains("replay-eval"));
     assert!(zsh.contains("completions"));
+    assert!(zsh.contains("ssh"));
+}
+
+#[test]
+fn ssh_cli_contract_lists_configured_hosts_without_connecting() {
+    let home = fixture_home("ssh-list");
+    fs::create_dir_all(home.join(".ssh")).expect("ssh fixture dir");
+    fs::write(
+        home.join("config.json"),
+        r#"{
+  "ssh_hosts": [
+    {"name": "prod-api", "host": "prod-api.internal", "user": "deploy", "port": 2222, "identity_file": "~/.ssh/prod-api", "tags": ["prod"]}
+  ]
+}"#,
+    )
+    .expect("moonbox ssh config");
+    fs::write(
+        home.join(".ssh").join("config"),
+        r#"
+Host dev-box
+  HostName dev-box.internal
+  User dev
+  Port 2200
+
+Host *
+  User ignored
+"#,
+    )
+    .expect("openssh config");
+
+    let json = output_json(
+        moon_command("ssh-list")
+            .args(["ssh", "--json"])
+            .output()
+            .expect("ssh json"),
+    );
+    let hosts = json.as_array().expect("ssh host array");
+
+    assert_eq!(hosts.len(), 2);
+    assert!(hosts.iter().any(|host| {
+        host["name"] == "prod-api"
+            && host["host"] == "prod-api.internal"
+            && host["source"] == "moonbox_config"
+    }));
+    assert!(hosts.iter().any(|host| {
+        host["name"] == "dev-box"
+            && host["host"] == "dev-box.internal"
+            && host["source"] == "openssh_config"
+    }));
+
+    let text = output_text(
+        moon_command("ssh-list")
+            .arg("ssh")
+            .output()
+            .expect("ssh text"),
+    );
+    assert!(text.contains("SSH hosts: 2"));
+    assert!(text.contains("prod-api"));
+    assert!(text.contains("dev-box"));
 }
 
 #[test]

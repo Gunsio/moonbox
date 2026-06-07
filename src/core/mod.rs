@@ -13,5 +13,6 @@ pub mod local_jsonl;
 pub mod model;
 pub mod replay_eval;
 pub mod sources;
+pub mod ssh;
 pub mod verifier;
 pub mod workbench;

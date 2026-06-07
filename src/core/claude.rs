@@ -898,6 +898,31 @@ mod tests {
     }
 
     #[test]
+    fn load_timeline_deduplicates_adjacent_duplicate_messages() {
+        let root = test_root("timeline-dedup");
+        write_session(
+            &root,
+            "repo/claude-dedup.jsonl",
+            r#"{"type":"user","sessionId":"claude-dedup","timestamp":"2026-05-19T07:55:10.994Z","cwd":"/repo","message":{"role":"user","content":"Repeat once"}}
+{"type":"user","sessionId":"claude-dedup","timestamp":"2026-05-19T07:55:10.994Z","cwd":"/repo","message":{"role":"user","content":"Repeat once"}}
+"#,
+        );
+
+        let timeline = ClaudeSourceAdapter::new(&root)
+            .load_timeline("claude-dedup")
+            .expect("timeline");
+
+        assert_eq!(
+            timeline
+                .events
+                .iter()
+                .filter(|event| event.detail == "Repeat once")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
     fn loads_explicit_claude_session_outside_list_limit() {
         let root = test_root("explicit-outside-limit");
         write_session(

@@ -291,6 +291,12 @@ pub fn push_timeline_event(
     event: TimelineEvent,
     event_limit: Option<usize>,
 ) -> bool {
+    if events
+        .last()
+        .is_some_and(|previous| is_adjacent_duplicate_event(previous, &event))
+    {
+        return false;
+    }
     events.push(event);
     if let Some(limit) = event_limit
         && events.len() >= limit
@@ -299,6 +305,13 @@ pub fn push_timeline_event(
         return true;
     }
     false
+}
+
+fn is_adjacent_duplicate_event(previous: &TimelineEvent, event: &TimelineEvent) -> bool {
+    previous.time == event.time
+        && previous.kind == event.kind
+        && previous.title == event.title
+        && previous.detail == event.detail
 }
 
 pub fn timeline_preview_truncated_event(number: usize, limit: usize) -> TimelineEvent {
@@ -478,4 +491,70 @@ fn modified_time(path: &Path) -> SystemTime {
     path.metadata()
         .and_then(|metadata| metadata.modified())
         .unwrap_or(UNIX_EPOCH)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn timeline_event(number: usize, detail: &str) -> TimelineEvent {
+        TimelineEvent {
+            id: event_id(number),
+            time: "10:00".into(),
+            kind: TimelineKind::User,
+            title: "User".into(),
+            detail: detail.into(),
+        }
+    }
+
+    #[test]
+    fn push_timeline_event_skips_adjacent_duplicate_events() {
+        let mut events = Vec::new();
+
+        assert!(!push_timeline_event(
+            &mut events,
+            timeline_event(1, "same"),
+            None
+        ));
+        assert!(!push_timeline_event(
+            &mut events,
+            timeline_event(2, "same"),
+            None
+        ));
+        assert!(!push_timeline_event(
+            &mut events,
+            timeline_event(3, "different"),
+            None,
+        ));
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].detail, "same");
+        assert_eq!(events[1].detail, "different");
+    }
+
+    #[test]
+    fn skipped_duplicate_events_do_not_consume_preview_limit() {
+        let mut events = Vec::new();
+
+        assert!(!push_timeline_event(
+            &mut events,
+            timeline_event(1, "first"),
+            Some(2),
+        ));
+        assert!(!push_timeline_event(
+            &mut events,
+            timeline_event(2, "first"),
+            Some(2),
+        ));
+        assert!(push_timeline_event(
+            &mut events,
+            timeline_event(3, "second"),
+            Some(2),
+        ));
+
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0].detail, "first");
+        assert_eq!(events[1].detail, "second");
+        assert_eq!(events[2].title, "Timeline preview truncated");
+    }
 }

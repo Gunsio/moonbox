@@ -881,6 +881,32 @@ mod tests {
     }
 
     #[test]
+    fn load_timeline_deduplicates_adjacent_duplicate_messages() {
+        let root = test_root("timeline-dedup");
+        write_session(
+            &root,
+            "2026/06/06/rollout-2026-06-06T08-00-00-dedup.jsonl",
+            r#"{"timestamp":"2026-06-06T08:00:00.000Z","type":"session_meta","payload":{"id":"codex-dedup","cwd":"/repo"}}
+{"timestamp":"2026-06-06T08:01:00.000Z","type":"event_msg","payload":{"type":"user_message","message":"Repeat once"}}
+{"timestamp":"2026-06-06T08:01:00.000Z","type":"event_msg","payload":{"type":"user_message","message":"Repeat once"}}
+"#,
+        );
+
+        let timeline = CodexSourceAdapter::new(&root)
+            .load_timeline("codex-dedup")
+            .expect("timeline");
+
+        assert_eq!(
+            timeline
+                .events
+                .iter()
+                .filter(|event| event.detail == "Repeat once")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
     fn loads_explicit_session_outside_list_limit() {
         let root = test_root("explicit-outside-limit");
         write_session(

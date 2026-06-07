@@ -113,6 +113,9 @@ and this project uses semantic versioning once tagged releases start.
   CLI internals kept crate-private until a deliberate library API is stabilized.
 - TUI real-vs-draft labeling that separates real source metadata from built-in
   Work Capsule draft guidance.
+- Read-only SSH inventory through `moonbox ssh` / `moon ssh`, combining
+  Moonbox `ssh_hosts` config entries with concrete OpenSSH `Host` aliases from
+  `~/.ssh/config` or `MOONBOX_SSH_CONFIG` without opening remote connections.
 
 ### Changed
 
@@ -191,8 +194,14 @@ and this project uses semantic versioning once tagged releases start.
   switching no longer shifts the top border line.
 - TUI timeline rendering folds low-signal tool/function-call rows by default,
   and timeline navigation/rewind selection skip hidden tool events.
-- Real-session default rewind selection now prefers high-signal non-tool events
-  instead of arbitrary fixed fixture rewind ids such as `evt-091`.
+- Canonical timeline parsing now folds adjacent duplicate events from Codex,
+  Claude, and Hermes before rendering, so provider double-writes do not show as
+  repeated timeline rows.
+- Real-session default rewind selection now prefers user turns or explicit
+  rewind markers instead of assistant/tool output or arbitrary fixed fixture
+  ids such as `evt-091`.
+- TUI `space` now rejects assistant/tool rows as rewind anchors while still
+  allowing those rows to remain visible for reading context.
 - Built-in compiler output is labeled as deterministic draft guidance; real
   fields are limited to session id, title, cwd, selected rewind, and source
   health until an external compiler skill is configured.

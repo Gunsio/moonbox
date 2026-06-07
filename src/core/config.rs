@@ -18,12 +18,26 @@ pub struct CompilerPresetConfig {
     pub enabled: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SshHostConfig {
+    pub name: String,
+    #[serde(alias = "hostname")]
+    pub host: String,
+    pub user: Option<String>,
+    pub port: Option<u16>,
+    pub identity_file: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct UserConfig {
     last_target: Option<CliTool>,
     default_compiler: Option<String>,
     #[serde(default)]
     compiler_presets: Vec<CompilerPresetConfig>,
+    #[serde(default)]
+    ssh_hosts: Vec<SshHostConfig>,
 }
 
 pub fn load_last_target() -> Option<CliTool> {
@@ -65,6 +79,15 @@ pub fn load_compiler_presets() -> Vec<CompilerPresetConfig> {
         .unwrap_or_default()
         .into_iter()
         .filter(|preset| !preset.id.trim().is_empty() && !preset.command.trim().is_empty())
+        .collect()
+}
+
+pub fn load_ssh_host_configs() -> Vec<SshHostConfig> {
+    load_user_config()
+        .map(|config| config.ssh_hosts)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|host| !host.name.trim().is_empty() && !host.host.trim().is_empty())
         .collect()
 }
 
@@ -118,6 +141,9 @@ mod tests {
   "default_compiler": "handoff",
   "compiler_presets": [
     {"id": "handoff", "command": "/bin/moonbox-handoff", "args": ["--mode", "handoff"], "timeout_ms": 12000}
+  ],
+  "ssh_hosts": [
+    {"name": "dev", "hostname": "dev.example.com", "user": "moon", "port": 2222, "identity_file": "~/.ssh/dev", "tags": ["dev"]}
   ]
 }"#,
         )
@@ -127,10 +153,12 @@ mod tests {
         assert_eq!(config.compiler_presets[0].id, "handoff");
         assert!(config.compiler_presets[0].enabled);
         assert_eq!(config.compiler_presets[0].args, ["--mode", "handoff"]);
+        assert_eq!(config.ssh_hosts[0].name, "dev");
+        assert_eq!(config.ssh_hosts[0].host, "dev.example.com");
     }
 
     #[test]
-    fn save_last_target_preserves_compiler_presets() {
+    fn save_last_target_preserves_compiler_presets_and_ssh_hosts() {
         let path = env::temp_dir().join(format!(
             "moonbox-config-preserve-{}.json",
             std::process::id()
@@ -142,6 +170,9 @@ mod tests {
   "default_compiler": "handoff",
   "compiler_presets": [
     {"id": "handoff", "command": "/bin/moonbox-handoff", "enabled": false}
+  ],
+  "ssh_hosts": [
+    {"name": "prod", "host": "prod.internal", "user": "deploy"}
   ]
 }"#,
         )
@@ -154,6 +185,8 @@ mod tests {
         assert_eq!(saved.default_compiler.as_deref(), Some("handoff"));
         assert_eq!(saved.compiler_presets.len(), 1);
         assert!(!saved.compiler_presets[0].enabled);
+        assert_eq!(saved.ssh_hosts.len(), 1);
+        assert_eq!(saved.ssh_hosts[0].name, "prod");
     }
 
     #[test]

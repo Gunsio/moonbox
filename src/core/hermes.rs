@@ -14,8 +14,8 @@ use super::{
         report_from_sessions_with_scan,
     },
     local_jsonl::{
-        configured_session_limit, display_time, event_id, human_timestamp, read_error,
-        text_from_value, timeline_preview_truncated_event, title_case, truncate,
+        configured_session_limit, display_time, event_id, human_timestamp, push_timeline_event,
+        read_error, text_from_value, timeline_preview_truncated_event, title_case, truncate,
     },
     model::{
         CanonicalTimeline, CliTool, SessionStatus, SessionSummary, SourceProvenance, TimelineEvent,
@@ -365,19 +365,17 @@ impl HermesSourceAdapter {
                 session_id: session_id.into(),
             });
         }
-        let mut messages = self.load_messages(session_id, event_limit)?;
-        let truncated = event_limit.is_some_and(|limit| messages.len() > limit);
-        if let Some(limit) = event_limit {
-            messages.truncate(limit);
+        let messages = self.load_messages(session_id, event_limit)?;
+        let mut events = Vec::new();
+        for row in messages {
+            if let Some(event) = timeline_event(row, events.len() + 1) {
+                push_timeline_event(&mut events, event, None);
+            }
         }
-        let mut events = messages
-            .into_iter()
-            .enumerate()
-            .filter_map(|(index, row)| timeline_event(row, index + 1))
-            .collect::<Vec<_>>();
         if let Some(limit) = event_limit
-            && truncated
+            && events.len() > limit
         {
+            events.truncate(limit);
             events.push(timeline_preview_truncated_event(events.len() + 1, limit));
         }
 
@@ -738,6 +736,31 @@ mod tests {
         assert_eq!(timeline.events[3].kind, TimelineKind::Tool);
         assert_eq!(timeline.events[4].kind, TimelineKind::Assistant);
         assert_eq!(timeline.events[3].title, "Tool: skill_view");
+    }
+
+    #[test]
+    fn load_timeline_deduplicates_adjacent_duplicate_messages() {
+        let root = test_root("timeline-dedup");
+        write_state_db(&root);
+        let db = Connection::open(root.join("state.db")).expect("db");
+        db.execute(
+            "insert into messages (session_id, role, content, timestamp, active) values (?1, ?2, ?3, ?4, 1)",
+            params!["hermes-feishu", "user", "Investigate handoff", 1780641496.0],
+        )
+        .expect("duplicate message");
+
+        let timeline = HermesSourceAdapter::new(&root)
+            .load_timeline("hermes-feishu")
+            .expect("timeline");
+
+        assert_eq!(
+            timeline
+                .events
+                .iter()
+                .filter(|event| event.detail == "Investigate handoff")
+                .count(),
+            1
+        );
     }
 
     #[test]

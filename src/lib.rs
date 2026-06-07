@@ -44,6 +44,7 @@ pub fn run() -> Result<()> {
         Command::CompileRequest(args) => print_compile_request(args),
         Command::CompileOutput(args) => print_compile_output(args),
         Command::Compilers(args) => print_compilers(args),
+        Command::Ssh(args) => print_ssh_hosts(args),
         Command::Doctor(args) => print_doctor(args),
         Command::Completions(args) => print_completions(args),
         Command::Launch(args) => print_launch_plan(args),
@@ -253,6 +254,41 @@ fn print_compilers(args: cli::JsonArgs) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn print_ssh_hosts(args: cli::JsonArgs) -> Result<()> {
+    let hosts = core::ssh::list_ssh_hosts()?;
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&hosts)?);
+    } else if hosts.is_empty() {
+        println!("No SSH hosts configured");
+        println!("Add Host entries to ~/.ssh/config or ssh_hosts to ~/.config/moonbox/config.json");
+    } else {
+        println!("SSH hosts: {}", hosts.len());
+        for host in hosts {
+            println!(
+                "{:<24} {:<32} {:<16} {:<6} {}{}",
+                host.name,
+                host.host,
+                host.user.unwrap_or_else(|| "-".into()),
+                host.port
+                    .map(|port| port.to_string())
+                    .unwrap_or_else(|| "-".into()),
+                ssh_source_label(host.source),
+                host.source_path
+                    .map(|path| format!("  {path}"))
+                    .unwrap_or_default()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn ssh_source_label(source: core::ssh::SshHostSource) -> &'static str {
+    match source {
+        core::ssh::SshHostSource::MoonboxConfig => "moonbox",
+        core::ssh::SshHostSource::OpensshConfig => "openssh",
+    }
 }
 
 fn print_doctor(args: cli::JsonArgs) -> Result<()> {
