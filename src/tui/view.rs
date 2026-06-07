@@ -419,6 +419,7 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
         let active = selected && app.focus == Focus::Timeline;
         let is_rewind = group.is_rewind(&app.rewind_event_id);
         let (label, color) = timeline_group_label(group, is_rewind);
+        let accent = timeline_group_accent(color, is_rewind);
         let marker = if active && is_rewind {
             "▶◆"
         } else if active {
@@ -431,16 +432,14 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
             "│ "
         };
         let time_style = if active {
-            Style::default()
-                .fg(theme::GOLD)
-                .add_modifier(Modifier::BOLD)
+            Style::default().fg(accent).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(color)
         };
         let label_style = if active {
             Style::default()
                 .fg(Color::Black)
-                .bg(theme::GOLD)
+                .bg(accent)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(color).add_modifier(Modifier::BOLD)
@@ -485,10 +484,7 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
                 let prefix =
                     timeline_detail_prefix(active, group.is_ai_group(), event_offset, line_index);
                 lines.push(Line::from(vec![
-                    Span::styled(
-                        prefix,
-                        Style::default().fg(if active { theme::GOLD } else { theme::MUTED }),
-                    ),
+                    Span::styled(prefix, timeline_prefix_style(active, accent)),
                     Span::styled(detail, detail_style),
                 ]));
             }
@@ -573,6 +569,18 @@ fn timeline_group_title<'a>(group: &TimelineGroup<'a>) -> Option<&'a str> {
         TimelineKind::User if event.title == "User" => None,
         TimelineKind::Assistant if event.title == "Assistant" => None,
         _ => Some(event.title.as_str()).filter(|title| !title.trim().is_empty()),
+    }
+}
+
+fn timeline_group_accent(color: Color, is_rewind: bool) -> Color {
+    if is_rewind { theme::GOLD } else { color }
+}
+
+fn timeline_prefix_style(active: bool, accent: Color) -> Style {
+    if active {
+        Style::default().fg(accent).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::MUTED)
     }
 }
 
@@ -2038,6 +2046,21 @@ mod tests {
         assert_screen_contains(&screen, "继续分析缓存");
         assert_eq!(screen.matches("AI x2").count(), 1, "{screen}");
         assert!(!screen.contains("ASSISTANT  Assistant"), "{screen}");
+    }
+
+    #[test]
+    fn selected_timeline_rows_keep_role_accent_colors() {
+        assert_eq!(timeline_group_accent(theme::BLUE, false), theme::BLUE);
+        assert_eq!(timeline_group_accent(theme::GOLD, false), theme::GOLD);
+        assert_eq!(timeline_group_accent(theme::BLUE, true), theme::GOLD);
+
+        let selected_user_prefix = timeline_prefix_style(true, theme::BLUE);
+        assert_eq!(selected_user_prefix.fg, Some(theme::BLUE));
+        assert!(selected_user_prefix.add_modifier.contains(Modifier::BOLD));
+
+        let selected_ai_prefix = timeline_prefix_style(true, theme::GOLD);
+        assert_eq!(selected_ai_prefix.fg, Some(theme::GOLD));
+        assert!(selected_ai_prefix.add_modifier.contains(Modifier::BOLD));
     }
 
     #[test]

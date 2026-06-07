@@ -205,7 +205,8 @@ The first implementation focuses on the product shell:
   Hermes so provider double-writes do not render repeated rows
 - Timeline rendering folds low-signal tool/function-call rows by default while
   grouping consecutive AI output and keeping rewind selection on user turns or
-  explicit rewind markers
+  explicit rewind markers; selected rows preserve role accent colors so active
+  user turns and active AI groups remain visually distinct
 - Timeline auto-scroll, Capsule/modal scroll, and small-terminal modal polish
 - Copyable launch/original wrapper commands via `y` with OSC52 clipboard
   support; main-list `enter` hands control directly to the selected session's
@@ -650,6 +651,9 @@ Stable interfaces matter more than any single framework:
 - M48.2: timeline visual grouping; consecutive assistant messages render as
   one `AI xN` block, and Timeline navigation moves by visible groups so `j/k`
   never appear to stall inside a folded AI burst.
+- M48.3: timeline selected-state polish; active user rows keep the blue user
+  accent, active AI groups keep the gold AI accent, and rewind selection still
+  overrides to the gold rewind accent.
 
 ### Can Build Now
 

@@ -158,6 +158,9 @@ and this project uses semantic versioning once tagged releases start.
 - TUI timeline visually groups consecutive assistant messages into one `AI xN`
   block, and `j/k` navigation now moves by those visible groups instead of
   silently stepping through folded AI events.
+- Selected Timeline rows now preserve role accent colors, so active user turns
+  stay blue and active AI groups stay gold instead of collapsing into one
+  selected-state color.
 - Compiler execution precedence is now explicit: environment override, config
   preset, then built-in fixture compiler.
 - Unknown compiler ids and disabled compiler presets now return structured
