@@ -561,7 +561,11 @@ fn claude_project_dir_name(project: &str) -> String {
 fn history_display_title(display: &str) -> Option<String> {
     let title = normalized_text(display)?;
     let title = title.trim();
-    if title.is_empty() || title.starts_with('/') || is_provider_context_text(title) {
+    if title.is_empty()
+        || title.starts_with('/')
+        || is_provider_context_text(title)
+        || is_claude_internal_event_text(title)
+    {
         None
     } else {
         Some(truncate(title, 160))
@@ -610,6 +614,7 @@ impl SummaryBuilder {
             && !has_tool_result(&record)
             && let Some(text) = message_text(&record)
             && !is_provider_context_text(&text)
+            && !is_claude_internal_event_text(&text)
         {
             self.title = Some(truncate(&text, 160));
         }
@@ -699,6 +704,7 @@ fn timeline_kind(record_type: &str, record: &ClaudeRecord) -> Option<TimelineKin
     }
     match record_type {
         "user" if has_tool_result(record) => Some(TimelineKind::Tool),
+        "user" if record_has_claude_internal_message(record) => Some(TimelineKind::Tool),
         "user" => Some(TimelineKind::User),
         "assistant" if message_content_has_type(record, "tool_use") => Some(TimelineKind::Tool),
         "assistant" => Some(TimelineKind::Assistant),
@@ -712,6 +718,7 @@ fn timeline_kind(record_type: &str, record: &ClaudeRecord) -> Option<TimelineKin
 fn timeline_title(record_type: &str, record: &ClaudeRecord) -> String {
     match record_type {
         "user" if has_tool_result(record) => "Tool result".into(),
+        "user" if record_has_claude_internal_message(record) => "Internal event".into(),
         "user" => "User".into(),
         "assistant" if message_content_has_type(record, "tool_use") => "Tool call".into(),
         "assistant" => "Assistant".into(),
@@ -749,6 +756,23 @@ fn timeline_detail(record_type: &str, record: &ClaudeRecord) -> String {
 
 fn message_text(record: &ClaudeRecord) -> Option<String> {
     text_from_value(record.message.get("content").unwrap_or(&Value::Null))
+}
+
+fn record_has_claude_internal_message(record: &ClaudeRecord) -> bool {
+    message_text(record).is_some_and(|text| is_claude_internal_event_text(&text))
+}
+
+fn is_claude_internal_event_text(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    [
+        "<local-command",
+        "<local-command-stdout>",
+        "<local-command-stderr>",
+        "<local-command-caveat>",
+        "<command-name>",
+    ]
+    .iter()
+    .any(|prefix| trimmed.starts_with(prefix))
 }
 
 fn usage_token_count(message: &Value) -> Option<usize> {
@@ -875,6 +899,30 @@ mod tests {
     }
 
     #[test]
+    fn history_index_ignores_claude_internal_display_titles() {
+        let root = test_root("history-index-internal-display");
+        write_session(
+            &root,
+            "-repo-internal/session-internal.jsonl",
+            r#"{"type":"user","sessionId":"session-internal","timestamp":"2026-06-01T09:00:00.000Z","cwd":"/repo/internal","message":{"content":"<local-command-caveat>Claude Code may run local commands</local-command-caveat>"}}
+"#,
+        );
+        write_history(
+            &root,
+            r#"{"display":"<command-name>git status</command-name>","timestamp":1780300000000,"project":"/repo/internal","sessionId":"session-internal"}
+"#,
+        );
+
+        let sessions = ClaudeSourceAdapter::new(&root)
+            .list_sessions()
+            .expect("sessions");
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "session-internal");
+        assert_eq!(sessions[0].title, "Claude session session-");
+    }
+
+    #[test]
     fn loads_canonical_timeline_from_claude_jsonl_store() {
         let root = test_root("timeline");
         write_session(
@@ -899,6 +947,36 @@ mod tests {
         assert_eq!(timeline.events[2].kind, TimelineKind::Tool);
         assert_eq!(timeline.events[3].kind, TimelineKind::Tool);
         assert_eq!(timeline.events[4].kind, TimelineKind::Compact);
+    }
+
+    #[test]
+    fn local_command_tags_are_internal_tool_events_not_user_anchors() {
+        let root = test_root("timeline-local-command");
+        write_session(
+            &root,
+            "repo/claude-local-command.jsonl",
+            r#"{"type":"user","sessionId":"claude-local-command","timestamp":"2026-05-19T07:55:10.994Z","cwd":"/repo","message":{"role":"user","content":"<local-command-caveat>Claude Code may run local commands</local-command-caveat>"}}
+{"type":"user","sessionId":"claude-local-command","timestamp":"2026-05-19T07:55:20.994Z","cwd":"/repo","message":{"role":"user","content":"<command-name>git status</command-name>"}}
+{"type":"user","sessionId":"claude-local-command","timestamp":"2026-05-19T07:55:30.994Z","cwd":"/repo","message":{"role":"user","content":"Plan the next milestone"}}
+"#,
+        );
+
+        let adapter = ClaudeSourceAdapter::new(&root);
+        let session = adapter
+            .find_session("claude-local-command")
+            .expect("find")
+            .expect("session");
+        let timeline = adapter
+            .load_timeline("claude-local-command")
+            .expect("timeline");
+
+        assert_eq!(session.title, "Plan the next milestone");
+        assert_eq!(timeline.events[0].kind, TimelineKind::Tool);
+        assert_eq!(timeline.events[0].title, "Internal event");
+        assert_eq!(timeline.events[1].kind, TimelineKind::Tool);
+        assert_eq!(timeline.events[1].title, "Internal event");
+        assert_eq!(timeline.events[2].kind, TimelineKind::User);
+        assert_eq!(timeline.events[2].detail, "Plan the next milestone");
     }
 
     #[test]

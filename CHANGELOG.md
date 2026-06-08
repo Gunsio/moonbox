@@ -136,6 +136,9 @@ and this project uses semantic versioning once tagged releases start.
   HEAD, branch, staged/unstaged/untracked paths, bounded diff previews, key
   project files, environment summary, and explicit test-command results without
   reading or opening source CLI sessions.
+- Auditable Capsule source maps with `raw_source_map`, `raw_refs`, and
+  `coverage` fields, enriched from the canonical timeline for built-in and
+  external compiler output.
 
 ### Changed
 
@@ -154,6 +157,9 @@ and this project uses semantic versioning once tagged releases start.
 - README now frames Capsule as Moonbox's product/schema name for the generic
   continuation-package category, keeping `capsule` CLI and JSON fields stable
   while improving external discoverability.
+- Claude local-command XML-like records such as `<local-command-caveat>`,
+  `<local-command-stdout>`, and `<command-name>` are now treated as internal
+  tool events instead of user messages, rewind anchors, or resume-index titles.
 - Generated dry-run launch plans report `capsule_path: null` and do not emit
   fake `--capsule` paths.
 - Codex, Claude, and Hermes source discovery use real local stores when any

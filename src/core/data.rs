@@ -8,9 +8,9 @@ use super::{
     error::CoreError,
     fixture::FixtureSourceAdapter,
     model::{
-        BranchNode, CanonicalTimeline, CapsuleCompileOutput, CapsuleCompileRequest, CliTool,
-        SessionStatus, SessionSummary, SourceAdapterReport, SourceProvenance, TimelineEvent,
-        TimelineKind, WorkCapsule, WorkbenchData,
+        BranchNode, CanonicalTimeline, CapsuleCompileOutput, CapsuleCompileRequest,
+        CapsuleCoverage, CliTool, SessionStatus, SessionSummary, SourceAdapterReport,
+        SourceProvenance, TimelineEvent, TimelineKind, WorkCapsule, WorkbenchData,
     },
     sources,
 };
@@ -450,6 +450,9 @@ fn pending_work_capsule(
         risks: vec![
             "Launch and verify remain blocked until a real rewind event is selected.".into(),
         ],
+        raw_source_map: None,
+        raw_refs: Vec::new(),
+        coverage: CapsuleCoverage::default(),
     }
 }
 
