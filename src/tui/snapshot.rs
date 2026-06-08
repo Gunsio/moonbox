@@ -7,7 +7,8 @@ use ratatui::{
 };
 
 use crate::{
-    app::App,
+    app::{App, Focus},
+    cli::DocsSnapshotVariant,
     core::model::{CliTool, DoctorReport, VerificationStatus},
 };
 
@@ -19,10 +20,22 @@ const CELL_WIDTH: usize = 9;
 const CELL_HEIGHT: usize = 18;
 const PADDING: usize = 28;
 
-pub fn docs_screenshot_svg(width: u16, height: u16) -> Result<String> {
+pub fn docs_screenshot_svg(
+    width: u16,
+    height: u16,
+    variant: DocsSnapshotVariant,
+) -> Result<String> {
+    let app = docs_app(variant)?;
+    let (title, desc) = docs_variant_copy(variant);
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend)?;
+    terminal.draw(|frame| view::render(frame, &app))?;
+
+    Ok(buffer_to_svg(terminal.backend().buffer(), title, desc))
+}
+
+fn docs_app(variant: DocsSnapshotVariant) -> Result<App> {
     let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes)?;
-    app.show_launch = true;
-    app.launch_review = true;
     app.pending_target = CliTool::Hermes;
     app.doctor_report = DoctorReport {
         version: 1,
@@ -31,25 +44,55 @@ pub fn docs_screenshot_svg(width: u16, height: u16) -> Result<String> {
         source_adapters: Vec::new(),
         checks: Vec::new(),
     };
-
-    let backend = TestBackend::new(width, height);
-    let mut terminal = Terminal::new(backend)?;
-    terminal.draw(|frame| view::render(frame, &app))?;
-
-    Ok(buffer_to_svg(terminal.backend().buffer()))
+    match variant {
+        DocsSnapshotVariant::Main => {
+            app.focus = Focus::Sessions;
+            app.status_message = "Fixture workbench screenshot".into();
+        }
+        DocsSnapshotVariant::Timeline => {
+            app.focus = Focus::Timeline;
+            app.zoomed_focus = Some(Focus::Timeline);
+            app.status_message = "Zoomed Timeline".into();
+        }
+        DocsSnapshotVariant::HandoffReview => {
+            app.show_launch = true;
+            app.launch_review = true;
+            app.status_message = "Launch review opened".into();
+        }
+    }
+    Ok(app)
 }
 
-fn buffer_to_svg(buffer: &Buffer) -> String {
+fn docs_variant_copy(variant: DocsSnapshotVariant) -> (&'static str, &'static str) {
+    match variant {
+        DocsSnapshotVariant::Main => (
+            "Moonbox main workbench screenshot",
+            "A generated terminal screenshot of Moonbox showing the session inventory, timeline, session details, action path, and Vim-style key hints.",
+        ),
+        DocsSnapshotVariant::Timeline => (
+            "Moonbox timeline zoom screenshot",
+            "A generated terminal screenshot of Moonbox showing the full-screen Timeline zoom view with user turns, assistant groups, rewind markers, and key hints.",
+        ),
+        DocsSnapshotVariant::HandoffReview => (
+            "Moonbox Handoff Review screenshot",
+            "A generated terminal screenshot of Moonbox showing Handoff Review, capsule content, verifier readiness details, and Vim-style key hints.",
+        ),
+    }
+}
+
+fn buffer_to_svg(buffer: &Buffer, title: &str, desc: &str) -> String {
     let terminal_width = buffer.area.width as usize * CELL_WIDTH;
     let terminal_height = buffer.area.height as usize * CELL_HEIGHT;
     let width = terminal_width + PADDING * 2;
     let height = terminal_height + PADDING * 2;
+    let title = escape_xml(title);
+    let desc = escape_xml(desc);
 
     let mut svg = String::new();
     svg.push_str(&format!(
         r##"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-labelledby="title desc">
-  <title id="title">Moonbox TUI screenshot</title>
-  <desc id="desc">A generated terminal screenshot of Moonbox showing Handoff Review, capsule content, verifier readiness details, and Vim-style key hints.</desc>
+  <title id="title">{title}</title>
+  <desc id="desc">{desc}</desc>
   <defs>
     <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
       <feDropShadow dx="0" dy="18" stdDeviation="26" flood-color="#000000" flood-opacity="0.40"/>
@@ -187,7 +230,7 @@ mod tests {
 
     #[test]
     fn docs_screenshot_contains_launch_review_state() {
-        let svg = docs_screenshot_svg(120, 36).expect("svg");
+        let svg = docs_screenshot_svg(120, 36, DocsSnapshotVariant::HandoffReview).expect("svg");
 
         assert!(svg.contains("Handoff Review"));
         assert!(svg.contains("Capsule Review"));
@@ -197,5 +240,31 @@ mod tests {
         assert!(svg.contains("enter"));
         assert!(svg.contains("Handoff"));
         assert!(svg.contains("<svg"));
+    }
+
+    #[test]
+    fn docs_main_screenshot_contains_unobstructed_workbench() {
+        let svg = docs_screenshot_svg(120, 36, DocsSnapshotVariant::Main).expect("svg");
+
+        assert!(svg.contains("Moonbox main workbench screenshot"));
+        assert!(svg.contains("Sessions"));
+        assert!(svg.contains("Timeline"));
+        assert!(svg.contains("Real Session Metadata"));
+        assert!(svg.contains("Action Path"));
+        assert!(!svg.contains("Handoff Review"));
+    }
+
+    #[test]
+    fn docs_timeline_screenshot_contains_zoomed_timeline() {
+        let svg = docs_screenshot_svg(140, 36, DocsSnapshotVariant::Timeline).expect("svg");
+
+        assert!(svg.contains("Moonbox timeline zoom screenshot"));
+        assert!(svg.contains("Timeline"));
+        assert!(svg.contains("Zoomed Timeline"));
+        assert!(svg.contains("Codex"));
+        assert!(svg.contains("REWIND"));
+        assert!(svg.contains("Action Path"));
+        assert!(!svg.contains("Session Details"));
+        assert!(!svg.contains("Handoff Review"));
     }
 }

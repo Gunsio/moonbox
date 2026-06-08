@@ -13,11 +13,16 @@ use ratatui::DefaultTerminal;
 
 use crate::{
     app::{App, SessionFilter, TuiExitAction},
+    cli::DocsSnapshotVariant,
     core::model::CliTool,
 };
 
-pub fn docs_screenshot_svg(width: u16, height: u16) -> Result<String> {
-    snapshot::docs_screenshot_svg(width, height)
+pub fn docs_screenshot_svg(
+    width: u16,
+    height: u16,
+    variant: DocsSnapshotVariant,
+) -> Result<String> {
+    snapshot::docs_screenshot_svg(width, height, variant)
 }
 
 pub fn run(terminal: &mut DefaultTerminal, mut app: App) -> Result<Option<TuiExitAction>> {

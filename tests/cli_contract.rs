@@ -286,6 +286,34 @@ fn docs_snapshot_is_hidden_fixture_safe_and_generated() {
     assert!(svg.contains("Draft Work Capsule"));
     assert!(svg.contains("moonbox launch --execute"));
     assert!(svg.contains("Handoff"));
+
+    let main_svg = output_text(
+        moonbox_command("docs-snapshot-main")
+            .arg("docs-snapshot")
+            .args(["--variant", "main"])
+            .output()
+            .expect("main docs snapshot"),
+    );
+    assert!(main_svg.starts_with("<svg "));
+    assert!(main_svg.contains("Moonbox main workbench screenshot"));
+    assert!(main_svg.contains("Sessions"));
+    assert!(main_svg.contains("Timeline"));
+    assert!(main_svg.contains("Real Session Metadata"));
+    assert!(!main_svg.contains("Handoff Review"));
+
+    let timeline_svg = output_text(
+        moonbox_command("docs-snapshot-timeline")
+            .arg("docs-snapshot")
+            .args(["--variant", "timeline"])
+            .output()
+            .expect("timeline docs snapshot"),
+    );
+    assert!(timeline_svg.starts_with("<svg "));
+    assert!(timeline_svg.contains("Moonbox timeline zoom screenshot"));
+    assert!(timeline_svg.contains("Timeline"));
+    assert!(timeline_svg.contains("Zoomed Timeline"));
+    assert!(timeline_svg.contains("REWIND"));
+    assert!(!timeline_svg.contains("Session Details"));
 }
 
 #[test]

@@ -76,8 +76,9 @@ and this project uses semantic versioning once tagged releases start.
   and Handoff Review.
 - Documentation asset smoke coverage for README screenshot semantics,
   installation commands, and unpublished Homebrew wording.
-- Hidden fixture-only `docs-snapshot` maintenance command that renders the real
-  Ratatui Handoff Review buffer to SVG for the README screenshot asset.
+- Hidden fixture-only `docs-snapshot` maintenance command that renders real
+  Ratatui buffers to SVG for the README main workbench, Timeline zoom, and
+  Handoff Review screenshot assets.
 - Draft Homebrew formula template plus a fixture-safe Homebrew docs smoke gate.
 - Release artifact staging script that produces source, Cargo crate, and host
   binary archives, generated shell completions, `SHA256SUMS`, and
@@ -109,7 +110,7 @@ and this project uses semantic versioning once tagged releases start.
   frame.
 - Shared verifier policy for CLI and TUI launch validation.
 - Real `--capsule` file parsing and target mismatch verification.
-- README screenshot, installation notes, and Homebrew release planning docs.
+- README screenshots, installation notes, and Homebrew release planning docs.
 - Production panic-boundary lint policy for non-test builds, denying `unsafe`,
   `unwrap()`, `expect()`, `panic!`, `todo!`, and `unimplemented!`.
 - Minimal documented Rust library entrypoint through `moonbox::run()`, with

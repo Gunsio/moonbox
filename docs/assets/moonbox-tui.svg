@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1496" height="848" viewBox="0 0 1496 848" role="img" aria-labelledby="title desc">
-  <title id="title">Moonbox TUI screenshot</title>
+  <title id="title">Moonbox Handoff Review screenshot</title>
   <desc id="desc">A generated terminal screenshot of Moonbox showing Handoff Review, capsule content, verifier readiness details, and Vim-style key hints.</desc>
   <defs>
     <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
@@ -256,7 +256,7 @@
   <text x="46" y="744" class="mono" font-size="14" font-weight="500" fill="#374452">╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
   <text x="46" y="762" class="mono" font-size="14" font-weight="500" fill="#374452">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
   <text x="46" y="780" class="mono" font-size="14" font-weight="500" fill="#8b949e">Status</text>
-  <text x="109" y="780" class="mono" font-size="14" font-weight="800" fill="#47c9da">Ready</text>
+  <text x="109" y="780" class="mono" font-size="14" font-weight="800" fill="#47c9da">Launch review opened</text>
   <text x="55" y="798" class="mono" font-size="14" font-weight="800" fill="#5c91f5">y</text>
   <text x="73" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">Copy</text>
   <text x="136" y="798" class="mono" font-size="14" font-weight="800" fill="#5c91f5">enter</text>

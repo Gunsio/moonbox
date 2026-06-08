@@ -444,7 +444,7 @@ fn print_replay_eval(args: cli::JsonArgs) -> Result<()> {
 }
 
 fn print_docs_snapshot(args: cli::DocsSnapshotArgs) -> Result<()> {
-    let svg = tui::docs_screenshot_svg(args.width, args.height)?;
+    let svg = tui::docs_screenshot_svg(args.width, args.height, args.variant)?;
     if let Some(path) = args.output {
         fs::write(path, svg)?;
     } else {

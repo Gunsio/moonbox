@@ -1,0 +1,166 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1496" height="848" viewBox="0 0 1496 848" role="img" aria-labelledby="title desc">
+  <title id="title">Moonbox timeline zoom screenshot</title>
+  <desc id="desc">A generated terminal screenshot of Moonbox showing the full-screen Timeline zoom view with user turns, assistant groups, rewind markers, and key hints.</desc>
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="18" stdDeviation="26" flood-color="#000000" flood-opacity="0.40"/>
+    </filter>
+    <style>
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; white-space: pre; }
+    </style>
+  </defs>
+  <rect x="28" y="28" width="1440" height="792" rx="8" fill="#050607" stroke="#58616f" stroke-width="2" filter="url(#shadow)"/>
+  <text x="46" y="60" class="mono" font-size="14" font-weight="500" fill="#374452">╭ Moonbox CLI ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮</text>
+  <text x="46" y="78" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
+  <text x="73" y="78" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">MOONBOX</text>
+  <text x="145" y="78" class="mono" font-size="14" font-weight="500" fill="#8b949e">月</text>
+  <text x="163" y="78" class="mono" font-size="14" font-weight="500" fill="#8b949e">光</text>
+  <text x="181" y="78" class="mono" font-size="14" font-weight="500" fill="#8b949e">宝</text>
+  <text x="199" y="78" class="mono" font-size="14" font-weight="500" fill="#8b949e">盒</text>
+  <text x="244" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Filter</text>
+  <text x="307" y="78" class="mono" font-size="14" font-weight="500" fill="#8b949e">[ ]</text>
+  <text x="334" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">:</text>
+  <text x="352" y="78" class="mono" font-size="14" font-weight="800" fill="#5c91f5">All</text>
+  <text x="406" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Data:</text>
+  <text x="460" y="78" class="mono" font-size="14" font-weight="800" fill="#47c9da">Local</text>
+  <text x="532" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Compiler:</text>
+  <text x="622" y="78" class="mono" font-size="14" font-weight="800" fill="#5cd689">ACTIVE</text>
+  <text x="721" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Skill:</text>
+  <text x="784" y="78" class="mono" font-size="14" font-weight="500" fill="#47c9da">engineering-handoff</text>
+  <text x="982" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Tokens:</text>
+  <text x="1054" y="78" class="mono" font-size="14" font-weight="800" fill="#e6be53">42K</text>
+  <text x="1108" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Doctor:</text>
+  <text x="1180" y="78" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
+  <text x="1243" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Verify:</text>
+  <text x="1315" y="78" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
+  <text x="1441" y="78" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
+  <text x="46" y="96" class="mono" font-size="14" font-weight="500" fill="#374452">╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
+  <text x="46" y="114" class="mono" font-size="14" font-weight="500" fill="#e6be53">╭ Timeline ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮</text>
+  <text x="46" y="132" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1441" y="132" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="150" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="64" y="150" class="mono" font-size="14" font-weight="500" fill="#8b949e">│</text>
+  <text x="100" y="150" class="mono" font-size="14" font-weight="800" fill="#e6be53">Codex</text>
+  <text x="1378" y="150" class="mono" font-size="14" font-weight="500" fill="#e6be53">16:08</text>
+  <text x="1441" y="150" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="168" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="91" y="168" class="mono" font-size="14" font-weight="500" fill="#8b949e">Conclusion: raw session copy is the wrong abstraction.</text>
+  <text x="1441" y="168" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="186" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1441" y="186" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="204" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="64" y="204" class="mono" font-size="14" font-weight="500" fill="#8b949e">│</text>
+  <text x="100" y="204" class="mono" font-size="14" font-weight="800" fill="#47c9da">COMPACT</text>
+  <text x="181" y="204" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Compact</text>
+  <text x="1378" y="204" class="mono" font-size="14" font-weight="500" fill="#47c9da">16:14</text>
+  <text x="1441" y="204" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="222" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="91" y="222" class="mono" font-size="14" font-weight="500" fill="#8b949e">Conversation summary created; hidden state cannot be ported safely.</text>
+  <text x="1441" y="222" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="240" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1441" y="240" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="258" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="64" y="258" class="mono" font-size="14" font-weight="500" fill="#8b949e">│</text>
+  <text x="100" y="258" class="mono" font-size="14" font-weight="800" fill="#f16565">ERROR</text>
+  <text x="163" y="258" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Error</text>
+  <text x="1378" y="258" class="mono" font-size="14" font-weight="500" fill="#f16565">16:18</text>
+  <text x="1441" y="258" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="276" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="91" y="276" class="mono" font-size="14" font-weight="500" fill="#8b949e">Target CLI resume returned 502 after provider/session mismatch.</text>
+  <text x="1441" y="276" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="294" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1441" y="294" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="312" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="64" y="312" class="mono" font-size="14" font-weight="500" fill="#8b949e">│</text>
+  <text x="100" y="312" class="mono" font-size="14" font-weight="800" fill="#5cd689">GIT DIFF</text>
+  <text x="190" y="312" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Git Diff</text>
+  <text x="1378" y="312" class="mono" font-size="14" font-weight="500" fill="#5cd689">16:23</text>
+  <text x="1441" y="312" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="330" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="91" y="330" class="mono" font-size="14" font-weight="500" fill="#8b949e">+ Canonical Timeline schema, + Work Capsule schema.</text>
+  <text x="1441" y="330" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="348" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1441" y="348" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="366" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="64" y="366" class="mono" font-size="14" font-weight="800" fill="#47c9da">▶◆</text>
+  <rect x="100" y="351" width="54" height="18" fill="#e6be53"/>
+  <text x="100" y="366" class="mono" font-size="14" font-weight="800" fill="#000000">REWIND</text>
+  <text x="172" y="366" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">Rewind Point</text>
+  <text x="1369" y="366" class="mono" font-size="14" font-weight="800" fill="#e6be53">16:26</text>
+  <text x="1441" y="366" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="384" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="82" y="384" class="mono" font-size="14" font-weight="800" fill="#e6be53">└</text>
+  <text x="100" y="384" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">Before raw resume. Compile new Work Capsule for Hermes.</text>
+  <text x="1441" y="384" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="402" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1441" y="402" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="420" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1441" y="420" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="438" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1441" y="438" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="456" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1441" y="456" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="474" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1441" y="474" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="492" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1441" y="492" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="510" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1441" y="510" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="528" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1441" y="528" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="546" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1441" y="546" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="564" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1441" y="564" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="582" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1441" y="582" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="600" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1441" y="600" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="618" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1441" y="618" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="636" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1441" y="636" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="654" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="1441" y="654" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="46" y="672" class="mono" font-size="14" font-weight="500" fill="#e6be53">╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
+  <text x="46" y="690" class="mono" font-size="14" font-weight="500" fill="#374452">╭ Action Path ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮</text>
+  <text x="46" y="708" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
+  <text x="91" y="708" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">Codex codex-cxcp...</text>
+  <text x="271" y="708" class="mono" font-size="14" font-weight="500" fill="#374452">──</text>
+  <text x="298" y="708" class="mono" font-size="14" font-weight="800" fill="#e6be53">rewind evt-091</text>
+  <text x="433" y="708" class="mono" font-size="14" font-weight="500" fill="#374452">──</text>
+  <text x="460" y="708" class="mono" font-size="14" font-weight="800" fill="#47c9da">handoff Hermes</text>
+  <text x="1441" y="708" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
+  <text x="46" y="726" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
+  <text x="91" y="726" class="mono" font-size="14" font-weight="500" fill="#8b949e">cwd:</text>
+  <text x="136" y="726" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">~/coding/moonbox</text>
+  <text x="289" y="726" class="mono" font-size="14" font-weight="500" fill="#374452">·</text>
+  <text x="307" y="726" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Codex 1</text>
+  <text x="379" y="726" class="mono" font-size="14" font-weight="500" fill="#374452">·</text>
+  <text x="397" y="726" class="mono" font-size="14" font-weight="500" fill="#47c9da">Claude 0</text>
+  <text x="478" y="726" class="mono" font-size="14" font-weight="500" fill="#374452">·</text>
+  <text x="496" y="726" class="mono" font-size="14" font-weight="500" fill="#f59756">Hermes 0</text>
+  <text x="1441" y="726" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
+  <text x="46" y="744" class="mono" font-size="14" font-weight="500" fill="#374452">╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
+  <text x="46" y="762" class="mono" font-size="14" font-weight="500" fill="#374452">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+  <text x="46" y="780" class="mono" font-size="14" font-weight="500" fill="#8b949e">Status</text>
+  <text x="109" y="780" class="mono" font-size="14" font-weight="800" fill="#47c9da">Zoomed Timeline</text>
+  <text x="55" y="798" class="mono" font-size="14" font-weight="800" fill="#5c91f5">j/k</text>
+  <text x="91" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">Events</text>
+  <text x="172" y="798" class="mono" font-size="14" font-weight="800" fill="#5c91f5">gg/G</text>
+  <text x="217" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">Jump</text>
+  <text x="280" y="798" class="mono" font-size="14" font-weight="800" fill="#5c91f5">space</text>
+  <text x="334" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">Rewind</text>
+  <text x="415" y="798" class="mono" font-size="14" font-weight="800" fill="#5c91f5">c</text>
+  <text x="433" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">Review</text>
+  <text x="514" y="798" class="mono" font-size="14" font-weight="800" fill="#5c91f5">+</text>
+  <text x="532" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">Zoom</text>
+  <text x="595" y="798" class="mono" font-size="14" font-weight="800" fill="#5c91f5">-</text>
+  <text x="613" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">Restore</text>
+  <text x="703" y="798" class="mono" font-size="14" font-weight="800" fill="#5c91f5">tab</text>
+  <text x="739" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">Next</text>
+  <text x="802" y="798" class="mono" font-size="14" font-weight="800" fill="#5c91f5">:</text>
+  <text x="820" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">Cmd</text>
+  <text x="874" y="798" class="mono" font-size="14" font-weight="800" fill="#5c91f5">q</text>
+  <text x="892" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">Quit</text>
+</svg>

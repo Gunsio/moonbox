@@ -94,9 +94,23 @@ pub struct DocsSnapshotArgs {
     /// Snapshot terminal height in cells.
     #[arg(long, default_value_t = 44)]
     pub height: u16,
+    /// Screenshot scene to render.
+    #[arg(long, value_enum, default_value_t = DocsSnapshotVariant::default())]
+    pub variant: DocsSnapshotVariant,
     /// Write the SVG to this path instead of stdout.
     #[arg(long)]
     pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
+pub enum DocsSnapshotVariant {
+    /// Main three-panel workbench without modal overlays.
+    Main,
+    /// Timeline zoom view, matching the TUI + key behavior.
+    Timeline,
+    /// Handoff Review modal.
+    #[default]
+    HandoffReview,
 }
 
 #[derive(Debug, Args, Clone, Default)]
