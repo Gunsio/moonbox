@@ -101,6 +101,10 @@ and this project uses semantic versioning once tagged releases start.
   full-file parsing before the TUI becomes usable.
 - Bounded TUI timeline previews through `MOONBOX_TIMELINE_EVENT_LIMIT`, with a
   visible truncation marker for large sessions.
+- Bounded timeline event body previews through
+  `MOONBOX_TIMELINE_DETAIL_CHAR_LIMIT`, defaulting to 4000 characters so zoomed
+  Timeline panels can show long-form context without unbounded transcript
+  rendering.
 - Animated TUI loading screen while source sessions are indexed before the
   workbench becomes interactive.
 - Async selected-session preview hydration in the TUI, with stale-result

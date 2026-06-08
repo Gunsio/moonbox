@@ -16,7 +16,7 @@ use super::{
         configured_session_summary_line_limit, discover_project_jsonl_files, display_time,
         event_id, find_token_count, human_timestamp, is_provider_context_text, max_timestamp,
         open_reader, push_timeline_event, read_error, sort_paths_by_modified_desc, text_from_value,
-        title_case, truncate,
+        title_case, truncate, truncate_timeline_detail,
     },
     model::{
         CanonicalTimeline, CliTool, SessionStatus, SessionSummary, SourceProvenance, TimelineEvent,
@@ -738,10 +738,10 @@ fn timeline_detail(record_type: &str, record: &ClaudeRecord) -> String {
             .unwrap_or_default(),
         _ if has_tool_result(record) => text_from_value(&record.tool_use_result)
             .or_else(|| message_text(record))
-            .map(|text| truncate(&text, 220))
+            .map(|text| truncate_timeline_detail(&text))
             .unwrap_or_else(|| "tool result".into()),
         _ => message_text(record)
-            .map(|text| truncate(&text, 220))
+            .map(|text| truncate_timeline_detail(&text))
             .or_else(|| record.cwd.as_deref().map(|cwd| format!("cwd: {cwd}")))
             .unwrap_or_default(),
     }

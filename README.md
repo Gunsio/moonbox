@@ -176,6 +176,11 @@ The first implementation focuses on the product shell:
 - Set `MOONBOX_SESSION_SUMMARY_LINE_LIMIT=0` for full summary parsing, or a positive integer to tune index latency
 - TUI timeline preview defaults to the first 300 events per selected session, with a visible truncation marker for large sessions
 - Set `MOONBOX_TIMELINE_EVENT_LIMIT=0` for full TUI timeline previews, or a positive integer to tune switching latency
+- Timeline event bodies default to a bounded 4000-character review budget, so
+  zoomed Timeline panels can show long-form context without reverting to
+  unbounded raw transcript rendering
+- Set `MOONBOX_TIMELINE_DETAIL_CHAR_LIMIT=0` for full event bodies during
+  deliberate local review, or a positive integer to tune detail fidelity
 - TUI session filtering is cached and the session list renders only the visible window, so large real indexes do not require formatting every row on every frame
 - Set `MOONBOX_SESSION_MODE=fixture` to disable real source stores and force embedded fixture sessions
 - Auto discovery only falls back to fixture sessions when no real source stores are present; real and fixture sources are not mixed
@@ -313,6 +318,7 @@ MOONBOX_SESSION_LIMIT=50 cargo run -- sessions --json
 MOONBOX_SESSION_SCAN_LIMIT=1000 cargo run -- doctor --json
 MOONBOX_SESSION_SUMMARY_LINE_LIMIT=200 cargo run -- sessions --json
 MOONBOX_TIMELINE_EVENT_LIMIT=100 cargo run -- tui
+MOONBOX_TIMELINE_DETAIL_CHAR_LIMIT=8000 cargo run -- tui
 cargo run -- open --session <session-id>
 cargo run -- open --session <session-id> --json
 cargo run -- open --execute --session <session-id>
@@ -375,7 +381,10 @@ Session switching uses a bounded timeline preview by default, so very large
 JSONL sessions do not freeze navigation. When the preview reaches
 `MOONBOX_TIMELINE_EVENT_LIMIT`, Moonbox adds a `Timeline preview truncated`
 event to the timeline. Set `MOONBOX_TIMELINE_EVENT_LIMIT=0` only when you
-explicitly want full timeline previews in the TUI.
+explicitly want full timeline previews in the TUI. Individual event bodies use
+`MOONBOX_TIMELINE_DETAIL_CHAR_LIMIT`, which defaults to 4000 characters so
+expanded Timeline panels can show substantially more than the compact list
+snippet while still protecting large-session navigation.
 
 `replay-eval` is also non-executing. It uses only embedded fixtures, does not
 scan local session stores, and reports verifier signals across every

@@ -17,6 +17,7 @@ use super::{
         discover_jsonl_files, display_time, event_id, find_token_count, human_timestamp,
         is_provider_context_text, max_timestamp, open_reader, push_timeline_event, read_error,
         replace_time_dashes, string_field, text_from_value, title_case, truncate,
+        truncate_timeline_detail,
     },
     model::{
         CanonicalTimeline, CliTool, SessionStatus, SessionSummary, SourceProvenance, TimelineEvent,
@@ -758,7 +759,7 @@ fn timeline_detail(payload: &Value, record_type: &str, payload_type: &str) -> St
         return format!("completed in {duration} ms");
     }
     text_from_value(payload)
-        .map(|text| truncate(&text, 220))
+        .map(|text| truncate_timeline_detail(&text))
         .unwrap_or_default()
 }
 
@@ -965,6 +966,40 @@ mod tests {
         assert_eq!(timeline.events[1].kind, TimelineKind::User);
         assert_eq!(timeline.events[2].kind, TimelineKind::Assistant);
         assert_eq!(timeline.events[3].kind, TimelineKind::Error);
+    }
+
+    #[test]
+    fn timeline_detail_keeps_longer_assistant_body_for_zoomed_review() {
+        let root = test_root("timeline-long-detail");
+        let long_detail = format!(
+            "{}tail-marker",
+            "long assistant detail with markdown list item ".repeat(20)
+        );
+        let content = format!(
+            r#"{{"timestamp":"2026-06-06T08:00:00.000Z","type":"session_meta","payload":{{"id":"codex-long-detail","cwd":"/repo"}}}}
+{{"timestamp":"2026-06-06T08:01:00.000Z","type":"event_msg","payload":{{"type":"agent_message","message":{}}}}}
+"#,
+            serde_json::to_string(&long_detail).expect("detail json")
+        );
+        write_session(
+            &root,
+            "2026/06/06/rollout-2026-06-06T08-00-00-long-detail.jsonl",
+            &content,
+        );
+
+        let timeline = CodexSourceAdapter::new(&root)
+            .load_timeline("codex-long-detail")
+            .expect("timeline");
+
+        let detail = timeline
+            .events
+            .iter()
+            .find(|event| event.kind == TimelineKind::Assistant)
+            .expect("assistant event")
+            .detail
+            .as_str();
+        assert!(detail.len() > 220, "detail should exceed old 220-char cap");
+        assert!(detail.contains("tail-marker"));
     }
 
     #[test]

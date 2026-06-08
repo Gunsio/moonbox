@@ -15,6 +15,7 @@ use super::{
 pub const DEFAULT_SESSION_LIMIT: usize = 200;
 pub const DEFAULT_SESSION_SCAN_ENTRY_LIMIT: usize = 5000;
 pub const DEFAULT_SESSION_SUMMARY_LINE_LIMIT: usize = 800;
+pub const DEFAULT_TIMELINE_DETAIL_CHAR_LIMIT: usize = 4000;
 
 pub fn configured_session_limit() -> Option<usize> {
     match env::var("MOONBOX_SESSION_LIMIT") {
@@ -53,6 +54,25 @@ pub fn configured_session_summary_line_limit() -> Option<usize> {
             .or(Some(DEFAULT_SESSION_SUMMARY_LINE_LIMIT)),
         Err(_) => Some(DEFAULT_SESSION_SUMMARY_LINE_LIMIT),
     }
+}
+
+pub fn configured_timeline_detail_char_limit() -> Option<usize> {
+    match env::var("MOONBOX_TIMELINE_DETAIL_CHAR_LIMIT") {
+        Ok(value) if value.trim() == "0" => None,
+        Ok(value) => value
+            .trim()
+            .parse::<usize>()
+            .ok()
+            .filter(|limit| *limit > 0)
+            .or(Some(DEFAULT_TIMELINE_DETAIL_CHAR_LIMIT)),
+        Err(_) => Some(DEFAULT_TIMELINE_DETAIL_CHAR_LIMIT),
+    }
+}
+
+pub fn truncate_timeline_detail(text: &str) -> String {
+    configured_timeline_detail_char_limit()
+        .map(|limit| truncate(text, limit))
+        .unwrap_or_else(|| text.to_owned())
 }
 
 pub fn open_reader(tool: CliTool, path: &Path) -> Result<BufReader<fs::File>, AdapterError> {
