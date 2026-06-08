@@ -352,15 +352,11 @@ impl CapsuleCompiler for FixtureCapsuleCompiler {
 }
 
 pub fn default_compiler_id() -> String {
-    configured_process_compiler_id()
-        .or_else(|| {
-            config::load_default_compiler().filter(|id| {
-                compiler_catalog_entries().iter().any(|compiler| {
-                    compiler.id == *id && compiler.status != CompilerPresetStatus::Disabled
-                })
-            })
-        })
-        .unwrap_or_else(|| DEFAULT_COMPILER_ID.into())
+    if let Some(id) = configured_process_compiler_id() {
+        return id;
+    }
+    let catalog = compiler_catalog_entries();
+    select_default_compiler(config::load_default_compiler(), &catalog)
 }
 
 pub fn compiler_catalog() -> Vec<String> {
@@ -399,6 +395,10 @@ pub fn compiler_catalog_entries() -> Vec<CompilerPresetInfo> {
         push_unique_compiler(&mut compilers, builtin_info(id));
     }
     compilers
+}
+
+pub fn compiler_is_builtin(id: &str) -> bool {
+    FIXTURE_COMPILER_IDS.contains(&id)
 }
 
 pub fn compile_with_configured_runner(
@@ -617,8 +617,8 @@ fn builtin_info(id: &str) -> CompilerPresetInfo {
     CompilerPresetInfo {
         id: id.into(),
         kind: CompilerPresetKind::Builtin,
-        status: CompilerPresetStatus::Ready,
-        score: 45,
+        status: CompilerPresetStatus::Warning,
+        score: 35,
         command: None,
         args: Vec::new(),
         timeout_ms: None,
@@ -632,6 +632,27 @@ fn builtin_info(id: &str) -> CompilerPresetInfo {
         homepage: Some("https://github.com/Gunsio/moonbox".into()),
         github_stars: None,
     }
+}
+
+fn select_default_compiler(
+    configured_default: Option<String>,
+    catalog: &[CompilerPresetInfo],
+) -> String {
+    if let Some(id) = configured_default.filter(|id| {
+        catalog
+            .iter()
+            .any(|compiler| compiler.id == *id && compiler.status != CompilerPresetStatus::Disabled)
+    }) {
+        return id;
+    }
+    catalog
+        .iter()
+        .find(|compiler| {
+            compiler.kind != CompilerPresetKind::Builtin
+                && compiler.status == CompilerPresetStatus::Ready
+        })
+        .map(|compiler| compiler.id.clone())
+        .unwrap_or_else(|| DEFAULT_COMPILER_ID.into())
 }
 
 fn command_available(command: &str) -> bool {
@@ -850,14 +871,57 @@ sleep 1
 
         assert_eq!(info.id, DEFAULT_COMPILER_ID);
         assert_eq!(info.kind, CompilerPresetKind::Builtin);
-        assert_eq!(info.status, CompilerPresetStatus::Ready);
-        assert_eq!(info.score, 45);
+        assert_eq!(info.status, CompilerPresetStatus::Warning);
+        assert_eq!(info.score, 35);
         assert_eq!(info.command, None);
         assert_eq!(
             info.homepage.as_deref(),
             Some("https://github.com/Gunsio/moonbox")
         );
         assert_eq!(info.github_stars, None);
+    }
+
+    #[test]
+    fn default_compiler_prefers_ready_external_preset_over_builtin_draft() {
+        let external = CompilerPresetInfo {
+            id: "production-skill".into(),
+            kind: CompilerPresetKind::Config,
+            status: CompilerPresetStatus::Ready,
+            score: 85,
+            command: Some("/bin/moonbox-handoff".into()),
+            args: Vec::new(),
+            timeout_ms: Some(30_000),
+            reason: "ready".into(),
+            description: None,
+            homepage: None,
+            github_stars: None,
+        };
+        let catalog = vec![builtin_info(DEFAULT_COMPILER_ID), external];
+
+        assert_eq!(select_default_compiler(None, &catalog), "production-skill");
+    }
+
+    #[test]
+    fn configured_default_overrides_external_preset_when_enabled() {
+        let external = CompilerPresetInfo {
+            id: "production-skill".into(),
+            kind: CompilerPresetKind::Config,
+            status: CompilerPresetStatus::Ready,
+            score: 85,
+            command: Some("/bin/moonbox-handoff".into()),
+            args: Vec::new(),
+            timeout_ms: Some(30_000),
+            reason: "ready".into(),
+            description: None,
+            homepage: None,
+            github_stars: None,
+        };
+        let catalog = vec![external, builtin_info("bugfix-continuation")];
+
+        assert_eq!(
+            select_default_compiler(Some("bugfix-continuation".into()), &catalog),
+            "bugfix-continuation"
+        );
     }
 
     #[cfg(unix)]

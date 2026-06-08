@@ -14,6 +14,14 @@ use super::{
     verifier,
 };
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetInputPreview {
+    pub program: String,
+    pub args: Vec<String>,
+    pub cwd: Option<String>,
+    pub prompt: String,
+}
+
 pub fn target_command(
     target: CliTool,
     session: &SessionSummary,
@@ -31,6 +39,10 @@ pub fn target_command(
         cwd,
         display,
     })
+}
+
+pub fn target_prompt_preview(session: &SessionSummary, capsule: &WorkCapsule) -> String {
+    handoff_prompt(session, capsule)
 }
 
 pub fn execute_plan(mut plan: LaunchPlan) -> Result<LaunchExecution, CoreError> {

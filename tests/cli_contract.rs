@@ -4,6 +4,7 @@ use std::{
     process::{Command, Output},
 };
 
+use rusqlite::{Connection, params};
 use serde_json::Value;
 
 fn moonbox_command(test_name: &str) -> Command {
@@ -90,6 +91,57 @@ fn output_json(output: Output) -> Value {
     serde_json::from_str(&text).unwrap_or_else(|error| {
         panic!("invalid json: {error}\nstdout:\n{text}");
     })
+}
+
+fn write_codex_thread_index(root: &Path, rollout_path: &Path, id: &str, title: &str) {
+    let db = Connection::open(root.join("state_5.sqlite")).expect("codex state db");
+    db.execute_batch(
+        r#"
+        create table threads (
+            id text primary key,
+            rollout_path text not null,
+            created_at integer not null,
+            updated_at integer not null,
+            created_at_ms integer,
+            updated_at_ms integer,
+            cwd text not null,
+            title text not null,
+            preview text not null default '',
+            first_user_message text not null default '',
+            git_branch text,
+            tokens_used integer not null default 0,
+            archived integer not null default 0
+        );
+        "#,
+    )
+    .expect("codex state schema");
+    db.execute(
+        r#"
+        insert into threads (
+            id,
+            rollout_path,
+            created_at,
+            updated_at,
+            created_at_ms,
+            updated_at_ms,
+            cwd,
+            title,
+            preview,
+            first_user_message,
+            git_branch,
+            tokens_used,
+            archived
+        ) values (?1, ?2, 0, 0, 1780736400000, 1780736400000, ?3, ?4, '', '', ?5, 0, 0)
+        "#,
+        params![
+            id,
+            rollout_path.display().to_string(),
+            "/tmp/moonbox-renamed",
+            title,
+            "rename-branch"
+        ],
+    )
+    .expect("codex state row");
 }
 
 #[test]
@@ -230,7 +282,8 @@ fn docs_snapshot_is_hidden_fixture_safe_and_generated() {
     assert!(svg.starts_with("<svg "));
     assert!(svg.contains("Handoff Review"));
     assert!(svg.contains("Capsule Review"));
-    assert!(svg.contains("Readiness details"));
+    assert!(svg.contains("Target receives"));
+    assert!(svg.contains("Draft Work Capsule"));
     assert!(svg.contains("moonbox launch --execute"));
     assert!(svg.contains("Handoff"));
 }
@@ -365,6 +418,53 @@ fn session_listing_source_filter_matches_global_entry_model() {
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0]["id"], "hermes-cxcp-502");
     assert_eq!(sessions[0]["cli"], "hermes");
+}
+
+#[test]
+fn codex_sessions_json_uses_renamed_thread_name_from_session_index() {
+    let test_name = "codex-renamed-thread-name";
+    let home = fixture_home(test_name);
+    let codex_home = home.join("codex");
+    let rollout_path = codex_home
+        .join("sessions")
+        .join("2026")
+        .join("06")
+        .join("08")
+        .join("rollout-2026-06-08T10-00-00-codex-renamed.jsonl");
+    fs::create_dir_all(rollout_path.parent().expect("rollout parent")).expect("codex sessions");
+    fs::write(
+        &rollout_path,
+        r#"{"timestamp":"2026-06-08T10:00:00Z","type":"session_meta","payload":{"id":"codex-renamed-cli","cwd":"/tmp/moonbox-renamed","git":{"branch":"rename-branch"}}}
+{"timestamp":"2026-06-08T10:01:00Z","type":"response_item","payload":{"role":"user","content":[{"type":"input_text","text":"old url title"}]}}"#,
+    )
+    .expect("codex rollout");
+    write_codex_thread_index(
+        &codex_home,
+        &rollout_path,
+        "codex-renamed-cli",
+        "https://bytedance.larkoffice.com/wiki/old-title",
+    );
+    fs::write(
+        codex_home.join("session_index.jsonl"),
+        r#"{"id":"codex-renamed-cli","thread_name":"102_303","updated_at":"2026-06-08T10:05:00Z"}"#,
+    )
+    .expect("codex session index");
+
+    let sessions = output_json(
+        moonbox_command(test_name)
+            .args(["sessions", "--json", "--filter", "codex"])
+            .output()
+            .expect("sessions"),
+    );
+    let sessions = sessions.as_array().expect("session array");
+
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0]["id"], "codex-renamed-cli");
+    assert_eq!(sessions[0]["title"], "102_303");
+    assert_ne!(
+        sessions[0]["title"],
+        "https://bytedance.larkoffice.com/wiki/old-title"
+    );
 }
 
 #[test]

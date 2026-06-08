@@ -143,6 +143,9 @@ The first implementation focuses on the product shell:
 - Time-sorted global session list with source tags
 - Real Codex resume-index discovery from `~/.codex/state_5.sqlite`,
   with rollout fallback from `~/.codex/sessions`
+- Codex renamed thread titles from `~/.codex/session_index.jsonl` override
+  stale `state_5.sqlite` titles, so Moonbox search/listing follows Codex
+  resume-picker names
 - Runtime Codex home override via `MOONBOX_CODEX_HOME` or `CODEX_HOME`
 - Real Claude resume-index discovery from `~/.claude/history.jsonl`,
   with timeline/details hydrated from `~/.claude/projects`
@@ -175,6 +178,9 @@ The first implementation focuses on the product shell:
 - Target picker and Handoff Review show verifier-backed readiness rows so users can see the exact PASS/WARN/FAIL signal behind each target state
 - `c` refreshes the Work Capsule and opens Handoff Review in one step; the
   previous TUI-only `d Diff` surface is removed to keep the handoff flow linear
+- Handoff Review shows the target program, cwd, argument count, exact prompt
+  argument, and grouped Source Health / Capsule Health / Target Readiness checks
+  before target handoff can launch
 - Target handoff uses a dedicated `x` shortcut, with `H` and `t` kept as
   compatibility aliases, and a three-stage TUI flow:
   choose target, review the command, then press `enter` to restore the terminal
@@ -229,6 +235,9 @@ The first implementation focuses on the product shell:
 - `CapsuleCompiler` trait with fixture and process-backed compiler implementations
 - External compiler skill runner via `MOONBOX_COMPILER`, JSON stdin/stdout, structured errors, and timeout handling
 - Configurable compiler skill presets with catalog status and quality scores
+- Compiler selection prefers explicit environment override, configured default,
+  then the first ready external preset before falling back to the built-in
+  draft compiler
 - `capsule`, `compile-request`, and `compile-output` support explicit
   `--session`, `--target`, `--rewind`, and `--compiler`, so CLI automation can
   inspect the same selected session and rewind as the TUI and launch flow
@@ -237,7 +246,9 @@ The first implementation focuses on the product shell:
 - `open --json` and `launch --json` include an `action` discriminator so tooling can distinguish original resume from target handoff
 - Single core verifier policy shared by CLI and TUI target validation
 - `--capsule` reads a real Work Capsule JSON file when provided; generated dry-run capsules do not pretend to have a file path
-- Hardened verifier checks for Work Capsule version, required fields, handoff context, risk context, capsule size, target branch markers, and execution command preflight
+- Hardened verifier checks for compiler mode, Work Capsule version, required
+  fields, handoff context, risk context, capsule size, target branch markers,
+  and execution command preflight
 - First-class `moon` binary alias installed alongside `moonbox`
 - Shell completion generation for `moonbox` and `moon`
 - Non-executing `doctor` diagnostics for config, source adapter provenance,
@@ -706,14 +717,16 @@ Stable interfaces matter more than any single framework:
   session inventory through `ssh <host> moonbox sessions --json`, and failures
   surface as explicit status messages without opening, resuming, or launching
   sessions.
+- M52: production compiler and verifier chain hardening; compiler selection now
+  prefers explicit environment override, configured default, then ready external
+  presets before built-in draft fallback, built-in compilers warn for real
+  handoffs, Handoff Review shows target program/cwd/args/exact prompt plus
+  grouped Source Health / Capsule Health / Target Readiness checks, and Codex
+  renamed thread titles from `session_index.jsonl` override stale
+  `state_5.sqlite` titles in CLI/TUI listings.
 
 ### Remaining Milestones
 
-- M52: production compiler and verifier chain. Make external compiler skills the
-  default production path, keep the built-in compiler as explicit draft fallback,
-  and split source health, capsule health, and target readiness. Acceptance:
-  Handoff Review shows exactly what the target CLI will receive and blocks
-  unsafe launch states.
 - M53: release and distribution readiness. Finalize README screenshots,
   installation docs, install smoke, release archives, and the Homebrew tap plan.
   Acceptance: a clean machine can install and run `moon`; Homebrew publication

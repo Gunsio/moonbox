@@ -36,13 +36,12 @@ grep -Fq 'Homebrew distribution is planned, but not published yet.' README.md
 
 grep -Fq 'Handoff Review' "$svg"
 grep -Fq 'Capsule Review' "$svg"
-grep -Fq 'Prepared content' "$svg"
-grep -Fq 'Readiness details' "$svg"
+grep -Fq 'Target receives' "$svg"
+grep -Fq 'Draft Work Capsule' "$svg"
+grep -Fq 'Readiness' "$svg"
 grep -Fq 'Real Session Metadata' "$svg"
 grep -Fq 'Cdx  Moonbox session rewind' "$svg"
 grep -Fq 'moonbox launch --execute' "$svg"
-grep -Fq 'enter handoff' "$svg"
-grep -Fq 'y copy command' "$svg"
 grep -Fq 'Action Path' "$svg"
 
 echo "moonbox docs asset smoke passed"

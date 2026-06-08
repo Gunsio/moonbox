@@ -1825,23 +1825,47 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             ]),
             Line::raw(""),
             Line::from(Span::styled(
-                "Prepared content",
+                "Target receives",
                 Style::default()
                     .fg(theme::BLUE)
                     .add_modifier(Modifier::BOLD),
             )),
         ];
+        lines.extend(target_input_lines(app));
+        lines.extend([
+            Line::raw(""),
+            Line::from(Span::styled(
+                if compiler::compiler_is_builtin(&capsule.compiler) {
+                    "Draft Work Capsule"
+                } else {
+                    "Work Capsule"
+                },
+                Style::default()
+                    .fg(theme::BLUE)
+                    .add_modifier(Modifier::BOLD),
+            )),
+        ]);
         lines.extend(capsule_review_lines(&capsule, 1));
         lines.extend([
             Line::raw(""),
             Line::from(Span::styled(
-                "Readiness details",
+                "Readiness",
                 Style::default()
                     .fg(theme::BLUE)
                     .add_modifier(Modifier::BOLD),
             )),
         ]);
         lines.extend(readiness_lines(pending_report.as_ref(), 6));
+        lines.extend([
+            Line::raw(""),
+            Line::from(Span::styled(
+                "Prompt argument",
+                Style::default()
+                    .fg(theme::GOLD)
+                    .add_modifier(Modifier::BOLD),
+            )),
+        ]);
+        lines.extend(target_prompt_lines(app));
         lines.extend([
             Line::raw(""),
             Line::from(Span::styled(
@@ -1936,7 +1960,7 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         ]),
         Line::raw(""),
         Line::from(Span::styled(
-            "Readiness details",
+            "Readiness",
             Style::default()
                 .fg(theme::BLUE)
                 .add_modifier(Modifier::BOLD),
@@ -2002,6 +2026,52 @@ fn capsule_review_lines(capsule: &WorkCapsule, _max_rows: usize) -> Vec<Line<'st
     ]
 }
 
+fn target_input_lines(app: &App) -> Vec<Line<'static>> {
+    let Some(preview) = app.target_command_preview() else {
+        return vec![Line::from(Span::styled(
+            "No target input available for the current selection.",
+            Style::default().fg(theme::MUTED),
+        ))];
+    };
+    let cwd = preview.cwd.unwrap_or_else(|| "terminal default".into());
+    vec![
+        review_label_line("Program", preview.program, theme::BLUE),
+        review_label_line("Cwd", cwd, theme::BLUE),
+        review_label_line(
+            "Args",
+            format!(
+                "{} arg(s), final arg is the handoff prompt",
+                preview.args.len()
+            ),
+            theme::BLUE,
+        ),
+        review_label_line(
+            "Prompt",
+            "shown below, passed as the final argument".into(),
+            theme::BLUE,
+        ),
+    ]
+}
+
+fn target_prompt_lines(app: &App) -> Vec<Line<'static>> {
+    let Some(preview) = app.target_command_preview() else {
+        return vec![Line::from(Span::styled(
+            "No prompt available for the current selection.",
+            Style::default().fg(theme::MUTED),
+        ))];
+    };
+    preview
+        .prompt
+        .lines()
+        .map(|line| {
+            Line::from(vec![
+                Span::styled("> ", Style::default().fg(theme::MUTED)),
+                Span::raw(line.to_string()),
+            ])
+        })
+        .collect()
+}
+
 fn review_label_line(
     label: &'static str,
     value: String,
@@ -2044,7 +2114,7 @@ fn validation_color(state: LaunchValidationState) -> Color {
     }
 }
 
-fn readiness_lines(report: Option<&VerificationReport>, max_rows: usize) -> Vec<Line<'static>> {
+fn readiness_lines(report: Option<&VerificationReport>, _max_rows: usize) -> Vec<Line<'static>> {
     let Some(report) = report else {
         return vec![Line::from(vec![
             Span::styled(
@@ -2056,64 +2126,95 @@ fn readiness_lines(report: Option<&VerificationReport>, max_rows: usize) -> Vec<
         ])];
     };
 
-    let mut checks = report
-        .checks
-        .iter()
-        .filter(|check| check.status == VerificationStatus::Fail)
-        .chain(
-            report
-                .checks
-                .iter()
-                .filter(|check| check.status == VerificationStatus::Warn),
-        )
-        .collect::<Vec<_>>();
-
-    if checks.is_empty() {
-        for name in [
-            "capsule_source",
-            "target_cli",
-            "rewind_exists",
-            "handoff_context",
-            "target_support",
-        ] {
-            if let Some(check) = report.checks.iter().find(|check| check.name == name) {
-                checks.push(check);
-            }
-        }
-    }
-
-    let overflow = checks.len().saturating_sub(max_rows);
-    checks.truncate(max_rows);
-    let mut lines = checks
-        .into_iter()
-        .map(|check| {
-            let color = verification_color(check.status);
-            Line::from(vec![
-                Span::styled(
-                    format!("{:<5} ", check.status),
-                    Style::default().fg(color).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    check.name.clone(),
-                    Style::default()
-                        .fg(theme::TEXT)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!("  {}", check.detail),
-                    Style::default().fg(theme::MUTED),
-                ),
-            ])
-        })
-        .collect::<Vec<_>>();
-
-    if overflow > 0 {
+    let mut lines = Vec::new();
+    for group in readiness_groups() {
         lines.push(Line::from(Span::styled(
-            format!("... {overflow} more readiness signal(s)"),
-            Style::default().fg(theme::MUTED),
+            group.title,
+            Style::default()
+                .fg(group.color)
+                .add_modifier(Modifier::BOLD),
         )));
+        let checks = grouped_checks(report, group.names);
+        lines.extend(checks.into_iter().map(readiness_check_line));
     }
     lines
+}
+
+struct ReadinessGroup {
+    title: &'static str,
+    color: Color,
+    names: &'static [&'static str],
+}
+
+fn readiness_groups() -> [ReadinessGroup; 3] {
+    [
+        ReadinessGroup {
+            title: "Source Health",
+            color: theme::BLUE,
+            names: &["source_health", "token_budget", "rewind_exists"],
+        },
+        ReadinessGroup {
+            title: "Capsule Health",
+            color: theme::GOLD,
+            names: &[
+                "compiler_mode",
+                "capsule_version",
+                "capsule_required_fields",
+                "capsule_source",
+                "target_cli",
+                "target_branch",
+                "target_branch_namespace",
+                "handoff_context",
+                "risk_context",
+                "capsule_size",
+            ],
+        },
+        ReadinessGroup {
+            title: "Target Readiness",
+            color: theme::GREEN,
+            names: &["target_support", "target_command"],
+        },
+    ]
+}
+
+fn grouped_checks<'a>(
+    report: &'a VerificationReport,
+    names: &[&str],
+) -> Vec<&'a crate::core::model::VerificationCheck> {
+    let mut checks = names
+        .iter()
+        .filter_map(|name| report.checks.iter().find(|check| check.name == *name))
+        .filter(|check| check.status != VerificationStatus::Pass)
+        .collect::<Vec<_>>();
+    if checks.is_empty() {
+        checks = names
+            .iter()
+            .filter_map(|name| report.checks.iter().find(|check| check.name == *name))
+            .take(2)
+            .collect();
+    }
+    checks
+}
+
+fn readiness_check_line(check: &crate::core::model::VerificationCheck) -> Line<'static> {
+    let color = verification_color(check.status);
+    Line::from(vec![
+        Span::raw("  "),
+        Span::styled(
+            format!("{:<5} ", check.status),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            check.name.clone(),
+            Style::default()
+                .fg(theme::TEXT)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("  {}", check.detail),
+            Style::default().fg(theme::MUTED),
+        ),
+    ])
 }
 
 fn verification_color(status: VerificationStatus) -> Color {
@@ -2647,11 +2748,14 @@ mod tests {
         assert_screen_contains(&screen, "Launch");
         assert_screen_contains(&screen, "Choose target CLI");
         assert_screen_contains(&screen, "BLOCKED");
-        assert_screen_contains(&screen, "Readiness details");
+        assert_screen_contains(&screen, "Readiness");
+        assert_screen_contains(&screen, "Source Health");
+        assert_screen_contains(&screen, "Capsule Health");
+        assert_screen_contains(&screen, "Target Readiness");
         assert_screen_contains(&screen, "FAIL");
         assert_screen_contains(&screen, "target_support");
         assert_screen_contains(&screen, "raw resume is known failed");
-        assert_screen_contains(&screen, "enter/y blocked");
+        assert_screen_contains(&screen, "enter/y Blocked");
     }
 
     #[test]
@@ -2660,18 +2764,34 @@ mod tests {
         app.show_launch = true;
         app.launch_review = true;
         app.pending_target = CliTool::Hermes;
-        let screen = render_text(&app, 120, 36);
+        let screen = render_text(&app, 120, 48);
 
         assert_screen_contains(&screen, "Handoff Review");
         assert_screen_contains(&screen, "Capsule Review");
         assert_screen_contains(&screen, "handoff");
-        assert_screen_contains(&screen, "Prepared content");
+        assert_screen_contains(&screen, "Target receives");
+        assert_screen_contains(&screen, "Prompt");
+        assert_screen_contains(&screen, "Draft Work Capsule");
         assert_screen_contains(&screen, "Goal");
-        assert_screen_contains(&screen, "Readiness details");
+        assert_screen_contains(&screen, "Readiness");
         assert_screen_contains(&screen, "PASS");
-        assert_screen_contains(&screen, "target_cli");
+        assert_screen_contains(&screen, "target_support");
         assert_screen_contains(&screen, "moonbox launch --execute");
         assert_screen_contains(&screen, "enter Handoff");
+    }
+
+    #[test]
+    fn launch_review_scrolls_to_exact_target_prompt() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.show_launch = true;
+        app.launch_review = true;
+        app.pending_target = CliTool::Hermes;
+        app.modal_scroll = 22;
+        let screen = render_text(&app, 120, 36);
+
+        assert_screen_contains(&screen, "Prompt argument");
+        assert_screen_contains(&screen, "You are receiving a Moonbox cross-CLI handoff");
+        assert_screen_contains(&screen, "- CLI: Hermes");
     }
 
     #[test]
@@ -2682,9 +2802,10 @@ mod tests {
         let screen = render_text(&app, 120, 36);
 
         assert_screen_contains(&screen, "WARN");
-        assert_screen_contains(&screen, "Readiness details");
+        assert_screen_contains(&screen, "Readiness");
+        assert_screen_contains(&screen, "Target Readiness");
         assert_screen_contains(&screen, "target_support");
         assert_screen_contains(&screen, "Same-CLI handoff");
-        assert_screen_contains(&screen, "enter review");
+        assert_screen_contains(&screen, "enter Review");
     }
 }

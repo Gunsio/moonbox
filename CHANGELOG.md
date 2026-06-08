@@ -121,6 +121,10 @@ and this project uses semantic versioning once tagged releases start.
 - TUI data spaces backed by local session stores plus configured SSH/devbox
   inventories, switchable with `{` / `}` without opening, resuming, or
   launching any remote session.
+- Handoff Review target-input preview, including target program, cwd, argument
+  count, and the exact prompt argument that will be passed to the target CLI.
+- Verifier `compiler_mode` checks that mark built-in draft compilers as a
+  warning for real source handoffs.
 
 ### Changed
 
@@ -178,8 +182,10 @@ and this project uses semantic versioning once tagged releases start.
 - Selected Timeline rows now preserve role accent colors, so active user turns
   stay blue and active AI groups stay gold instead of collapsing into one
   selected-state color.
-- Compiler execution precedence is now explicit: environment override, config
-  preset, then built-in fixture compiler.
+- Compiler execution precedence is now explicit: environment override,
+  configured default, first ready external preset, then built-in draft fallback.
+- Built-in draft compilers now show warning catalog/readiness signals instead
+  of presenting themselves as production-ready compiler skills.
 - Unknown compiler ids and disabled compiler presets now return structured
   configuration errors instead of silently compiling through the fixture path.
 - Saving the last selected target now preserves compiler presets and
@@ -217,8 +223,8 @@ and this project uses semantic versioning once tagged releases start.
   `moonbox` and `moon`.
 - Replay eval JSON now separates matrix and synthetic case counts, labels each
   case with `case_kind` and `scenario`, and reports expected scenario coverage.
-- README screenshot now shows the current Handoff Review readiness-details flow
-  on a transparent SVG canvas, generated from the real TUI render path.
+- README screenshot now shows the current Handoff Review target-input flow on a
+  transparent SVG canvas, generated from the real TUI render path.
 - Draft Homebrew formula now points at a staged GitHub release source archive
   instead of a GitHub auto-generated tag archive.
 - TUI `{` / `}` now cycles the main session inventory between Local and
@@ -226,6 +232,12 @@ and this project uses semantic versioning once tagged releases start.
   `ssh <host> moonbox sessions --json`, load the returned sessions as a
   read-only inventory, and keep failures visible in the status line while
   preserving the previous local list.
+- Codex session titles now prefer `session_index.jsonl` `thread_name` values
+  over stale `state_5.sqlite` titles, so renamed Codex threads are searchable
+  and displayed the same way as the Codex resume picker.
+- Handoff Review readiness output is grouped into Source Health, Capsule
+  Health, and Target Readiness sections, with the full target prompt available
+  from the review panel before launch.
 - Auto session discovery now uses fixture fallback only when no real source
   stores are present, so real local indexes are not mixed with demo sessions.
 - `open --execute` and `launch --execute` now require an explicit `--session`;

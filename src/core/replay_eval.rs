@@ -522,7 +522,7 @@ mod tests {
             .find(|case| case.scenario == ReplayEvalScenario::MissingToolPreflight)
             .expect("missing tool case");
         assert_eq!(missing_tool.status, VerificationStatus::Fail);
-        assert_eq!(missing_tool.check_count, 14);
+        assert_eq!(missing_tool.check_count, 15);
         assert!(
             missing_tool
                 .failures

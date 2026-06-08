@@ -1534,6 +1534,18 @@ impl App {
             .map(|session| launcher::original_command(session).display)
     }
 
+    pub fn target_command_preview(&self) -> Option<launcher::TargetInputPreview> {
+        let session = self.current_session()?;
+        let capsule = self.launch_capsule_for_target(self.pending_target);
+        let command = launcher::target_command(self.pending_target, session, &capsule).ok()?;
+        Some(launcher::TargetInputPreview {
+            program: command.program,
+            args: command.args,
+            cwd: command.cwd,
+            prompt: launcher::target_prompt_preview(session, &capsule),
+        })
+    }
+
     pub fn validate_launch_for_target(&self, target: CliTool) -> LaunchValidation {
         let Some(report) = self.launch_verification_for_target(target) else {
             return LaunchValidation::blocked(vec!["No session selected".into()]);

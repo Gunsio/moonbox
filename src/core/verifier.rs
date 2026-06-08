@@ -1,8 +1,12 @@
 use std::{env, path::Path};
 
-use super::model::{
-    CliTool, LaunchValidation, SessionStatus, SessionSummary, TargetLaunchCommand, TimelineEvent,
-    VerificationCheck, VerificationReport, VerificationStatus, WorkCapsule,
+use super::{
+    compiler,
+    model::{
+        CliTool, LaunchValidation, SessionStatus, SessionSummary, SourceProvenance,
+        TargetLaunchCommand, TimelineEvent, VerificationCheck, VerificationReport,
+        VerificationStatus, WorkCapsule,
+    },
 };
 
 const SUPPORTED_CAPSULE_VERSION: u16 = 1;
@@ -45,6 +49,12 @@ pub fn verify_capsule(
         } else {
             format!("missing required field(s): {}", missing_fields.join(", "))
         },
+    ));
+
+    checks.push(check(
+        "compiler_mode",
+        compiler_mode_status(capsule, session),
+        compiler_mode_detail(capsule, session),
     ));
 
     checks.push(check(
@@ -264,6 +274,34 @@ fn missing_required_fields(capsule: &WorkCapsule) -> Vec<&'static str> {
     .collect()
 }
 
+fn compiler_mode_status(capsule: &WorkCapsule, session: &SessionSummary) -> VerificationStatus {
+    if compiler::compiler_is_builtin(&capsule.compiler)
+        && session.source_provenance != SourceProvenance::Fixture
+    {
+        VerificationStatus::Warn
+    } else {
+        VerificationStatus::Pass
+    }
+}
+
+fn compiler_mode_detail(capsule: &WorkCapsule, session: &SessionSummary) -> String {
+    if compiler::compiler_is_builtin(&capsule.compiler) {
+        if session.source_provenance == SourceProvenance::Fixture {
+            format!(
+                "{} built-in draft compiler for fixture replay",
+                capsule.compiler
+            )
+        } else {
+            format!(
+                "{} is a built-in draft compiler; configure an external skill for production handoff",
+                capsule.compiler
+            )
+        }
+    } else {
+        format!("external compiler {} selected", capsule.compiler)
+    }
+}
+
 fn handoff_context_status(capsule: &WorkCapsule) -> VerificationStatus {
     if capsule.decisions.is_empty()
         || capsule.todo.is_empty()
@@ -409,6 +447,47 @@ mod tests {
 
         assert_eq!(report.status, VerificationStatus::Pass);
         assert!(report.ready);
+    }
+
+    #[test]
+    fn builtin_compiler_warns_for_real_source_handoff() {
+        let data = data::workbench_data(CliTool::Codex, CliTool::Hermes).expect("data");
+        let mut session = data
+            .sessions
+            .iter()
+            .find(|session| session.id == data.capsule.source_session)
+            .expect("source session")
+            .clone();
+        session.source_provenance = SourceProvenance::Real;
+
+        let report = verify_capsule(&data.capsule, &session, &data.timeline, CliTool::Hermes);
+
+        assert_eq!(report.status, VerificationStatus::Warn);
+        assert!(report.ready);
+        assert!(report.checks.iter().any(|check| {
+            check.name == "compiler_mode" && check.status == VerificationStatus::Warn
+        }));
+    }
+
+    #[test]
+    fn external_compiler_passes_compiler_mode_for_real_source() {
+        let data = data::workbench_data(CliTool::Codex, CliTool::Hermes).expect("data");
+        let mut session = data
+            .sessions
+            .iter()
+            .find(|session| session.id == data.capsule.source_session)
+            .expect("source session")
+            .clone();
+        session.source_provenance = SourceProvenance::Real;
+        let mut capsule = data.capsule.clone();
+        capsule.compiler = "production-skill".into();
+        capsule.state = "compiled".into();
+
+        let report = verify_capsule(&capsule, &session, &data.timeline, CliTool::Hermes);
+
+        assert!(report.checks.iter().any(|check| {
+            check.name == "compiler_mode" && check.status == VerificationStatus::Pass
+        }));
     }
 
     #[test]

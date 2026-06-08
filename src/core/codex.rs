@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     env,
     io::BufRead,
     path::{Path, PathBuf},
@@ -40,6 +41,12 @@ struct CodexRecord {
     record_type: Option<String>,
     #[serde(default)]
     payload: Value,
+}
+
+#[derive(Debug, Deserialize)]
+struct CodexSessionIndexRecord {
+    id: Option<String>,
+    thread_name: Option<String>,
 }
 
 #[derive(Debug)]
@@ -143,6 +150,10 @@ impl CodexSourceAdapter {
         self.root.join("state_5.sqlite")
     }
 
+    fn session_index_path(&self) -> PathBuf {
+        self.root.join("session_index.jsonl")
+    }
+
     fn has_state_index(&self) -> bool {
         self.state_db_path().is_file()
     }
@@ -194,6 +205,35 @@ impl CodexSourceAdapter {
             .query_row(params![session_id], thread_row)
             .optional()
             .map_err(|error| read_error(CODEX_TOOL, &self.state_db_path(), error))
+    }
+
+    fn thread_name_overrides(&self) -> Result<HashMap<String, String>, AdapterError> {
+        let path = self.session_index_path();
+        if !path.is_file() {
+            return Ok(HashMap::new());
+        }
+        let reader = open_reader(CODEX_TOOL, &path)?;
+        let mut overrides = HashMap::new();
+        for line in reader.lines() {
+            let line = line.map_err(|error| read_error(CODEX_TOOL, &path, error))?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let Ok(record) = serde_json::from_str::<CodexSessionIndexRecord>(&line) else {
+                continue;
+            };
+            let Some(id) = record.id.filter(|value| !value.trim().is_empty()) else {
+                continue;
+            };
+            let Some(thread_name) = record
+                .thread_name
+                .filter(|value| !value.trim().is_empty() && !is_provider_context_text(value))
+            else {
+                continue;
+            };
+            overrides.insert(id, thread_name);
+        }
+        Ok(overrides)
     }
 
     fn summary_for_thread(&self, row: CodexThreadRow) -> SessionSummary {
@@ -394,10 +434,14 @@ impl SourceAdapter for CodexSourceAdapter {
 
     fn list_sessions(&self) -> Result<Vec<SessionSummary>, AdapterError> {
         if self.has_state_index() {
+            let overrides = self.thread_name_overrides()?;
             return Ok(self
                 .list_thread_rows(self.list_limit)?
                 .into_iter()
-                .map(|row| self.summary_for_thread(row))
+                .map(|mut row| {
+                    apply_thread_name_override(&mut row, &overrides);
+                    self.summary_for_thread(row)
+                })
                 .collect());
         }
         let mut sessions = Vec::new();
@@ -456,7 +500,9 @@ impl SourceAdapter for CodexSourceAdapter {
     }
 
     fn find_session(&self, session_id: &str) -> Result<Option<SessionSummary>, AdapterError> {
-        if let Some(row) = self.find_thread_row(session_id)? {
+        if let Some(mut row) = self.find_thread_row(session_id)? {
+            let overrides = self.thread_name_overrides()?;
+            apply_thread_name_override(&mut row, &overrides);
             return Ok(Some(self.summary_for_thread(row)));
         }
         let Some(path) = self.find_session_path(session_id)? else {
@@ -751,6 +797,12 @@ fn thread_row(row: &Row<'_>) -> rusqlite::Result<CodexThreadRow> {
     })
 }
 
+fn apply_thread_name_override(row: &mut CodexThreadRow, overrides: &HashMap<String, String>) {
+    if let Some(title) = overrides.get(&row.id) {
+        row.title = title.clone();
+    }
+}
+
 fn collect_rows<T>(
     rows: MappedRows<'_, impl FnMut(&Row<'_>) -> rusqlite::Result<T>>,
     path: &Path,
@@ -859,6 +911,35 @@ mod tests {
         assert_eq!(sessions[0].token_count, Some(42));
         assert_eq!(sessions[0].updated_at, "2026-06-06T09:00:00.000Z");
         assert_eq!(timeline.source_session, "codex-indexed");
+    }
+
+    #[test]
+    fn codex_session_index_thread_name_overrides_sqlite_title() {
+        let root = test_root("session-index-title");
+        let rollout_path = write_session(
+            &root,
+            "2026/06/06/rollout-2026-06-06T08-00-00-indexed.jsonl",
+            r#"{"timestamp":"2026-06-06T08:00:00.000Z","type":"session_meta","payload":{"id":"codex-renamed","cwd":"/jsonl"}}
+{"timestamp":"2026-06-06T08:01:00.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Old URL title"}]}}
+"#,
+        );
+        write_state_db(&root, &rollout_path, "codex-renamed", "Old SQLite title");
+        write_session_index(
+            &root,
+            r#"{"id":"codex-renamed","thread_name":"102_303","updated_at":"2026-06-06T09:00:00Z"}
+{"id":"other","thread_name":"ignored"}
+"#,
+        );
+
+        let adapter = CodexSourceAdapter::new(&root);
+        let sessions = adapter.list_sessions().expect("sessions");
+        let found = adapter
+            .find_session("codex-renamed")
+            .expect("find")
+            .expect("session");
+
+        assert_eq!(sessions[0].title, "102_303");
+        assert_eq!(found.title, "102_303");
     }
 
     #[test]
@@ -1126,5 +1207,9 @@ not-json-after-limit"#,
             ],
         )
         .expect("insert thread");
+    }
+
+    fn write_session_index(root: &Path, contents: &str) {
+        fs::write(root.join("session_index.jsonl"), contents).expect("session index");
     }
 }
