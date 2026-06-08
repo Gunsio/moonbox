@@ -132,6 +132,10 @@ and this project uses semantic versioning once tagged releases start.
   count, and the exact prompt argument that will be passed to the target CLI.
 - Verifier `compiler_mode` checks that mark built-in draft compilers as a
   warning for real source handoffs.
+- Workspace continuation snapshots through `moonbox snapshot`, capturing git
+  HEAD, branch, staged/unstaged/untracked paths, bounded diff previews, key
+  project files, environment summary, and explicit test-command results without
+  reading or opening source CLI sessions.
 
 ### Changed
 
@@ -147,6 +151,9 @@ and this project uses semantic versioning once tagged releases start.
 - README planning now tracks the accepted M68-M72 product design milestones:
   handoff trail signature, session portraits, pre-flight pill, command
   palette, and visual system polish.
+- README now frames Capsule as Moonbox's product/schema name for the generic
+  continuation-package category, keeping `capsule` CLI and JSON fields stable
+  while improving external discoverability.
 - Generated dry-run launch plans report `capsule_path: null` and do not emit
   fake `--capsule` paths.
 - Codex, Claude, and Hermes source discovery use real local stores when any

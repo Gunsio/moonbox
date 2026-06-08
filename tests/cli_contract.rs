@@ -93,6 +93,24 @@ fn output_json(output: Output) -> Value {
     })
 }
 
+fn write_file(root: &Path, relative: &str, contents: &str) {
+    let path = root.join(relative);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("file parent");
+    }
+    fs::write(path, contents).expect("fixture file");
+}
+
+fn git(root: &Path, args: &[&str]) {
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .status()
+        .expect("git command");
+    assert!(status.success(), "git command failed: {args:?}");
+}
+
 fn write_codex_thread_index(root: &Path, rollout_path: &Path, id: &str, title: &str) {
     let db = Connection::open(root.join("state_5.sqlite")).expect("codex state db");
     db.execute_batch(
@@ -175,6 +193,7 @@ fn completion_generation_uses_requested_or_invoked_binary_name() {
     assert!(bash.contains("moonbox"));
     assert!(bash.contains("replay-eval"));
     assert!(bash.contains("completions"));
+    assert!(bash.contains("snapshot"));
     assert!(bash.contains("ssh"));
 
     let fish = output_text(
@@ -186,6 +205,7 @@ fn completion_generation_uses_requested_or_invoked_binary_name() {
     assert!(fish.contains("complete -c moon"));
     assert!(fish.contains("replay-eval"));
     assert!(fish.contains("completions"));
+    assert!(fish.contains("snapshot"));
     assert!(fish.contains("ssh"));
 
     let zsh = output_text(
@@ -197,7 +217,81 @@ fn completion_generation_uses_requested_or_invoked_binary_name() {
     assert!(zsh.contains("#compdef moon"));
     assert!(zsh.contains("replay-eval"));
     assert!(zsh.contains("completions"));
+    assert!(zsh.contains("snapshot"));
     assert!(zsh.contains("ssh"));
+}
+
+#[test]
+fn snapshot_cli_contract_captures_isolated_workspace_state() {
+    let test_name = "snapshot-workspace";
+    let repo = fixture_home(test_name).join("repo");
+    fs::create_dir_all(&repo).expect("snapshot repo");
+    git(&repo, &["init"]);
+    write_file(&repo, "README.md", "initial\n");
+    git(&repo, &["add", "README.md"]);
+    git(
+        &repo,
+        &[
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "user.name=Moonbox Test",
+            "commit",
+            "-m",
+            "init",
+        ],
+    );
+    write_file(&repo, "README.md", "initial\nchanged\n");
+    write_file(&repo, "AGENTS.md", "handoff rules\n");
+    git(&repo, &["add", "AGENTS.md"]);
+    write_file(&repo, "scratch.txt", "untracked\n");
+
+    let repo_arg = repo.to_str().expect("repo path");
+    let json = output_json(
+        moon_command(test_name)
+            .args([
+                "snapshot",
+                "--json",
+                "--path",
+                repo_arg,
+                "--diff-lines",
+                "20",
+                "--test-command",
+                "printf snapshot-cli",
+            ])
+            .output()
+            .expect("snapshot json"),
+    );
+
+    assert_eq!(json["version"], 1);
+    assert_eq!(json["git"]["available"], true);
+    assert_eq!(json["git"]["dirty"], true);
+    assert!(json["git"]["head"].as_str().expect("head").len() >= 12);
+    assert!(!json["git"]["branch"].as_str().expect("branch").is_empty());
+    assert_eq!(json["git"]["staged"][0], "AGENTS.md");
+    assert_eq!(json["git"]["unstaged"][0], "README.md");
+    assert_eq!(json["git"]["untracked"][0], "scratch.txt");
+    assert_eq!(json["test_commands"][0]["success"], true);
+    assert_eq!(json["test_commands"][0]["stdout"], "snapshot-cli");
+    assert!(
+        json["key_files"]
+            .as_array()
+            .expect("key files")
+            .iter()
+            .any(|file| file["path"] == "README.md")
+    );
+
+    let text = output_text(
+        moon_command("snapshot-workspace-text")
+            .args(["snapshot", "--path", repo_arg])
+            .output()
+            .expect("snapshot text"),
+    );
+    assert!(text.contains("workspace snapshot: v1"));
+    assert!(text.contains("dirty: true"));
+    assert!(text.contains("staged: 1"));
+    assert!(text.contains("unstaged: 1"));
+    assert!(text.contains("untracked: 1"));
 }
 
 #[test]

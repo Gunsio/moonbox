@@ -36,6 +36,8 @@ pub enum Command {
     Ssh(JsonArgs),
     /// Diagnose Moonbox configuration without opening sessions.
     Doctor(JsonArgs),
+    /// Capture a workspace continuation snapshot without opening sessions.
+    Snapshot(SnapshotArgs),
     /// Generate shell completion scripts.
     Completions(CompletionsArgs),
     /// Dry-run a target launch plan and verification report.
@@ -97,6 +99,22 @@ pub struct DocsSnapshotArgs {
     /// Write the SVG to this path instead of stdout.
     #[arg(long)]
     pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct SnapshotArgs {
+    /// Workspace path to inspect. Defaults to the current directory.
+    #[arg(long, default_value = ".")]
+    pub path: PathBuf,
+    /// Maximum diff preview lines per staged/unstaged section. 0 keeps full diffs.
+    #[arg(long, default_value_t = 240)]
+    pub diff_lines: usize,
+    /// Explicit test or verification command to run and record. Repeatable.
+    #[arg(long = "test-command")]
+    pub test_commands: Vec<String>,
+    /// Print JSON output.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args, Clone, Default)]
