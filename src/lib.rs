@@ -478,7 +478,7 @@ fn print_launch_plan(args: cli::LaunchArgs) -> Result<()> {
                 plan.capsule_path.as_deref().unwrap_or("generated")
             );
             println!("preflight_ready: {}", plan.verification.ready);
-            println!("scope: structural preflight; semantic correctness is not guaranteed");
+            println!("scope: structural and semantic preflight; user review is still required");
             println!("status: {}", plan.verification.status);
             println!("command: {}", plan.command);
             println!("program: {}", plan.target_command.program);
@@ -499,7 +499,7 @@ fn print_verify_report(args: cli::LaunchArgs) -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&report)?);
         } else {
             println!("preflight_ready: {}", report.ready);
-            println!("scope: structural preflight; semantic correctness is not guaranteed");
+            println!("scope: structural and semantic preflight; user review is still required");
             println!("status: {}", report.status);
             print_checks(&report.checks);
         }

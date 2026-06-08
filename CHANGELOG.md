@@ -142,6 +142,11 @@ and this project uses semantic versioning once tagged releases start.
 - Redaction policy reports on Capsule compile requests and Work Capsules,
   covering secret-like value scanning, sensitive path masking, event/file
   allowlists, prompt-injection warnings, and external compiler disclosure.
+- Semantic verifier checks for raw source map consistency, compiler coverage
+  gaps, todo/timeline event references, local file references, and
+  patch-shaped diff evidence.
+- Fixture adapter contract coverage for session summary fields, report metadata,
+  timeline schema version, unique event ids, and user/rewind anchors.
 
 ### Changed
 
@@ -149,8 +154,8 @@ and this project uses semantic versioning once tagged releases start.
   misleading `target_branch` name, while still accepting legacy
   `target_branch` capsule input for compatibility.
 - Text launch and verify output now labels verifier readiness as
-  `preflight_ready` and explicitly scopes it to structural preflight, not
-  semantic handoff correctness.
+  `preflight_ready` and scopes it to structural and semantic preflight while
+  still requiring user review before handoff.
 - Real-session `launch --execute` now blocks built-in draft compiler handoffs
   unless `--allow-draft` is explicitly passed; fixture sessions remain
   executable for safe tests and demos.
@@ -167,6 +172,10 @@ and this project uses semantic versioning once tagged releases start.
   prompts now use the shared redaction policy; target prompts include a
   dedicated Privacy / Redaction section while local execution routing remains
   exact for verifiable dry-run previews.
+- Handoff Review readiness groups now prioritize Target Readiness, then Source
+  Health, Capsule Health, and Semantic Evidence, and launch validation summaries
+  stay concise while full verifier checks remain available in JSON and TUI
+  readiness details.
 - Generated dry-run launch plans report `capsule_path: null` and do not emit
   fake `--capsule` paths.
 - Codex, Claude, and Hermes source discovery use real local stores when any

@@ -285,7 +285,8 @@ mod tests {
         assert_eq!(plan.capsule_path, None);
         assert!(!plan.command.contains("--capsule"));
         assert!(plan.command.starts_with("hermes chat "));
-        assert_eq!(plan.verification.status, VerificationStatus::Pass);
+        assert_eq!(plan.verification.status, VerificationStatus::Warn);
+        assert!(plan.verification.ready);
     }
 
     #[test]

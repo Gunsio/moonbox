@@ -2322,7 +2322,7 @@ mod tests {
         app.handle_key(key('v'));
 
         assert!(app.verify_passed);
-        assert!(app.status_message.starts_with("Verify: PASS ("));
+        assert!(app.status_message.starts_with("Verify: WARN ("));
         assert!(app.status_message.ends_with(" checks)"));
     }
 

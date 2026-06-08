@@ -203,6 +203,10 @@ The first implementation focuses on the product shell:
   handoff prompts: secret-like values are scanned, sensitive paths are masked,
   event/file allowlists can narrow forwarded context, and every Capsule carries
   a `redaction` report plus external compiler disclosure
+- Semantic verifier checks now sit beside the structural launch preflight:
+  raw source map consistency, compiler coverage gaps, todo/timeline event
+  references, local file references, and patch-shaped diff evidence are surfaced
+  as PASS/WARN/FAIL checks.
 - Original resume and target handoff are explicit action intents:
   `original_resume` for `open`, `target_handoff` for `launch`
 - Target selection lives inside the launch flow, with explicit `> [x]` radio-list selection
@@ -211,8 +215,8 @@ The first implementation focuses on the product shell:
 - `c` refreshes the Work Capsule and opens Handoff Review in one step; the
   previous TUI-only `d Diff` surface is removed to keep the handoff flow linear
 - Handoff Review shows the target program, cwd, argument count, exact prompt
-  argument, and grouped Source Health / Capsule Health / Target Readiness checks
-  before target handoff can launch
+  argument, and grouped Target Readiness / Source Health / Capsule Health /
+  Semantic Evidence checks before target handoff can launch
 - Target handoff uses a dedicated `x` shortcut, with `H` and `t` kept as
   compatibility aliases, and a three-stage TUI flow:
   choose target, review the command, then press `enter` to restore the terminal
@@ -421,6 +425,8 @@ scan local session stores, and reports verifier signals across every
 source-target pair plus safe synthetic regressions for target mismatch,
 oversized capsules, and missing target commands. The JSON output includes
 matrix and synthetic case counts plus a coverage table for expected scenarios.
+M59 semantic evidence gaps intentionally downgrade built-in fixture handoffs to
+ready WARN cases instead of claiming full semantic proof.
 
 For demos, release smoke, or any automation that must not touch real local
 session stores, force fixture mode:
@@ -822,12 +828,13 @@ Stable interfaces matter more than any single framework:
   Capsule JSON export, verifier output, and target handoff prompts now carry a
   configurable redaction policy with secret scanning, path masking, event/file
   allowlists, external compiler disclosure, and untrusted-history warnings.
+- M59: semantic verifier and adapter contract hardening; launch verification now
+  checks raw source map consistency, compiler coverage gaps, todo/timeline event
+  references, local file references, patch-shaped diff evidence, and fixture
+  adapter contract invariants.
 
 ### Remaining Milestones
 
-- M59: semantic verifier and adapter contract hardening. Check file references,
-  diff applicability, todo/timeline consistency, compiler coverage, target
-  capability fit, adapter schema/version detection, and fixture contract tests.
 - M60: target import and workspace restore protocol. Define prompt-only
   handoff, continuation package import, and explicit reversible branch/worktree
   restore modes.

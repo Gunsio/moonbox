@@ -140,6 +140,7 @@ fn fixture_for_tool(tool: CliTool) -> FixtureSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     #[test]
     fn parses_session_fixture_for_each_source() {
@@ -169,6 +170,71 @@ mod tests {
                     .iter()
                     .any(|event| event.id.starts_with("evt-"))
             );
+        }
+    }
+
+    #[test]
+    fn fixture_adapters_satisfy_source_contract() {
+        for tool in CliTool::ALL {
+            let adapter = FixtureSourceAdapter::new(tool);
+            let (sessions, report) = adapter
+                .list_sessions_with_report("included_fixture_snapshot", "fixture contract")
+                .expect("sessions and report");
+
+            assert_eq!(report.cli, tool);
+            assert_eq!(report.provenance, SourceProvenance::Fixture);
+            assert!(report.active);
+            assert_eq!(report.session_count, sessions.len());
+            assert_eq!(report.scan_entry_count, sessions.len());
+            assert!(!report.scan_truncated);
+            assert!(
+                report
+                    .store_path
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("fixtures/")
+            );
+
+            for session in sessions {
+                assert_eq!(session.cli, tool);
+                assert_eq!(session.source_provenance, SourceProvenance::Fixture);
+                assert!(
+                    session
+                        .source_path
+                        .as_deref()
+                        .unwrap_or_default()
+                        .contains("fixtures/")
+                );
+                assert!(!session.id.trim().is_empty());
+                assert!(!session.title.trim().is_empty());
+                assert!(!session.updated_at.trim().is_empty());
+                assert_eq!(session.parse_skip_count, 0);
+
+                let timeline = adapter.load_timeline(&session.id).expect("timeline");
+                assert_eq!(timeline.version, 1);
+                assert_eq!(timeline.source_cli, tool);
+                assert_eq!(timeline.source_session, session.id);
+                assert!(session.event_count >= timeline.events.len());
+                assert!(timeline.events.iter().any(|event| {
+                    matches!(
+                        event.kind,
+                        super::super::model::TimelineKind::User
+                            | super::super::model::TimelineKind::RewindPoint
+                    )
+                }));
+
+                let mut ids = BTreeSet::new();
+                for event in &timeline.events {
+                    assert!(
+                        ids.insert(event.id.as_str()),
+                        "duplicate event id {}",
+                        event.id
+                    );
+                    assert!(event.id.starts_with("evt-"));
+                    assert!(!event.time.trim().is_empty());
+                    assert!(!event.title.trim().is_empty());
+                }
+            }
         }
     }
 }

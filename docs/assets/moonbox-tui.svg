@@ -102,8 +102,8 @@
   <text x="46" y="294" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="294" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="235" y="294" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Validation:</text>
-  <text x="343" y="294" class="mono" font-size="14" font-weight="800" fill="#5cd689">READY</text>
-  <text x="406" y="294" class="mono" font-size="14" font-weight="500" fill="#8b949e">Ready</text>
+  <text x="343" y="294" class="mono" font-size="14" font-weight="800" fill="#e6be53">WARN</text>
+  <text x="397" y="294" class="mono" font-size="14" font-weight="500" fill="#8b949e">compiler coverage has uncovered critical source refs; diff evidence is not patch-applicable</text>
   <text x="1270" y="294" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1279" y="294" class="mono" font-size="14" font-weight="500" fill="#8b949e">dex/sessions.json</text>
   <text x="1441" y="294" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
@@ -204,39 +204,37 @@
   <text x="1441" y="582" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="600" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="600" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="600" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Source Health</text>
+  <text x="235" y="600" class="mono" font-size="14" font-weight="800" fill="#5cd689">Target Readiness</text>
   <text x="1270" y="600" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1441" y="600" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="618" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="618" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="235" y="618" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
-  <text x="280" y="618" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">source_health</text>
-  <text x="415" y="618" class="mono" font-size="14" font-weight="500" fill="#8b949e">ready</text>
+  <text x="280" y="618" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">target_support</text>
+  <text x="424" y="618" class="mono" font-size="14" font-weight="500" fill="#8b949e">Hermes handoff dry-run supported</text>
   <text x="1270" y="618" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1441" y="618" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="636" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="636" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="636" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
-  <text x="280" y="636" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">token_budget</text>
-  <text x="406" y="636" class="mono" font-size="14" font-weight="500" fill="#8b949e">42000 / 100000 tokens</text>
+  <text x="235" y="636" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Source Health</text>
   <text x="1270" y="636" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1441" y="636" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="654" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="654" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="654" class="mono" font-size="14" font-weight="800" fill="#e6be53">Capsule Health</text>
+  <text x="235" y="654" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
+  <text x="280" y="654" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">source_health</text>
+  <text x="415" y="654" class="mono" font-size="14" font-weight="500" fill="#8b949e">ready</text>
   <text x="1270" y="654" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1441" y="654" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="672" class="mono" font-size="14" font-weight="500" fill="#e6be53">╰──────────────────│</text>
   <text x="235" y="672" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
-  <text x="280" y="672" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">compiler_mode</text>
-  <text x="415" y="672" class="mono" font-size="14" font-weight="500" fill="#8b949e">engineering-handoff built-in draft compiler for fixture replay</text>
+  <text x="280" y="672" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">token_budget</text>
+  <text x="406" y="672" class="mono" font-size="14" font-weight="500" fill="#8b949e">42000 / 100000 tokens</text>
   <text x="1270" y="672" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1279" y="672" class="mono" font-size="14" font-weight="500" fill="#374452">──────────────────╯</text>
   <text x="46" y="690" class="mono" font-size="14" font-weight="500" fill="#374452">╭ Action Path ─────</text>
   <text x="217" y="690" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="690" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
-  <text x="280" y="690" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">capsule_version</text>
-  <text x="433" y="690" class="mono" font-size="14" font-weight="500" fill="#8b949e">capsule version 1 vs supported 1</text>
+  <text x="235" y="690" class="mono" font-size="14" font-weight="800" fill="#e6be53">Capsule Health</text>
   <text x="1270" y="690" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1279" y="690" class="mono" font-size="14" font-weight="500" fill="#374452">──────────────────╮</text>
   <text x="46" y="708" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
