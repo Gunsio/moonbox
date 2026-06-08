@@ -911,6 +911,19 @@ fn capsule_and_compile_surfaces_accept_explicit_session_target_rewind_and_compil
             .contains("evt-074")
     );
     assert_eq!(capsule["compiler"], "engineering-handoff");
+    assert_eq!(capsule["raw_source_map"]["rewind_event_id"], "evt-074");
+    assert!(capsule["raw_refs"].as_array().expect("raw refs").len() >= 1);
+    assert!(
+        capsule["raw_refs"]
+            .as_array()
+            .expect("raw refs")
+            .iter()
+            .any(|raw_ref| raw_ref["source_event_id"] == "evt-074")
+    );
+    assert_eq!(
+        capsule["coverage"]["raw_ref_count"],
+        serde_json::json!(capsule["raw_refs"].as_array().expect("raw refs").len())
+    );
 
     let request = output_json(
         moonbox_command("compile-surface-contract")

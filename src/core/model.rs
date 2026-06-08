@@ -114,6 +114,33 @@ pub struct TimelineEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RawSourceMap {
+    pub version: u16,
+    pub source_cli: CliTool,
+    pub source_session: String,
+    pub rewind_event_id: String,
+    pub source_event_count: usize,
+    pub generated_by: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RawSourceRef {
+    pub source_event_id: String,
+    pub kind: TimelineKind,
+    pub digest: String,
+    pub excerpt: String,
+    pub covered: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CapsuleCoverage {
+    pub raw_ref_count: usize,
+    pub covered_ref_count: usize,
+    pub uncovered_ref_count: usize,
+    pub note: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkCapsule {
     pub version: u16,
     pub source_cli: CliTool,
@@ -129,6 +156,12 @@ pub struct WorkCapsule {
     pub todo: Vec<ChecklistItem>,
     pub evidence: Vec<String>,
     pub risks: Vec<String>,
+    #[serde(default)]
+    pub raw_source_map: Option<RawSourceMap>,
+    #[serde(default)]
+    pub raw_refs: Vec<RawSourceRef>,
+    #[serde(default)]
+    pub coverage: CapsuleCoverage,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -413,6 +446,9 @@ mod tests {
         .expect("legacy capsule");
 
         assert_eq!(capsule.handoff_label, "moonbox/hermes-rewind-evt-001");
+        assert!(capsule.raw_source_map.is_none());
+        assert!(capsule.raw_refs.is_empty());
+        assert_eq!(capsule.coverage.raw_ref_count, 0);
         let json = serde_json::to_value(capsule).expect("capsule json");
         assert_eq!(json["handoff_label"], "moonbox/hermes-rewind-evt-001");
         assert!(json.get("target_branch").is_none());

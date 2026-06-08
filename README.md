@@ -196,6 +196,9 @@ The first implementation focuses on the product shell:
   branch, staged/unstaged/untracked paths, bounded diff previews, key project
   files, environment summary, and explicitly requested test-command results
   without opening or resuming any source session
+- Work Capsule JSON carries an auditable source map: `raw_source_map`,
+  `raw_refs`, and `coverage` are enriched from the canonical timeline even when
+  an external compiler omits them
 - Original resume and target handoff are explicit action intents:
   `original_resume` for `open`, `target_handoff` for `launch`
 - Target selection lives inside the launch flow, with explicit `> [x]` radio-list selection
@@ -249,6 +252,10 @@ The first implementation focuses on the product shell:
   grouping consecutive AI output and keeping rewind selection on user turns or
   explicit rewind markers; selected rows preserve role accent colors so active
   user turns and active AI groups remain visually distinct
+- Claude XML-like local-command records such as `<local-command-caveat>`,
+  `<local-command-stdout>`, and `<command-name>` are classified as internal
+  tool events and ignored as resume-index titles, so they are folded by default
+  and do not become rewind anchors
 - Timeline auto-scroll, Capsule/modal scroll, and small-terminal modal polish
 - Copyable launch/original wrapper commands via `y` with OSC52 clipboard
   support; main-list `enter` hands control directly to the selected session's
@@ -780,19 +787,21 @@ Stable interfaces matter more than any single framework:
   readiness `preflight_ready` and scopes it to structural preflight, and
   real-session `launch --execute` blocks built-in draft compiler handoffs unless
   `--allow-draft` is explicit.
+- M55: Timeline fidelity and Markdown readability; timeline event bodies are
+  governed by `MOONBOX_TIMELINE_DETAIL_CHAR_LIMIT`, defaulting to 4000
+  characters so zoomed review preserves useful context while event counts remain
+  bounded separately.
+- M56: workspace snapshot package; `moonbox snapshot` / `moon snapshot` capture
+  git state, bounded diffs, key files, environment summary, and explicit
+  test-command results from an isolated workspace without opening source
+  sessions.
+- M57: auditable Capsule source map; Work Capsule JSON now keeps the readable
+  summary while adding `raw_source_map`, `raw_refs`, and `coverage`, and Claude
+  local-command XML-like records are internal tool events instead of user turns
+  or session titles.
 
 ### Remaining Milestones
 
-- M55: Timeline fidelity and Markdown readability. Preserve lightweight list,
-  code, quote, evidence, and tool-output structure without turning the default
-  view into a raw log wall.
-- M56: workspace snapshot package. Capture HEAD, branch, staged/unstaged state,
-  selected diff, key files, recent test commands/results, and environment
-  summary without opening or resuming source sessions.
-- M57: auditable continuation package. Split Work Capsule into readable summary
-  plus raw source map, including source events, tool calls/results, attachment
-  refs, file-change evidence, workspace snapshot refs, compiler coverage, and
-  verifier findings.
 - M58: privacy, redaction, and prompt-injection controls. Add secret scan,
   path redaction, event/file allowlists, external compiler disclosure, and
   explicit risk prompts before forwarding historical content to another agent.

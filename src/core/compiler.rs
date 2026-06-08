@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     env,
     error::Error,
     ffi::OsString,
@@ -13,8 +14,9 @@ use std::{
 use super::{
     config::{self, CompilerPresetConfig},
     model::{
-        CapsuleCompileOutput, CapsuleCompileRequest, ChecklistItem, CompilerPresetInfo,
-        CompilerPresetKind, CompilerPresetStatus, WorkCapsule,
+        CapsuleCompileOutput, CapsuleCompileRequest, CapsuleCoverage, ChecklistItem,
+        CompilerPresetInfo, CompilerPresetKind, CompilerPresetStatus, RawSourceMap, RawSourceRef,
+        TimelineEvent, WorkCapsule,
     },
 };
 
@@ -251,12 +253,13 @@ impl CapsuleCompiler for ProcessCapsuleCompiler {
             compiler: self.id.clone(),
             reason: error.to_string(),
         })?;
-        serde_json::from_str::<CapsuleCompileOutput>(&stdout).map_err(|error| {
+        let output = serde_json::from_str::<CapsuleCompileOutput>(&stdout).map_err(|error| {
             CompilerError::InvalidOutput {
                 compiler: self.id.clone(),
                 reason: error.to_string(),
             }
-        })
+        })?;
+        Ok(enrich_compile_output(request, output))
     }
 }
 
@@ -300,7 +303,7 @@ impl CapsuleCompiler for FixtureCapsuleCompiler {
             risks.push(format!("Source health needs review: {source_health}"));
         }
 
-        Ok(CapsuleCompileOutput {
+        let output = CapsuleCompileOutput {
             version: 1,
             capsule: WorkCapsule {
                 version: 1,
@@ -346,9 +349,159 @@ impl CapsuleCompiler for FixtureCapsuleCompiler {
                     format!("source health: {source_health}"),
                 ],
                 risks,
+                raw_source_map: None,
+                raw_refs: Vec::new(),
+                coverage: CapsuleCoverage::default(),
             },
-        })
+        };
+        Ok(enrich_compile_output(request, output))
     }
+}
+
+pub fn enrich_compile_output(
+    request: &CapsuleCompileRequest,
+    mut output: CapsuleCompileOutput,
+) -> CapsuleCompileOutput {
+    output.capsule = enrich_work_capsule(request, output.capsule);
+    output
+}
+
+fn enrich_work_capsule(request: &CapsuleCompileRequest, mut capsule: WorkCapsule) -> WorkCapsule {
+    let previous_coverage = capsule
+        .raw_refs
+        .iter()
+        .map(|raw_ref| (raw_ref.source_event_id.clone(), raw_ref.covered))
+        .collect::<HashMap<_, _>>();
+    let summary = capsule_summary_text(&capsule);
+    let source_events =
+        source_events_through_rewind(&request.timeline.events, &request.rewind_event_id);
+    let raw_refs = source_events
+        .iter()
+        .map(|event| {
+            let excerpt = raw_source_excerpt(event);
+            let covered = previous_coverage.get(&event.id).copied().unwrap_or(false)
+                || summary_covers_event(&summary, event, &excerpt);
+            RawSourceRef {
+                source_event_id: event.id.clone(),
+                kind: event.kind,
+                digest: raw_source_digest(event),
+                excerpt,
+                covered,
+            }
+        })
+        .collect::<Vec<_>>();
+    let covered_ref_count = raw_refs.iter().filter(|raw_ref| raw_ref.covered).count();
+    let raw_ref_count = raw_refs.len();
+
+    capsule.raw_source_map = Some(RawSourceMap {
+        version: 1,
+        source_cli: request.source_cli,
+        source_session: request.source_session.id.clone(),
+        rewind_event_id: request.rewind_event_id.clone(),
+        source_event_count: raw_ref_count,
+        generated_by: capsule.compiler.clone(),
+    });
+    capsule.coverage = CapsuleCoverage {
+        raw_ref_count,
+        covered_ref_count,
+        uncovered_ref_count: raw_ref_count.saturating_sub(covered_ref_count),
+        note: format!(
+            "{covered_ref_count}/{raw_ref_count} raw source refs are covered by capsule summary fields"
+        ),
+    };
+    capsule.raw_refs = raw_refs;
+    capsule
+}
+
+fn source_events_through_rewind<'a>(
+    events: &'a [TimelineEvent],
+    rewind_event_id: &str,
+) -> Vec<&'a TimelineEvent> {
+    let mut selected = Vec::new();
+    for event in events {
+        selected.push(event);
+        if event.id == rewind_event_id {
+            return selected;
+        }
+    }
+    selected
+}
+
+fn capsule_summary_text(capsule: &WorkCapsule) -> String {
+    let mut parts = vec![
+        capsule.rewind_point.as_str(),
+        capsule.goal.as_str(),
+        capsule.state.as_str(),
+        capsule.handoff_label.as_str(),
+    ]
+    .into_iter()
+    .map(normalize_for_coverage)
+    .collect::<Vec<_>>();
+    parts.extend(
+        capsule
+            .decisions
+            .iter()
+            .map(|value| normalize_for_coverage(value)),
+    );
+    parts.extend(
+        capsule
+            .todo
+            .iter()
+            .map(|item| normalize_for_coverage(&item.text)),
+    );
+    parts.extend(
+        capsule
+            .evidence
+            .iter()
+            .map(|value| normalize_for_coverage(value)),
+    );
+    parts.extend(
+        capsule
+            .risks
+            .iter()
+            .map(|value| normalize_for_coverage(value)),
+    );
+    parts.join("\n")
+}
+
+fn summary_covers_event(summary: &str, event: &TimelineEvent, excerpt: &str) -> bool {
+    if summary.contains(&normalize_for_coverage(&event.id)) {
+        return true;
+    }
+    let excerpt = normalize_for_coverage(excerpt);
+    let significant = excerpt.chars().take(48).collect::<String>();
+    significant.chars().count() >= 16 && summary.contains(&significant)
+}
+
+fn raw_source_excerpt(event: &TimelineEvent) -> String {
+    let text = if event.detail.trim().is_empty() {
+        event.title.as_str()
+    } else {
+        event.detail.as_str()
+    };
+    truncate(text, 180)
+}
+
+fn raw_source_digest(event: &TimelineEvent) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in format!(
+        "{}\n{:?}\n{}\n{}",
+        event.id, event.kind, event.title, event.detail
+    )
+    .as_bytes()
+    {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("fnv64:{hash:016x}")
+}
+
+fn normalize_for_coverage(value: &str) -> String {
+    value
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 pub fn default_compiler_id() -> String {
@@ -814,6 +967,27 @@ JSON
         assert_eq!(output.version, 1);
         assert_eq!(output.capsule.compiler, "process-skill");
         assert_eq!(output.capsule.goal, "external compiler");
+        assert_eq!(
+            output
+                .capsule
+                .raw_source_map
+                .as_ref()
+                .expect("raw source map")
+                .rewind_event_id,
+            "evt-091"
+        );
+        assert_eq!(output.capsule.raw_refs.len(), request.timeline.events.len());
+        assert!(
+            output
+                .capsule
+                .raw_refs
+                .iter()
+                .any(|raw_ref| { raw_ref.source_event_id == "evt-091" && raw_ref.covered })
+        );
+        assert_eq!(
+            output.capsule.coverage.raw_ref_count,
+            output.capsule.raw_refs.len()
+        );
     }
 
     #[cfg(unix)]
