@@ -4,10 +4,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
-svg="docs/assets/moonbox-tui.svg"
 smoke_home="${MOONBOX_DOCS_ASSETS_SMOKE_HOME:-$repo_root/target/moonbox-docs-assets-smoke-home}"
 output_dir="$smoke_home/output"
-generated="$output_dir/moonbox-tui.svg"
 mkdir -p "$output_dir"
 
 export MOONBOX_CODEX_HOME="$smoke_home/codex"
@@ -18,17 +16,29 @@ export MOONBOX_SESSION_MODE=fixture
 export MOONBOX_SESSION_LIMIT=50
 export MOONBOX_TUI_NOW_UNIX=1780650000
 
-cargo run --locked -- docs-snapshot --output "$generated"
+check_asset() {
+  local variant="$1"
+  local asset="$2"
+  local generated="$output_dir/$(basename "$asset")"
 
-if ! cmp -s "$generated" "$svg"; then
-  diff -u "$generated" "$svg"
-  echo "README screenshot asset is stale; regenerate with: MOONBOX_TUI_NOW_UNIX=1780650000 cargo run --locked -- docs-snapshot --output docs/assets/moonbox-tui.svg" >&2
-  exit 1
-fi
+  cargo run --locked -- docs-snapshot --variant "$variant" --output "$generated"
 
-xmllint --noout "$svg"
+  if ! cmp -s "$generated" "$asset"; then
+    diff -u "$generated" "$asset"
+    echo "README screenshot asset is stale; regenerate with: MOONBOX_TUI_NOW_UNIX=1780650000 cargo run --locked -- docs-snapshot --variant $variant --output $asset" >&2
+    exit 1
+  fi
 
-grep -Fq '![Moonbox TUI screenshot](docs/assets/moonbox-tui.svg)' README.md
+  xmllint --noout "$asset"
+}
+
+check_asset main docs/assets/moonbox-main.svg
+check_asset timeline docs/assets/moonbox-timeline-zoom.svg
+check_asset handoff-review docs/assets/moonbox-tui.svg
+
+grep -Fq '![Moonbox main workbench screenshot](docs/assets/moonbox-main.svg)' README.md
+grep -Fq '![Moonbox timeline zoom screenshot](docs/assets/moonbox-timeline-zoom.svg)' README.md
+grep -Fq '![Moonbox Handoff Review screenshot](docs/assets/moonbox-tui.svg)' README.md
 grep -Fq 'cargo install --git https://github.com/Gunsio/moonbox' README.md
 grep -Fq 'cargo install --path . --locked' README.md
 grep -Fq 'MOONBOX_SESSION_MODE=fixture moon sessions --json --filter codex' README.md
@@ -37,14 +47,22 @@ grep -Fq 'moon completions zsh > /tmp/_moon' README.md
 grep -Fq 'brew tap Gunsio/tap' README.md
 grep -Fq 'Homebrew distribution is planned, but not published yet.' README.md
 
-grep -Fq 'Handoff Review' "$svg"
-grep -Fq 'Capsule Review' "$svg"
-grep -Fq 'Target receives' "$svg"
-grep -Fq 'Draft Work Capsule' "$svg"
-grep -Fq 'Readiness' "$svg"
-grep -Fq 'Real Session Metadata' "$svg"
-grep -Fq 'Cdx  Moonbox session rewind' "$svg"
-grep -Fq 'moonbox launch --execute' "$svg"
-grep -Fq 'Action Path' "$svg"
+grep -Fq 'Sessions' docs/assets/moonbox-main.svg
+grep -Fq 'Timeline' docs/assets/moonbox-main.svg
+grep -Fq 'Real Session Metadata' docs/assets/moonbox-main.svg
+grep -Fq 'Action Path' docs/assets/moonbox-main.svg
+
+grep -Fq 'Moonbox timeline zoom screenshot' docs/assets/moonbox-timeline-zoom.svg
+grep -Fq 'Timeline' docs/assets/moonbox-timeline-zoom.svg
+grep -Fq 'Zoomed Timeline' docs/assets/moonbox-timeline-zoom.svg
+grep -Fq 'REWIND' docs/assets/moonbox-timeline-zoom.svg
+
+grep -Fq 'Handoff Review' docs/assets/moonbox-tui.svg
+grep -Fq 'Capsule Review' docs/assets/moonbox-tui.svg
+grep -Fq 'Target receives' docs/assets/moonbox-tui.svg
+grep -Fq 'Draft Work Capsule' docs/assets/moonbox-tui.svg
+grep -Fq 'Readiness' docs/assets/moonbox-tui.svg
+grep -Fq 'moonbox launch --execute' docs/assets/moonbox-tui.svg
+grep -Fq 'Action Path' docs/assets/moonbox-tui.svg
 
 echo "moonbox docs asset smoke passed"

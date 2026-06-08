@@ -9,9 +9,19 @@ This repository is intentionally not a raw session copier. The source session
 is read-only. Compatibility and compression are delegated to replaceable
 compiler skills.
 
-## Screenshot
+## Screenshots
 
-![Moonbox TUI screenshot](docs/assets/moonbox-tui.svg)
+Main workbench:
+
+![Moonbox main workbench screenshot](docs/assets/moonbox-main.svg)
+
+Timeline zoom:
+
+![Moonbox timeline zoom screenshot](docs/assets/moonbox-timeline-zoom.svg)
+
+Handoff Review:
+
+![Moonbox Handoff Review screenshot](docs/assets/moonbox-tui.svg)
 
 ## Install
 
@@ -266,7 +276,7 @@ The first implementation focuses on the product shell:
 - TUI Doctor panel with refresh and JSON copy for the same non-executing
   diagnostics
 - Hidden fixture-only `docs-snapshot` maintenance command for regenerating the
-  README TUI screenshot from the real Ratatui render buffer
+  README TUI screenshots from the real Ratatui render buffer
 - Fixture session mode for demos, CI, release smoke, and other environments
   that must not read real local session stores
 - Fixture-safe TUI render regression tests for main, Doctor, and Launch views
@@ -656,7 +666,7 @@ Stable interfaces matter more than any single framework:
 - M34: fixture replay corpus expansion with 9 source-target matrix cases plus 3 synthetic regressions for target mismatch, oversized capsule, and missing-tool preflight; replay output now includes case kind, scenario, capsule target, coverage rows, and updated fixture-safe CLI smoke/contract checks.
 - M35: target readiness explanation rows in the TUI launch picker and Handoff Review, backed by verifier report checks with FAIL/WARN priority, READY pass-check context, corrected launch key hints, and render/App tests for blocked, warning, and ready states.
 - M36: README screenshot/install polish with a Handoff Review readiness screenshot, transparent SVG canvas, and `docs-assets-smoke` coverage for screenshot semantics, install commands, and unpublished Homebrew wording in both local and GitHub Actions gates.
-- M37: generated docs screenshot pipeline with a hidden fixture-only `docs-snapshot` command that renders the real Ratatui Handoff Review buffer to SVG, compares the generated output byte-for-byte in `docs-assets-smoke`, and keeps the command hidden from normal help while covered by CLI contract tests.
+- M37: generated docs screenshot pipeline with a hidden fixture-only `docs-snapshot` command that renders real Ratatui buffers to SVG, compares the generated output byte-for-byte in `docs-assets-smoke`, and keeps the command hidden from normal help while covered by CLI contract tests.
 - M38: release artifact staging with source, Cargo crate, and host binary archives, generated shell completions, `SHA256SUMS`, `release-manifest.json`, Homebrew source archive URL/checksum guidance, and CI smoke validation without publishing.
 - M39: real-session index hardening with fixture fallback only when no real stores exist, CLI `sessions --filter <source>` support, and execute-time guards requiring explicit `--session` before original resume or target handoff can spawn a process.
 - M40: adapter health reporting with per-session provenance fields, structured `doctor.source_adapters`, TUI source badges, missing-store reports when real adapters are active, and single-scan inventory plumbing to avoid duplicate source discovery during diagnostics.
@@ -748,14 +758,79 @@ Stable interfaces matter more than any single framework:
 
 ### Remaining Milestones
 
-- No implementation milestone remains in this branch. Homebrew publication,
-  release tagging, and registry publication stay gated until explicit approval
-  after final validation.
+- M54: terminology and launch-safety hardening. Rename misleading TUI/JSON
+  fields such as `target_branch` unless Moonbox actually creates a git branch
+  or worktree, make `verify ready` wording distinguish structural readiness
+  from semantic correctness, and block `launch --execute` for real sessions
+  compiled by the built-in draft compiler unless an explicit `--allow-draft`
+  override is supplied.
+- M55: Timeline fidelity and Markdown readability. Preserve lightweight
+  Markdown structure in Timeline details, including ordered/unordered list
+  breaks, code fences, and quoted evidence; add a raw-event/source view for
+  audit without turning the default Timeline back into noisy logs.
+- M56: workspace snapshot package. Add `moonbox snapshot` to capture HEAD,
+  current branch, staged/unstaged/untracked state, selected diff, relevant
+  files, recent test commands/results, and environment summary without opening
+  or resuming any source session.
+- M57: auditable continuation package. Evolve Work Capsule into a continuation
+  package with both readable summary and raw source map: source events, tool
+  calls, tool outputs, attachment references, file-change evidence, workspace
+  snapshot references, compiler coverage, and verifier findings.
+- M58: privacy, redaction, and prompt-injection controls. Add redaction policy,
+  secret scanning, path masking, event/file allowlists, external compiler
+  disclosure, and warnings when untrusted historical content will be forwarded
+  to a target CLI or compiler process.
+- M59: semantic verifier and adapter contract hardening. Extend verifier checks
+  beyond schema shape to file existence, diff applicability, todo/timeline
+  consistency, missing tool-output coverage, compiler omissions, and
+  target-side capability mismatches; add adapter schema/version detection plus
+  fixture contract tests for Codex, Claude, and Hermes store changes.
+- M60: target import and workspace restore protocol. Define what target CLIs can
+  actually receive: prompt-only handoff, continuation package import, or
+  workspace restore. If Moonbox creates branches/worktrees, make that explicit
+  and reversible; otherwise keep the UI honest that the operation is prompt
+  handoff plus evidence, not native session migration.
+- M61: source capability registry. Add a provider capability matrix that records
+  which source surfaces are available per CLI: local store, rich local RPC,
+  cloud metadata, app/deep link, export/search, remote-control, fork/resume, and
+  native handoff. The TUI must distinguish `updated_at` from active runtime
+  status; if Moonbox cannot prove a session is running, display it as unknown.
+- M62: Codex app-server source adapter. Prefer Codex `app-server`
+  `thread/list`, `thread/read`, and `thread/turns/list` for rich local thread
+  data, with `$CODEX_HOME` SQLite/JSONL as fallback. Add non-executing
+  `open-app` support for `codex://threads/<id>` and model Codex cloud task
+  metadata separately from local threads.
+- M63: Claude multi-surface adapter hardening. Keep `~/.claude/history.jsonl`
+  and project JSONL as the local transcript baseline, then add optional
+  CLI/SDK capture for `stream-json`, result metadata, `session_id`, cost,
+  duration, turn counts, hook/partial events, and fork semantics. Treat
+  `--remote` / `--remote-control` as a distinct session surface rather than a
+  normal local resume row.
+- M64: Hermes all-source gateway inventory. Stop defaulting Hermes inventory to
+  `source = 'cli'`; list every non-archived Hermes source by default and expose
+  source filters for CLI, Discord, Telegram, Slack, API server, cron, and other
+  gateway sessions. Preserve source platform, user/session key, origin metadata,
+  model/config, system prompt snapshot, handoff state, and token breakdown.
+- M65: Hermes export/search integration. Add capability-gated support for
+  `hermes sessions export`, `hermes sessions stats`, and `session_search` or
+  equivalent FTS queries. Use snippets, bookends, message ids, and scroll
+  context to locate continuation points without loading an entire long session.
+- M66: high-fidelity event/source schema. Extend the canonical model beyond
+  `TimelineEvent { id, time, kind, title, detail }` with stable raw refs,
+  message ids, provider item ids, tool args/results, approvals, attachments,
+  file-change evidence, runtime status, system prompt/config snapshots, and
+  token/cost accounting where each source provides it.
+- M67: source fallback and contract tests. Prefer documented rich APIs over
+  private local stores, keep local stores as read-only fallback, and add
+  fixture contract tests for each source surface. Any degraded path must be
+  visible in Doctor/TUI so users know whether they are seeing full-fidelity data
+  or a lossy index fallback.
 
 ### Can Build Now
 
 - Use the staged release artifacts and generated checksums for a tagged release
-  once publication is accepted.
+  only after the post-M53 experience and safety milestones above are accepted.
+  Homebrew publication, release tagging, and registry publication remain gated.
 
 ### Prototype Now, Improve With Real Data
 
