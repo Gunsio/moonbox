@@ -1,12 +1,12 @@
 use std::fs;
 
 use super::{
-    compiler, data, dataspace,
+    compiler, continuation, data, dataspace,
     error::CoreError,
     launcher,
     model::{
-        CapsuleCompileOutput, CapsuleCompileRequest, CliTool, LaunchExecution, LaunchPlan,
-        OriginalSessionExecution, OriginalSessionPlan, SessionAction, SessionSummary,
+        CapsuleCompileOutput, CapsuleCompileRequest, CliTool, ContinuationOptions, LaunchExecution,
+        LaunchPlan, OriginalSessionExecution, OriginalSessionPlan, SessionAction, SessionSummary,
         VerificationReport, WorkCapsule, WorkbenchData,
     },
     redaction, verifier,
@@ -150,6 +150,20 @@ pub fn launch_plan(
     target: CliTool,
     capsule_path: Option<&str>,
 ) -> Result<Option<LaunchPlan>, CoreError> {
+    launch_plan_with_options(
+        session_id,
+        target,
+        capsule_path,
+        ContinuationOptions::default(),
+    )
+}
+
+pub fn launch_plan_with_options(
+    session_id: Option<&str>,
+    target: CliTool,
+    capsule_path: Option<&str>,
+    continuation_options: ContinuationOptions,
+) -> Result<Option<LaunchPlan>, CoreError> {
     let Some(source_session) = selected_session(session_id)? else {
         return Ok(None);
     };
@@ -159,10 +173,27 @@ pub fn launch_plan(
         return Ok(None);
     };
     let (capsule, capsule_path) = capsule_for_plan(&generated_capsule, capsule_path)?;
-    let target_command = launcher::target_command(target, &source_session, &capsule)?;
+    let continuation = continuation::build_continuation_protocol(
+        &source_session,
+        target,
+        &capsule,
+        capsule_path.as_deref(),
+        continuation_options,
+    );
+    let target_command = launcher::target_command_with_continuation(
+        target,
+        &source_session,
+        &capsule,
+        &continuation,
+    )?;
     let command = target_command.display.clone();
-    let verification =
-        verifier::verify_capsule(&capsule, &source_session, &timeline.events, target);
+    let verification = verifier::verify_capsule_with_continuation(
+        &capsule,
+        &source_session,
+        &timeline.events,
+        target,
+        &continuation,
+    );
 
     Ok(Some(LaunchPlan {
         version: 1,
@@ -176,6 +207,7 @@ pub fn launch_plan(
         command,
         target_command,
         verification,
+        continuation,
     }))
 }
 
@@ -187,14 +219,45 @@ pub fn verify_launch(
     Ok(launch_plan(session_id, target, capsule_path)?.map(|plan| plan.verification))
 }
 
+pub fn verify_launch_with_options(
+    session_id: Option<&str>,
+    target: CliTool,
+    capsule_path: Option<&str>,
+    continuation_options: ContinuationOptions,
+) -> Result<Option<VerificationReport>, CoreError> {
+    Ok(
+        launch_plan_with_options(session_id, target, capsule_path, continuation_options)?
+            .map(|plan| plan.verification),
+    )
+}
+
+#[cfg(test)]
 pub fn execute_launch(
     session_id: Option<&str>,
     target: CliTool,
     capsule_path: Option<&str>,
     allow_draft: bool,
 ) -> Result<Option<LaunchExecution>, CoreError> {
+    execute_launch_with_options(
+        session_id,
+        target,
+        capsule_path,
+        allow_draft,
+        ContinuationOptions::default(),
+    )
+}
+
+pub fn execute_launch_with_options(
+    session_id: Option<&str>,
+    target: CliTool,
+    capsule_path: Option<&str>,
+    allow_draft: bool,
+    continuation_options: ContinuationOptions,
+) -> Result<Option<LaunchExecution>, CoreError> {
     require_explicit_session(session_id, "target handoff")?;
-    let Some(plan) = launch_plan(session_id, target, capsule_path)? else {
+    let Some(plan) =
+        launch_plan_with_options(session_id, target, capsule_path, continuation_options)?
+    else {
         return Ok(None);
     };
     launcher::execute_plan(plan, allow_draft).map(Some)

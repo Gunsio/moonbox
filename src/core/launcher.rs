@@ -8,9 +8,9 @@ use super::{
     compiler,
     error::CoreError,
     model::{
-        ChecklistItem, CliTool, LaunchExecution, LaunchExecutionStatus, LaunchPlan,
-        OriginalSessionExecution, OriginalSessionPlan, SessionSummary, SourceProvenance,
-        TargetLaunchCommand, WorkCapsule,
+        ChecklistItem, CliTool, ContinuationProtocol, LaunchExecution, LaunchExecutionStatus,
+        LaunchPlan, OriginalSessionExecution, OriginalSessionPlan, SessionSummary,
+        SourceProvenance, TargetLaunchCommand, WorkCapsule,
     },
     redaction, verifier,
 };
@@ -23,13 +23,23 @@ pub struct TargetInputPreview {
     pub prompt: String,
 }
 
+#[cfg(test)]
 pub fn target_command(
     target: CliTool,
     session: &SessionSummary,
     capsule: &WorkCapsule,
 ) -> Result<TargetLaunchCommand, CoreError> {
+    target_command_with_continuation(target, session, capsule, &ContinuationProtocol::default())
+}
+
+pub fn target_command_with_continuation(
+    target: CliTool,
+    session: &SessionSummary,
+    capsule: &WorkCapsule,
+    continuation: &ContinuationProtocol,
+) -> Result<TargetLaunchCommand, CoreError> {
     let program = configured_target_binary(target);
-    let prompt = handoff_prompt(session, capsule);
+    let prompt = handoff_prompt(session, capsule, continuation);
     let cwd = usable_cwd(&session.cwd);
     let args = target_args(target, cwd.as_deref(), prompt);
     let display = shell_command(&program, &args);
@@ -42,8 +52,12 @@ pub fn target_command(
     })
 }
 
-pub fn target_prompt_preview(session: &SessionSummary, capsule: &WorkCapsule) -> String {
-    handoff_prompt(session, capsule)
+pub fn target_prompt_preview_with_continuation(
+    session: &SessionSummary,
+    capsule: &WorkCapsule,
+    continuation: &ContinuationProtocol,
+) -> String {
+    handoff_prompt(session, capsule, continuation)
 }
 
 pub fn execute_plan(mut plan: LaunchPlan, allow_draft: bool) -> Result<LaunchExecution, CoreError> {
@@ -212,7 +226,11 @@ fn target_args(target: CliTool, cwd: Option<&str>, prompt: String) -> Vec<String
     }
 }
 
-fn handoff_prompt(session: &SessionSummary, capsule: &WorkCapsule) -> String {
+fn handoff_prompt(
+    session: &SessionSummary,
+    capsule: &WorkCapsule,
+    continuation: &ContinuationProtocol,
+) -> String {
     let prompt_session = redaction::redact_session_for_prompt(session, &capsule.redaction);
     format!(
         "\
@@ -229,6 +247,9 @@ Target
 - CLI: {}
 - Handoff label: {}
 - Rewind point: {}
+
+Continuation Protocol
+{}
 
 Work Capsule Summary
 
@@ -267,6 +288,7 @@ Instructions
         capsule.target_cli,
         prompt_value(&capsule.handoff_label),
         capsule.rewind_point,
+        continuation_prompt(continuation),
         prompt_value(&capsule.goal),
         prompt_value(&capsule.state),
         bullet_lines(&capsule.decisions),
@@ -275,6 +297,36 @@ Instructions
         bullet_lines(&capsule.risks),
         redaction::prompt_summary(&capsule.redaction)
     )
+}
+
+fn continuation_prompt(continuation: &ContinuationProtocol) -> String {
+    let mut lines = vec![
+        format!("- Requested level: {}", continuation.requested_level),
+        format!("- Target input level: {}", continuation.target_input_level),
+        format!(
+            "- Package import: {}",
+            if continuation.package_import.requested {
+                continuation.package_import.reason.as_str()
+            } else {
+                "not requested"
+            }
+        ),
+        format!(
+            "- Workspace restore: {}",
+            if continuation.workspace_restore.requested {
+                continuation.workspace_restore.reason.as_str()
+            } else {
+                "not requested"
+            }
+        ),
+    ];
+    lines.extend(
+        continuation
+            .notes
+            .iter()
+            .map(|note| format!("- Note: {}", prompt_value(note))),
+    );
+    lines.join("\n")
 }
 
 fn session_health_prompt(session: &SessionSummary) -> String {

@@ -3,6 +3,7 @@ pub mod claude;
 pub mod codex;
 pub mod compiler;
 pub mod config;
+pub mod continuation;
 pub mod data;
 pub mod dataspace;
 pub mod doctor;

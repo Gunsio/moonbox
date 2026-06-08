@@ -302,6 +302,159 @@ pub struct VerificationReport {
     pub checks: Vec<VerificationCheck>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "snake_case")]
+pub enum ContinuationLevel {
+    #[default]
+    PromptOnly,
+    PackageImport,
+    WorkspaceRestore,
+}
+
+impl Display for ContinuationLevel {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PromptOnly => f.write_str("prompt-only"),
+            Self::PackageImport => f.write_str("package-import"),
+            Self::WorkspaceRestore => f.write_str("workspace-restore"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceRestoreMode {
+    #[default]
+    None,
+    Branch,
+    Worktree,
+}
+
+impl Display for WorkspaceRestoreMode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => f.write_str("none"),
+            Self::Branch => f.write_str("branch"),
+            Self::Worktree => f.write_str("worktree"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ContinuationOptions {
+    pub requested_level: ContinuationLevel,
+    pub workspace_restore: WorkspaceRestoreMode,
+}
+
+impl ContinuationOptions {
+    pub fn new(
+        requested_level: Option<ContinuationLevel>,
+        workspace_restore: Option<WorkspaceRestoreMode>,
+    ) -> Self {
+        let mut options = Self {
+            requested_level: requested_level.unwrap_or_default(),
+            workspace_restore: workspace_restore.unwrap_or_default(),
+        };
+        if options.workspace_restore != WorkspaceRestoreMode::None {
+            options.requested_level = ContinuationLevel::WorkspaceRestore;
+        }
+        if options.requested_level == ContinuationLevel::WorkspaceRestore
+            && options.workspace_restore == WorkspaceRestoreMode::None
+        {
+            options.workspace_restore = WorkspaceRestoreMode::Worktree;
+        }
+        if options.requested_level != ContinuationLevel::WorkspaceRestore {
+            options.workspace_restore = WorkspaceRestoreMode::None;
+        }
+        options
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContinuationProtocol {
+    pub version: u16,
+    pub requested_level: ContinuationLevel,
+    pub target_input_level: ContinuationLevel,
+    pub package_import: PackageImportPlan,
+    pub workspace_restore: WorkspaceRestorePlan,
+    pub notes: Vec<String>,
+}
+
+impl Default for ContinuationProtocol {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            requested_level: ContinuationLevel::PromptOnly,
+            target_input_level: ContinuationLevel::PromptOnly,
+            package_import: PackageImportPlan::default(),
+            workspace_restore: WorkspaceRestorePlan::default(),
+            notes: vec!["Target receives a prompt-only Capsule summary.".into()],
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackageImportPlan {
+    pub requested: bool,
+    pub supported: bool,
+    pub target_native_import: bool,
+    pub capsule_path: Option<String>,
+    pub command: Option<String>,
+    pub reason: String,
+    pub warnings: Vec<String>,
+}
+
+impl Default for PackageImportPlan {
+    fn default() -> Self {
+        Self {
+            requested: false,
+            supported: false,
+            target_native_import: false,
+            capsule_path: None,
+            command: None,
+            reason: "native continuation package import not requested".into(),
+            warnings: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceRestorePlan {
+    pub requested: bool,
+    pub mode: WorkspaceRestoreMode,
+    pub supported: bool,
+    pub reversible: bool,
+    pub preview_only: bool,
+    pub source_cwd: Option<String>,
+    pub target_cwd: Option<String>,
+    pub branch: Option<String>,
+    pub worktree_path: Option<String>,
+    pub commands: Vec<String>,
+    pub cleanup_commands: Vec<String>,
+    pub reason: String,
+    pub warnings: Vec<String>,
+}
+
+impl Default for WorkspaceRestorePlan {
+    fn default() -> Self {
+        Self {
+            requested: false,
+            mode: WorkspaceRestoreMode::None,
+            supported: true,
+            reversible: true,
+            preview_only: false,
+            source_cwd: None,
+            target_cwd: None,
+            branch: None,
+            worktree_path: None,
+            commands: Vec::new(),
+            cleanup_commands: Vec::new(),
+            reason: "workspace restore not requested".into(),
+            warnings: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoctorReport {
     pub version: u16,
@@ -400,6 +553,8 @@ pub struct LaunchPlan {
     pub command: String,
     pub target_command: TargetLaunchCommand,
     pub verification: VerificationReport,
+    #[serde(default)]
+    pub continuation: ContinuationProtocol,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

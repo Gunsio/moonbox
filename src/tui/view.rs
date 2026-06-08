@@ -2166,12 +2166,17 @@ struct ReadinessGroup {
     names: &'static [&'static str],
 }
 
-fn readiness_groups() -> [ReadinessGroup; 4] {
+fn readiness_groups() -> [ReadinessGroup; 5] {
     [
         ReadinessGroup {
             title: "Target Readiness",
             color: theme::GREEN,
             names: &["target_support", "target_command"],
+        },
+        ReadinessGroup {
+            title: "Workspace Restore",
+            color: theme::PURPLE,
+            names: &["continuation_level", "package_import", "workspace_restore"],
         },
         ReadinessGroup {
             title: "Source Health",
@@ -2826,7 +2831,7 @@ mod tests {
         app.show_launch = true;
         app.launch_review = true;
         app.pending_target = CliTool::Hermes;
-        app.modal_scroll = 30;
+        app.modal_scroll = 38;
         let screen = render_text(&app, 120, 36);
 
         assert_screen_contains(&screen, "Prompt argument");

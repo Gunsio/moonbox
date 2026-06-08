@@ -207,6 +207,10 @@ The first implementation focuses on the product shell:
   raw source map consistency, compiler coverage gaps, todo/timeline event
   references, local file references, and patch-shaped diff evidence are surfaced
   as PASS/WARN/FAIL checks.
+- Launch plans now carry an explicit continuation protocol. Default target
+  handoff is honest `prompt_only`; requested native package import and
+  branch/worktree workspace restore modes are previewed but blocked until a
+  target/import or restore executor is verified.
 - Original resume and target handoff are explicit action intents:
   `original_resume` for `open`, `target_handoff` for `launch`
 - Target selection lives inside the launch flow, with explicit `> [x]` radio-list selection
@@ -215,15 +219,15 @@ The first implementation focuses on the product shell:
 - `c` refreshes the Work Capsule and opens Handoff Review in one step; the
   previous TUI-only `d Diff` surface is removed to keep the handoff flow linear
 - Handoff Review shows the target program, cwd, argument count, exact prompt
-  argument, and grouped Target Readiness / Source Health / Capsule Health /
-  Semantic Evidence checks before target handoff can launch
+  argument, and grouped Target Readiness / Workspace Restore / Source Health /
+  Capsule Health / Semantic Evidence checks before target handoff can launch
 - Target handoff uses a dedicated `x` shortcut, with `H` and `t` kept as
   compatibility aliases, and a three-stage TUI flow:
   choose target, review the command, then press `enter` to restore the terminal
   and launch, or `y` to copy it
 - Target CLI first prompt is a readable Work Capsule Summary with source,
-  target, goal, state, decisions, todo, evidence, risks, and instructions
-  instead of a raw single-line JSON blob
+  target, continuation protocol, goal, state, decisions, todo, evidence, risks,
+  and instructions instead of a raw single-line JSON blob
 - Last confirmed target is persisted in `~/.config/moonbox/config.json`
 - Configured SSH hosts can be listed through `moonbox ssh` / `moon ssh`,
   combining Moonbox `ssh_hosts` entries with concrete `Host` aliases from
@@ -357,6 +361,8 @@ cargo run -- completions bash
 cargo run -- completions zsh --bin moon
 cargo run -- replay-eval --json
 cargo run -- launch --target hermes --session <session-id> --json
+cargo run -- launch --target hermes --session <session-id> --continuation package-import --json
+cargo run -- launch --target hermes --session <session-id> --workspace-restore worktree --json
 cargo run -- launch --execute --target hermes --session <session-id>
 cargo run -- verify --target hermes --session <session-id> --capsule ./capsule.json --json
 cargo run -- verify --target hermes --session hermes-cxcp-502 --json
@@ -376,6 +382,12 @@ cannot accidentally open the newest active session. `verify`, `capsule`,
 `capsule`, `compile-request`, and `compile-output` accept `--session`,
 `--target`, `--rewind`, and `--compiler`, so scripts can inspect an exact
 selected rewind without relying on the old Codex-to-Hermes fixture defaults.
+`launch` and `verify` also accept `--continuation prompt-only|package-import|workspace-restore`
+and `--workspace-restore branch|worktree`. The default is prompt-only target
+input. Native package import is not claimed for Codex, Claude, or Hermes yet;
+workspace restore requests produce reversible branch/worktree preview commands
+in the local launch plan, but verification blocks execution because M60 does
+not mutate the user's checkout or create worktrees implicitly.
 `doctor` is also
 non-executing: it checks config resolution, source adapter provenance, session
 summary discovery, target binary availability, and compiler catalog readiness
@@ -596,10 +608,12 @@ groups consecutive AI output into one readable block, right-aligns event times,
 and scrolls by wrapped row height so the selected event stays visible.
 
 The target CLI receives a concise, human-readable Capsule Summary as its first
-prompt. It includes source metadata, selected rewind, goal, state, decisions,
-todo, evidence, risks, a Privacy / Redaction section, and execution instructions
-without dumping the capsule as raw JSON. Machine-readable capsule data remains
-available through the dry-run JSON surfaces and `capsule --json`.
+prompt. It includes source metadata, selected rewind, continuation protocol,
+goal, state, decisions, todo, evidence, risks, a Privacy / Redaction section,
+and execution instructions without dumping the capsule as raw JSON.
+Machine-readable capsule data, including preview-only workspace restore
+commands, remains available through the dry-run JSON surfaces and
+`capsule --json`.
 
 ## TUI Keys
 
@@ -664,7 +678,7 @@ Stable interfaces matter more than any single framework:
 
 - `SourceAdapter`: read-only session parsing
 - `CapsuleCompiler`: source timeline and workspace evidence to Capsule; fixture and process runners exist now
-- `Verifier`: schema, token, capability, handoff, size, and execution preflight checks; shared by CLI/TUI
+- `Verifier`: schema, token, capability, continuation protocol, handoff, size, and execution preflight checks; shared by CLI/TUI
 - `SkillRunner`: JSON input/output compiler skill execution through a process runner
 - `TargetLauncher`: target-specific command construction and guarded process execution
 
@@ -832,12 +846,13 @@ Stable interfaces matter more than any single framework:
   checks raw source map consistency, compiler coverage gaps, todo/timeline event
   references, local file references, patch-shaped diff evidence, and fixture
   adapter contract invariants.
+- M60: target import and workspace restore protocol; launch plans now make
+  prompt-only target input explicit, refuse to claim unsupported native Capsule
+  import, and expose reversible branch/worktree workspace restore previews that
+  remain blocked from execution until a restore executor is verified.
 
 ### Remaining Milestones
 
-- M60: target import and workspace restore protocol. Define prompt-only
-  handoff, continuation package import, and explicit reversible branch/worktree
-  restore modes.
 - M61: source capability registry. Track each provider's local store, rich RPC,
   cloud metadata, deep links, export/search, remote control, fork/resume, and
   native handoff capabilities; distinguish updated time from unknown runtime

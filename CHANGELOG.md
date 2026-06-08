@@ -147,6 +147,12 @@ and this project uses semantic versioning once tagged releases start.
   patch-shaped diff evidence.
 - Fixture adapter contract coverage for session summary fields, report metadata,
   timeline schema version, unique event ids, and user/rewind anchors.
+- Continuation protocol plans in `launch --json`, covering explicit
+  `prompt_only` target input, unsupported native Capsule import requests, and
+  preview-only reversible branch/worktree workspace restore commands.
+- `launch` and `verify` options for `--continuation` and
+  `--workspace-restore`, with fixture-safe contract coverage proving unsupported
+  import/restore requests are blocked instead of silently downgraded.
 
 ### Changed
 
@@ -172,10 +178,10 @@ and this project uses semantic versioning once tagged releases start.
   prompts now use the shared redaction policy; target prompts include a
   dedicated Privacy / Redaction section while local execution routing remains
   exact for verifiable dry-run previews.
-- Handoff Review readiness groups now prioritize Target Readiness, then Source
-  Health, Capsule Health, and Semantic Evidence, and launch validation summaries
-  stay concise while full verifier checks remain available in JSON and TUI
-  readiness details.
+- Handoff Review readiness groups now prioritize Target Readiness, Workspace
+  Restore, Source Health, Capsule Health, and Semantic Evidence, and launch
+  validation summaries stay concise while full verifier checks remain available
+  in JSON and TUI readiness details.
 - Generated dry-run launch plans report `capsule_path: null` and do not emit
   fake `--capsule` paths.
 - Codex, Claude, and Hermes source discovery use real local stores when any
