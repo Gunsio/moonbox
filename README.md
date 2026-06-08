@@ -128,6 +128,7 @@ The staging script writes source, Cargo crate, and host binary archives plus
 
 ## Project Standards
 
+- [Agent operating rules](AGENTS.md)
 - [Contributing guide](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 - [Changelog](CHANGELOG.md)

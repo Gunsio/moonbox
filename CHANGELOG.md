@@ -9,6 +9,8 @@ and this project uses semantic versioning once tagged releases start.
 
 ### Added
 
+- Root agent operating rules covering one-milestone-per-PR governance, fixture-safe
+  tests, read-only source stores, and documentation sync expectations.
 - Rust + Ratatui TUI workbench with Vim-style navigation.
 - Global session list with source tags, search, source filtering, original
   session preview, and target picker.
