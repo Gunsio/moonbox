@@ -8,10 +8,11 @@ use super::{
     error::CoreError,
     fixture::FixtureSourceAdapter,
     model::{
-        CanonicalTimeline, CapsuleCompileRequest, CliTool, SessionSummary, TargetLaunchCommand,
-        VerificationCheck, VerificationReport, VerificationStatus, WorkCapsule,
+        CanonicalTimeline, CapsuleCompileRequest, CliTool, RedactionReport, SessionSummary,
+        TargetLaunchCommand, VerificationCheck, VerificationReport, VerificationStatus,
+        WorkCapsule,
     },
-    verifier,
+    redaction, verifier,
 };
 
 const TOKEN_BUDGET: usize = 100_000;
@@ -285,7 +286,7 @@ fn compile_fixture_capsule(
 ) -> Result<(CanonicalTimeline, String, WorkCapsule), CoreError> {
     let timeline = adapter.load_timeline(&session.id)?;
     let rewind_event_id = rewind_event_id_for_session(session, &timeline.events);
-    let request = CapsuleCompileRequest {
+    let request = redaction::redact_compile_request(CapsuleCompileRequest {
         version: 1,
         source_cli: session.cli,
         target_cli: target,
@@ -294,7 +295,8 @@ fn compile_fixture_capsule(
         token_budget: TOKEN_BUDGET,
         compiler: DEFAULT_COMPILER_ID.into(),
         timeline: timeline.clone(),
-    };
+        redaction: RedactionReport::default(),
+    });
     let output = FixtureCapsuleCompiler.compile(&request)?;
     Ok((timeline, rewind_event_id, output.capsule))
 }
@@ -522,7 +524,7 @@ mod tests {
             .find(|case| case.scenario == ReplayEvalScenario::MissingToolPreflight)
             .expect("missing tool case");
         assert_eq!(missing_tool.status, VerificationStatus::Fail);
-        assert_eq!(missing_tool.check_count, 15);
+        assert_eq!(missing_tool.check_count, 16);
         assert!(
             missing_tool
                 .failures

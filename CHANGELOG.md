@@ -139,6 +139,9 @@ and this project uses semantic versioning once tagged releases start.
 - Auditable Capsule source maps with `raw_source_map`, `raw_refs`, and
   `coverage` fields, enriched from the canonical timeline for built-in and
   external compiler output.
+- Redaction policy reports on Capsule compile requests and Work Capsules,
+  covering secret-like value scanning, sensitive path masking, event/file
+  allowlists, prompt-injection warnings, and external compiler disclosure.
 
 ### Changed
 
@@ -160,6 +163,10 @@ and this project uses semantic versioning once tagged releases start.
 - Claude local-command XML-like records such as `<local-command-caveat>`,
   `<local-command-stdout>`, and `<command-name>` are now treated as internal
   tool events instead of user messages, rewind anchors, or resume-index titles.
+- Compiler stdin, Capsule JSON export, verifier output, and target handoff
+  prompts now use the shared redaction policy; target prompts include a
+  dedicated Privacy / Redaction section while local execution routing remains
+  exact for verifiable dry-run previews.
 - Generated dry-run launch plans report `capsule_path: null` and do not emit
   fake `--capsule` paths.
 - Codex, Claude, and Hermes source discovery use real local stores when any

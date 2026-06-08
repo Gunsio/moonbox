@@ -104,6 +104,18 @@ pub enum TimelineKind {
     RewindPoint,
 }
 
+impl TimelineKind {
+    pub const ALL: [Self; 7] = [
+        Self::User,
+        Self::Assistant,
+        Self::Tool,
+        Self::Compact,
+        Self::Error,
+        Self::GitDiff,
+        Self::RewindPoint,
+    ];
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimelineEvent {
     pub id: String,
@@ -141,6 +153,43 @@ pub struct CapsuleCoverage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RedactionReport {
+    pub version: u16,
+    pub enabled: bool,
+    pub policy: String,
+    pub secret_scan: bool,
+    pub path_redaction: bool,
+    pub event_allowlist: Vec<TimelineKind>,
+    pub file_allowlist: Vec<String>,
+    pub secrets_redacted: usize,
+    pub paths_redacted: usize,
+    pub events_removed: usize,
+    pub prompt_injection_warnings: usize,
+    pub external_compiler_disclosure: String,
+    pub warnings: Vec<String>,
+}
+
+impl Default for RedactionReport {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            enabled: false,
+            policy: "disabled".into(),
+            secret_scan: false,
+            path_redaction: false,
+            event_allowlist: Vec::new(),
+            file_allowlist: Vec::new(),
+            secrets_redacted: 0,
+            paths_redacted: 0,
+            events_removed: 0,
+            prompt_injection_warnings: 0,
+            external_compiler_disclosure: "redaction policy not applied".into(),
+            warnings: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkCapsule {
     pub version: u16,
     pub source_cli: CliTool,
@@ -162,6 +211,8 @@ pub struct WorkCapsule {
     pub raw_refs: Vec<RawSourceRef>,
     #[serde(default)]
     pub coverage: CapsuleCoverage,
+    #[serde(default)]
+    pub redaction: RedactionReport,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -208,6 +259,8 @@ pub struct CapsuleCompileRequest {
     pub token_budget: usize,
     pub compiler: String,
     pub timeline: CanonicalTimeline,
+    #[serde(default)]
+    pub redaction: RedactionReport,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -449,6 +502,7 @@ mod tests {
         assert!(capsule.raw_source_map.is_none());
         assert!(capsule.raw_refs.is_empty());
         assert_eq!(capsule.coverage.raw_ref_count, 0);
+        assert!(!capsule.redaction.enabled);
         let json = serde_json::to_value(capsule).expect("capsule json");
         assert_eq!(json["handoff_label"], "moonbox/hermes-rewind-evt-001");
         assert!(json.get("target_branch").is_none());

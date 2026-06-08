@@ -46,6 +46,9 @@ fn fixture_safe_command(binary: &str, test_name: &str) -> Command {
         "MOONBOX_CODEX_BIN",
         "MOONBOX_CLAUDE_BIN",
         "MOONBOX_HERMES_BIN",
+        "MOONBOX_REDACTION",
+        "MOONBOX_REDACTION_EVENT_ALLOWLIST",
+        "MOONBOX_REDACTION_FILE_ALLOWLIST",
         "MOONBOX_SESSION_MODE",
     ] {
         command.env_remove(key);
@@ -816,6 +819,9 @@ fn open_launch_and_verify_public_cli_contracts_are_dry_run_by_default() {
         .expect("handoff prompt");
     assert!(handoff_prompt.contains("Work Capsule Summary"));
     assert!(handoff_prompt.contains("Instructions\n- Continue from the selected rewind point"));
+    assert!(handoff_prompt.contains("Privacy / Redaction"));
+    assert!(handoff_prompt.contains("Prompt injection"));
+    assert!(!handoff_prompt.contains("~/coding/moonbox"));
     assert!(!handoff_prompt.contains("Work Capsule JSON"));
     assert!(!handoff_prompt.contains("\"source_cli\""));
 
@@ -912,6 +918,8 @@ fn capsule_and_compile_surfaces_accept_explicit_session_target_rewind_and_compil
     );
     assert_eq!(capsule["compiler"], "engineering-handoff");
     assert_eq!(capsule["raw_source_map"]["rewind_event_id"], "evt-074");
+    assert_eq!(capsule["redaction"]["enabled"], true);
+    assert_eq!(capsule["redaction"]["policy"], "standard");
     assert!(capsule["raw_refs"].as_array().expect("raw refs").len() >= 1);
     assert!(
         capsule["raw_refs"]
@@ -935,8 +943,16 @@ fn capsule_and_compile_surfaces_accept_explicit_session_target_rewind_and_compil
     assert_eq!(request["source_cli"], "claude");
     assert_eq!(request["target_cli"], "codex");
     assert_eq!(request["source_session"]["id"], "claude-qc-platform");
+    assert_eq!(request["source_session"]["cwd"], "<path:redacted>");
     assert_eq!(request["rewind_event_id"], "evt-074");
     assert_eq!(request["compiler"], "engineering-handoff");
+    assert_eq!(request["redaction"]["enabled"], true);
+    assert!(
+        request["redaction"]["external_compiler_disclosure"]
+            .as_str()
+            .expect("redaction disclosure")
+            .contains("External compilers receive a redacted")
+    );
 
     let output = output_json(
         moonbox_command("compile-surface-contract")

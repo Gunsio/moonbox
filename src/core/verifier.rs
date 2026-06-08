@@ -136,6 +136,26 @@ pub fn verify_capsule(
     ));
 
     checks.push(check(
+        "redaction_policy",
+        if capsule.redaction.enabled {
+            VerificationStatus::Pass
+        } else {
+            VerificationStatus::Warn
+        },
+        if capsule.redaction.enabled {
+            format!(
+                "redaction {}: {} secret(s), {} path(s), {} event(s) removed",
+                capsule.redaction.policy,
+                capsule.redaction.secrets_redacted,
+                capsule.redaction.paths_redacted,
+                capsule.redaction.events_removed
+            )
+        } else {
+            "redaction policy disabled or missing; inspect sensitive content before handoff".into()
+        },
+    ));
+
+    checks.push(check(
         "capsule_size",
         capsule_size_status(capsule),
         capsule_size_detail(capsule),
