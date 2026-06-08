@@ -216,25 +216,25 @@
   <text x="1441" y="618" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="636" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="636" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="636" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Source Health</text>
+  <text x="235" y="636" class="mono" font-size="14" font-weight="800" fill="#b284ff">Workspace Restore</text>
   <text x="1270" y="636" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1441" y="636" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="654" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="654" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="235" y="654" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
-  <text x="280" y="654" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">source_health</text>
-  <text x="415" y="654" class="mono" font-size="14" font-weight="500" fill="#8b949e">ready</text>
+  <text x="280" y="654" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">continuation_level</text>
+  <text x="460" y="654" class="mono" font-size="14" font-weight="500" fill="#8b949e">target input level is prompt-only</text>
   <text x="1270" y="654" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1441" y="654" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="672" class="mono" font-size="14" font-weight="500" fill="#e6be53">╰──────────────────│</text>
   <text x="235" y="672" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
-  <text x="280" y="672" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">token_budget</text>
-  <text x="406" y="672" class="mono" font-size="14" font-weight="500" fill="#8b949e">42000 / 100000 tokens</text>
+  <text x="280" y="672" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">package_import</text>
+  <text x="424" y="672" class="mono" font-size="14" font-weight="500" fill="#8b949e">native continuation package import not requested</text>
   <text x="1270" y="672" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1279" y="672" class="mono" font-size="14" font-weight="500" fill="#374452">──────────────────╯</text>
   <text x="46" y="690" class="mono" font-size="14" font-weight="500" fill="#374452">╭ Action Path ─────</text>
   <text x="217" y="690" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="690" class="mono" font-size="14" font-weight="800" fill="#e6be53">Capsule Health</text>
+  <text x="235" y="690" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Source Health</text>
   <text x="1270" y="690" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1279" y="690" class="mono" font-size="14" font-weight="500" fill="#374452">──────────────────╮</text>
   <text x="46" y="708" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>

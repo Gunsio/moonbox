@@ -7,9 +7,9 @@ use std::{
 use super::{
     compiler,
     model::{
-        CliTool, LaunchValidation, SessionStatus, SessionSummary, SourceProvenance,
-        TargetLaunchCommand, TimelineEvent, VerificationCheck, VerificationReport,
-        VerificationStatus, WorkCapsule,
+        CliTool, ContinuationProtocol, LaunchValidation, SessionStatus, SessionSummary,
+        SourceProvenance, TargetLaunchCommand, TimelineEvent, VerificationCheck,
+        VerificationReport, VerificationStatus, WorkCapsule,
     },
 };
 
@@ -23,6 +23,22 @@ pub fn verify_capsule(
     session: &SessionSummary,
     timeline: &[TimelineEvent],
     requested_target: CliTool,
+) -> VerificationReport {
+    verify_capsule_with_continuation(
+        capsule,
+        session,
+        timeline,
+        requested_target,
+        &ContinuationProtocol::default(),
+    )
+}
+
+pub fn verify_capsule_with_continuation(
+    capsule: &WorkCapsule,
+    session: &SessionSummary,
+    timeline: &[TimelineEvent],
+    requested_target: CliTool,
+    continuation: &ContinuationProtocol,
 ) -> VerificationReport {
     let rewind_id = rewind_event_id(capsule);
     let mut checks = Vec::new();
@@ -86,6 +102,10 @@ pub fn verify_capsule(
             capsule.target_cli, requested_target
         ),
     ));
+
+    checks.push(continuation_level_check(continuation));
+    checks.push(package_import_check(continuation));
+    checks.push(workspace_restore_check(continuation));
 
     checks.push(check(
         "rewind_exists",
@@ -371,13 +391,13 @@ fn semantic_source_map_check(
 fn validation_warning_reasons(checks: &[&VerificationCheck]) -> Vec<String> {
     const PRIORITY: [&str; 8] = [
         "target_support",
+        "workspace_restore",
+        "package_import",
+        "continuation_level",
         "source_health",
         "semantic_compiler_coverage",
         "semantic_diff_applicability",
         "semantic_file_refs",
-        "compiler_mode",
-        "risk_context",
-        "redaction_policy",
     ];
     let mut reasons = Vec::new();
     for name in PRIORITY {
@@ -407,6 +427,9 @@ fn validation_warning_reasons(checks: &[&VerificationCheck]) -> Vec<String> {
 
 fn validation_warning_summary(check: &VerificationCheck) -> String {
     match check.name.as_str() {
+        "continuation_level" => "requested continuation level is not target input yet".into(),
+        "package_import" => "native Capsule import is not supported for this target".into(),
+        "workspace_restore" => "workspace restore is preview-only or unavailable".into(),
         "semantic_compiler_coverage" => {
             "compiler coverage has uncovered critical source refs".into()
         }
@@ -414,6 +437,65 @@ fn validation_warning_summary(check: &VerificationCheck) -> String {
         "semantic_file_refs" => "file references could not all be verified".into(),
         _ => truncate(&check.detail, 112),
     }
+}
+
+fn continuation_level_check(continuation: &ContinuationProtocol) -> VerificationCheck {
+    if continuation.requested_level == continuation.target_input_level {
+        return check(
+            "continuation_level",
+            VerificationStatus::Pass,
+            format!("target input level is {}", continuation.target_input_level),
+        );
+    }
+
+    check(
+        "continuation_level",
+        VerificationStatus::Warn,
+        format!(
+            "requested {} but target input is {}; unsupported requested capabilities must be resolved before launch",
+            continuation.requested_level, continuation.target_input_level
+        ),
+    )
+}
+
+fn package_import_check(continuation: &ContinuationProtocol) -> VerificationCheck {
+    let plan = &continuation.package_import;
+    if !plan.requested {
+        return check(
+            "package_import",
+            VerificationStatus::Pass,
+            plan.reason.clone(),
+        );
+    }
+    check(
+        "package_import",
+        if plan.supported {
+            VerificationStatus::Pass
+        } else {
+            VerificationStatus::Fail
+        },
+        plan.reason.clone(),
+    )
+}
+
+fn workspace_restore_check(continuation: &ContinuationProtocol) -> VerificationCheck {
+    let plan = &continuation.workspace_restore;
+    if !plan.requested {
+        return check(
+            "workspace_restore",
+            VerificationStatus::Pass,
+            plan.reason.clone(),
+        );
+    }
+    check(
+        "workspace_restore",
+        if plan.supported {
+            VerificationStatus::Pass
+        } else {
+            VerificationStatus::Fail
+        },
+        plan.reason.clone(),
+    )
 }
 
 fn semantic_compiler_coverage_check(

@@ -8,13 +8,13 @@ use std::{
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::core::{
-    compiler, config, dataspace, doctor,
+    compiler, config, continuation, dataspace, doctor,
     error::CoreError,
     launcher,
     model::{
-        CliTool, DoctorReport, LaunchPlan, LaunchValidation, LaunchValidationState,
-        OriginalSessionPlan, SessionAction, SessionSummary, TimelineKind, VerificationReport,
-        WorkCapsule, WorkbenchData,
+        CliTool, ContinuationOptions, DoctorReport, LaunchPlan, LaunchValidation,
+        LaunchValidationState, OriginalSessionPlan, SessionAction, SessionSummary, TimelineKind,
+        VerificationReport, WorkCapsule, WorkbenchData,
     },
     verifier, workbench,
 };
@@ -128,8 +128,8 @@ impl SessionFilter {
 
 #[derive(Debug, Clone)]
 pub enum TuiExitAction {
-    OriginalResume(OriginalSessionPlan),
-    TargetHandoff(LaunchPlan),
+    OriginalResume(Box<OriginalSessionPlan>),
+    TargetHandoff(Box<LaunchPlan>),
 }
 
 #[derive(Debug)]
@@ -887,13 +887,15 @@ impl App {
             return;
         };
         let command = launcher::original_command(&session);
-        self.exit_action = Some(TuiExitAction::OriginalResume(OriginalSessionPlan {
-            version: 1,
-            action: SessionAction::OriginalResume,
-            dry_run: true,
-            source_session: session.clone(),
-            command,
-        }));
+        self.exit_action = Some(TuiExitAction::OriginalResume(Box::new(
+            OriginalSessionPlan {
+                version: 1,
+                action: SessionAction::OriginalResume,
+                dry_run: true,
+                source_session: session.clone(),
+                command,
+            },
+        )));
         self.should_quit = true;
         self.set_status(format!("Opening original: {} {}", session.cli, session.id));
     }
@@ -1470,20 +1472,36 @@ impl App {
             return;
         };
         let capsule = self.launch_capsule_for_target(self.pending_target);
-        let target_command = match launcher::target_command(self.pending_target, &session, &capsule)
-        {
+        let continuation = continuation::build_continuation_protocol(
+            &session,
+            self.pending_target,
+            &capsule,
+            None,
+            ContinuationOptions::default(),
+        );
+        let target_command = match launcher::target_command_with_continuation(
+            self.pending_target,
+            &session,
+            &capsule,
+            &continuation,
+        ) {
             Ok(command) => command,
             Err(error) => {
                 self.set_status(format!("Target failed: {error}"));
                 return;
             }
         };
-        let verification =
-            verifier::verify_capsule(&capsule, &session, &self.data.timeline, self.pending_target);
+        let verification = verifier::verify_capsule_with_continuation(
+            &capsule,
+            &session,
+            &self.data.timeline,
+            self.pending_target,
+            &continuation,
+        );
         let command = target_command.display.clone();
         let compiler = capsule.compiler.clone();
         let handoff_label = capsule.handoff_label;
-        self.exit_action = Some(TuiExitAction::TargetHandoff(LaunchPlan {
+        self.exit_action = Some(TuiExitAction::TargetHandoff(Box::new(LaunchPlan {
             version: 1,
             action: SessionAction::TargetHandoff,
             dry_run: true,
@@ -1495,7 +1513,8 @@ impl App {
             command,
             target_command,
             verification,
-        }));
+            continuation,
+        })));
         self.should_quit = true;
         self.set_status(format!("Launching target: {}", self.pending_target));
     }
@@ -1539,12 +1558,29 @@ impl App {
     pub fn target_command_preview(&self) -> Option<launcher::TargetInputPreview> {
         let session = self.current_session()?;
         let capsule = self.launch_capsule_for_target(self.pending_target);
-        let command = launcher::target_command(self.pending_target, session, &capsule).ok()?;
+        let continuation = continuation::build_continuation_protocol(
+            session,
+            self.pending_target,
+            &capsule,
+            None,
+            ContinuationOptions::default(),
+        );
+        let command = launcher::target_command_with_continuation(
+            self.pending_target,
+            session,
+            &capsule,
+            &continuation,
+        )
+        .ok()?;
         Some(launcher::TargetInputPreview {
             program: command.program,
             args: command.args,
             cwd: command.cwd,
-            prompt: launcher::target_prompt_preview(session, &capsule),
+            prompt: launcher::target_prompt_preview_with_continuation(
+                session,
+                &capsule,
+                &continuation,
+            ),
         })
     }
 
@@ -1558,11 +1594,19 @@ impl App {
     pub fn launch_verification_for_target(&self, target: CliTool) -> Option<VerificationReport> {
         let session = self.current_session()?;
         let capsule = self.launch_capsule_for_target(target);
-        Some(verifier::verify_capsule(
+        let continuation = continuation::build_continuation_protocol(
+            session,
+            target,
+            &capsule,
+            None,
+            ContinuationOptions::default(),
+        );
+        Some(verifier::verify_capsule_with_continuation(
             &capsule,
             session,
             &self.data.timeline,
             target,
+            &continuation,
         ))
     }
 

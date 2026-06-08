@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
 
-use crate::core::model::CliTool;
+use crate::core::model::{CliTool, ContinuationLevel, WorkspaceRestoreMode};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -190,6 +190,12 @@ pub struct LaunchArgs {
     /// Allow executing a real-session handoff produced by the built-in draft compiler.
     #[arg(long)]
     pub allow_draft: bool,
+    /// Requested continuation level. Defaults to prompt-only handoff.
+    #[arg(long, value_enum)]
+    pub continuation: Option<ContinuationLevel>,
+    /// Preview a reversible workspace restore path. Implies --continuation workspace-restore.
+    #[arg(long = "workspace-restore", value_enum)]
+    pub workspace_restore: Option<WorkspaceRestoreMode>,
     /// Print JSON output.
     #[arg(long)]
     pub json: bool,

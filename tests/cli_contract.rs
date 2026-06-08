@@ -801,6 +801,12 @@ fn open_launch_and_verify_public_cli_contracts_are_dry_run_by_default() {
     assert_eq!(launch["dry_run"], true);
     assert_eq!(launch["action"], "target_handoff");
     assert_eq!(launch["compiler"], "engineering-handoff");
+    assert_eq!(launch["continuation"]["requested_level"], "prompt_only");
+    assert_eq!(launch["continuation"]["target_input_level"], "prompt_only");
+    assert_eq!(
+        launch["continuation"]["workspace_restore"]["requested"],
+        false
+    );
     assert!(
         launch["handoff_label"]
             .as_str()
@@ -818,6 +824,7 @@ fn open_launch_and_verify_public_cli_contracts_are_dry_run_by_default() {
         .and_then(|value| value.as_str())
         .expect("handoff prompt");
     assert!(handoff_prompt.contains("Work Capsule Summary"));
+    assert!(handoff_prompt.contains("Continuation Protocol"));
     assert!(handoff_prompt.contains("Instructions\n- Continue from the selected rewind point"));
     assert!(handoff_prompt.contains("Privacy / Redaction"));
     assert!(handoff_prompt.contains("Prompt injection"));
@@ -844,6 +851,16 @@ fn open_launch_and_verify_public_cli_contracts_are_dry_run_by_default() {
     assert!(
         checks
             .iter()
+            .any(|check| { check["name"] == "continuation_level" && check["status"] == "pass" })
+    );
+    assert!(
+        checks
+            .iter()
+            .any(|check| { check["name"] == "workspace_restore" && check["status"] == "pass" })
+    );
+    assert!(
+        checks
+            .iter()
             .any(|check| { check["name"] == "semantic_source_map" && check["status"] == "pass" })
     );
     assert!(checks.iter().any(|check| {
@@ -852,6 +869,142 @@ fn open_launch_and_verify_public_cli_contracts_are_dry_run_by_default() {
     assert!(checks.iter().any(|check| {
         check["name"] == "semantic_diff_applicability" && check["status"] == "warn"
     }));
+}
+
+#[test]
+fn launch_continuation_protocol_blocks_unsupported_import_and_restore_modes() {
+    let package = output_json(
+        moonbox_command("continuation-package-import")
+            .args([
+                "launch",
+                "--target",
+                "hermes",
+                "--session",
+                "codex-cxcp-design",
+                "--continuation",
+                "package-import",
+                "--json",
+            ])
+            .output()
+            .expect("package import dry-run"),
+    );
+
+    assert_eq!(package["dry_run"], true);
+    assert_eq!(package["verification"]["ready"], false);
+    assert_eq!(package["verification"]["status"], "fail");
+    assert_eq!(package["continuation"]["requested_level"], "package_import");
+    assert_eq!(package["continuation"]["target_input_level"], "prompt_only");
+    assert_eq!(package["continuation"]["package_import"]["requested"], true);
+    assert_eq!(
+        package["continuation"]["package_import"]["supported"],
+        false
+    );
+    assert!(
+        package["verification"]["checks"]
+            .as_array()
+            .expect("package checks")
+            .iter()
+            .any(|check| check["name"] == "package_import" && check["status"] == "fail")
+    );
+
+    let test_name = "continuation-worktree-restore";
+    let home = fixture_home(test_name);
+    let workspace = home.join("workspace");
+    fs::create_dir_all(&workspace).expect("workspace");
+    git(&workspace, &["init"]);
+    write_file(&workspace, "README.md", "restore preview\n");
+    git(&workspace, &["add", "README.md"]);
+    git(
+        &workspace,
+        &[
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "user.name=Moonbox Test",
+            "commit",
+            "-m",
+            "init",
+        ],
+    );
+
+    let codex_home = home.join("codex");
+    let rollout_path = codex_home
+        .join("sessions")
+        .join("2026")
+        .join("06")
+        .join("06")
+        .join("rollout-2026-06-06T10-00-00-restore.jsonl");
+    fs::create_dir_all(rollout_path.parent().expect("rollout parent")).expect("codex sessions");
+    fs::write(
+        &rollout_path,
+        format!(
+            r#"{{"timestamp":"2026-06-06T10:00:00Z","type":"session_meta","payload":{{"id":"codex-restore-preview","cwd":"{}","git":{{"branch":"main"}}}}}}
+{{"timestamp":"2026-06-06T10:01:00Z","type":"response_item","payload":{{"type":"message","role":"user","content":[{{"type":"input_text","text":"Continue with a workspace restore preview"}}]}}}}"#,
+            workspace.display()
+        ),
+    )
+    .expect("codex rollout");
+    let restore = output_json(
+        moonbox_command(test_name)
+            .args([
+                "launch",
+                "--target",
+                "hermes",
+                "--session",
+                "codex-restore-preview",
+                "--workspace-restore",
+                "worktree",
+                "--json",
+            ])
+            .output()
+            .expect("workspace restore dry-run"),
+    );
+
+    assert_eq!(restore["verification"]["ready"], false);
+    assert_eq!(restore["verification"]["status"], "fail");
+    assert_eq!(
+        restore["continuation"]["requested_level"],
+        "workspace_restore"
+    );
+    let workspace_restore = &restore["continuation"]["workspace_restore"];
+    assert_eq!(workspace_restore["requested"], true);
+    assert_eq!(workspace_restore["mode"], "worktree");
+    assert_eq!(workspace_restore["supported"], false);
+    assert_eq!(workspace_restore["reversible"], true);
+    assert_eq!(workspace_restore["preview_only"], true);
+    assert!(
+        workspace_restore["commands"]
+            .as_array()
+            .expect("restore commands")
+            .iter()
+            .any(|command| command.as_str().expect("command").contains("worktree add"))
+    );
+    assert!(
+        workspace_restore["cleanup_commands"]
+            .as_array()
+            .expect("cleanup commands")
+            .iter()
+            .any(|command| command
+                .as_str()
+                .expect("command")
+                .contains("worktree remove"))
+    );
+    assert!(
+        restore["verification"]["checks"]
+            .as_array()
+            .expect("restore checks")
+            .iter()
+            .any(|check| check["name"] == "workspace_restore" && check["status"] == "fail")
+    );
+    let prompt = restore["target_command"]["args"]
+        .as_array()
+        .expect("target args")
+        .last()
+        .and_then(|value| value.as_str())
+        .expect("target prompt");
+    assert!(prompt.contains("Continuation Protocol"));
+    assert!(!prompt.contains(&workspace.display().to_string()));
+    assert!(!prompt.contains("worktree add"));
 }
 
 #[test]

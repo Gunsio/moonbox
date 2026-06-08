@@ -73,10 +73,10 @@ fn execute_tui_exit_action(action: Option<app::TuiExitAction>) -> Result<()> {
         Some(app::TuiExitAction::OriginalResume(plan)) => {
             print!("{}", core::launcher::original_handoff_notice(&plan));
             io::stdout().flush()?;
-            core::launcher::handoff_original_plan(plan)?;
+            core::launcher::handoff_original_plan(*plan)?;
         }
         Some(app::TuiExitAction::TargetHandoff(plan)) => {
-            core::launcher::execute_plan(plan, false)?;
+            core::launcher::execute_plan(*plan, false)?;
         }
         None => {}
     }
@@ -434,12 +434,14 @@ fn completion_bin_name(binary: Option<cli::CompletionBinary>) -> String {
 
 fn print_launch_plan(args: cli::LaunchArgs) -> Result<()> {
     let target = launch_target(args.target);
+    let continuation_options = continuation_options(&args);
     if args.execute {
-        let execution = core::workbench::execute_launch(
+        let execution = core::workbench::execute_launch_with_options(
             args.session.as_deref(),
             target,
             args.capsule.as_deref(),
             args.allow_draft,
+            continuation_options,
         )?;
         if let Some(execution) = execution {
             if args.json {
@@ -462,8 +464,12 @@ fn print_launch_plan(args: cli::LaunchArgs) -> Result<()> {
         return Ok(());
     }
 
-    let plan =
-        core::workbench::launch_plan(args.session.as_deref(), target, args.capsule.as_deref())?;
+    let plan = core::workbench::launch_plan_with_options(
+        args.session.as_deref(),
+        target,
+        args.capsule.as_deref(),
+        continuation_options,
+    )?;
     if let Some(plan) = plan {
         if args.json {
             println!("{}", serde_json::to_string_pretty(&plan)?);
@@ -480,6 +486,7 @@ fn print_launch_plan(args: cli::LaunchArgs) -> Result<()> {
             println!("preflight_ready: {}", plan.verification.ready);
             println!("scope: structural and semantic preflight; user review is still required");
             println!("status: {}", plan.verification.status);
+            print_continuation_protocol(&plan.continuation);
             println!("command: {}", plan.command);
             println!("program: {}", plan.target_command.program);
             print_checks(&plan.verification.checks);
@@ -492,8 +499,12 @@ fn print_launch_plan(args: cli::LaunchArgs) -> Result<()> {
 
 fn print_verify_report(args: cli::LaunchArgs) -> Result<()> {
     let target = launch_target(args.target);
-    let report =
-        core::workbench::verify_launch(args.session.as_deref(), target, args.capsule.as_deref())?;
+    let report = core::workbench::verify_launch_with_options(
+        args.session.as_deref(),
+        target,
+        args.capsule.as_deref(),
+        continuation_options(&args),
+    )?;
     if let Some(report) = report {
         if args.json {
             println!("{}", serde_json::to_string_pretty(&report)?);
@@ -507,6 +518,39 @@ fn print_verify_report(args: cli::LaunchArgs) -> Result<()> {
         println!("No session selected");
     }
     Ok(())
+}
+
+fn continuation_options(args: &cli::LaunchArgs) -> core::model::ContinuationOptions {
+    core::model::ContinuationOptions::new(args.continuation, args.workspace_restore)
+}
+
+fn print_continuation_protocol(protocol: &core::model::ContinuationProtocol) {
+    println!("continuation: {}", protocol.requested_level);
+    println!("target_input_level: {}", protocol.target_input_level);
+    println!(
+        "package_import: {}",
+        if protocol.package_import.requested {
+            protocol.package_import.reason.as_str()
+        } else {
+            "not requested"
+        }
+    );
+    println!(
+        "workspace_restore: {} {}",
+        protocol.workspace_restore.mode, protocol.workspace_restore.reason
+    );
+    if !protocol.workspace_restore.commands.is_empty() {
+        println!("workspace_restore_preview:");
+        for command in &protocol.workspace_restore.commands {
+            println!("- {command}");
+        }
+    }
+    if !protocol.workspace_restore.cleanup_commands.is_empty() {
+        println!("workspace_restore_cleanup:");
+        for command in &protocol.workspace_restore.cleanup_commands {
+            println!("- {command}");
+        }
+    }
 }
 
 fn print_replay_eval(args: cli::JsonArgs) -> Result<()> {
