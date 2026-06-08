@@ -68,7 +68,7 @@ grep -q '"compiler": "engineering-handoff"' "$output_dir/compile-request.json"
 grep -q '"target_cli": "hermes"' "$output_dir/compile-request.json"
 
 "$moonbox" compile-output --session codex-cxcp-design --target hermes --rewind evt-091 --json > "$output_dir/compile-output.json"
-grep -q '"target_branch": "moonbox/hermes-rewind-evt-091"' "$output_dir/compile-output.json"
+grep -q '"handoff_label": "moonbox/hermes-rewind-evt-091"' "$output_dir/compile-output.json"
 
 "$moonbox" compilers --json > "$output_dir/compilers.json"
 grep -q '"id": "engineering-handoff"' "$output_dir/compilers.json"

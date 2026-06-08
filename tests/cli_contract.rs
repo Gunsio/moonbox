@@ -703,6 +703,14 @@ fn open_launch_and_verify_public_cli_contracts_are_dry_run_by_default() {
     );
     assert_eq!(launch["dry_run"], true);
     assert_eq!(launch["action"], "target_handoff");
+    assert_eq!(launch["compiler"], "engineering-handoff");
+    assert!(
+        launch["handoff_label"]
+            .as_str()
+            .expect("handoff label")
+            .starts_with("moonbox/hermes-rewind-")
+    );
+    assert!(launch.get("target_branch").is_none());
     assert_eq!(launch["verification"]["ready"], true);
     assert_eq!(launch["target_command"]["program"], "hermes");
     let target_args = launch["target_command"]["args"]
@@ -732,6 +740,50 @@ fn open_launch_and_verify_public_cli_contracts_are_dry_run_by_default() {
     );
     assert_eq!(verify["ready"], true);
     assert_eq!(verify["status"], "pass");
+}
+
+#[test]
+fn launch_execute_blocks_real_builtin_draft_without_allow_draft() {
+    let test_name = "real-draft-execute-block";
+    let home = fixture_home(test_name);
+    let codex_home = home.join("codex");
+    let rollout_path = codex_home
+        .join("sessions")
+        .join("2026")
+        .join("06")
+        .join("06")
+        .join("rollout-2026-06-06T10-00-00-real-draft.jsonl");
+    fs::create_dir_all(rollout_path.parent().expect("rollout parent")).expect("codex sessions");
+    fs::write(
+        &rollout_path,
+        r#"{"timestamp":"2026-06-06T10:00:00Z","type":"session_meta","payload":{"id":"codex-real-draft","cwd":"/tmp/moonbox-real-draft","git":{"branch":"main"}}}
+{"timestamp":"2026-06-06T10:01:00Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Continue a real session safely"}]}}"#,
+    )
+    .expect("codex rollout");
+    write_codex_thread_index(
+        &codex_home,
+        &rollout_path,
+        "codex-real-draft",
+        "Real draft execute block",
+    );
+
+    let error = error_text(
+        moonbox_command(test_name)
+            .args([
+                "launch",
+                "--execute",
+                "--target",
+                "hermes",
+                "--session",
+                "codex-real-draft",
+            ])
+            .output()
+            .expect("launch execute"),
+    );
+
+    assert!(error.contains("built-in draft compiler"));
+    assert!(error.contains("--allow-draft"));
+    assert!(error.contains("non-fixture session"));
 }
 
 #[test]

@@ -42,7 +42,7 @@ and this project uses semantic versioning once tagged releases start.
 - Compiler catalog output through `moonbox compilers`, including source,
   status, score, command, arguments, timeout, and quality reason.
 - Hardened verification checks for Work Capsule version, required fields,
-  handoff context, risk context, capsule size, target branch markers, and
+  handoff context, risk context, capsule size, handoff label markers, and
   execute-time target command preflight.
 - Fixture-only replay evaluation through `moonbox replay-eval`, covering every
   Codex/Claude/Hermes source-target pair without scanning or opening local
@@ -131,6 +131,18 @@ and this project uses semantic versioning once tagged releases start.
 
 ### Changed
 
+- Work Capsule and launch plan JSON now emit `handoff_label` instead of the
+  misleading `target_branch` name, while still accepting legacy
+  `target_branch` capsule input for compatibility.
+- Text launch and verify output now labels verifier readiness as
+  `preflight_ready` and explicitly scopes it to structural preflight, not
+  semantic handoff correctness.
+- Real-session `launch --execute` now blocks built-in draft compiler handoffs
+  unless `--allow-draft` is explicitly passed; fixture sessions remain
+  executable for safe tests and demos.
+- README planning now tracks the accepted M68-M72 product design milestones:
+  handoff trail signature, session portraits, pre-flight pill, command
+  palette, and visual system polish.
 - Generated dry-run launch plans report `capsule_path: null` and do not emit
   fake `--capsule` paths.
 - Codex, Claude, and Hermes source discovery use real local stores when any

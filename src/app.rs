@@ -1481,14 +1481,16 @@ impl App {
         let verification =
             verifier::verify_capsule(&capsule, &session, &self.data.timeline, self.pending_target);
         let command = target_command.display.clone();
-        let target_branch = capsule.target_branch;
+        let compiler = capsule.compiler.clone();
+        let handoff_label = capsule.handoff_label;
         self.exit_action = Some(TuiExitAction::TargetHandoff(LaunchPlan {
             version: 1,
             action: SessionAction::TargetHandoff,
             dry_run: true,
             source_session: session,
             target_cli: self.pending_target,
-            target_branch,
+            compiler,
+            handoff_label,
             capsule_path: None,
             command,
             target_command,
@@ -1516,7 +1518,7 @@ impl App {
         workbench::moonbox_execute_command(self.pending_target, session, None)
     }
 
-    pub fn launch_branch(&self) -> String {
+    pub fn launch_handoff_label(&self) -> String {
         format!(
             "moonbox/{}-rewind-{}",
             self.pending_target.id(),
@@ -1567,14 +1569,14 @@ impl App {
     pub(crate) fn launch_capsule_for_target(&self, target: CliTool) -> WorkCapsule {
         let mut capsule = self.data.capsule.clone();
         capsule.target_cli = target;
-        capsule.target_branch = format!("moonbox/{}-rewind-{}", target.id(), self.rewind_event_id);
+        capsule.handoff_label = format!("moonbox/{}-rewind-{}", target.id(), self.rewind_event_id);
         capsule
     }
 
     fn apply_rewind_event(&mut self, id: String, title: String) {
         self.rewind_event_id = id.clone();
         self.data.capsule.rewind_point = format!("{id} / {title}");
-        self.data.capsule.target_branch = format!("moonbox/{}-rewind-{id}", self.data.target.id());
+        self.data.capsule.handoff_label = format!("moonbox/{}-rewind-{id}", self.data.target.id());
     }
 
     fn timeline_event_title(&self, id: &str) -> Option<String> {
@@ -1778,7 +1780,7 @@ mod tests {
         app.handle_key(key(' '));
         assert_eq!(app.rewind_event_id, "evt-001");
         assert!(app.data.capsule.rewind_point.contains("evt-001"));
-        assert!(app.data.capsule.target_branch.contains("evt-001"));
+        assert!(app.data.capsule.handoff_label.contains("evt-001"));
     }
 
     #[test]
@@ -2219,7 +2221,7 @@ mod tests {
         assert_eq!(app.data.source, CliTool::Codex);
         assert_eq!(app.data.capsule.source_cli, CliTool::Codex);
         assert_eq!(app.data.capsule.source_session, "codex-cxcp-design");
-        assert!(app.data.capsule.target_branch.contains("codex"));
+        assert!(app.data.capsule.handoff_label.contains("codex"));
         assert!(app.data.branches[2].label.contains("codex"));
     }
 
@@ -2243,7 +2245,7 @@ mod tests {
 
         assert_eq!(app.rewind_event_id, "evt-001");
         assert!(app.data.capsule.rewind_point.contains("evt-001"));
-        assert!(app.data.capsule.target_branch.contains("evt-001"));
+        assert!(app.data.capsule.handoff_label.contains("evt-001"));
     }
 
     #[test]

@@ -94,25 +94,25 @@ pub fn verify_capsule(
     ));
 
     checks.push(check(
-        "target_branch",
-        if capsule.target_branch.contains(capsule.target_cli.id())
-            && capsule.target_branch.contains(rewind_id)
+        "handoff_label",
+        if capsule.handoff_label.contains(capsule.target_cli.id())
+            && capsule.handoff_label.contains(rewind_id)
         {
             VerificationStatus::Pass
         } else {
             VerificationStatus::Fail
         },
-        format!("target branch {}", capsule.target_branch),
+        format!("handoff label {}", capsule.handoff_label),
     ));
 
     checks.push(check(
-        "target_branch_namespace",
-        if capsule.target_branch.starts_with("moonbox/") {
+        "handoff_label_namespace",
+        if capsule.handoff_label.starts_with("moonbox/") {
             VerificationStatus::Pass
         } else {
             VerificationStatus::Warn
         },
-        format!("target branch namespace {}", capsule.target_branch),
+        format!("handoff label namespace {}", capsule.handoff_label),
     ));
 
     checks.push(check(
@@ -265,7 +265,7 @@ fn missing_required_fields(capsule: &WorkCapsule) -> Vec<&'static str> {
         (capsule.source_session.trim().is_empty(), "source_session"),
         (capsule.rewind_point.trim().is_empty(), "rewind_point"),
         (capsule.compiler.trim().is_empty(), "compiler"),
-        (capsule.target_branch.trim().is_empty(), "target_branch"),
+        (capsule.handoff_label.trim().is_empty(), "handoff_label"),
         (capsule.goal.trim().is_empty(), "goal"),
         (capsule.state.trim().is_empty(), "state"),
     ]
@@ -657,7 +657,7 @@ mod tests {
     }
 
     #[test]
-    fn target_branch_without_rewind_fails() {
+    fn handoff_label_without_rewind_fails() {
         let data = data::workbench_data(CliTool::Codex, CliTool::Hermes).expect("data");
         let session = data
             .sessions
@@ -665,7 +665,7 @@ mod tests {
             .find(|session| session.id == data.capsule.source_session)
             .expect("source session");
         let mut capsule = data.capsule.clone();
-        capsule.target_branch = "moonbox/hermes-rewind-other".into();
+        capsule.handoff_label = "moonbox/hermes-rewind-other".into();
 
         let report = verify_capsule(&capsule, session, &data.timeline, CliTool::Hermes);
 
@@ -674,7 +674,7 @@ mod tests {
             report
                 .checks
                 .iter()
-                .any(|check| check.name == "target_branch"
+                .any(|check| check.name == "handoff_label"
                     && check.status == VerificationStatus::Fail)
         );
     }
