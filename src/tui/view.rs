@@ -627,6 +627,7 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
         let is_rewind = group.is_rewind(&app.rewind_event_id);
         let (label, color) = timeline_group_label(group, is_rewind, app.data.source);
         let accent = timeline_group_accent(color, is_rewind);
+        let marker_style = timeline_marker_style(active, selected, is_rewind);
         let marker = if active && is_rewind {
             "▶◆"
         } else if active {
@@ -665,6 +666,7 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
                 time: &time,
                 marker,
                 label: &label,
+                marker_style,
                 time_style,
                 label_style,
                 title_style,
@@ -677,9 +679,7 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
                 .fg(theme::TEXT)
                 .add_modifier(Modifier::BOLD)
         } else if is_rewind || group.kind() == TimelineKind::RewindPoint {
-            Style::default()
-                .fg(theme::GOLD)
-                .add_modifier(Modifier::BOLD)
+            Style::default().fg(theme::TEXT)
         } else {
             Style::default().fg(theme::MUTED)
         };
@@ -736,6 +736,7 @@ struct TimelineHeader<'a> {
     time: &'a str,
     marker: &'a str,
     label: &'a str,
+    marker_style: Style,
     time_style: Style,
     label_style: Style,
     title_style: Style,
@@ -746,6 +747,7 @@ fn timeline_header_line(header: TimelineHeader<'_>, area_width: u16) -> Line<'st
     let time = header.time;
     let marker = header.marker;
     let label = header.label;
+    let marker_style = header.marker_style;
     let time_style = header.time_style;
     let label_style = header.label_style;
     let title_style = header.title_style;
@@ -759,7 +761,7 @@ fn timeline_header_line(header: TimelineHeader<'_>, area_width: u16) -> Line<'st
         .saturating_sub(left_width + display_width(time))
         .max(1);
     let mut spans = vec![
-        Span::styled(format!("{marker} "), time_style),
+        Span::styled(format!("{marker} "), marker_style),
         Span::styled(format!(" {label} "), label_style),
     ];
     if let Some(title) = title {
@@ -786,6 +788,24 @@ fn timeline_group_accent(color: Color, is_rewind: bool) -> Color {
 fn timeline_prefix_style(active: bool, accent: Color) -> Style {
     if active {
         Style::default().fg(accent).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::MUTED)
+    }
+}
+
+fn timeline_marker_style(active: bool, selected: bool, is_rewind: bool) -> Style {
+    if active {
+        Style::default()
+            .fg(theme::CYAN)
+            .add_modifier(Modifier::BOLD)
+    } else if is_rewind {
+        Style::default()
+            .fg(theme::GOLD)
+            .add_modifier(Modifier::BOLD)
+    } else if selected {
+        Style::default()
+            .fg(theme::TEXT)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme::MUTED)
     }
@@ -2706,6 +2726,14 @@ mod tests {
         let selected_ai_prefix = timeline_prefix_style(true, theme::GOLD);
         assert_eq!(selected_ai_prefix.fg, Some(theme::GOLD));
         assert!(selected_ai_prefix.add_modifier.contains(Modifier::BOLD));
+
+        let active_cursor_marker = timeline_marker_style(true, true, false);
+        assert_eq!(active_cursor_marker.fg, Some(theme::CYAN));
+        assert!(active_cursor_marker.add_modifier.contains(Modifier::BOLD));
+
+        let inactive_rewind_marker = timeline_marker_style(false, false, true);
+        assert_eq!(inactive_rewind_marker.fg, Some(theme::GOLD));
+        assert!(inactive_rewind_marker.add_modifier.contains(Modifier::BOLD));
     }
 
     #[test]

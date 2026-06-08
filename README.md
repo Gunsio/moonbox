@@ -9,6 +9,8 @@ This repository is intentionally not a raw session copier. The source session
 is read-only. Compatibility and compression are delegated to replaceable
 compiler skills.
 
+## Screenshot
+
 ![Moonbox TUI screenshot](docs/assets/moonbox-tui.svg)
 
 ## Install
@@ -28,6 +30,14 @@ checkout, install the same two binaries with:
 
 ```bash
 cargo install --path . --locked
+```
+
+Verify the installed binary without reading real local sessions:
+
+```bash
+MOONBOX_SESSION_MODE=fixture moon sessions --json --filter codex
+MOONBOX_SESSION_MODE=fixture moon doctor --json
+moon completions zsh > /tmp/_moon
 ```
 
 If `moon --help` still says the session list "uses demo data", the global binary
@@ -272,6 +282,11 @@ The first implementation focuses on the product shell:
 - Draft Homebrew formula template plus fixture-safe Homebrew docs smoke coverage
 - Release artifact staging with source, Cargo crate, host binary archive,
   `SHA256SUMS`, and `release-manifest.json`, covered by fixture-safe smoke
+- Fixture-safe installed-binary smoke coverage through
+  `scripts/ci/install-smoke.sh`; it installs `moonbox` and `moon` into an
+  isolated root, then exercises installed session listing, Doctor diagnostics,
+  completion generation, and replay evaluation with source homes redirected
+  away from real local session stores
 - GitHub Actions CI for Rust quality gates, documentation build, fixture replay eval, fixture-safe CLI smoke, docs asset smoke, Homebrew docs smoke, package verification, release artifact smoke, and install smoke
 - Dependabot configuration for Cargo and GitHub Actions updates
 - Contributing, security, changelog, issue template, and PR template docs
@@ -724,13 +739,18 @@ Stable interfaces matter more than any single framework:
   grouped Source Health / Capsule Health / Target Readiness checks, and Codex
   renamed thread titles from `session_index.jsonl` override stale
   `state_5.sqlite` titles in CLI/TUI listings.
+- M53: release and distribution readiness; README installation verification now
+  includes fixture-safe installed `moon` checks, install smoke validates
+  installed session listing, Doctor diagnostics, completion generation, and
+  replay evaluation, release artifact/Homebrew docs gates remain wired into the
+  full quality gate, and Timeline cursor vs selected rewind markers are visually
+  distinct so the workbench does not appear to have two active rows.
 
 ### Remaining Milestones
 
-- M53: release and distribution readiness. Finalize README screenshots,
-  installation docs, install smoke, release archives, and the Homebrew tap plan.
-  Acceptance: a clean machine can install and run `moon`; Homebrew publication
-  stays gated until explicit approval.
+- No implementation milestone remains in this branch. Homebrew publication,
+  release tagging, and registry publication stay gated until explicit approval
+  after final validation.
 
 ### Can Build Now
 

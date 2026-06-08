@@ -52,8 +52,9 @@ and this project uses semantic versioning once tagged releases start.
 - Fixture-safe CLI smoke script for non-executing command surfaces, with source
   homes redirected away from real local session stores.
 - Fixture-safe install smoke script that verifies `cargo install --path`
-  produces working `moonbox` and `moon` executables, with source homes
-  redirected away from real local session stores.
+  produces working `moonbox` and `moon` executables, then exercises installed
+  session listing, Doctor diagnostics, completion generation, and replay
+  evaluation with source homes redirected away from real local session stores.
 - Fixture-safe integration tests for public CLI contracts across `moonbox` and
   `moon` binaries.
 - Documentation build gate with rustdoc warnings treated as errors.
@@ -235,6 +236,9 @@ and this project uses semantic versioning once tagged releases start.
 - Codex session titles now prefer `session_index.jsonl` `thread_name` values
   over stale `state_5.sqlite` titles, so renamed Codex threads are searchable
   and displayed the same way as the Codex resume picker.
+- Timeline cursor and selected rewind anchor markers now use separate visual
+  treatment, so the active row and the saved rewind point no longer both look
+  like the current selection.
 - Handoff Review readiness output is grouped into Source Health, Capsule
   Health, and Target Readiness sections, with the full target prompt available
   from the review panel before launch.

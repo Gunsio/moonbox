@@ -31,6 +31,9 @@ xmllint --noout "$svg"
 grep -Fq '![Moonbox TUI screenshot](docs/assets/moonbox-tui.svg)' README.md
 grep -Fq 'cargo install --git https://github.com/Gunsio/moonbox' README.md
 grep -Fq 'cargo install --path . --locked' README.md
+grep -Fq 'MOONBOX_SESSION_MODE=fixture moon sessions --json --filter codex' README.md
+grep -Fq 'MOONBOX_SESSION_MODE=fixture moon doctor --json' README.md
+grep -Fq 'moon completions zsh > /tmp/_moon' README.md
 grep -Fq 'brew tap Gunsio/tap' README.md
 grep -Fq 'Homebrew distribution is planned, but not published yet.' README.md
 
