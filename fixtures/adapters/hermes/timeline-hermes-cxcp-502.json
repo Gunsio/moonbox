@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "source_cli": "hermes",
+  "source_session": "hermes-cxcp-502",
+  "events": [
+    {
+      "id": "evt-001",
+      "time": "18:04",
+      "kind": "user",
+      "title": "User",
+      "detail": "Investigate why copied Codex sessions return 502 after Hermes resume."
+    },
+    {
+      "id": "evt-013",
+      "time": "18:11",
+      "kind": "tool",
+      "title": "Tool: sqlite",
+      "detail": "Inspected copied session rows and rollout JSONL metadata."
+    },
+    {
+      "id": "evt-029",
+      "time": "18:28",
+      "kind": "error",
+      "title": "Error",
+      "detail": "Hermes resume rejected provider/session mismatch and returned 502."
+    },
+    {
+      "id": "evt-044",
+      "time": "18:43",
+      "kind": "compact",
+      "title": "Compact",
+      "detail": "Captured root cause: raw DB copy skips hidden provider state."
+    },
+    {
+      "id": "evt-052",
+      "time": "18:55",
+      "kind": "rewind_point",
+      "title": "Rewind Point",
+      "detail": "Before retrying raw resume. Compile Work Capsule instead."
+    }
+  ]
+}

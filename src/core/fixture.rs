@@ -1,0 +1,174 @@
+use serde::Deserialize;
+
+use super::{
+    adapter::{AdapterError, SourceAdapter},
+    model::{CanonicalTimeline, CliTool, SessionSummary, SourceProvenance},
+};
+
+#[derive(Debug, Deserialize)]
+struct SessionsFixture {
+    sessions: Vec<SessionSummary>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FixtureSet {
+    tool: CliTool,
+    sessions_path: &'static str,
+    sessions_json: &'static str,
+    timelines: &'static [TimelineFixture],
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TimelineFixture {
+    path: &'static str,
+    json: &'static str,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct FixtureSourceAdapter {
+    fixture: FixtureSet,
+}
+
+impl FixtureSourceAdapter {
+    pub fn new(tool: CliTool) -> Self {
+        Self {
+            fixture: fixture_for_tool(tool),
+        }
+    }
+
+    fn parse_sessions(&self) -> Result<Vec<SessionSummary>, AdapterError> {
+        serde_json::from_str::<SessionsFixture>(self.fixture.sessions_json)
+            .map(|fixture| {
+                fixture
+                    .sessions
+                    .into_iter()
+                    .map(|mut session| {
+                        session.source_provenance = SourceProvenance::Fixture;
+                        session.source_path = Some(self.fixture.sessions_path.into());
+                        session.parse_skip_count = 0;
+                        session
+                    })
+                    .collect()
+            })
+            .map_err(|error| AdapterError::InvalidFixture {
+                tool: self.fixture.tool,
+                path: self.fixture.sessions_path.into(),
+                reason: error.to_string(),
+            })
+    }
+
+    fn parse_timeline(&self, fixture: TimelineFixture) -> Result<CanonicalTimeline, AdapterError> {
+        serde_json::from_str::<CanonicalTimeline>(fixture.json).map_err(|error| {
+            AdapterError::InvalidFixture {
+                tool: self.fixture.tool,
+                path: fixture.path.into(),
+                reason: error.to_string(),
+            }
+        })
+    }
+}
+
+impl SourceAdapter for FixtureSourceAdapter {
+    fn tool(&self) -> CliTool {
+        self.fixture.tool
+    }
+
+    fn provenance(&self) -> SourceProvenance {
+        SourceProvenance::Fixture
+    }
+
+    fn store_path(&self) -> Option<String> {
+        Some(self.fixture.sessions_path.into())
+    }
+
+    fn list_sessions(&self) -> Result<Vec<SessionSummary>, AdapterError> {
+        self.parse_sessions()
+    }
+
+    fn load_timeline(&self, session_id: &str) -> Result<CanonicalTimeline, AdapterError> {
+        for fixture in self.fixture.timelines {
+            let timeline = self.parse_timeline(*fixture)?;
+            if timeline.source_session == session_id {
+                return Ok(timeline);
+            }
+        }
+        Err(AdapterError::SessionNotFound {
+            tool: self.fixture.tool,
+            session_id: session_id.into(),
+        })
+    }
+}
+
+const CODEX_TIMELINES: [TimelineFixture; 1] = [TimelineFixture {
+    path: "fixtures/adapters/codex/timeline-codex-cxcp-design.json",
+    json: include_str!("../../fixtures/adapters/codex/timeline-codex-cxcp-design.json"),
+}];
+
+const CLAUDE_TIMELINES: [TimelineFixture; 1] = [TimelineFixture {
+    path: "fixtures/adapters/claude/timeline-claude-qc-platform.json",
+    json: include_str!("../../fixtures/adapters/claude/timeline-claude-qc-platform.json"),
+}];
+
+const HERMES_TIMELINES: [TimelineFixture; 1] = [TimelineFixture {
+    path: "fixtures/adapters/hermes/timeline-hermes-cxcp-502.json",
+    json: include_str!("../../fixtures/adapters/hermes/timeline-hermes-cxcp-502.json"),
+}];
+
+fn fixture_for_tool(tool: CliTool) -> FixtureSet {
+    match tool {
+        CliTool::Codex => FixtureSet {
+            tool,
+            sessions_path: "fixtures/adapters/codex/sessions.json",
+            sessions_json: include_str!("../../fixtures/adapters/codex/sessions.json"),
+            timelines: &CODEX_TIMELINES,
+        },
+        CliTool::Claude => FixtureSet {
+            tool,
+            sessions_path: "fixtures/adapters/claude/sessions.json",
+            sessions_json: include_str!("../../fixtures/adapters/claude/sessions.json"),
+            timelines: &CLAUDE_TIMELINES,
+        },
+        CliTool::Hermes => FixtureSet {
+            tool,
+            sessions_path: "fixtures/adapters/hermes/sessions.json",
+            sessions_json: include_str!("../../fixtures/adapters/hermes/sessions.json"),
+            timelines: &HERMES_TIMELINES,
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_session_fixture_for_each_source() {
+        for tool in CliTool::ALL {
+            let adapter = FixtureSourceAdapter::new(tool);
+            let sessions = adapter.list_sessions().expect("sessions");
+
+            assert_eq!(sessions.len(), 1);
+            assert_eq!(sessions[0].cli, tool);
+            assert!(sessions[0].event_count > 0);
+        }
+    }
+
+    #[test]
+    fn parses_timeline_fixture_for_each_session() {
+        for tool in CliTool::ALL {
+            let adapter = FixtureSourceAdapter::new(tool);
+            let session = adapter.list_sessions().expect("sessions").remove(0);
+            let timeline = adapter.load_timeline(&session.id).expect("timeline");
+
+            assert_eq!(timeline.source_cli, tool);
+            assert_eq!(timeline.source_session, session.id);
+            assert!(!timeline.events.is_empty());
+            assert!(
+                timeline
+                    .events
+                    .iter()
+                    .any(|event| event.id.starts_with("evt-"))
+            );
+        }
+    }
+}

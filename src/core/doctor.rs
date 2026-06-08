@@ -1,0 +1,316 @@
+use std::{env, fs, path::Path};
+
+use super::{
+    compiler, config, launcher,
+    model::{
+        CliTool, CompilerPresetStatus, DoctorReport, SessionSummary, SourceAdapterReport,
+        VerificationCheck, VerificationStatus,
+    },
+    sources,
+};
+
+pub fn diagnose() -> DoctorReport {
+    let mut checks = Vec::new();
+    checks.push(config_check());
+    checks.push(session_mode_check());
+    let source_adapters = match sources::source_inventory() {
+        Ok(inventory) => {
+            checks.extend(inventory.adapter_reports.iter().map(source_adapter_check));
+            checks.push(session_summaries_check(&inventory.sessions));
+            inventory.adapter_reports
+        }
+        Err(error) => {
+            checks.push(check(
+                "source_adapters",
+                VerificationStatus::Fail,
+                format!("cannot inspect source adapters: {error}"),
+            ));
+            checks.push(check(
+                "session_discovery",
+                VerificationStatus::Fail,
+                format!("cannot list session summaries: {error}"),
+            ));
+            Vec::new()
+        }
+    };
+    checks.extend(CliTool::ALL.into_iter().map(target_binary_check));
+    checks.push(compiler_catalog_check());
+
+    report(checks, source_adapters)
+}
+
+pub fn diagnose_with_inventory(
+    sessions: &[SessionSummary],
+    source_adapters: &[SourceAdapterReport],
+) -> DoctorReport {
+    let mut checks = Vec::new();
+    checks.push(config_check());
+    checks.push(session_mode_check());
+    checks.extend(source_adapters.iter().map(source_adapter_check));
+    checks.push(session_summaries_check(sessions));
+    checks.extend(CliTool::ALL.into_iter().map(target_binary_check));
+    checks.push(compiler_catalog_check());
+
+    report(checks, source_adapters.to_vec())
+}
+
+fn report(
+    checks: Vec<VerificationCheck>,
+    source_adapters: Vec<SourceAdapterReport>,
+) -> DoctorReport {
+    let status = overall_status(&checks);
+    DoctorReport {
+        version: 1,
+        status,
+        ready: status != VerificationStatus::Fail,
+        source_adapters,
+        checks,
+    }
+}
+
+fn session_mode_check() -> VerificationCheck {
+    let state = sources::session_mode_state();
+    if !state.valid {
+        return check(
+            "session_mode",
+            VerificationStatus::Warn,
+            format!(
+                "{}={} is invalid; falling back to auto real-session discovery",
+                sources::SESSION_MODE_ENV,
+                state.raw.unwrap_or_default()
+            ),
+        );
+    }
+
+    match state.mode {
+        sources::SessionMode::Auto => check(
+            "session_mode",
+            VerificationStatus::Pass,
+            format!(
+                "{}=auto; real source stores are used when present",
+                sources::SESSION_MODE_ENV
+            ),
+        ),
+        sources::SessionMode::Fixture => check(
+            "session_mode",
+            VerificationStatus::Pass,
+            format!(
+                "{}=fixture; real source stores are disabled",
+                sources::SESSION_MODE_ENV
+            ),
+        ),
+    }
+}
+
+fn config_check() -> VerificationCheck {
+    let Some(path) = config::config_path() else {
+        return check(
+            "config_file",
+            VerificationStatus::Fail,
+            "HOME is not available and MOONBOX_CONFIG is not set",
+        );
+    };
+    let display = path.display().to_string();
+    if !path.exists() {
+        return check(
+            "config_file",
+            VerificationStatus::Pass,
+            format!("{display} is absent; built-in defaults will be used"),
+        );
+    }
+    match fs::read_to_string(&path) {
+        Ok(_) => match config::validate_config_file_at(&path) {
+            Ok(_) => check(
+                "config_file",
+                VerificationStatus::Pass,
+                format!("{display} is readable Moonbox config"),
+            ),
+            Err(error) => check(
+                "config_file",
+                VerificationStatus::Fail,
+                format!("{display} is not a valid Moonbox config: {error}"),
+            ),
+        },
+        Err(error) => check(
+            "config_file",
+            VerificationStatus::Fail,
+            format!("{display} cannot be read: {error}"),
+        ),
+    }
+}
+
+fn source_adapter_check(report: &SourceAdapterReport) -> VerificationCheck {
+    let status = if !report.active
+        || report.session_count == 0
+        || report.skipped_record_count > 0
+        || report.scan_truncated
+    {
+        VerificationStatus::Warn
+    } else {
+        VerificationStatus::Pass
+    };
+    let path = report.store_path.as_deref().unwrap_or("-");
+    let last = report.last_indexed_at.as_deref().unwrap_or("-");
+    let list_limit = report
+        .list_limit
+        .map(|limit| limit.to_string())
+        .unwrap_or_else(|| "unlimited".into());
+    let scan_limit = report
+        .scan_entry_limit
+        .map(|limit| limit.to_string())
+        .unwrap_or_else(|| "unlimited".into());
+    let summary_limit = report
+        .summary_line_limit
+        .map(|limit| limit.to_string())
+        .unwrap_or_else(|| "unlimited".into());
+    check(
+        format!("source_{}_adapter", report.cli.id()),
+        status,
+        format!(
+            "{} {}; active={}; filter={}; path={path}; sessions={}; skipped={}; last={last}; list_limit={list_limit}; scan_entries={}; scan_limit={scan_limit}; summary_line_limit={summary_limit}; scan_truncated={}; {}",
+            report.cli,
+            report.provenance,
+            report.active,
+            report.filter_status,
+            report.session_count,
+            report.skipped_record_count,
+            report.scan_entry_count,
+            report.scan_truncated,
+            report.reason
+        ),
+    )
+}
+
+fn session_summaries_check(sessions: &[SessionSummary]) -> VerificationCheck {
+    if sessions.is_empty() {
+        return check(
+            "session_discovery",
+            VerificationStatus::Warn,
+            "no sessions discovered from configured source homes",
+        );
+    }
+
+    let codex = sessions
+        .iter()
+        .filter(|session| session.cli == CliTool::Codex)
+        .count();
+    let claude = sessions
+        .iter()
+        .filter(|session| session.cli == CliTool::Claude)
+        .count();
+    let hermes = sessions
+        .iter()
+        .filter(|session| session.cli == CliTool::Hermes)
+        .count();
+    check(
+        "session_discovery",
+        VerificationStatus::Pass,
+        format!(
+            "{} session summaries discovered; codex={codex}, claude={claude}, hermes={hermes}",
+            sessions.len()
+        ),
+    )
+}
+
+fn target_binary_check(target: CliTool) -> VerificationCheck {
+    let program = launcher::configured_target_binary(target);
+    let name = format!("target_{}_binary", target.id());
+    if command_available(&program) {
+        check(
+            name,
+            VerificationStatus::Pass,
+            format!("{target} target resolves to {program}"),
+        )
+    } else {
+        check(
+            name,
+            VerificationStatus::Warn,
+            format!("{target} target binary is not on PATH: {program}"),
+        )
+    }
+}
+
+fn compiler_catalog_check() -> VerificationCheck {
+    let compilers = compiler::compiler_catalog_entries();
+    let active = compilers
+        .iter()
+        .filter(|compiler| compiler.status != CompilerPresetStatus::Disabled)
+        .count();
+    if active == 0 {
+        return check(
+            "compiler_catalog",
+            VerificationStatus::Fail,
+            "no enabled capsule compiler presets are available",
+        );
+    }
+
+    let default = compiler::default_compiler_id();
+    let warning = compilers
+        .iter()
+        .filter(|compiler| compiler.status == CompilerPresetStatus::Warning)
+        .count();
+    let disabled = compilers.len().saturating_sub(active);
+    check(
+        "compiler_catalog",
+        VerificationStatus::Pass,
+        format!("default={default}; active={active}; warning={warning}; disabled={disabled}"),
+    )
+}
+
+fn command_available(program: &str) -> bool {
+    let program = program.trim();
+    if program.is_empty() {
+        return false;
+    }
+
+    let path = Path::new(program);
+    if path.components().count() > 1 {
+        return path.is_file();
+    }
+
+    env::var_os("PATH")
+        .map(|path| env::split_paths(&path).any(|directory| directory.join(program).is_file()))
+        .unwrap_or(false)
+}
+
+fn overall_status(checks: &[VerificationCheck]) -> VerificationStatus {
+    if checks
+        .iter()
+        .any(|check| check.status == VerificationStatus::Fail)
+    {
+        return VerificationStatus::Fail;
+    }
+    if checks
+        .iter()
+        .any(|check| check.status == VerificationStatus::Warn)
+    {
+        return VerificationStatus::Warn;
+    }
+    VerificationStatus::Pass
+}
+
+fn check(
+    name: impl Into<String>,
+    status: VerificationStatus,
+    detail: impl Into<String>,
+) -> VerificationCheck {
+    VerificationCheck {
+        name: name.into(),
+        status,
+        detail: detail.into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn report_warns_when_target_binary_is_missing_but_stays_ready() {
+        let check = target_binary_check(CliTool::Codex);
+
+        if !command_available(&launcher::configured_target_binary(CliTool::Codex)) {
+            assert_eq!(check.status, VerificationStatus::Warn);
+        }
+    }
+}

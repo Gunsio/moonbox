@@ -1,0 +1,18 @@
+{
+  "sessions": [
+    {
+      "id": "hermes-cxcp-502",
+      "cli": "hermes",
+      "title": "cxcp 502 resume failure",
+      "cwd": "~/.codex",
+      "updated_at": "2026-06-04T18:00:00+08:00",
+      "updated": "failed yesterday",
+      "status": "failed",
+      "branch": "cxcp/raw-copy",
+      "token_count": 58000,
+      "health_reason": "502 after raw resume",
+      "event_count": 61,
+      "resume_command": "hermes --resume hermes-cxcp-502"
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+## Summary
+
+Describe the change and why it matters.
+
+## Behavior Changes
+
+- 
+
+## Verification
+
+- [ ] `scripts/ci/full-gate.sh`
+- [ ] `git diff --check`
+- [ ] `scripts/ci/supply-chain.sh`
+- [ ] `cargo fmt --check`
+- [ ] `cargo check --locked`
+- [ ] `cargo test --locked`
+- [ ] `RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps`
+- [ ] `cargo run --locked -- replay-eval --json`
+- [ ] `scripts/ci/cli-smoke.sh`
+- [ ] `scripts/ci/homebrew-docs-smoke.sh`
+- [ ] `cargo clippy --locked -- -D warnings`
+- [ ] `cargo build --release --locked`
+- [ ] `scripts/ci/package-hygiene.sh`
+- [ ] `cargo package --locked`
+- [ ] `scripts/ci/release-artifacts-smoke.sh`
+- [ ] `scripts/ci/install-smoke.sh`
+
+## Documentation
+
+- [ ] README updated, or not needed.
+- [ ] Feishu plan updated, or not needed.
+- [ ] Release/Homebrew docs updated, or not needed.
+
+## Notes
+
+Known gaps, follow-ups, or review focus.

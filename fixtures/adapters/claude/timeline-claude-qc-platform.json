@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "source_cli": "claude",
+  "source_session": "claude-qc-platform",
+  "events": [
+    {
+      "id": "evt-001",
+      "time": "15:02",
+      "kind": "user",
+      "title": "User",
+      "detail": "Repair trace propagation across the QC platform gateway."
+    },
+    {
+      "id": "evt-018",
+      "time": "15:09",
+      "kind": "tool",
+      "title": "Tool: rg",
+      "detail": "Found missing request_id forwarding in gateway middleware."
+    },
+    {
+      "id": "evt-041",
+      "time": "15:21",
+      "kind": "assistant",
+      "title": "Assistant",
+      "detail": "Prepared trace header patch and marked health as warning pending staging verification."
+    },
+    {
+      "id": "evt-059",
+      "time": "15:37",
+      "kind": "git_diff",
+      "title": "Git Diff",
+      "detail": "+ gateway trace propagation, + request_id fallback."
+    },
+    {
+      "id": "evt-074",
+      "time": "15:48",
+      "kind": "rewind_point",
+      "title": "Rewind Point",
+      "detail": "Before staging verification. Compile continuation for Codex."
+    }
+  ]
+}

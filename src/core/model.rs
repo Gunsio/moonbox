@@ -51,6 +51,25 @@ pub enum SessionStatus {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceProvenance {
+    Real,
+    #[default]
+    Fixture,
+    Missing,
+}
+
+impl Display for SourceProvenance {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Real => f.write_str("real"),
+            Self::Fixture => f.write_str("fixture"),
+            Self::Missing => f.write_str("missing"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionSummary {
     pub id: String,
@@ -60,8 +79,17 @@ pub struct SessionSummary {
     pub updated_at: String,
     pub updated: String,
     pub status: SessionStatus,
+    pub branch: Option<String>,
+    pub token_count: Option<usize>,
+    pub health_reason: Option<String>,
     pub event_count: usize,
     pub resume_command: String,
+    #[serde(default)]
+    pub source_provenance: SourceProvenance,
+    #[serde(default)]
+    pub source_path: Option<String>,
+    #[serde(default)]
+    pub parse_skip_count: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -117,12 +145,241 @@ pub struct BranchNode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DemoData {
+pub struct WorkbenchData {
     pub source: CliTool,
     pub target: CliTool,
+    pub source_adapters: Vec<SourceAdapterReport>,
     pub sessions: Vec<SessionSummary>,
     pub timeline: Vec<TimelineEvent>,
     pub capsule: WorkCapsule,
     pub branches: Vec<BranchNode>,
     pub compilers: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CanonicalTimeline {
+    pub version: u16,
+    pub source_cli: CliTool,
+    pub source_session: String,
+    pub events: Vec<TimelineEvent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapsuleCompileRequest {
+    pub version: u16,
+    pub source_cli: CliTool,
+    pub target_cli: CliTool,
+    pub source_session: SessionSummary,
+    pub rewind_event_id: String,
+    pub token_budget: usize,
+    pub compiler: String,
+    pub timeline: CanonicalTimeline,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapsuleCompileOutput {
+    pub version: u16,
+    pub capsule: WorkCapsule,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VerificationStatus {
+    Pass,
+    Warn,
+    Fail,
+}
+
+impl Display for VerificationStatus {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VerificationStatus::Pass => f.write_str("PASS"),
+            VerificationStatus::Warn => f.write_str("WARN"),
+            VerificationStatus::Fail => f.write_str("FAIL"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerificationCheck {
+    pub name: String,
+    pub status: VerificationStatus,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerificationReport {
+    pub version: u16,
+    pub status: VerificationStatus,
+    pub ready: bool,
+    pub checks: Vec<VerificationCheck>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DoctorReport {
+    pub version: u16,
+    pub status: VerificationStatus,
+    pub ready: bool,
+    pub source_adapters: Vec<SourceAdapterReport>,
+    pub checks: Vec<VerificationCheck>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceAdapterReport {
+    pub cli: CliTool,
+    pub provenance: SourceProvenance,
+    pub active: bool,
+    pub store_path: Option<String>,
+    pub session_count: usize,
+    pub skipped_record_count: usize,
+    pub last_indexed_at: Option<String>,
+    pub filter_status: String,
+    pub reason: String,
+    #[serde(default)]
+    pub list_limit: Option<usize>,
+    #[serde(default)]
+    pub scan_entry_limit: Option<usize>,
+    #[serde(default)]
+    pub summary_line_limit: Option<usize>,
+    #[serde(default)]
+    pub scan_entry_count: usize,
+    #[serde(default)]
+    pub scan_truncated: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LaunchValidationState {
+    Ready,
+    Warning,
+    Blocked,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LaunchValidation {
+    pub state: LaunchValidationState,
+    pub reasons: Vec<String>,
+}
+
+impl LaunchValidation {
+    pub fn ready() -> Self {
+        Self {
+            state: LaunchValidationState::Ready,
+            reasons: vec!["Ready".into()],
+        }
+    }
+
+    pub fn warning(reasons: Vec<String>) -> Self {
+        Self {
+            state: LaunchValidationState::Warning,
+            reasons,
+        }
+    }
+
+    pub fn blocked(reasons: Vec<String>) -> Self {
+        Self {
+            state: LaunchValidationState::Blocked,
+            reasons,
+        }
+    }
+
+    pub fn summary(&self) -> String {
+        self.reasons.join("; ")
+    }
+
+    pub fn is_blocked(&self) -> bool {
+        self.state == LaunchValidationState::Blocked
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionAction {
+    OriginalResume,
+    TargetHandoff,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LaunchPlan {
+    pub version: u16,
+    pub action: SessionAction,
+    pub dry_run: bool,
+    pub source_session: SessionSummary,
+    pub target_cli: CliTool,
+    pub target_branch: String,
+    pub capsule_path: Option<String>,
+    pub command: String,
+    pub target_command: TargetLaunchCommand,
+    pub verification: VerificationReport,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TargetLaunchCommand {
+    pub program: String,
+    pub args: Vec<String>,
+    pub cwd: Option<String>,
+    pub display: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LaunchExecutionStatus {
+    Success,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LaunchExecution {
+    pub version: u16,
+    pub status: LaunchExecutionStatus,
+    pub exit_code: Option<i32>,
+    pub plan: LaunchPlan,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OriginalSessionPlan {
+    pub version: u16,
+    pub action: SessionAction,
+    pub dry_run: bool,
+    pub source_session: SessionSummary,
+    pub command: TargetLaunchCommand,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OriginalSessionExecution {
+    pub version: u16,
+    pub status: LaunchExecutionStatus,
+    pub exit_code: Option<i32>,
+    pub plan: OriginalSessionPlan,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompilerPresetKind {
+    Builtin,
+    Environment,
+    Config,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompilerPresetStatus {
+    Ready,
+    Warning,
+    Disabled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompilerPresetInfo {
+    pub id: String,
+    pub kind: CompilerPresetKind,
+    pub status: CompilerPresetStatus,
+    pub score: u8,
+    pub command: Option<String>,
+    pub args: Vec<String>,
+    pub timeout_ms: Option<u64>,
+    pub reason: String,
+    pub description: Option<String>,
+    pub homepage: Option<String>,
+    pub github_stars: Option<u64>,
 }

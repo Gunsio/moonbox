@@ -1,3 +1,5 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -10,7 +12,12 @@ use ratatui::{
 
 use crate::{
     app::{App, Focus},
-    core::model::{CliTool, SessionStatus, TimelineKind},
+    core::compiler,
+    core::model::{
+        CliTool, CompilerPresetInfo, CompilerPresetKind, CompilerPresetStatus,
+        LaunchValidationState, SessionStatus, SourceProvenance, TimelineEvent, TimelineKind,
+        VerificationReport, VerificationStatus, WorkCapsule,
+    },
 };
 
 use super::theme;
@@ -24,9 +31,24 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     let root = centered(area, 98, 96);
     let header_height = if root.width < 120 { 4 } else { 3 };
-    let body_min = if root.height < 32 { 8 } else { 18 };
-    let branch_height = if root.height < 32 { 3 } else { 4 };
     let command_height = if root.width < 120 { 5 } else { 3 };
+    let zoomed_action_path = app.zoomed_focus == Some(Focus::Branches);
+    let branch_height = if zoomed_action_path {
+        root.height
+            .saturating_sub(header_height + command_height + 8)
+            .max(8)
+    } else if root.height < 32 {
+        3
+    } else {
+        4
+    };
+    let body_min = if zoomed_action_path {
+        6
+    } else if root.height < 32 {
+        8
+    } else {
+        18
+    };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -43,7 +65,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     render_command_bar(frame, chunks[3], app);
 
     if app.show_help {
-        render_help(frame, root);
+        render_help(frame, root, app);
     }
     if app.show_launch {
         render_launch(frame, root, app);
@@ -51,9 +73,55 @@ pub fn render(frame: &mut Frame, app: &App) {
     if app.show_open_original {
         render_open_original(frame, root, app);
     }
-    if app.show_diff {
-        render_diff(frame, root);
+    if app.show_doctor {
+        render_doctor(frame, root, app);
     }
+    if app.show_skill_picker {
+        render_skill_picker(frame, root, app);
+    }
+}
+
+pub fn render_loading(frame: &mut Frame, tick: usize) {
+    let area = frame.area();
+    frame.render_widget(
+        Block::default().style(Style::default().fg(theme::TEXT)),
+        area,
+    );
+    let root = centered(area, 52, 32);
+    let spinner = ["|", "/", "-", "\\"][tick % 4];
+    let lines = vec![
+        Line::from(vec![
+            Span::styled(
+                " MOONBOX ",
+                Style::default()
+                    .fg(theme::TEXT)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("月光宝盒", Style::default().fg(theme::MUTED)),
+        ]),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled(spinner, Style::default().fg(theme::GOLD)),
+            Span::raw(" indexing source sessions"),
+        ]),
+        Line::from(vec![
+            Span::raw("   bounded scan "),
+            Span::styled("active", Style::default().fg(theme::GREEN)),
+        ]),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled("q", Style::default().fg(theme::BLUE)),
+            Span::raw(" quit   "),
+            Span::styled("ctrl-c", Style::default().fg(theme::BLUE)),
+            Span::raw(" quit"),
+        ]),
+    ];
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(panel_block(" Loading ", true))
+            .alignment(Alignment::Left),
+        root,
+    );
 }
 
 fn render_header(frame: &mut Frame, area: Rect, app: &App) {
@@ -87,9 +155,16 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
                 .fg(theme::BLUE)
                 .add_modifier(Modifier::BOLD),
         ),
+        Span::raw("   Data: "),
+        Span::styled(
+            app.current_data_space().label.clone(),
+            Style::default()
+                .fg(theme::CYAN)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("   Compiler: "),
         Span::styled(
-            app.compile_status,
+            compile_status_label(app.compile_status),
             Style::default()
                 .fg(theme::GREEN)
                 .add_modifier(Modifier::BOLD),
@@ -97,12 +172,23 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
         Span::raw("   Skill: "),
         Span::styled(&app.data.capsule.compiler, Style::default().fg(theme::CYAN)),
     ]);
+    let token_budget = app
+        .current_session()
+        .map(|session| format_token_count(session.token_count))
+        .unwrap_or_else(|| "-".into());
     let budget = Line::from(vec![
         Span::raw("Tokens: "),
         Span::styled(
-            "42K / 100K",
+            token_budget,
             Style::default()
                 .fg(theme::GOLD)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("   Doctor: "),
+        Span::styled(
+            app.doctor_report.status.to_string(),
+            Style::default()
+                .fg(verification_color(app.doctor_report.status))
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw("   Verify: "),
@@ -138,6 +224,27 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_body(frame: &mut Frame, area: Rect, app: &App) {
+    if let Some(focus) = app.zoomed_focus {
+        match focus {
+            Focus::Sessions => render_sessions(frame, area, app),
+            Focus::Timeline => render_timeline(frame, area, app),
+            Focus::Capsule => render_capsule(frame, area, app),
+            Focus::Branches => {
+                let cols = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([
+                        Constraint::Percentage(25),
+                        Constraint::Percentage(45),
+                        Constraint::Percentage(30),
+                    ])
+                    .split(area);
+                render_sessions(frame, cols[0], app);
+                render_timeline(frame, cols[1], app);
+                render_capsule(frame, cols[2], app);
+            }
+        }
+        return;
+    }
     let cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -154,6 +261,10 @@ fn render_body(frame: &mut Frame, area: Rect, app: &App) {
 
 fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
     let visible = app.visible_session_indices();
+    let selected = visible
+        .iter()
+        .position(|index| *index == app.selected_session)
+        .unwrap_or(0);
     let items: Vec<ListItem> = if visible.is_empty() {
         let mut lines = vec![
             Line::from(Span::styled(
@@ -180,78 +291,282 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
         )));
         vec![ListItem::new(lines)]
     } else {
-        visible
+        let (start, end) = session_list_window(visible.len(), selected, area.height);
+        visible[start..end]
             .iter()
             .map(|index| {
                 let session = &app.data.sessions[*index];
-                let status = match session.status {
-                    SessionStatus::Healthy => Span::styled("●", Style::default().fg(theme::GREEN)),
-                    SessionStatus::Warning => Span::styled("▲", Style::default().fg(theme::GOLD)),
-                    SessionStatus::Failed => Span::styled(
-                        "!",
-                        Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
-                    ),
+                let selected_row = *index == app.selected_session;
+                let selector = if selected_row {
+                    Span::styled(
+                        "▸",
+                        Style::default()
+                            .fg(theme::TEXT)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    Span::raw(" ")
                 };
+                let marker = session_row_marker(session, app.is_session_starred(session));
+                let mut title_spans = vec![selector, Span::raw(" ")];
+                if let Some(marker) = marker {
+                    title_spans.push(marker);
+                    title_spans.push(Span::raw(" "));
+                }
+                title_spans.extend([
+                    Span::styled(source_pill(session.cli), source_tool_style(session.cli)),
+                    Span::raw("  "),
+                    Span::styled(&session.title, session_title_style(selected_row)),
+                ]);
                 ListItem::new(vec![
-                    Line::from(vec![
-                        status,
-                        Span::raw(" "),
-                        Span::styled(
-                            format!("[{}] ", session.cli),
-                            Style::default()
-                                .fg(theme::CYAN)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled(
-                            &session.title,
-                            Style::default()
-                                .fg(theme::TEXT)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                    ]),
+                    Line::from(title_spans),
                     Line::from(vec![Span::styled(
-                        format!("  {}", session.cwd),
+                        session_list_secondary(session),
                         Style::default().fg(theme::MUTED),
                     )]),
-                    Line::from(vec![
-                        Span::styled(
-                            format!("  {}  ", session.updated),
-                            Style::default().fg(theme::BLUE),
-                        ),
-                        Span::styled(
-                            format!("{} events", session.event_count),
-                            Style::default().fg(theme::MUTED),
-                        ),
-                    ]),
                 ])
             })
             .collect()
     };
 
     let mut state = ListState::default();
-    let selected = visible
-        .iter()
-        .position(|index| *index == app.selected_session)
-        .unwrap_or(0);
-    state.select((!visible.is_empty()).then_some(selected));
+    if !visible.is_empty() {
+        let (start, _) = session_list_window(visible.len(), selected, area.height);
+        state.select(Some(selected.saturating_sub(start)));
+    }
 
     let title = if app.search_query.is_empty() {
-        format!(" Sessions · {} ", app.session_filter.label())
+        stable_panel_title(
+            format!(
+                "Sessions · {} {}",
+                app.session_filter.label(),
+                session_position_label(visible.len(), selected)
+            ),
+            area,
+        )
     } else if area.width < 28 {
-        format!(" Sessions /{} ", app.search_query)
+        stable_panel_title(format!("Sessions /{}", app.search_query), area)
     } else {
-        format!(" Sessions · {} ", filter_label(app))
+        stable_panel_title(
+            format!(
+                "Sessions · {} {}",
+                filter_label(app),
+                session_position_label(visible.len(), selected)
+            ),
+            area,
+        )
     };
 
     let list = List::new(items)
         .block(dynamic_panel_block(title, app.focus == Focus::Sessions))
-        .highlight_symbol("▸ ")
+        .highlight_symbol("")
         .highlight_style(
             Style::default()
                 .fg(theme::TEXT)
                 .add_modifier(Modifier::BOLD),
         );
     frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn compile_status_label(status: &str) -> String {
+    format!("{status:<8}")
+}
+
+fn session_title_style(selected: bool) -> Style {
+    if selected {
+        Style::default()
+            .fg(theme::TEXT)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::MUTED)
+    }
+}
+
+fn session_row_marker(
+    session: &crate::core::model::SessionSummary,
+    starred: bool,
+) -> Option<Span<'static>> {
+    match session.status {
+        SessionStatus::Warning => Some(Span::styled("▲", Style::default().fg(theme::GOLD))),
+        SessionStatus::Failed => Some(Span::styled(
+            "!",
+            Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+        )),
+        SessionStatus::Healthy if starred => Some(Span::styled(
+            "*",
+            Style::default()
+                .fg(theme::GOLD)
+                .add_modifier(Modifier::BOLD),
+        )),
+        SessionStatus::Healthy => None,
+    }
+}
+
+fn session_list_window(total: usize, selected: usize, area_height: u16) -> (usize, usize) {
+    if total == 0 {
+        return (0, 0);
+    }
+    let inner_height = usize::from(area_height.saturating_sub(2)).max(1);
+    let visible_items = (inner_height / 2).max(1);
+    let capacity = (visible_items + 4).min(total);
+    let mut start = selected.saturating_sub(capacity / 2);
+    let end = (start + capacity).min(total);
+    start = end.saturating_sub(capacity);
+    (start, end)
+}
+
+fn session_list_secondary(session: &crate::core::model::SessionSummary) -> String {
+    session_list_secondary_at(session, current_unix_timestamp())
+}
+
+fn session_list_secondary_at(
+    session: &crate::core::model::SessionSummary,
+    now_unix_seconds: i64,
+) -> String {
+    let updated = relative_time_label(&session.updated_at, now_unix_seconds)
+        .unwrap_or_else(|| session.updated.clone());
+    match session
+        .branch
+        .as_deref()
+        .filter(|branch| !branch.is_empty())
+    {
+        Some(branch) => format!("        {updated}  ·  {branch}"),
+        None => format!("        {updated}"),
+    }
+}
+
+fn current_unix_timestamp() -> i64 {
+    if let Ok(value) = std::env::var("MOONBOX_TUI_NOW_UNIX")
+        && let Ok(timestamp) = value.parse()
+    {
+        return timestamp;
+    }
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs().min(i64::MAX as u64) as i64)
+        .unwrap_or(0)
+}
+
+fn relative_time_label(timestamp: &str, now_unix_seconds: i64) -> Option<String> {
+    let timestamp_unix_seconds = parse_session_timestamp(timestamp)?;
+    let elapsed = now_unix_seconds
+        .saturating_sub(timestamp_unix_seconds)
+        .max(0);
+    Some(match elapsed {
+        0..=59 => format!("{elapsed}s ago"),
+        60..=3_599 => format!("{}m ago", elapsed / 60),
+        3_600..=86_399 => format!("{}h ago", elapsed / 3_600),
+        86_400..=604_799 => format!("{}d ago", elapsed / 86_400),
+        604_800..=2_591_999 => format!("{}w ago", elapsed / 604_800),
+        2_592_000..=31_535_999 => format!("{}mo ago", elapsed / 2_592_000),
+        _ => format!("{}y ago", elapsed / 31_536_000),
+    })
+}
+
+fn parse_session_timestamp(timestamp: &str) -> Option<i64> {
+    let timestamp = crate::core::local_jsonl::replace_time_dashes(timestamp);
+    let date_time = timestamp.get(..19)?;
+    let year = parse_i32(date_time.get(0..4)?)?;
+    let month = parse_u32(date_time.get(5..7)?)?;
+    let day = parse_u32(date_time.get(8..10)?)?;
+    let hour = parse_u32(date_time.get(11..13)?)?;
+    let minute = parse_u32(date_time.get(14..16)?)?;
+    let second = parse_u32(date_time.get(17..19)?)?;
+    if !valid_timestamp_parts(month, day, hour, minute, second) {
+        return None;
+    }
+    let offset = parse_timezone_offset(timestamp.get(19..).unwrap_or_default())?;
+    let local_seconds = days_from_civil(year, month, day)
+        .saturating_mul(86_400)
+        .saturating_add(i64::from(hour) * 3_600)
+        .saturating_add(i64::from(minute) * 60)
+        .saturating_add(i64::from(second));
+    Some(local_seconds.saturating_sub(offset))
+}
+
+fn parse_timezone_offset(mut suffix: &str) -> Option<i64> {
+    if let Some(rest) = suffix.strip_prefix('.') {
+        let fraction_len = rest
+            .char_indices()
+            .find(|(_, ch)| !ch.is_ascii_digit())
+            .map(|(index, _)| index)
+            .unwrap_or(rest.len());
+        suffix = &rest[fraction_len..];
+    }
+    if suffix.is_empty() || suffix.starts_with('Z') {
+        return Some(0);
+    }
+    let sign = match suffix.as_bytes().first().copied()? {
+        b'+' => 1,
+        b'-' => -1,
+        _ => return None,
+    };
+    let hour = parse_u32(suffix.get(1..3)?)?;
+    let minute = if suffix.get(3..4) == Some(":") {
+        parse_u32(suffix.get(4..6)?)?
+    } else {
+        parse_u32(suffix.get(3..5)?)?
+    };
+    if hour > 23 || minute > 59 {
+        return None;
+    }
+    Some(i64::from(sign) * (i64::from(hour) * 3_600 + i64::from(minute) * 60))
+}
+
+fn valid_timestamp_parts(month: u32, day: u32, hour: u32, minute: u32, second: u32) -> bool {
+    (1..=12).contains(&month)
+        && (1..=31).contains(&day)
+        && hour <= 23
+        && minute <= 59
+        && second <= 60
+}
+
+fn parse_i32(value: &str) -> Option<i32> {
+    value.parse().ok()
+}
+
+fn parse_u32(value: &str) -> Option<u32> {
+    value.parse().ok()
+}
+
+fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
+    let adjusted_year = year - i32::from(month <= 2);
+    let era = if adjusted_year >= 0 {
+        adjusted_year
+    } else {
+        adjusted_year - 399
+    } / 400;
+    let year_of_era = adjusted_year - era * 400;
+    let month = i32::try_from(month).unwrap_or_default();
+    let day = i32::try_from(day).unwrap_or_default();
+    let day_of_year = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    i64::from(era) * 146_097 + i64::from(day_of_era) - 719_468
+}
+
+fn source_pill(tool: CliTool) -> &'static str {
+    match tool {
+        CliTool::Codex => "Cdx",
+        CliTool::Claude => "Clu",
+        CliTool::Hermes => "Hms",
+    }
+}
+
+fn source_tool_style(tool: CliTool) -> Style {
+    let color = match tool {
+        CliTool::Codex => theme::BLUE,
+        CliTool::Claude => theme::PURPLE,
+        CliTool::Hermes => theme::ORANGE,
+    };
+    Style::default().fg(color).add_modifier(Modifier::BOLD)
+}
+
+fn session_position_label(total: usize, selected: usize) -> String {
+    if total == 0 {
+        "(0)".into()
+    } else {
+        format!("({}/{total})", selected + 1)
+    }
 }
 
 fn filter_label(app: &App) -> String {
@@ -262,25 +577,57 @@ fn filter_label(app: &App) -> String {
     }
 }
 
+fn format_token_count(token_count: Option<usize>) -> String {
+    match token_count {
+        Some(count) if count >= 1_000 => format!("{}K", count / 1_000),
+        Some(count) => count.to_string(),
+        None => "-".into(),
+    }
+}
+
+fn session_health_style(status: SessionStatus) -> Style {
+    match status {
+        SessionStatus::Healthy => Style::default().fg(theme::GREEN),
+        SessionStatus::Warning => Style::default().fg(theme::GOLD),
+        SessionStatus::Failed => Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+    }
+}
+
+fn source_provenance_style(provenance: SourceProvenance) -> Style {
+    match provenance {
+        SourceProvenance::Real => Style::default()
+            .fg(theme::GREEN)
+            .add_modifier(Modifier::BOLD),
+        SourceProvenance::Fixture => Style::default().fg(theme::BLUE),
+        SourceProvenance::Missing => Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+    }
+}
+
+fn session_health_detail(session: &crate::core::model::SessionSummary) -> String {
+    let reason = session.health_reason.as_deref().unwrap_or("ready");
+    let status = match session.status {
+        SessionStatus::Healthy => "healthy",
+        SessionStatus::Warning => "warning",
+        SessionStatus::Failed => "failed",
+    };
+    if session.parse_skip_count == 0 {
+        format!("{status} · {reason}")
+    } else {
+        format!("{status} · skipped {} · {reason}", session.parse_skip_count)
+    }
+}
+
 fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
+    let visible_groups = visible_timeline_groups(app);
+    let selected_group = selected_timeline_group_position(&visible_groups, app.selected_event);
     let mut lines = Vec::new();
-    for (idx, event) in app.data.timeline.iter().enumerate() {
-        let selected = idx == app.selected_event;
+    for (group_idx, group) in visible_groups.iter().enumerate() {
+        let selected = group_idx == selected_group;
         let active = selected && app.focus == Focus::Timeline;
-        let is_rewind = event.id == app.rewind_event_id;
-        let (label, color) = if is_rewind {
-            ("REWIND", theme::GOLD)
-        } else {
-            match event.kind {
-                TimelineKind::User => ("USER", theme::BLUE),
-                TimelineKind::Assistant => ("ASSISTANT", theme::GOLD),
-                TimelineKind::Tool => ("TOOL", theme::MUTED),
-                TimelineKind::Compact => ("COMPACT", theme::CYAN),
-                TimelineKind::Error => ("ERROR", theme::RED),
-                TimelineKind::GitDiff => ("GIT DIFF", theme::GREEN),
-                TimelineKind::RewindPoint => ("REWIND", theme::GOLD),
-            }
-        };
+        let is_rewind = group.is_rewind(&app.rewind_event_id);
+        let (label, color) = timeline_group_label(group, is_rewind, app.data.source);
+        let accent = timeline_group_accent(color, is_rewind);
+        let marker_style = timeline_marker_style(active, selected, is_rewind);
         let marker = if active && is_rewind {
             "▶◆"
         } else if active {
@@ -293,16 +640,14 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
             "│ "
         };
         let time_style = if active {
-            Style::default()
-                .fg(theme::GOLD)
-                .add_modifier(Modifier::BOLD)
+            Style::default().fg(accent).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(color)
         };
         let label_style = if active {
             Style::default()
                 .fg(Color::Black)
-                .bg(theme::GOLD)
+                .bg(accent)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(color).add_modifier(Modifier::BOLD)
@@ -314,177 +659,645 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             Style::default().fg(theme::TEXT)
         };
-        lines.push(Line::from(vec![
-            Span::styled(format!("{marker} {} ", event.time), time_style),
-            Span::styled(format!(" {label} "), label_style),
-            Span::styled(format!(" {}", event.title), title_style),
-        ]));
+        let time = timeline_group_time(group);
+        lines.push(timeline_header_line(
+            TimelineHeader {
+                title: timeline_group_title(group),
+                time: &time,
+                marker,
+                label: &label,
+                marker_style,
+                time_style,
+                label_style,
+                title_style,
+            },
+            area.width,
+        ));
 
         let detail_style = if active {
             Style::default()
                 .fg(theme::TEXT)
                 .add_modifier(Modifier::BOLD)
-        } else if is_rewind || event.kind == TimelineKind::RewindPoint {
-            Style::default()
-                .fg(theme::GOLD)
-                .add_modifier(Modifier::BOLD)
+        } else if is_rewind || group.kind() == TimelineKind::RewindPoint {
+            Style::default().fg(theme::TEXT)
         } else {
             Style::default().fg(theme::MUTED)
         };
-        lines.push(Line::from(vec![
-            Span::styled(
-                if active { "  └ " } else { "   " },
-                Style::default().fg(if active { theme::GOLD } else { theme::MUTED }),
-            ),
-            Span::styled(&event.detail, detail_style),
-        ]));
+        for (event_offset, (_, event)) in group.events().enumerate() {
+            for (line_index, detail) in timeline_detail_lines(&event.detail, area.width)
+                .into_iter()
+                .enumerate()
+            {
+                let prefix =
+                    timeline_detail_prefix(active, group.is_ai_group(), event_offset, line_index);
+                lines.push(Line::from(vec![
+                    Span::styled(prefix, timeline_prefix_style(active, accent)),
+                    Span::styled(detail, detail_style),
+                ]));
+            }
+        }
         lines.push(Line::raw(""));
+    }
+
+    if lines.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No user or assistant turns loaded",
+            Style::default().fg(theme::MUTED),
+        )));
     }
 
     frame.render_widget(
         Paragraph::new(lines)
             .block(panel_block(" Timeline ", app.focus == Focus::Timeline))
-            .wrap(Wrap { trim: true }),
+            .scroll((timeline_scroll(app, area), 0)),
         area,
     );
+}
+
+fn timeline_scroll(app: &App, area: Rect) -> u16 {
+    let viewport = usize::from(area.height.saturating_sub(2).max(1));
+    let visible_groups = visible_timeline_groups(app);
+    let selected_group = selected_timeline_group_position(&visible_groups, app.selected_event);
+    let selected_top = visible_groups
+        .iter()
+        .take(selected_group)
+        .map(|group| timeline_group_line_count(group, area.width))
+        .sum::<usize>();
+    let selected_height = visible_groups
+        .get(selected_group)
+        .map(|group| timeline_group_line_count(group, area.width))
+        .unwrap_or(1);
+    let center_padding = viewport.saturating_sub(selected_height) / 2;
+    usize_to_u16(selected_top.saturating_sub(center_padding))
+}
+
+struct TimelineHeader<'a> {
+    title: Option<&'a str>,
+    time: &'a str,
+    marker: &'a str,
+    label: &'a str,
+    marker_style: Style,
+    time_style: Style,
+    label_style: Style,
+    title_style: Style,
+}
+
+fn timeline_header_line(header: TimelineHeader<'_>, area_width: u16) -> Line<'static> {
+    let title = header.title;
+    let time = header.time;
+    let marker = header.marker;
+    let label = header.label;
+    let marker_style = header.marker_style;
+    let time_style = header.time_style;
+    let label_style = header.label_style;
+    let title_style = header.title_style;
+    let inner_width = usize::from(area_width.saturating_sub(4)).max(20);
+    let left_width = display_width(marker)
+        + 1
+        + display_width(label)
+        + 2
+        + title.map(|title| 1 + display_width(title)).unwrap_or(0);
+    let padding = inner_width
+        .saturating_sub(left_width + display_width(time))
+        .max(1);
+    let mut spans = vec![
+        Span::styled(format!("{marker} "), marker_style),
+        Span::styled(format!(" {label} "), label_style),
+    ];
+    if let Some(title) = title {
+        spans.push(Span::styled(format!(" {title}"), title_style));
+    }
+    spans.push(Span::raw(" ".repeat(padding)));
+    spans.push(Span::styled(time.to_owned(), time_style));
+    Line::from(spans)
+}
+
+fn timeline_group_title<'a>(group: &TimelineGroup<'a>) -> Option<&'a str> {
+    let event = group.primary_event();
+    match group.kind() {
+        TimelineKind::User if event.title == "User" => None,
+        TimelineKind::Assistant if event.title == "Assistant" => None,
+        _ => Some(event.title.as_str()).filter(|title| !title.trim().is_empty()),
+    }
+}
+
+fn timeline_group_accent(color: Color, is_rewind: bool) -> Color {
+    if is_rewind { theme::GOLD } else { color }
+}
+
+fn timeline_prefix_style(active: bool, accent: Color) -> Style {
+    if active {
+        Style::default().fg(accent).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::MUTED)
+    }
+}
+
+fn timeline_marker_style(active: bool, selected: bool, is_rewind: bool) -> Style {
+    if active {
+        Style::default()
+            .fg(theme::CYAN)
+            .add_modifier(Modifier::BOLD)
+    } else if is_rewind {
+        Style::default()
+            .fg(theme::GOLD)
+            .add_modifier(Modifier::BOLD)
+    } else if selected {
+        Style::default()
+            .fg(theme::TEXT)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::MUTED)
+    }
+}
+
+fn timeline_group_line_count(group: &TimelineGroup<'_>, area_width: u16) -> usize {
+    1 + group
+        .events()
+        .map(|(_, event)| timeline_detail_lines(&event.detail, area_width).len())
+        .sum::<usize>()
+        + 1
+}
+
+fn timeline_detail_prefix(
+    active: bool,
+    ai_group: bool,
+    event_offset: usize,
+    line_index: usize,
+) -> &'static str {
+    if active && event_offset == 0 && line_index == 0 {
+        return "  └ ";
+    }
+    if active && ai_group && line_index == 0 {
+        return "  • ";
+    }
+    if active {
+        return "    ";
+    }
+    if ai_group && event_offset > 0 && line_index == 0 {
+        return "  · ";
+    }
+    "   "
+}
+
+fn timeline_detail_lines(detail: &str, area_width: u16) -> Vec<String> {
+    wrap_timeline_text(detail, timeline_detail_width(area_width))
+}
+
+fn timeline_detail_width(area_width: u16) -> usize {
+    usize::from(area_width.saturating_sub(10)).max(12)
+}
+
+fn wrap_timeline_text(text: &str, width: usize) -> Vec<String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return vec![String::new()];
+    }
+    let mut lines = Vec::new();
+    for raw_line in text.lines() {
+        wrap_timeline_line(raw_line, width, &mut lines);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
+}
+
+fn wrap_timeline_line(line: &str, width: usize, lines: &mut Vec<String>) {
+    let mut current = String::new();
+    for word in line.split_whitespace() {
+        let word_width = display_width(word);
+        if word_width > width {
+            if !current.is_empty() {
+                lines.push(std::mem::take(&mut current));
+            }
+            lines.extend(split_display_width(word, width));
+            continue;
+        }
+
+        if current.is_empty() {
+            current.push_str(word);
+        } else if display_width(&current) + 1 + word_width <= width {
+            current.push(' ');
+            current.push_str(word);
+        } else {
+            lines.push(std::mem::take(&mut current));
+            current.push_str(word);
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+}
+
+fn split_display_width(text: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut used = 0;
+    for character in text.chars() {
+        let character_width = character_display_width(character);
+        if used + character_width > width && !current.is_empty() {
+            lines.push(std::mem::take(&mut current));
+            used = 0;
+        }
+        current.push(character);
+        used += character_width;
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    lines
+}
+
+fn display_width(text: &str) -> usize {
+    text.chars().map(character_display_width).sum()
+}
+
+fn character_display_width(character: char) -> usize {
+    if character.is_ascii() { 1 } else { 2 }
+}
+
+fn usize_to_u16(value: usize) -> u16 {
+    value.min(usize::from(u16::MAX)) as u16
+}
+
+struct TimelineGroup<'a> {
+    first: (usize, &'a TimelineEvent),
+    rest: Vec<(usize, &'a TimelineEvent)>,
+}
+
+impl<'a> TimelineGroup<'a> {
+    fn new(event: (usize, &'a TimelineEvent)) -> Self {
+        Self {
+            first: event,
+            rest: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, event: (usize, &'a TimelineEvent)) {
+        self.rest.push(event);
+    }
+
+    fn events(&self) -> impl Iterator<Item = (usize, &'a TimelineEvent)> + '_ {
+        std::iter::once(self.first).chain(self.rest.iter().copied())
+    }
+
+    fn len(&self) -> usize {
+        1 + self.rest.len()
+    }
+
+    fn primary_event(&self) -> &'a TimelineEvent {
+        self.first.1
+    }
+
+    fn last_event(&self) -> &'a TimelineEvent {
+        self.rest
+            .last()
+            .map(|(_, event)| *event)
+            .unwrap_or(self.first.1)
+    }
+
+    fn last_event_index(&self) -> usize {
+        self.rest
+            .last()
+            .map(|(index, _)| *index)
+            .unwrap_or(self.first.0)
+    }
+
+    fn kind(&self) -> TimelineKind {
+        self.primary_event().kind
+    }
+
+    fn is_ai_group(&self) -> bool {
+        self.kind() == TimelineKind::Assistant
+    }
+
+    fn is_rewind(&self, rewind_event_id: &str) -> bool {
+        self.events().any(|(_, event)| event.id == rewind_event_id)
+    }
+}
+
+fn visible_timeline_groups(app: &App) -> Vec<TimelineGroup<'_>> {
+    let mut groups: Vec<TimelineGroup<'_>> = Vec::new();
+    for event in visible_timeline_events(app) {
+        if event.1.kind == TimelineKind::Assistant
+            && let Some(group) = groups.last_mut()
+            && group.is_ai_group()
+        {
+            group.push(event);
+            continue;
+        }
+        groups.push(TimelineGroup::new(event));
+    }
+    groups
+}
+
+fn selected_timeline_group_position(
+    visible_groups: &[TimelineGroup<'_>],
+    selected_event: usize,
+) -> usize {
+    visible_groups
+        .iter()
+        .position(|group| group.events().any(|(index, _)| index == selected_event))
+        .or_else(|| {
+            visible_groups
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(_, group)| group.last_event_index() <= selected_event)
+                .map(|(position, _)| position)
+        })
+        .unwrap_or(0)
+}
+
+fn timeline_group_label(
+    group: &TimelineGroup<'_>,
+    is_rewind: bool,
+    source: CliTool,
+) -> (String, Color) {
+    if is_rewind {
+        return ("REWIND".into(), theme::GOLD);
+    }
+    match group.kind() {
+        TimelineKind::User => ("USER".into(), theme::BLUE),
+        TimelineKind::Assistant if group.len() > 1 => (
+            format!("{} x{}", assistant_source_label(source), group.len()),
+            theme::GOLD,
+        ),
+        TimelineKind::Assistant => (assistant_source_label(source).into(), theme::GOLD),
+        TimelineKind::Tool => ("TOOL".into(), theme::MUTED),
+        TimelineKind::Compact => ("COMPACT".into(), theme::CYAN),
+        TimelineKind::Error => ("ERROR".into(), theme::RED),
+        TimelineKind::GitDiff => ("GIT DIFF".into(), theme::GREEN),
+        TimelineKind::RewindPoint => ("REWIND".into(), theme::GOLD),
+    }
+}
+
+fn assistant_source_label(source: CliTool) -> &'static str {
+    match source {
+        CliTool::Codex => "Codex",
+        CliTool::Claude => "Claude Code",
+        CliTool::Hermes => "Hermes",
+    }
+}
+
+fn timeline_group_time(group: &TimelineGroup<'_>) -> String {
+    let first = &group.primary_event().time;
+    let last = &group.last_event().time;
+    if group.len() == 1 {
+        first.clone()
+    } else if first == last {
+        format!("{first} x{}", group.len())
+    } else {
+        format!("{first}-{last}")
+    }
+}
+
+fn visible_timeline_events(app: &App) -> Vec<(usize, &TimelineEvent)> {
+    app.data
+        .timeline
+        .iter()
+        .enumerate()
+        .filter(|(_, event)| event.id == app.rewind_event_id || event.kind != TimelineKind::Tool)
+        .collect()
 }
 
 fn render_capsule(frame: &mut Frame, area: Rect, app: &App) {
     let capsule = &app.data.capsule;
-    let mut lines = vec![
-        label_line("Goal", &capsule.goal, theme::BLUE),
-        Line::raw(""),
-        label_line("State", &capsule.state, theme::GOLD),
-        Line::raw(""),
-        label_line("Rewind", &capsule.rewind_point, theme::GOLD),
-        Line::raw(""),
-        Line::from(Span::styled(
-            "Decisions",
+    let mut lines = session_detail_lines(app);
+
+    if app.is_session_load_pending() {
+        lines.push(Line::raw(""));
+        lines.push(Line::from(Span::styled(
+            "Loading",
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::GOLD)
                 .add_modifier(Modifier::BOLD),
-        )),
-    ];
-
-    for decision in &capsule.decisions {
-        lines.push(Line::from(vec![
-            Span::raw("  • "),
-            Span::styled(decision, Style::default().fg(theme::TEXT)),
-        ]));
+        )));
+        lines.push(Line::from(Span::styled(
+            "  Hydrating timeline and capsule preview for the selected session.",
+            Style::default().fg(theme::TEXT),
+        )));
+        lines.push(Line::from(Span::styled(
+            "  Launch, verify, compile, and rewind wait until this completes.",
+            Style::default().fg(theme::MUTED),
+        )));
+        frame.render_widget(
+            Paragraph::new(lines)
+                .block(panel_block(
+                    " Session Details ",
+                    app.focus == Focus::Capsule,
+                ))
+                .scroll((app.capsule_scroll, 0))
+                .wrap(Wrap { trim: true }),
+            area,
+        );
+        return;
     }
 
-    lines.push(Line::raw(""));
-    lines.push(Line::from(Span::styled(
-        "Todo",
-        Style::default()
-            .fg(theme::BLUE)
-            .add_modifier(Modifier::BOLD),
-    )));
-    for todo in &capsule.todo {
-        let mark = if todo.done { "[x]" } else { "[ ]" };
-        let color = if todo.done { theme::GREEN } else { theme::TEXT };
-        lines.push(Line::from(vec![
-            Span::styled(format!("  {mark} "), Style::default().fg(color)),
-            Span::styled(&todo.text, Style::default().fg(color)),
-        ]));
-    }
-
-    lines.push(Line::raw(""));
-    lines.push(Line::from(Span::styled(
-        "Evidence",
-        Style::default()
-            .fg(theme::BLUE)
-            .add_modifier(Modifier::BOLD),
-    )));
-    for evidence in &capsule.evidence {
-        lines.push(Line::from(vec![
-            Span::styled("  > ", Style::default().fg(theme::MUTED)),
-            Span::styled(evidence, Style::default().fg(theme::MUTED)),
-        ]));
-    }
-
-    lines.push(Line::raw(""));
-    lines.push(Line::from(Span::styled(
-        "Risks",
-        Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
-    )));
-    for risk in &capsule.risks {
-        lines.push(Line::from(vec![
-            Span::styled("  ! ", Style::default().fg(theme::RED)),
-            Span::styled(risk, Style::default().fg(theme::GOLD)),
-        ]));
-    }
+    lines.extend(compact_capsule_lines(capsule));
 
     frame.render_widget(
         Paragraph::new(lines)
             .block(panel_block(
-                " Work Capsule Preview ",
+                " Session Details ",
                 app.focus == Focus::Capsule,
             ))
+            .scroll((app.capsule_scroll, 0))
             .wrap(Wrap { trim: true }),
         area,
     );
 }
 
+fn compact_capsule_lines(capsule: &WorkCapsule) -> Vec<Line<'static>> {
+    vec![
+        Line::raw(""),
+        Line::from(Span::styled(
+            "Handoff Snapshot",
+            Style::default()
+                .fg(theme::BLUE)
+                .add_modifier(Modifier::BOLD),
+        )),
+        review_label_line("State", capsule.state.clone(), theme::GOLD),
+        review_label_line(
+            "Rewind",
+            review_snippet(&capsule.rewind_point, 96),
+            theme::GOLD,
+        ),
+        review_label_line("Goal", review_snippet(&capsule.goal, 96), theme::BLUE),
+        review_label_line(
+            "Risk",
+            capsule
+                .risks
+                .first()
+                .map(|risk| review_snippet(risk, 96))
+                .unwrap_or_else(|| "none".into()),
+            theme::RED,
+        ),
+        Line::raw(""),
+        Line::from(Span::styled(
+            "Press c to refresh and review the full handoff.",
+            Style::default().fg(theme::MUTED),
+        )),
+    ]
+}
+
+fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
+    let Some(session) = app.current_session() else {
+        return vec![
+            Line::from(Span::styled(
+                "Real Session Metadata",
+                Style::default()
+                    .fg(theme::BLUE)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(
+                "  No session selected",
+                Style::default().fg(theme::MUTED),
+            )),
+        ];
+    };
+
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "Real Session Metadata",
+            Style::default()
+                .fg(theme::BLUE)
+                .add_modifier(Modifier::BOLD),
+        )),
+        metadata_line(
+            "Raw Title",
+            &session.title,
+            Style::default().fg(theme::TEXT),
+        ),
+        metadata_line(
+            "Source",
+            &format!("{} · {}", session.cli, session.source_provenance),
+            source_provenance_style(session.source_provenance),
+        ),
+        metadata_line(
+            "Updated",
+            &session.updated,
+            Style::default().fg(theme::BLUE),
+        ),
+        metadata_line("Cwd", &session.cwd, Style::default().fg(theme::TEXT)),
+        metadata_line(
+            "Branch",
+            session.branch.as_deref().unwrap_or("-"),
+            Style::default().fg(theme::CYAN),
+        ),
+        metadata_line(
+            "Events",
+            &session.event_count.to_string(),
+            Style::default().fg(theme::MUTED),
+        ),
+        metadata_line(
+            "Tokens",
+            &format_token_count(session.token_count),
+            Style::default().fg(theme::GOLD),
+        ),
+        metadata_line(
+            "Source Health",
+            &session_health_detail(session),
+            session_health_style(session.status),
+        ),
+    ];
+    if let Some(path) = &session.source_path {
+        lines.push(metadata_line(
+            "Path",
+            path,
+            Style::default().fg(theme::MUTED),
+        ));
+    }
+    lines
+}
+
+fn metadata_line(label: &'static str, value: &str, style: Style) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!("{label}: "), Style::default().fg(theme::MUTED)),
+        Span::styled(value.to_owned(), style),
+    ])
+}
+
 fn render_branch_tree(frame: &mut Frame, area: Rect, app: &App) {
-    let original = app
+    let session = app
         .current_session()
-        .map(|session| format!("original/{}", session.id))
-        .unwrap_or_else(|| "original/no-session".into());
-    let rewind = format!("rewind/{}", app.rewind_event_id);
-    let target = format!("handoff/{}", app.data.target.id());
-    let rewind_detail = app
-        .data
-        .timeline
-        .iter()
-        .find(|event| event.id == app.rewind_event_id)
-        .map(|event| event.title.as_str())
-        .unwrap_or("selected rewind point");
+        .map(|session| format!("{} {}", session.cli, short_identifier(&session.id, 10)))
+        .unwrap_or_else(|| "no session".into());
+    let rewind = format!("rewind {}", short_identifier(&app.rewind_event_id, 12));
+    let target = format!("handoff {}", app.data.target);
     let nodes = [
-        (original, false, "original session, read-only"),
-        (rewind, false, rewind_detail),
-        (target, true, "compiled by engineering-handoff"),
+        (session, theme::TEXT),
+        (rewind, theme::GOLD),
+        (target, theme::CYAN),
     ];
 
-    let mut spans = vec![Span::styled(" * ", Style::default().fg(theme::MUTED))];
-    for (idx, (label, active, _)) in nodes.iter().enumerate() {
+    let mut spans = vec![Span::styled("   ", Style::default().fg(theme::MUTED))];
+    for (idx, (label, color)) in nodes.iter().enumerate() {
         if idx > 0 {
             spans.push(Span::styled(" ── ", Style::default().fg(theme::BORDER)));
         }
-        let style = if *active {
-            Style::default()
-                .fg(theme::CYAN)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(theme::TEXT)
-        };
-        let label = if *active {
-            format!(" > {label} ")
-        } else {
-            format!(" {label} ")
-        };
-        spans.push(Span::styled(label, style));
+        spans.push(Span::styled(
+            label.clone(),
+            Style::default().fg(*color).add_modifier(Modifier::BOLD),
+        ));
     }
-    let active = nodes
-        .iter()
-        .find(|(_, active, _)| *active)
-        .map(|(_, _, detail)| *detail)
-        .unwrap_or("no active branch");
     let lines = if area.height < 4 {
         vec![Line::from(spans)]
     } else {
-        vec![
-            Line::from(spans),
-            Line::from(vec![
-                Span::styled("   active: ", Style::default().fg(theme::MUTED)),
-                Span::styled(active, Style::default().fg(theme::CYAN)),
-            ]),
-        ]
+        vec![Line::from(spans), cwd_inventory_line(app, area.width)]
     };
     frame.render_widget(
-        Paragraph::new(lines).block(panel_block(" Branch Tree ", app.focus == Focus::Branches)),
+        Paragraph::new(lines).block(panel_block(" Action Path ", app.focus == Focus::Branches)),
         area,
     );
+}
+
+fn cwd_inventory_line(app: &App, width: u16) -> Line<'static> {
+    let Some(session) = app.current_session() else {
+        return Line::from(Span::styled(
+            "   cwd: no session",
+            Style::default().fg(theme::MUTED),
+        ));
+    };
+    let codex = cwd_session_count(app, &session.cwd, CliTool::Codex);
+    let claude = cwd_session_count(app, &session.cwd, CliTool::Claude);
+    let hermes = cwd_session_count(app, &session.cwd, CliTool::Hermes);
+    let max_path_chars = usize::from(width.saturating_sub(56)).clamp(12, 64);
+    Line::from(vec![
+        Span::styled("   cwd: ", Style::default().fg(theme::MUTED)),
+        Span::styled(
+            review_snippet(&session.cwd, max_path_chars),
+            Style::default().fg(theme::TEXT),
+        ),
+        Span::styled(" · ", Style::default().fg(theme::BORDER)),
+        Span::styled(format!("Codex {codex}"), Style::default().fg(theme::BLUE)),
+        Span::styled(" · ", Style::default().fg(theme::BORDER)),
+        Span::styled(format!("Claude {claude}"), Style::default().fg(theme::CYAN)),
+        Span::styled(" · ", Style::default().fg(theme::BORDER)),
+        Span::styled(
+            format!("Hermes {hermes}"),
+            Style::default().fg(theme::ORANGE),
+        ),
+    ])
+}
+
+fn cwd_session_count(app: &App, cwd: &str, tool: CliTool) -> usize {
+    app.data
+        .sessions
+        .iter()
+        .filter(|session| session.cwd == cwd && session.cli == tool)
+        .count()
+}
+
+fn short_identifier(value: &str, keep: usize) -> String {
+    let mut chars = value.chars();
+    let prefix = chars.by_ref().take(keep).collect::<String>();
+    if chars.next().is_some() {
+        format!("{prefix}...")
+    } else {
+        prefix
+    }
 }
 
 fn render_command_bar(frame: &mut Frame, area: Rect, app: &App) {
@@ -531,15 +1344,71 @@ type KeyHint = (&'static str, &'static str);
 
 fn active_key_hints(app: &App) -> Vec<KeyHint> {
     if app.show_launch {
+        if app.launch_review {
+            let enter_hint = if app
+                .validate_launch_for_target(app.pending_target)
+                .is_blocked()
+            {
+                "Blocked"
+            } else {
+                "Handoff"
+            };
+            return vec![
+                ("y", "Copy"),
+                ("enter", enter_hint),
+                ("PgUp/Dn", "Scroll"),
+                ("Esc/q", "Close"),
+            ];
+        }
+        if app.validate_launch_for_target(app.pending_target).state
+            == LaunchValidationState::Blocked
+        {
+            return vec![
+                ("j/k", "Target"),
+                ("enter/y", "Blocked"),
+                ("PgUp/Dn", "Scroll"),
+                ("Esc", "Cancel"),
+            ];
+        }
         return vec![
             ("j/k", "Target"),
-            ("enter", "Save"),
+            ("enter", "Review"),
+            ("y", "Unavailable"),
+            ("PgUp/Dn", "Scroll"),
             ("Esc", "Cancel"),
-            ("q", "Cancel"),
         ];
     }
-    if app.show_open_original || app.show_diff || app.show_help {
-        return vec![("Esc", "Close"), ("q", "Close")];
+    if app.show_open_original {
+        return vec![
+            ("y", "Copy"),
+            ("j/k", "Scroll"),
+            ("PgUp/Dn", "Scroll"),
+            ("Esc", "Close"),
+        ];
+    }
+    if app.show_skill_picker {
+        return vec![
+            ("j/k", "Skill"),
+            ("enter", "Apply"),
+            ("y", "Copy Ref"),
+            ("q", "Close"),
+        ];
+    }
+    if app.show_doctor {
+        return vec![
+            ("r", "Refresh"),
+            ("y", "Copy JSON"),
+            ("j/k", "Scroll"),
+            ("Esc", "Close"),
+        ];
+    }
+    if app.show_help {
+        return vec![
+            ("j/k", "Scroll"),
+            ("PgUp/Dn", "Scroll"),
+            ("Esc", "Close"),
+            ("q", "Close"),
+        ];
     }
 
     match app.focus {
@@ -548,35 +1417,48 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("gg/G", "Jump"),
             ("/", "Search"),
             ("[ ]", "Source"),
+            ("{ }", "Data"),
             ("a", "Clear"),
+            ("s", "Star"),
+            ("S", "Skill"),
+            ("+", "Zoom"),
+            ("-", "Restore"),
             ("o", "Original"),
-            ("enter", "Target"),
+            ("enter", "Open"),
+            ("x/H", "Handoff"),
             ("tab", "Next"),
         ],
         Focus::Timeline => vec![
             ("j/k", "Events"),
             ("gg/G", "Jump"),
             ("space", "Rewind"),
-            ("c", "Compile"),
-            ("d", "Diff"),
+            ("c", "Review"),
+            ("+", "Zoom"),
+            ("-", "Restore"),
             ("tab", "Next"),
             (":", "Cmd"),
             ("q", "Quit"),
         ],
         Focus::Capsule => vec![
-            ("c", "Compile"),
+            ("j/k", "Scroll"),
+            ("gg/G", "Top/Bottom"),
+            ("c", "Review"),
             ("v", "Verify"),
-            ("s", "Skill"),
-            ("d", "Diff"),
-            ("space", "Rewind"),
+            ("S", "Skill"),
+            ("+", "Zoom"),
+            ("-", "Restore"),
             ("tab", "Next"),
             (":", "Cmd"),
             ("q", "Quit"),
         ],
         Focus::Branches => vec![
-            ("enter", "Target"),
+            ("enter", "Open"),
+            ("x/H", "Handoff"),
             ("o", "Original"),
             ("space", "Rewind"),
+            ("D", "Doctor"),
+            ("+", "Zoom"),
+            ("-", "Restore"),
             ("tab", "Next"),
             (":", "Cmd"),
             ("?", "Help"),
@@ -605,6 +1487,7 @@ fn status_line(app: &App) -> Line<'_> {
     } else if app.status_message.contains("PASS")
         || app.status_message.contains("saved")
         || app.status_message.contains("compiled")
+        || app.status_message.contains("refreshed")
         || app.status_message.contains("cleared")
     {
         theme::GREEN
@@ -621,8 +1504,8 @@ fn status_line(app: &App) -> Line<'_> {
     ])
 }
 
-fn render_help(frame: &mut Frame, root: Rect) {
-    let area = centered(root, 52, 48);
+fn render_help(frame: &mut Frame, root: Rect, app: &App) {
+    let area = modal_area(root, 52, 48);
     frame.render_widget(Clear, area);
     let lines = vec![
         Line::from(Span::styled(
@@ -636,53 +1519,424 @@ fn render_help(frame: &mut Frame, root: Rect) {
         Line::raw("tab, shift-tab  switch panel"),
         Line::raw("f               cycle session source filter"),
         Line::raw("a               clear source and text filters"),
+        Line::raw("s               star / unstar selected session"),
+        Line::raw("*               star / unstar selected session alias"),
         Line::raw("/text           filter sessions by text"),
         Line::raw("o               open original session with original CLI"),
+        Line::raw("enter           open selected session with original CLI"),
+        Line::raw("x / H           choose target for handoff"),
+        Line::raw("D               open environment doctor"),
         Line::raw("[ / ]           previous / next session source filter"),
         Line::raw("space           set rewind point"),
-        Line::raw("c, v, d, s      compile, verify, diff, switch skill"),
-        Line::raw("enter           choose target and show handoff command"),
+        Line::raw("c               refresh capsule and open handoff review"),
+        Line::raw("v, S            verify capsule, switch skill"),
         Line::raw(":               command mode"),
-        Line::raw("q / Esc         close or quit"),
+        Line::raw("q / Ctrl-C      quit"),
+        Line::raw("Esc             cancel command/search or close overlay"),
     ];
     frame.render_widget(
         Paragraph::new(lines)
             .block(panel_block(" Help ", true))
+            .scroll((app.modal_scroll, 0))
             .wrap(Wrap { trim: true }),
         area,
     );
 }
 
+fn render_doctor(frame: &mut Frame, root: Rect, app: &App) {
+    let area = modal_area(root, 72, 72);
+    frame.render_widget(Clear, area);
+
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled(
+                "Environment doctor",
+                Style::default()
+                    .fg(theme::GOLD)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                app.doctor_report.status.to_string(),
+                Style::default()
+                    .fg(verification_color(app.doctor_report.status))
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Ready: ", Style::default().fg(theme::BLUE)),
+            Span::styled(
+                app.doctor_report.ready.to_string(),
+                Style::default().fg(if app.doctor_report.ready {
+                    theme::GREEN
+                } else {
+                    theme::RED
+                }),
+            ),
+        ]),
+        Line::raw(""),
+    ];
+
+    for check in &app.doctor_report.checks {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} ", check.status),
+                Style::default()
+                    .fg(verification_color(check.status))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                &check.name,
+                Style::default()
+                    .fg(theme::TEXT)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("  ", Style::default().fg(theme::MUTED)),
+            Span::styled(&check.detail, Style::default().fg(theme::MUTED)),
+        ]));
+        lines.push(Line::raw(""));
+    }
+
+    lines.extend([
+        Line::from(Span::styled(
+            "Read-only diagnostics. No timeline load, resume, launch, or target spawn.",
+            Style::default().fg(theme::MUTED),
+        )),
+        Line::from(Span::styled(
+            "r refresh   y copy JSON   Esc close",
+            Style::default().fg(theme::MUTED),
+        )),
+    ]);
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(panel_block(" Doctor ", true))
+            .scroll((app.modal_scroll, 0))
+            .wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
+fn render_skill_picker(frame: &mut Frame, root: Rect, app: &App) {
+    let area = modal_area(root, 78, 72);
+    frame.render_widget(Clear, area);
+    let catalog = compiler::compiler_catalog_entries();
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "Choose compiler skill",
+            Style::default()
+                .fg(theme::GOLD)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "Compression and compatibility live in replaceable compiler skills.",
+            Style::default().fg(theme::MUTED),
+        )),
+        Line::raw(""),
+    ];
+
+    for (index, id) in app.data.compilers.iter().enumerate() {
+        let info = catalog
+            .iter()
+            .find(|entry| entry.id == *id)
+            .cloned()
+            .unwrap_or_else(|| fallback_compiler_info(id));
+        let pending = index == app.pending_compiler;
+        let active = index == app.selected_compiler;
+        let status_color = compiler_status_color(info.status);
+        let row_style = if pending {
+            Style::default()
+                .fg(Color::Black)
+                .bg(status_color)
+                .add_modifier(Modifier::BOLD)
+        } else if active {
+            Style::default()
+                .fg(theme::TEXT)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme::TEXT)
+        };
+        let muted_style = if pending {
+            Style::default().fg(theme::TEXT)
+        } else {
+            Style::default().fg(theme::MUTED)
+        };
+        let cursor = if pending { ">" } else { " " };
+        let active_mark = if active { "active" } else { "      " };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{cursor} "), row_style),
+            Span::styled(format!("{:<24}", info.id), row_style),
+            Span::styled("  ", row_style),
+            Span::styled(
+                format!("{:<7}", compiler_status_label(info.status)),
+                row_style,
+            ),
+            Span::styled("  ", row_style),
+            Span::styled(format!("{:<11}", compiler_kind_label(info.kind)), row_style),
+            Span::styled("  ", row_style),
+            Span::styled(active_mark, row_style),
+        ]));
+        lines.push(Line::from(vec![
+            Span::raw("    "),
+            Span::styled(compiler_description(&info), muted_style),
+        ]));
+        lines.push(Line::from(vec![
+            Span::raw("    "),
+            Span::styled("stars: ", Style::default().fg(theme::MUTED)),
+            Span::styled(format_star_count(&info), Style::default().fg(theme::GOLD)),
+            Span::styled("  link: ", Style::default().fg(theme::MUTED)),
+            Span::styled(compiler_reference(&info), Style::default().fg(theme::CYAN)),
+        ]));
+        lines.push(Line::raw(""));
+    }
+
+    if app.data.compilers.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No compiler skills configured.",
+            Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+        )));
+    }
+    lines.push(Line::from(Span::styled(
+        "j/k choose   enter apply   y copy link/command   q close",
+        Style::default().fg(theme::MUTED),
+    )));
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(panel_block(" Skill Picker ", true))
+            .scroll((app.modal_scroll, 0))
+            .wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
+fn fallback_compiler_info(id: &str) -> CompilerPresetInfo {
+    CompilerPresetInfo {
+        id: id.into(),
+        kind: CompilerPresetKind::Config,
+        status: CompilerPresetStatus::Warning,
+        score: 0,
+        command: None,
+        args: Vec::new(),
+        timeout_ms: None,
+        reason: "compiler id is listed but missing from catalog".into(),
+        description: None,
+        homepage: None,
+        github_stars: None,
+    }
+}
+
+fn compiler_status_label(status: CompilerPresetStatus) -> &'static str {
+    match status {
+        CompilerPresetStatus::Ready => "READY",
+        CompilerPresetStatus::Warning => "WARN",
+        CompilerPresetStatus::Disabled => "DISABLE",
+    }
+}
+
+fn compiler_status_color(status: CompilerPresetStatus) -> Color {
+    match status {
+        CompilerPresetStatus::Ready => theme::GREEN,
+        CompilerPresetStatus::Warning => theme::GOLD,
+        CompilerPresetStatus::Disabled => theme::MUTED,
+    }
+}
+
+fn compiler_kind_label(kind: CompilerPresetKind) -> &'static str {
+    match kind {
+        CompilerPresetKind::Builtin => "builtin",
+        CompilerPresetKind::Environment => "env",
+        CompilerPresetKind::Config => "config",
+    }
+}
+
+fn compiler_description(info: &CompilerPresetInfo) -> String {
+    info.description
+        .clone()
+        .unwrap_or_else(|| review_snippet(&info.reason, 96))
+}
+
+fn compiler_reference(info: &CompilerPresetInfo) -> String {
+    info.homepage
+        .clone()
+        .or_else(|| info.command.clone())
+        .unwrap_or_else(|| "built-in".into())
+}
+
+fn format_star_count(info: &CompilerPresetInfo) -> String {
+    let Some(stars) = info.github_stars else {
+        return match info.kind {
+            CompilerPresetKind::Builtin => "n/a".into(),
+            CompilerPresetKind::Environment | CompilerPresetKind::Config => "not configured".into(),
+        };
+    };
+    if stars >= 1_000 {
+        format!("{:.1}k", stars as f64 / 1_000.0)
+    } else {
+        stars.to_string()
+    }
+}
+
 fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
-    let area = centered(root, 76, 78);
+    let area = modal_area(root, 76, 78);
     frame.render_widget(Clear, area);
     let session = app
         .current_session()
         .map(|session| format!("{} / {}", session.cli, session.id))
         .unwrap_or_else(|| "No session selected".into());
+    let target_branch = app.launch_branch();
+    let pending_validation = app.validate_launch_for_target(app.pending_target);
+    let pending_report = app.launch_verification_for_target(app.pending_target);
+    if app.launch_review {
+        let capsule = app.launch_capsule_for_target(app.pending_target);
+        let launch_blocked = pending_validation.state == LaunchValidationState::Blocked;
+        let mut lines = vec![
+            Line::from(Span::styled(
+                "Capsule Review",
+                Style::default()
+                    .fg(theme::GOLD)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::raw(""),
+            Line::from(vec![
+                Span::styled("Action: ", Style::default().fg(theme::BLUE)),
+                Span::styled(
+                    "handoff",
+                    Style::default()
+                        .fg(theme::CYAN)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("Session: ", Style::default().fg(theme::BLUE)),
+                Span::raw(session),
+            ]),
+            Line::from(vec![
+                Span::styled("Target: ", Style::default().fg(theme::BLUE)),
+                Span::raw(app.pending_target.to_string()),
+            ]),
+            Line::from(vec![
+                Span::styled("Branch: ", Style::default().fg(theme::BLUE)),
+                Span::raw(target_branch),
+            ]),
+            Line::from(vec![
+                Span::styled("Rewind: ", Style::default().fg(theme::BLUE)),
+                Span::raw(capsule.rewind_point.clone()),
+            ]),
+            Line::from(vec![
+                Span::styled("Validation: ", Style::default().fg(theme::BLUE)),
+                Span::styled(
+                    validation_label(pending_validation.state),
+                    Style::default()
+                        .fg(validation_color(pending_validation.state))
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("  "),
+                Span::styled(
+                    pending_validation.summary(),
+                    Style::default().fg(theme::MUTED),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("Command: ", Style::default().fg(theme::BLUE)),
+                Span::styled(app.launch_command(), Style::default().fg(theme::CYAN)),
+            ]),
+            Line::raw(""),
+            Line::from(Span::styled(
+                "Target receives",
+                Style::default()
+                    .fg(theme::BLUE)
+                    .add_modifier(Modifier::BOLD),
+            )),
+        ];
+        lines.extend(target_input_lines(app));
+        lines.extend([
+            Line::raw(""),
+            Line::from(Span::styled(
+                if compiler::compiler_is_builtin(&capsule.compiler) {
+                    "Draft Work Capsule"
+                } else {
+                    "Work Capsule"
+                },
+                Style::default()
+                    .fg(theme::BLUE)
+                    .add_modifier(Modifier::BOLD),
+            )),
+        ]);
+        lines.extend(capsule_review_lines(&capsule, 1));
+        lines.extend([
+            Line::raw(""),
+            Line::from(Span::styled(
+                "Readiness",
+                Style::default()
+                    .fg(theme::BLUE)
+                    .add_modifier(Modifier::BOLD),
+            )),
+        ]);
+        lines.extend(readiness_lines(pending_report.as_ref(), 6));
+        lines.extend([
+            Line::raw(""),
+            Line::from(Span::styled(
+                "Prompt argument",
+                Style::default()
+                    .fg(theme::GOLD)
+                    .add_modifier(Modifier::BOLD),
+            )),
+        ]);
+        lines.extend(target_prompt_lines(app));
+        lines.extend([
+            Line::raw(""),
+            Line::from(Span::styled(
+                if launch_blocked {
+                    "enter disabled   y copy blocked   Esc/q close"
+                } else {
+                    "enter handoff   y copy command   Esc/q close"
+                },
+                Style::default().fg(theme::MUTED),
+            )),
+        ]);
+        frame.render_widget(
+            Paragraph::new(lines)
+                .block(panel_block(" Handoff Review ", true))
+                .scroll((app.modal_scroll, 0))
+                .wrap(Wrap { trim: true }),
+            area,
+        );
+        return;
+    }
+
     let mut target_lines = Vec::new();
     for target in CliTool::ALL {
         let selected = target == app.pending_target;
+        let validation = app.validate_launch_for_target(target);
         let style = if selected {
             Style::default()
                 .fg(ratatui::style::Color::Black)
-                .bg(theme::BLUE)
+                .bg(validation_color(validation.state))
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(theme::TEXT)
+            Style::default().fg(validation_color(validation.state))
+        };
+        let muted_style = if selected {
+            Style::default()
+                .fg(ratatui::style::Color::Black)
+                .bg(validation_color(validation.state))
+        } else {
+            Style::default().fg(theme::MUTED)
         };
         let cursor = if selected { ">" } else { " " };
         let mark = if selected { "[x]" } else { "[ ]" };
         target_lines.push(Line::from(vec![
             Span::styled(format!("{cursor} {mark} {target:<6}"), style),
-            Span::styled("  handoff target", Style::default().fg(theme::MUTED)),
+            Span::styled(format!("  {}", validation_label(validation.state)), style),
+        ]));
+        target_lines.push(Line::from(vec![
+            Span::raw("    "),
+            Span::styled(validation.summary(), muted_style),
         ]));
     }
-    let target_branch = format!(
-        "moonbox/{}-rewind-{}",
-        app.pending_target.id(),
-        app.rewind_event_id
-    );
     let mut lines = vec![
         Line::from(Span::styled(
             "Choose target CLI",
@@ -711,34 +1965,288 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             Span::raw(app.pending_target.to_string()),
         ]),
         Line::from(vec![
-            Span::styled("Branch: ", Style::default().fg(theme::BLUE)),
-            Span::raw(target_branch),
+            Span::styled("Validation: ", Style::default().fg(theme::BLUE)),
+            Span::styled(
+                validation_label(pending_validation.state),
+                Style::default()
+                    .fg(validation_color(pending_validation.state))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                pending_validation.summary(),
+                Style::default().fg(theme::MUTED),
+            ),
         ]),
         Line::raw(""),
         Line::from(Span::styled(
-            format!(
-                "moonbox launch --target {} --capsule ~/.moonbox/capsules/{}.json",
-                app.pending_target.id(),
-                app.rewind_event_id
-            ),
-            Style::default().fg(theme::CYAN),
+            "Readiness",
+            Style::default()
+                .fg(theme::BLUE)
+                .add_modifier(Modifier::BOLD),
         )),
+    ]);
+    lines.extend(readiness_lines(pending_report.as_ref(), 6));
+    lines.extend([
+        if pending_validation.state == LaunchValidationState::Blocked {
+            Line::from(Span::styled(
+                "Launch review disabled until validation passes",
+                Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+            ))
+        } else {
+            Line::from(Span::styled(
+                "Press enter to review the handoff command before copying",
+                Style::default().fg(theme::GOLD),
+            ))
+        },
         Line::raw(""),
         Line::from(Span::styled(
-            "j/k choose target   enter confirm   Esc cancel",
+            if pending_validation.state == LaunchValidationState::Blocked {
+                "j/k choose target   enter/y blocked   Esc cancel"
+            } else {
+                "j/k choose target   enter review   y unavailable   Esc cancel"
+            },
             Style::default().fg(theme::MUTED),
         )),
     ]);
     frame.render_widget(
         Paragraph::new(lines)
             .block(panel_block(" Launch ", true))
+            .scroll((app.modal_scroll, 0))
             .wrap(Wrap { trim: true }),
         area,
     );
 }
 
+fn capsule_review_lines(capsule: &WorkCapsule, _max_rows: usize) -> Vec<Line<'static>> {
+    let decision = capsule
+        .decisions
+        .first()
+        .map(|value| review_snippet(value, 88))
+        .unwrap_or_else(|| "none".into());
+    let todo = capsule
+        .todo
+        .first()
+        .map(|item| {
+            let mark = if item.done { "[x]" } else { "[ ]" };
+            review_snippet(&format!("{mark} {}", item.text), 88)
+        })
+        .unwrap_or_else(|| "none".into());
+    let risk = capsule
+        .risks
+        .first()
+        .map(|value| review_snippet(value, 88))
+        .unwrap_or_else(|| "none".into());
+    vec![
+        review_label_line("Goal", review_snippet(&capsule.goal, 88), theme::BLUE),
+        review_label_line("State", capsule.state.clone(), theme::GOLD),
+        review_label_line("Decision", decision, theme::BLUE),
+        review_label_line("Todo", todo, theme::BLUE),
+        review_label_line("Risk", risk, theme::RED),
+    ]
+}
+
+fn target_input_lines(app: &App) -> Vec<Line<'static>> {
+    let Some(preview) = app.target_command_preview() else {
+        return vec![Line::from(Span::styled(
+            "No target input available for the current selection.",
+            Style::default().fg(theme::MUTED),
+        ))];
+    };
+    let cwd = preview.cwd.unwrap_or_else(|| "terminal default".into());
+    vec![
+        review_label_line("Program", preview.program, theme::BLUE),
+        review_label_line("Cwd", cwd, theme::BLUE),
+        review_label_line(
+            "Args",
+            format!(
+                "{} arg(s), final arg is the handoff prompt",
+                preview.args.len()
+            ),
+            theme::BLUE,
+        ),
+        review_label_line(
+            "Prompt",
+            "shown below, passed as the final argument".into(),
+            theme::BLUE,
+        ),
+    ]
+}
+
+fn target_prompt_lines(app: &App) -> Vec<Line<'static>> {
+    let Some(preview) = app.target_command_preview() else {
+        return vec![Line::from(Span::styled(
+            "No prompt available for the current selection.",
+            Style::default().fg(theme::MUTED),
+        ))];
+    };
+    preview
+        .prompt
+        .lines()
+        .map(|line| {
+            Line::from(vec![
+                Span::styled("> ", Style::default().fg(theme::MUTED)),
+                Span::raw(line.to_string()),
+            ])
+        })
+        .collect()
+}
+
+fn review_label_line(
+    label: &'static str,
+    value: String,
+    color: ratatui::style::Color,
+) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(
+            format!("{label}: "),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(value, Style::default().fg(theme::TEXT)),
+    ])
+}
+
+fn review_snippet(value: &str, max_chars: usize) -> String {
+    let mut output = String::new();
+    for (index, ch) in value.chars().enumerate() {
+        if index == max_chars {
+            output.push_str("...");
+            return output;
+        }
+        output.push(ch);
+    }
+    output
+}
+
+fn validation_label(state: LaunchValidationState) -> &'static str {
+    match state {
+        LaunchValidationState::Ready => "READY",
+        LaunchValidationState::Warning => "WARN",
+        LaunchValidationState::Blocked => "BLOCKED",
+    }
+}
+
+fn validation_color(state: LaunchValidationState) -> Color {
+    match state {
+        LaunchValidationState::Ready => theme::GREEN,
+        LaunchValidationState::Warning => theme::GOLD,
+        LaunchValidationState::Blocked => theme::RED,
+    }
+}
+
+fn readiness_lines(report: Option<&VerificationReport>, _max_rows: usize) -> Vec<Line<'static>> {
+    let Some(report) = report else {
+        return vec![Line::from(vec![
+            Span::styled(
+                "BLOCKED ",
+                Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("session", Style::default().fg(theme::TEXT)),
+            Span::styled("  No session selected", Style::default().fg(theme::MUTED)),
+        ])];
+    };
+
+    let mut lines = Vec::new();
+    for group in readiness_groups() {
+        lines.push(Line::from(Span::styled(
+            group.title,
+            Style::default()
+                .fg(group.color)
+                .add_modifier(Modifier::BOLD),
+        )));
+        let checks = grouped_checks(report, group.names);
+        lines.extend(checks.into_iter().map(readiness_check_line));
+    }
+    lines
+}
+
+struct ReadinessGroup {
+    title: &'static str,
+    color: Color,
+    names: &'static [&'static str],
+}
+
+fn readiness_groups() -> [ReadinessGroup; 3] {
+    [
+        ReadinessGroup {
+            title: "Source Health",
+            color: theme::BLUE,
+            names: &["source_health", "token_budget", "rewind_exists"],
+        },
+        ReadinessGroup {
+            title: "Capsule Health",
+            color: theme::GOLD,
+            names: &[
+                "compiler_mode",
+                "capsule_version",
+                "capsule_required_fields",
+                "capsule_source",
+                "target_cli",
+                "target_branch",
+                "target_branch_namespace",
+                "handoff_context",
+                "risk_context",
+                "capsule_size",
+            ],
+        },
+        ReadinessGroup {
+            title: "Target Readiness",
+            color: theme::GREEN,
+            names: &["target_support", "target_command"],
+        },
+    ]
+}
+
+fn grouped_checks<'a>(
+    report: &'a VerificationReport,
+    names: &[&str],
+) -> Vec<&'a crate::core::model::VerificationCheck> {
+    let mut checks = names
+        .iter()
+        .filter_map(|name| report.checks.iter().find(|check| check.name == *name))
+        .filter(|check| check.status != VerificationStatus::Pass)
+        .collect::<Vec<_>>();
+    if checks.is_empty() {
+        checks = names
+            .iter()
+            .filter_map(|name| report.checks.iter().find(|check| check.name == *name))
+            .take(2)
+            .collect();
+    }
+    checks
+}
+
+fn readiness_check_line(check: &crate::core::model::VerificationCheck) -> Line<'static> {
+    let color = verification_color(check.status);
+    Line::from(vec![
+        Span::raw("  "),
+        Span::styled(
+            format!("{:<5} ", check.status),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            check.name.clone(),
+            Style::default()
+                .fg(theme::TEXT)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("  {}", check.detail),
+            Style::default().fg(theme::MUTED),
+        ),
+    ])
+}
+
+fn verification_color(status: VerificationStatus) -> Color {
+    match status {
+        VerificationStatus::Pass => theme::GREEN,
+        VerificationStatus::Warn => theme::GOLD,
+        VerificationStatus::Fail => theme::RED,
+    }
+}
+
 fn render_open_original(frame: &mut Frame, root: Rect, app: &App) {
-    let area = centered(root, 72, 64);
+    let area = modal_area(root, 72, 64);
     frame.render_widget(Clear, area);
     let lines = if let Some(session) = app.current_session() {
         vec![
@@ -763,16 +2271,33 @@ fn render_open_original(frame: &mut Frame, root: Rect, app: &App) {
             ]),
             Line::raw(""),
             Line::from(Span::styled(
-                &session.resume_command,
+                "Will run",
+                Style::default()
+                    .fg(theme::BLUE)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(
+                app.original_resume_display_command().unwrap_or_default(),
                 Style::default().fg(theme::CYAN),
             )),
             Line::raw(""),
             Line::from(Span::styled(
-                "Original resume only. Handoff uses Launch.",
+                "Copy wrapper",
+                Style::default()
+                    .fg(theme::BLUE)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(
+                app.original_open_command().unwrap_or_default(),
+                Style::default().fg(theme::MUTED),
+            )),
+            Line::raw(""),
+            Line::from(Span::styled(
+                "Action: Moonbox hands this terminal to the original CLI.",
                 Style::default().fg(theme::MUTED),
             )),
             Line::from(Span::styled(
-                "Press Esc to close",
+                "enter hand off   y copy wrapper command   Esc close",
                 Style::default().fg(theme::MUTED),
             )),
         ]
@@ -795,47 +2320,7 @@ fn render_open_original(frame: &mut Frame, root: Rect, app: &App) {
     frame.render_widget(
         Paragraph::new(lines)
             .block(panel_block(" Open Original ", true))
-            .wrap(Wrap { trim: true }),
-        area,
-    );
-}
-
-fn render_diff(frame: &mut Frame, root: Rect) {
-    let area = centered(root, 64, 42);
-    frame.render_widget(Clear, area);
-    let lines = vec![
-        Line::from(Span::styled(
-            "Capsule diff preview",
-            Style::default()
-                .fg(theme::GOLD)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::raw(""),
-        Line::from(Span::styled(
-            "+ canonical timeline schema",
-            Style::default().fg(theme::GREEN),
-        )),
-        Line::from(Span::styled(
-            "+ work capsule schema",
-            Style::default().fg(theme::GREEN),
-        )),
-        Line::from(Span::styled(
-            "+ target launcher new-branch mode",
-            Style::default().fg(theme::GREEN),
-        )),
-        Line::from(Span::styled(
-            "- raw session resume",
-            Style::default().fg(theme::RED),
-        )),
-        Line::raw(""),
-        Line::from(Span::styled(
-            "Press Esc to close",
-            Style::default().fg(theme::MUTED),
-        )),
-    ];
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(panel_block(" Diff ", true))
+            .scroll((app.modal_scroll, 0))
             .wrap(Wrap { trim: true }),
         area,
     );
@@ -863,14 +2348,10 @@ fn dynamic_panel_block(title: String, focused: bool) -> Block<'static> {
         .padding(Padding::horizontal(1))
 }
 
-fn label_line<'a>(label: &'a str, value: &'a str, color: ratatui::style::Color) -> Line<'a> {
-    Line::from(vec![
-        Span::styled(
-            format!("{label}: "),
-            Style::default().fg(color).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(value, Style::default().fg(theme::TEXT)),
-    ])
+fn stable_panel_title(content: String, area: Rect) -> String {
+    let width = usize::from(area.width.saturating_sub(4)).clamp(18, 30);
+    let clipped = content.chars().take(width).collect::<String>();
+    format!(" {clipped:<width$} ")
 }
 
 fn key(label: &'static str) -> Span<'static> {
@@ -884,6 +2365,12 @@ fn key(label: &'static str) -> Span<'static> {
 
 fn txt(label: &'static str) -> Span<'static> {
     Span::styled(label, Style::default().fg(theme::MUTED))
+}
+
+fn modal_area(root: Rect, percent_x: u16, percent_y: u16) -> Rect {
+    let width = if root.width < 100 { 100 } else { percent_x };
+    let height = if root.height < 34 { 100 } else { percent_y };
+    centered(root, width, height)
 }
 
 fn centered(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
@@ -904,4 +2391,449 @@ fn centered(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
         ])
         .split(vertical[1]);
     horizontal[1]
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::{Terminal, backend::TestBackend};
+
+    use super::*;
+    use crate::{
+        app::App,
+        core::model::{
+            CliTool, SessionStatus, SourceProvenance, TimelineEvent, TimelineKind,
+            VerificationStatus,
+        },
+    };
+
+    fn render_text(app: &App, width: u16, height: u16) -> String {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal.draw(|frame| render(frame, app)).expect("draw");
+        format!("{}", terminal.backend())
+    }
+
+    fn render_loading_text(tick: usize, width: u16, height: u16) -> String {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| render_loading(frame, tick))
+            .expect("draw");
+        format!("{}", terminal.backend())
+    }
+
+    fn assert_screen_contains(screen: &str, expected: &str) {
+        assert!(
+            screen.contains(expected),
+            "screen did not contain {expected:?}\n{screen}"
+        );
+    }
+
+    #[test]
+    fn main_screen_renders_core_regions_across_viewports() {
+        for (width, height) in [(140, 40), (80, 24)] {
+            let app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+            let screen = render_text(&app, width, height);
+
+            assert_screen_contains(&screen, "MOONBOX");
+            assert_screen_contains(&screen, "Sessions");
+            assert_screen_contains(&screen, "Timeline");
+            assert_screen_contains(&screen, "Session Details");
+            assert_screen_contains(&screen, "Status");
+            assert!(screen.chars().any(|ch| !ch.is_whitespace()));
+        }
+    }
+
+    #[test]
+    fn loading_screen_renders_animated_state() {
+        let first = render_loading_text(0, 100, 30);
+        let second = render_loading_text(1, 100, 30);
+
+        assert_screen_contains(&first, "MOONBOX");
+        assert_screen_contains(&first, "indexing source sessions");
+        assert_screen_contains(&first, "bounded scan");
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn session_list_window_keeps_render_work_bounded() {
+        assert_eq!(session_list_window(0, 0, 20), (0, 0));
+        assert_eq!(session_list_window(3, 1, 20), (0, 3));
+
+        let (start, end) = session_list_window(5_000, 2_500, 22);
+        assert!(start <= 2_500 && end > 2_500);
+        assert!(end - start <= 14);
+
+        let (start, end) = session_list_window(5_000, 4_999, 22);
+        assert!(start <= 4_999 && end == 5_000);
+        assert!(end - start <= 14);
+    }
+
+    #[test]
+    fn session_panel_title_keeps_stable_width_across_filters() {
+        let area = Rect::new(0, 0, 36, 10);
+        let all = stable_panel_title("Sessions · All (2/231)".into(), area);
+        let codex = stable_panel_title("Sessions · Codex (12/128)".into(), area);
+        let hermes = stable_panel_title("Sessions · Hermes (1/2)".into(), area);
+
+        assert_eq!(all.len(), codex.len());
+        assert_eq!(codex.len(), hermes.len());
+    }
+
+    #[test]
+    fn compile_status_label_keeps_header_width_stable() {
+        assert_eq!(compile_status_label("ACTIVE"), "ACTIVE  ");
+        assert_eq!(compile_status_label("LOADING"), "LOADING ");
+        assert_eq!(compile_status_label("COMPILED"), "COMPILED");
+    }
+
+    #[test]
+    fn unselected_session_titles_are_muted() {
+        assert_eq!(session_title_style(false).fg, Some(theme::MUTED));
+        assert_eq!(session_title_style(true).fg, Some(theme::TEXT));
+        assert!(
+            session_title_style(true)
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
+    }
+
+    #[test]
+    fn header_tokens_do_not_show_fake_budget() {
+        let app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        let screen = render_text(&app, 140, 40);
+
+        assert!(!screen.contains("/ 100K"), "{screen}");
+    }
+
+    #[test]
+    fn header_shows_current_data_space() {
+        let app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        let screen = render_text(&app, 160, 40);
+
+        assert_screen_contains(&screen, "Data:");
+        assert_screen_contains(&screen, "Local");
+    }
+
+    #[test]
+    fn session_list_secondary_uses_relative_time_with_branch() {
+        let now = parse_session_timestamp("2026-06-07T13:34:00+08:00").expect("now");
+        let session = test_session("2026-06-07T13:33:44+08:00", Some("dev"));
+
+        assert_eq!(
+            session_list_secondary_at(&session, now),
+            "        16s ago  ·  dev"
+        );
+    }
+
+    #[test]
+    fn relative_time_label_matches_resume_picker_style() {
+        let now = parse_session_timestamp("2026-06-07T13:34:00Z").expect("now");
+
+        assert_eq!(
+            relative_time_label("2026-06-07T13:30:00Z", now).as_deref(),
+            Some("4m ago")
+        );
+        assert_eq!(
+            relative_time_label("2026-06-07T04:34:00Z", now).as_deref(),
+            Some("9h ago")
+        );
+        assert_eq!(
+            relative_time_label("2026-06-05T13:34:00Z", now).as_deref(),
+            Some("2d ago")
+        );
+    }
+
+    fn test_session(updated_at: &str, branch: Option<&str>) -> crate::core::model::SessionSummary {
+        crate::core::model::SessionSummary {
+            id: "session-id".into(),
+            cli: CliTool::Codex,
+            title: "Session".into(),
+            cwd: "/repo".into(),
+            updated_at: updated_at.into(),
+            updated: "2026-06-07 13:33".into(),
+            status: SessionStatus::Healthy,
+            branch: branch.map(str::to_owned),
+            token_count: None,
+            health_reason: None,
+            event_count: 0,
+            resume_command: "codex resume session-id".into(),
+            source_provenance: SourceProvenance::Real,
+            source_path: None,
+            parse_skip_count: 0,
+        }
+    }
+
+    #[test]
+    fn main_timeline_hides_low_signal_tool_events() {
+        let app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        let screen = render_text(&app, 140, 40);
+
+        assert_screen_contains(&screen, "REWIND");
+        assert!(!screen.contains("Tool: rg"), "{screen}");
+    }
+
+    #[test]
+    fn timeline_scroll_accounts_for_wrapped_event_details() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.data.timeline = vec![
+            TimelineEvent {
+                id: "evt-001".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::User,
+                title: "User".into(),
+                detail: "very long context ".repeat(40),
+            },
+            TimelineEvent {
+                id: "evt-002".into(),
+                time: "10:01".into(),
+                kind: TimelineKind::User,
+                title: "User".into(),
+                detail: "selected user question".into(),
+            },
+        ];
+        app.selected_event = 1;
+        app.rewind_event_id = "evt-002".into();
+
+        let scroll = timeline_scroll(&app, Rect::new(0, 0, 48, 8));
+
+        assert!(scroll > 6, "scroll should include wrapped detail height");
+    }
+
+    #[test]
+    fn timeline_visually_groups_consecutive_assistant_events() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.data.timeline = vec![
+            TimelineEvent {
+                id: "evt-001".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::User,
+                title: "User".into(),
+                detail: "分析下 cxcp".into(),
+            },
+            TimelineEvent {
+                id: "evt-002".into(),
+                time: "10:01".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "先定位项目。".into(),
+            },
+            TimelineEvent {
+                id: "evt-003".into(),
+                time: "10:02".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "继续分析缓存。".into(),
+            },
+            TimelineEvent {
+                id: "evt-004".into(),
+                time: "10:03".into(),
+                kind: TimelineKind::User,
+                title: "User".into(),
+                detail: "下一步".into(),
+            },
+        ];
+        app.selected_event = 1;
+        app.rewind_event_id = "evt-001".into();
+
+        let screen = render_text(&app, 120, 28);
+
+        assert_screen_contains(&screen, "Codex x2");
+        assert_screen_contains(&screen, "先定位项目");
+        assert_screen_contains(&screen, "继续分析缓存");
+        assert_eq!(screen.matches("Codex x2").count(), 1, "{screen}");
+        assert!(!screen.contains("ASSISTANT  Assistant"), "{screen}");
+    }
+
+    #[test]
+    fn timeline_assistant_group_label_uses_source_cli() {
+        let mut app = App::new(CliTool::Claude, CliTool::Codex).expect("app");
+        app.focus = Focus::Timeline;
+        app.data.timeline = vec![
+            TimelineEvent {
+                id: "evt-001".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::User,
+                title: "User".into(),
+                detail: "start".into(),
+            },
+            TimelineEvent {
+                id: "evt-002".into(),
+                time: "10:01".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "first".into(),
+            },
+            TimelineEvent {
+                id: "evt-003".into(),
+                time: "10:02".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "second".into(),
+            },
+        ];
+        app.selected_event = 1;
+        app.rewind_event_id = "evt-001".into();
+
+        let screen = render_text(&app, 120, 28);
+
+        assert_screen_contains(&screen, "Claude Code x2");
+        assert!(!screen.contains("AI x2"), "{screen}");
+    }
+
+    #[test]
+    fn skill_picker_renders_compiler_metadata() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.show_skill_picker = true;
+
+        let screen = render_text(&app, 140, 40);
+
+        assert_screen_contains(&screen, "Skill Picker");
+        assert_screen_contains(&screen, "Choose compiler skill");
+        assert_screen_contains(&screen, "engineering-handoff");
+        assert_screen_contains(&screen, "stars:");
+        assert_screen_contains(&screen, "n/a");
+        assert_screen_contains(&screen, "https://github.com/Gunsio/moonbox");
+        assert_screen_contains(&screen, "j/k choose");
+    }
+
+    #[test]
+    fn zoomed_timeline_uses_full_body_without_side_panels() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.zoomed_focus = Some(Focus::Timeline);
+
+        let screen = render_text(&app, 140, 36);
+
+        assert_screen_contains(&screen, "Timeline");
+        assert!(!screen.contains("Sessions ·"), "{screen}");
+        assert!(!screen.contains("Session Details"), "{screen}");
+        assert_screen_contains(&screen, "Action Path");
+    }
+
+    #[test]
+    fn selected_timeline_rows_keep_role_accent_colors() {
+        assert_eq!(timeline_group_accent(theme::BLUE, false), theme::BLUE);
+        assert_eq!(timeline_group_accent(theme::GOLD, false), theme::GOLD);
+        assert_eq!(timeline_group_accent(theme::BLUE, true), theme::GOLD);
+
+        let selected_user_prefix = timeline_prefix_style(true, theme::BLUE);
+        assert_eq!(selected_user_prefix.fg, Some(theme::BLUE));
+        assert!(selected_user_prefix.add_modifier.contains(Modifier::BOLD));
+
+        let selected_ai_prefix = timeline_prefix_style(true, theme::GOLD);
+        assert_eq!(selected_ai_prefix.fg, Some(theme::GOLD));
+        assert!(selected_ai_prefix.add_modifier.contains(Modifier::BOLD));
+
+        let active_cursor_marker = timeline_marker_style(true, true, false);
+        assert_eq!(active_cursor_marker.fg, Some(theme::CYAN));
+        assert!(active_cursor_marker.add_modifier.contains(Modifier::BOLD));
+
+        let inactive_rewind_marker = timeline_marker_style(false, false, true);
+        assert_eq!(inactive_rewind_marker.fg, Some(theme::GOLD));
+        assert!(inactive_rewind_marker.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn right_panel_shows_compact_handoff_snapshot_not_full_capsule() {
+        let app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        let screen = render_text(&app, 140, 40);
+
+        assert_screen_contains(&screen, "Real Session Metadata");
+        assert_screen_contains(&screen, "Handoff Snapshot");
+        assert_screen_contains(&screen, "draft_from_builtin_compiler");
+        assert_screen_contains(&screen, "Press c to refresh and review");
+        assert!(
+            !screen.contains("Production handoff should use"),
+            "{screen}"
+        );
+        assert!(!screen.contains("Define canonical timeline"), "{screen}");
+    }
+
+    #[test]
+    fn doctor_overlay_renders_diagnostics_and_actions() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.show_doctor = true;
+        app.doctor_report.status = VerificationStatus::Pass;
+        let screen = render_text(&app, 120, 36);
+
+        assert_screen_contains(&screen, "Doctor");
+        assert_screen_contains(&screen, "Environment doctor");
+        assert_screen_contains(&screen, "source_codex_adapter");
+        assert_screen_contains(&screen, "fixtures/adapters/codex");
+        assert_screen_contains(&screen, "Copy JSON");
+    }
+
+    #[test]
+    fn launch_overlay_renders_blocked_target_state() {
+        let mut app = App::new(CliTool::Hermes, CliTool::Hermes).expect("app");
+        app.show_launch = true;
+        app.pending_target = CliTool::Hermes;
+        let screen = render_text(&app, 120, 36);
+
+        assert_screen_contains(&screen, "Launch");
+        assert_screen_contains(&screen, "Choose target CLI");
+        assert_screen_contains(&screen, "BLOCKED");
+        assert_screen_contains(&screen, "Readiness");
+        assert_screen_contains(&screen, "Source Health");
+        assert_screen_contains(&screen, "Capsule Health");
+        assert_screen_contains(&screen, "Target Readiness");
+        assert_screen_contains(&screen, "FAIL");
+        assert_screen_contains(&screen, "target_support");
+        assert_screen_contains(&screen, "raw resume is known failed");
+        assert_screen_contains(&screen, "enter/y Blocked");
+    }
+
+    #[test]
+    fn launch_review_renders_explicit_handoff_action() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.show_launch = true;
+        app.launch_review = true;
+        app.pending_target = CliTool::Hermes;
+        let screen = render_text(&app, 120, 48);
+
+        assert_screen_contains(&screen, "Handoff Review");
+        assert_screen_contains(&screen, "Capsule Review");
+        assert_screen_contains(&screen, "handoff");
+        assert_screen_contains(&screen, "Target receives");
+        assert_screen_contains(&screen, "Prompt");
+        assert_screen_contains(&screen, "Draft Work Capsule");
+        assert_screen_contains(&screen, "Goal");
+        assert_screen_contains(&screen, "Readiness");
+        assert_screen_contains(&screen, "PASS");
+        assert_screen_contains(&screen, "target_support");
+        assert_screen_contains(&screen, "moonbox launch --execute");
+        assert_screen_contains(&screen, "enter Handoff");
+    }
+
+    #[test]
+    fn launch_review_scrolls_to_exact_target_prompt() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.show_launch = true;
+        app.launch_review = true;
+        app.pending_target = CliTool::Hermes;
+        app.modal_scroll = 22;
+        let screen = render_text(&app, 120, 36);
+
+        assert_screen_contains(&screen, "Prompt argument");
+        assert_screen_contains(&screen, "You are receiving a Moonbox cross-CLI handoff");
+        assert_screen_contains(&screen, "- CLI: Hermes");
+    }
+
+    #[test]
+    fn launch_overlay_renders_warning_readiness_signal() {
+        let mut app = App::new(CliTool::Codex, CliTool::Codex).expect("app");
+        app.show_launch = true;
+        app.pending_target = CliTool::Codex;
+        let screen = render_text(&app, 120, 36);
+
+        assert_screen_contains(&screen, "WARN");
+        assert_screen_contains(&screen, "Readiness");
+        assert_screen_contains(&screen, "Target Readiness");
+        assert_screen_contains(&screen, "target_support");
+        assert_screen_contains(&screen, "Same-CLI handoff");
+        assert_screen_contains(&screen, "enter Review");
+    }
 }

@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$repo_root"
+
+smoke_home="${MOONBOX_SMOKE_HOME:-$repo_root/target/moonbox-smoke-home}"
+output_dir="$smoke_home/output"
+mkdir -p "$output_dir" "$smoke_home/.ssh"
+
+export MOONBOX_CODEX_HOME="$smoke_home/codex"
+export MOONBOX_CLAUDE_HOME="$smoke_home/claude"
+export MOONBOX_HERMES_HOME="$smoke_home/hermes"
+export MOONBOX_CONFIG="$smoke_home/config.json"
+export MOONBOX_SSH_CONFIG="$smoke_home/.ssh/config"
+export MOONBOX_SESSION_MODE=fixture
+export MOONBOX_SESSION_LIMIT=50
+
+cat > "$MOONBOX_CONFIG" <<'JSON'
+{
+  "ssh_hosts": [
+    {"name": "smoke-prod", "host": "smoke-prod.internal", "user": "deploy", "port": 2222}
+  ]
+}
+JSON
+
+cat > "$MOONBOX_SSH_CONFIG" <<'SSH'
+Host smoke-dev
+  HostName smoke-dev.internal
+  User dev
+  Port 2200
+SSH
+
+cargo build --locked
+
+target_dir="${CARGO_TARGET_DIR:-$repo_root/target}"
+if [[ "$target_dir" != /* ]]; then
+  target_dir="$repo_root/$target_dir"
+fi
+moonbox="$target_dir/debug/moonbox"
+moon="$target_dir/debug/moon"
+
+"$moonbox" --help > "$output_dir/help.txt"
+grep -q "replay-eval" "$output_dir/help.txt"
+
+"$moon" --help > "$output_dir/moon-help.txt"
+grep -q "replay-eval" "$output_dir/moon-help.txt"
+
+"$moonbox" completions bash > "$output_dir/moonbox.bash"
+grep -q "_moonbox" "$output_dir/moonbox.bash"
+grep -q "replay-eval" "$output_dir/moonbox.bash"
+
+"$moon" completions fish > "$output_dir/moon.fish"
+grep -q "complete -c moon" "$output_dir/moon.fish"
+grep -q "completions" "$output_dir/moon.fish"
+
+"$moonbox" sessions --json > "$output_dir/sessions.json"
+grep -q "codex-cxcp-design" "$output_dir/sessions.json"
+grep -q "claude-qc-platform" "$output_dir/sessions.json"
+grep -q "hermes-cxcp-502" "$output_dir/sessions.json"
+
+"$moonbox" capsule --session codex-cxcp-design --target hermes --rewind evt-091 --json > "$output_dir/capsule.json"
+grep -q '"source_cli": "codex"' "$output_dir/capsule.json"
+grep -q '"target_cli": "hermes"' "$output_dir/capsule.json"
+
+"$moonbox" compile-request --session codex-cxcp-design --target hermes --rewind evt-091 --json > "$output_dir/compile-request.json"
+grep -q '"compiler": "engineering-handoff"' "$output_dir/compile-request.json"
+grep -q '"target_cli": "hermes"' "$output_dir/compile-request.json"
+
+"$moonbox" compile-output --session codex-cxcp-design --target hermes --rewind evt-091 --json > "$output_dir/compile-output.json"
+grep -q '"target_branch": "moonbox/hermes-rewind-evt-091"' "$output_dir/compile-output.json"
+
+"$moonbox" compilers --json > "$output_dir/compilers.json"
+grep -q '"id": "engineering-handoff"' "$output_dir/compilers.json"
+
+"$moonbox" ssh --json > "$output_dir/ssh.json"
+grep -q '"name": "smoke-prod"' "$output_dir/ssh.json"
+grep -q '"source": "moonbox_config"' "$output_dir/ssh.json"
+grep -q '"name": "smoke-dev"' "$output_dir/ssh.json"
+grep -q '"source": "openssh_config"' "$output_dir/ssh.json"
+
+MOONBOX_CODEX_BIN="$moonbox" \
+  MOONBOX_CLAUDE_BIN="$moonbox" \
+  MOONBOX_HERMES_BIN="$moonbox" \
+  "$moonbox" doctor --json > "$output_dir/doctor.json"
+grep -q '"ready": true' "$output_dir/doctor.json"
+grep -q '"source_adapters"' "$output_dir/doctor.json"
+grep -q '"provenance": "fixture"' "$output_dir/doctor.json"
+grep -q '"name": "source_codex_adapter"' "$output_dir/doctor.json"
+grep -q '"name": "session_discovery"' "$output_dir/doctor.json"
+grep -q '"name": "target_codex_binary"' "$output_dir/doctor.json"
+
+"$moonbox" open --session codex-cxcp-design --json > "$output_dir/open.json"
+grep -q '"dry_run": true' "$output_dir/open.json"
+grep -q '"program": "codex"' "$output_dir/open.json"
+
+"$moonbox" launch --target hermes --session codex-cxcp-design --json > "$output_dir/launch.json"
+grep -q '"dry_run": true' "$output_dir/launch.json"
+grep -q '"ready": true' "$output_dir/launch.json"
+
+"$moonbox" verify --target hermes --session codex-cxcp-design --json > "$output_dir/verify.json"
+grep -q '"status": "pass"' "$output_dir/verify.json"
+
+"$moonbox" replay-eval --json > "$output_dir/replay-eval.json"
+grep -q '"fixture_only": true' "$output_dir/replay-eval.json"
+grep -q '"matrix_case_count": 9' "$output_dir/replay-eval.json"
+grep -q '"synthetic_case_count": 3' "$output_dir/replay-eval.json"
+grep -q '"case_count": 12' "$output_dir/replay-eval.json"
+grep -q '"target_mismatch"' "$output_dir/replay-eval.json"
+grep -q '"oversized_capsule"' "$output_dir/replay-eval.json"
+grep -q '"missing_tool_preflight"' "$output_dir/replay-eval.json"
+
+echo "moonbox CLI smoke passed with fixture-only source homes at $smoke_home"

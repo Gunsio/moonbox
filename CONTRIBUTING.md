@@ -1,0 +1,174 @@
+# Contributing
+
+Moonbox is early, but it should already be treated like production open-source
+software. Contributions must keep the CLI, TUI, data contracts, documentation,
+and release surface consistent.
+
+## Development Setup
+
+Moonbox requires Rust 1.88 or newer.
+
+```bash
+git clone https://github.com/Gunsio/moonbox.git
+cd moonbox
+cargo run --locked -- tui
+```
+
+## Required Checks
+
+Run these before opening a pull request:
+
+```bash
+scripts/ci/full-gate.sh
+```
+
+The full gate runs patch hygiene plus the CI/release checks. It expects a clean
+worktree for `cargo package --locked`; during pre-commit iteration you can use
+`MOONBOX_PACKAGE_ALLOW_DIRTY=1 scripts/ci/full-gate.sh`, then run it again
+without the override after committing.
+
+Expanded gates:
+
+```bash
+git diff --check
+scripts/ci/supply-chain.sh
+cargo fmt --check
+cargo check --locked
+cargo test --locked
+RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps
+cargo run --locked -- replay-eval --json
+scripts/ci/cli-smoke.sh
+scripts/ci/docs-assets-smoke.sh
+scripts/ci/homebrew-docs-smoke.sh
+cargo clippy --locked -- -D warnings
+cargo build --release --locked
+scripts/ci/package-hygiene.sh
+cargo package --locked
+scripts/ci/release-artifacts-smoke.sh
+scripts/ci/install-smoke.sh
+```
+
+`cargo test --locked` includes public CLI contract tests for the actual
+`moonbox` and `moon` binaries. Those tests redirect source homes into
+`target/cli-contract-home` and must stay fixture-safe.
+
+`cargo clippy --locked -- -D warnings` enforces the production panic boundary.
+Non-test builds deny `unsafe`, `unwrap()`, `expect()`, `panic!`, `todo!`, and
+`unimplemented!`. Use structured errors for recoverable production failures;
+reserve `expect` for test fixture setup and assertions.
+
+`cargo doc --locked --no-deps` must pass with `RUSTDOCFLAGS="-D warnings"` so
+public Rust documentation stays buildable as the library surface evolves.
+The stable library surface is intentionally limited to the documented
+`moonbox::run()` entrypoint while Moonbox is CLI-first; do not expose internal
+modules without committing to documentation and compatibility policy.
+
+`scripts/ci/package-hygiene.sh` validates Cargo package contents before
+`cargo package --locked`, allowing Cargo's standard generated entries while
+failing on editor backups, rejected patches, temporary files, and build
+directories. Use `MOONBOX_PACKAGE_ALLOW_DIRTY=1` during local iteration, then
+rerun from a clean worktree before merging.
+
+`scripts/ci/supply-chain.sh` requires `cargo-deny`. Install it with
+`cargo install --locked cargo-deny`, or set `CARGO_DENY=/path/to/cargo-deny`
+when using a downloaded binary. It checks advisories, duplicate-version policy,
+licenses, and crate sources against `deny.toml`.
+
+`scripts/ci/homebrew-docs-smoke.sh` validates the draft Homebrew formula syntax
+and the exact completion-generation commands the formula will use. It redirects
+source homes into `target/moonbox-homebrew-smoke-home`, sets
+`MOONBOX_SESSION_MODE=fixture`, and must not scan, open, or resume real
+sessions.
+
+`scripts/ci/release-artifacts-smoke.sh` stages source, Cargo crate, and host
+binary archives under `target/`, verifies `SHA256SUMS` and
+`release-manifest.json`, and checks that generated shell completions are present
+inside the binary archive. It sets `MOONBOX_SESSION_MODE=fixture` while
+generating completions and must not scan, open, or resume real sessions.
+
+For README screenshot and install-documentation changes:
+
+```bash
+cargo run --locked -- docs-snapshot --output docs/assets/moonbox-tui.svg
+scripts/ci/docs-assets-smoke.sh
+```
+
+`docs-snapshot` is a hidden maintenance command that renders the real TUI
+Launch Review state from embedded fixtures; it must not scan, open, resume, or
+launch real sessions. The smoke regenerates the same SVG under `target/`,
+compares it with the committed asset, and then validates the README image
+reference, install commands, planned Homebrew wording, and key screenshot
+semantics.
+
+## Engineering Standards
+
+- Keep source sessions read-only.
+- Keep real-session automation explicit: commands that spawn source or target
+  CLIs must require an explicit session id rather than defaulting to the newest
+  discovered session.
+- Keep source adapter state observable: real/fixture/missing provenance, store
+  path, skipped record count, indexed-session counts, list limits, scan limits,
+  visited scan entries, and truncation state belong in structured diagnostics,
+  not only in prose or debug logs.
+- Keep TUI data provenance explicit. Real source metadata, indexed timeline
+  events, generated draft capsule guidance, and externally compiled handoff
+  output must be labeled so users can tell which fields are real.
+- Keep TUI interaction paths bounded. Startup, session switching, filtering,
+  list rendering, and modal refreshes must not synchronously parse unbounded
+  local session history or format every indexed row on every frame.
+- Keep interactive launch handoff prompts observable. When the TUI opens
+  an original or target CLI, restore the terminal and surface the exact command
+  before control leaves Moonbox; tests must cover plans and prompts without
+  opening real sessions.
+- Keep target handoff prompts readable. The target CLI first screen should show
+  a structured summary, not an unformatted JSON dump; machine-readable data can
+  stay in dry-run JSON outputs and explicit capsule commands.
+- Keep inspection surfaces parameterized. User-facing capsule, compile-request,
+  compile-output, launch, verify, and open commands should accept explicit
+  session/target/rewind inputs where the model needs them; do not hard-code
+  fixture source-target pairs in production command paths.
+- Prefer stable core contracts over UI-only behavior.
+- Keep the Rust crate API narrow and documented. The CLI is the product surface;
+  internal adapters, compiler runners, source stores, and TUI state stay
+  crate-private until a deliberate library API is designed.
+- Do not duplicate business policy between CLI and TUI. Shared rules belong in
+  `src/core`.
+- Do not add fake parameters or placeholder outputs. If an argument accepts a
+  file, read and validate that file.
+- Return structured errors for recoverable failures. Production code must not
+  introduce panic-prone primitives; the non-test clippy policy enforces this.
+- Keep fixture data deterministic and representative enough to protect future
+  real adapters.
+- Keep tests and smoke scripts from opening or resuming recent active sessions.
+  Use `MOONBOX_SESSION_MODE=fixture`, explicit fixture homes, or embedded
+  fixtures for automated checks.
+- Update README and the Feishu plan whenever public behavior, install commands,
+  release state, or architecture milestones change.
+
+## Pull Request Shape
+
+Each milestone PR should include:
+
+- What changed.
+- Why the change matters.
+- User-visible behavior changes.
+- Verification commands and important smoke-test output.
+- Documentation updates.
+- Known remaining gaps.
+
+## Release Rules
+
+Do not publish a Homebrew formula, release archive, or package registry version
+until the milestone is accepted and a version tag is planned. The Homebrew path
+is documented in [docs/release/homebrew.md](docs/release/homebrew.md), but it is
+not live yet.
+
+For a dry run of the staged release artifacts:
+
+```bash
+scripts/release/stage-artifacts.sh --version 0.1.0
+```
+
+For an accepted tag, run the same script with `--ref v0.1.0` and attach the
+generated archives, `SHA256SUMS`, and `release-manifest.json` to the GitHub
+release before updating the Homebrew tap.
