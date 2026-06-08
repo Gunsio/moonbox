@@ -16,7 +16,7 @@ use super::{
     local_jsonl::{
         configured_session_limit, display_time, event_id, human_timestamp,
         is_provider_context_text, push_timeline_event, read_error, text_from_value,
-        timeline_preview_truncated_event, title_case, truncate,
+        timeline_preview_truncated_event, title_case, truncate, truncate_timeline_detail,
     },
     model::{
         CanonicalTimeline, CliTool, SessionStatus, SessionSummary, SourceProvenance, TimelineEvent,
@@ -667,7 +667,7 @@ fn timeline_detail(row: &HermesMessageRow) -> String {
         .or(reasoning)
         .or(tool_call)
         .or(token_count)
-        .map(|detail| truncate(&detail, 220))
+        .map(|detail| truncate_timeline_detail(&detail))
         .unwrap_or_default()
 }
 
