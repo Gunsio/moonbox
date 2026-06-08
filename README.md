@@ -2,12 +2,17 @@
 
 Moonbox is a cross-CLI session rewind workbench. It reads sessions from tools
 such as Codex, Claude, and Hermes, normalizes them into a canonical timeline,
-compiles a selected rewind point into a Work Capsule, and launches a new target
-CLI branch.
+and compiles a selected rewind point into a continuation package that any target
+CLI can resume from. In Moonbox, that package is called a Capsule.
 
 This repository is intentionally not a raw session copier. The source session
 is read-only. Compatibility and compression are delegated to replaceable
 compiler skills.
+
+Naming stays deliberately split: "continuation package" is the generic category
+for discovery, comparison, and external-facing docs; "Capsule" / `capsule` is
+the Moonbox product, CLI, and schema name. Existing `capsule --json`,
+`compile-output`, verifier fields, and JSON keys remain stable.
 
 ## Screenshot
 
@@ -187,6 +192,10 @@ The first implementation focuses on the product shell:
 - Source filter defaults to `All`; `Source` is a session-list filter, not a global handoff mode
 - `moonbox sessions --filter <source>` lists one source while keeping default output as the time-sorted global session index
 - `moonbox sessions --json` keeps the stable session array shape and annotates each session with `source_provenance`, `source_path`, and `parse_skip_count`
+- `moonbox snapshot` captures a workspace continuation snapshot with git HEAD,
+  branch, staged/unstaged/untracked paths, bounded diff previews, key project
+  files, environment summary, and explicitly requested test-command results
+  without opening or resuming any source session
 - Original resume and target handoff are explicit action intents:
   `original_resume` for `open`, `target_handoff` for `launch`
 - Target selection lives inside the launch flow, with explicit `> [x]` radio-list selection
@@ -327,6 +336,8 @@ cargo run -- compile-request --session <session-id> --target hermes --rewind <ev
 cargo run -- compile-output --session <session-id> --target hermes --rewind <event-id> --compiler <compiler-id> --json
 cargo run -- compilers --json
 cargo run -- doctor --json
+cargo run -- snapshot --path . --json
+cargo run -- snapshot --path . --test-command "cargo test --locked --lib"
 cargo run -- completions bash
 cargo run -- completions zsh --bin moon
 cargo run -- replay-eval --json
@@ -363,6 +374,14 @@ unbounded default scan or full-file summary parse. Target
 binaries can be overridden with `MOONBOX_CODEX_BIN`,
 `MOONBOX_CLAUDE_BIN`, or `MOONBOX_HERMES_BIN` for local testing and custom
 installs.
+
+`snapshot` is the first workspace side of the continuation package. It reads
+only the selected filesystem path and git worktree, then emits JSON or a compact
+text summary for handoff evidence: HEAD, branch, staged/unstaged/untracked
+paths, bounded diff previews, key project files, OS/architecture/shell summary,
+and any `--test-command` results you explicitly ask Moonbox to run. It does not
+scan Codex, Claude, or Hermes session stores, and it never opens or resumes a
+session.
 
 The TUI starts with an animated loading screen while source sessions are
 indexed. After indexing, session filtering is cached and the session list is
@@ -544,11 +563,11 @@ rows such as `<environment_context>`, folds low-signal tool rows by default,
 groups consecutive AI output into one readable block, right-aligns event times,
 and scrolls by wrapped row height so the selected event stays visible.
 
-The target CLI receives a concise, human-readable Work Capsule Summary as its
-first prompt. It includes source metadata, selected rewind, goal, state,
-decisions, todo, evidence, risks, and execution instructions without dumping the
-capsule as raw JSON. Machine-readable capsule data remains available through
-the dry-run JSON surfaces and `capsule --json`.
+The target CLI receives a concise, human-readable Capsule Summary as its first
+prompt. It includes source metadata, selected rewind, goal, state, decisions,
+todo, evidence, risks, and execution instructions without dumping the capsule as
+raw JSON. Machine-readable capsule data remains available through the dry-run
+JSON surfaces and `capsule --json`.
 
 ## TUI Keys
 
@@ -612,7 +631,7 @@ Source Adapter -> Canonical Timeline -> Rewind Engine
 Stable interfaces matter more than any single framework:
 
 - `SourceAdapter`: read-only session parsing
-- `CapsuleCompiler`: snapshot to Work Capsule; fixture and process runners exist now
+- `CapsuleCompiler`: source timeline and workspace evidence to Capsule; fixture and process runners exist now
 - `Verifier`: schema, token, capability, handoff, size, and execution preflight checks; shared by CLI/TUI
 - `SkillRunner`: JSON input/output compiler skill execution through a process runner
 - `TargetLauncher`: target-specific command construction and guarded process execution

@@ -14,6 +14,7 @@ pub enum CoreError {
     ReplayEval { reason: String },
     DataSpaceLoad { space: String, reason: String },
     SshConfigRead { path: String, reason: String },
+    WorkspaceSnapshot { reason: String },
 }
 
 impl fmt::Display for CoreError {
@@ -41,6 +42,9 @@ impl fmt::Display for CoreError {
             }
             Self::SshConfigRead { path, reason } => {
                 write!(f, "cannot read SSH config {path}: {reason}")
+            }
+            Self::WorkspaceSnapshot { reason } => {
+                write!(f, "cannot capture workspace snapshot: {reason}")
             }
         }
     }

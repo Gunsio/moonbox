@@ -46,6 +46,7 @@ pub fn run() -> Result<()> {
         Command::Compilers(args) => print_compilers(args),
         Command::Ssh(args) => print_ssh_hosts(args),
         Command::Doctor(args) => print_doctor(args),
+        Command::Snapshot(args) => print_workspace_snapshot(args),
         Command::Completions(args) => print_completions(args),
         Command::Launch(args) => print_launch_plan(args),
         Command::Verify(args) => print_verify_report(args),
@@ -308,6 +309,99 @@ fn print_doctor(args: cli::JsonArgs) -> Result<()> {
         print_checks(&report.checks);
     }
     Ok(())
+}
+
+fn print_workspace_snapshot(args: cli::SnapshotArgs) -> Result<()> {
+    let snapshot =
+        core::snapshot::capture_workspace_snapshot(&core::snapshot::WorkspaceSnapshotOptions {
+            path: args.path,
+            diff_line_limit: args.diff_lines,
+            test_commands: args.test_commands,
+        })?;
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&snapshot)?);
+    } else {
+        print_snapshot_text(&snapshot);
+    }
+    Ok(())
+}
+
+fn print_snapshot_text(snapshot: &core::snapshot::WorkspaceSnapshot) {
+    println!("workspace snapshot: v{}", snapshot.version);
+    println!("cwd: {}", snapshot.cwd);
+    println!("repo: {}", snapshot.repo_root.as_deref().unwrap_or("-"));
+    println!(
+        "git: {}",
+        if snapshot.git.available {
+            "available"
+        } else {
+            "unavailable"
+        }
+    );
+    if let Some(reason) = &snapshot.git.reason {
+        println!("reason: {reason}");
+    }
+    println!(
+        "head: {}",
+        snapshot.git.head.as_deref().map(short_sha).unwrap_or("-")
+    );
+    println!("branch: {}", snapshot.git.branch.as_deref().unwrap_or("-"));
+    println!(
+        "upstream: {}",
+        snapshot.git.upstream.as_deref().unwrap_or("-")
+    );
+    println!("dirty: {}", snapshot.git.dirty);
+    print_path_group("staged", &snapshot.git.staged);
+    print_path_group("unstaged", &snapshot.git.unstaged);
+    print_path_group("untracked", &snapshot.git.untracked);
+    if let Some(stat) = &snapshot.git.staged_diff_stat {
+        println!("staged diff stat:\n{stat}");
+    }
+    if let Some(stat) = &snapshot.git.unstaged_diff_stat {
+        println!("unstaged diff stat:\n{stat}");
+    }
+    if !snapshot.key_files.is_empty() {
+        println!("key files:");
+        for file in &snapshot.key_files {
+            println!("- {} {} bytes", file.path, file.bytes);
+        }
+    }
+    println!(
+        "env: {} {} shell={} term={} ci={}",
+        snapshot.environment.os,
+        snapshot.environment.arch,
+        snapshot.environment.shell.as_deref().unwrap_or("-"),
+        snapshot.environment.term.as_deref().unwrap_or("-"),
+        snapshot.environment.ci
+    );
+    if !snapshot.test_commands.is_empty() {
+        println!("test commands:");
+        for command in &snapshot.test_commands {
+            println!(
+                "- {} status={} exit={}",
+                command.command,
+                if command.success { "pass" } else { "fail" },
+                command
+                    .exit_code
+                    .map(|code| code.to_string())
+                    .unwrap_or_else(|| "signal".into())
+            );
+        }
+    }
+}
+
+fn print_path_group(label: &str, paths: &[String]) {
+    println!("{label}: {}", paths.len());
+    for path in paths.iter().take(20) {
+        println!("- {path}");
+    }
+    if paths.len() > 20 {
+        println!("- ... {} more", paths.len() - 20);
+    }
+}
+
+fn short_sha(value: &str) -> &str {
+    value.get(..12).unwrap_or(value)
 }
 
 fn print_completions(args: cli::CompletionsArgs) -> Result<()> {
