@@ -12,7 +12,7 @@ use super::{
         OriginalSessionExecution, OriginalSessionPlan, SessionSummary, SourceProvenance,
         TargetLaunchCommand, WorkCapsule,
     },
-    verifier,
+    redaction, verifier,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -213,6 +213,7 @@ fn target_args(target: CliTool, cwd: Option<&str>, prompt: String) -> Vec<String
 }
 
 fn handoff_prompt(session: &SessionSummary, capsule: &WorkCapsule) -> String {
+    let prompt_session = redaction::redact_session_for_prompt(session, &capsule.redaction);
     format!(
         "\
 You are receiving a Moonbox cross-CLI handoff.
@@ -249,17 +250,20 @@ Evidence:
 Risks:
 {}
 
+Privacy / Redaction:
+{}
+
 Instructions
 - Continue from the selected rewind point using this capsule.
 - Treat the source session as read-only.
 - Do not raw-resume the source session unless Moonbox explicitly asks for original-session resume.
 - Start by briefly restating the goal, current state, next step, and risks before making changes.
 ",
-        session.cli,
-        session.id,
-        prompt_value(&session.title),
-        prompt_value(&session.cwd),
-        session_health_prompt(session),
+        prompt_session.cli,
+        prompt_session.id,
+        prompt_value(&prompt_session.title),
+        prompt_value(&prompt_session.cwd),
+        session_health_prompt(&prompt_session),
         capsule.target_cli,
         prompt_value(&capsule.handoff_label),
         capsule.rewind_point,
@@ -268,7 +272,8 @@ Instructions
         bullet_lines(&capsule.decisions),
         todo_lines(&capsule.todo),
         bullet_lines(&capsule.evidence),
-        bullet_lines(&capsule.risks)
+        bullet_lines(&capsule.risks),
+        redaction::prompt_summary(&capsule.redaction)
     )
 }
 
@@ -421,10 +426,13 @@ mod tests {
         assert!(prompt.contains("Decisions:\n- "));
         assert!(prompt.contains("Todo:\n- ["));
         assert!(prompt.contains("Risks:\n- "));
+        assert!(prompt.contains("Privacy / Redaction"));
+        assert!(prompt.contains("Prompt injection"));
         assert!(prompt.contains("Instructions\n- Continue from the selected rewind point"));
         assert!(!prompt.contains("Work Capsule JSON"));
         assert!(!prompt.contains("\"source_cli\""));
         assert!(!prompt.contains("{\"version\""));
+        assert!(!prompt.contains("~/coding/qc-platform"));
     }
 
     #[test]

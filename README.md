@@ -199,6 +199,10 @@ The first implementation focuses on the product shell:
 - Work Capsule JSON carries an auditable source map: `raw_source_map`,
   `raw_refs`, and `coverage` are enriched from the canonical timeline even when
   an external compiler omits them
+- Redaction policy runs before compiler stdin, Capsule JSON export, and target
+  handoff prompts: secret-like values are scanned, sensitive paths are masked,
+  event/file allowlists can narrow forwarded context, and every Capsule carries
+  a `redaction` report plus external compiler disclosure
 - Original resume and target handoff are explicit action intents:
   `original_resume` for `open`, `target_handoff` for `launch`
 - Target selection lives inside the launch flow, with explicit `> [x]` radio-list selection
@@ -443,6 +447,14 @@ External compiler skills are optional. When configured, Moonbox sends a
 ```json
 {
   "default_compiler": "engineering-handoff",
+  "redaction_policy": {
+    "enabled": true,
+    "secret_scan": true,
+    "path_redaction": true,
+    "prompt_injection_warnings": true,
+    "event_allowlist": ["user", "assistant", "tool", "compact", "error", "git_diff", "rewind_point"],
+    "file_allowlist": ["README.md", "src/"]
+  },
   "compiler_presets": [
     {
       "id": "engineering-handoff",
@@ -488,6 +500,13 @@ MOONBOX_COMPILER_ARGS='["--mode","handoff"]' \
 MOONBOX_COMPILER_TIMEOUT_MS=30000 \
 cargo run -- compile-output --session <session-id> --target hermes --rewind <event-id> --compiler engineering-handoff --json
 ```
+
+Redaction is enabled by default. Use `MOONBOX_REDACTION=off` only for deliberate
+local audits. `MOONBOX_REDACTION_EVENT_ALLOWLIST` accepts comma-separated event
+kinds such as `user,assistant,tool,rewind_point`; `MOONBOX_REDACTION_FILE_ALLOWLIST`
+accepts comma-separated file/path prefixes to preserve while masking other paths.
+Moonbox keeps local execution routing fields exact for verifiable dry-run and
+`--execute` previews, while cross-agent content payloads are redacted.
 
 Without configured presets or `MOONBOX_COMPILER`, Moonbox uses the built-in
 fixture compiler.
@@ -572,9 +591,9 @@ and scrolls by wrapped row height so the selected event stays visible.
 
 The target CLI receives a concise, human-readable Capsule Summary as its first
 prompt. It includes source metadata, selected rewind, goal, state, decisions,
-todo, evidence, risks, and execution instructions without dumping the capsule as
-raw JSON. Machine-readable capsule data remains available through the dry-run
-JSON surfaces and `capsule --json`.
+todo, evidence, risks, a Privacy / Redaction section, and execution instructions
+without dumping the capsule as raw JSON. Machine-readable capsule data remains
+available through the dry-run JSON surfaces and `capsule --json`.
 
 ## TUI Keys
 
@@ -799,12 +818,13 @@ Stable interfaces matter more than any single framework:
   summary while adding `raw_source_map`, `raw_refs`, and `coverage`, and Claude
   local-command XML-like records are internal tool events instead of user turns
   or session titles.
+- M58: privacy, redaction, and prompt-injection controls; compiler requests,
+  Capsule JSON export, verifier output, and target handoff prompts now carry a
+  configurable redaction policy with secret scanning, path masking, event/file
+  allowlists, external compiler disclosure, and untrusted-history warnings.
 
 ### Remaining Milestones
 
-- M58: privacy, redaction, and prompt-injection controls. Add secret scan,
-  path redaction, event/file allowlists, external compiler disclosure, and
-  explicit risk prompts before forwarding historical content to another agent.
 - M59: semantic verifier and adapter contract hardening. Check file references,
   diff applicability, todo/timeline consistency, compiler coverage, target
   capability fit, adapter schema/version detection, and fixture contract tests.

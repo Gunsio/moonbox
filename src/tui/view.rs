@@ -2814,7 +2814,7 @@ mod tests {
         app.show_launch = true;
         app.launch_review = true;
         app.pending_target = CliTool::Hermes;
-        app.modal_scroll = 22;
+        app.modal_scroll = 24;
         let screen = render_text(&app, 120, 36);
 
         assert_screen_contains(&screen, "Prompt argument");

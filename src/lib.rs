@@ -183,6 +183,7 @@ fn print_capsule(args: cli::CompileArgs) -> Result<()> {
             println!("state: {}", capsule.state);
             println!("rewind: {}", capsule.rewind_point);
             println!("handoff_label: {}", capsule.handoff_label);
+            print_redaction_report(&capsule.redaction);
         }
     } else {
         println!("No session selected");
@@ -207,6 +208,7 @@ fn print_compile_request(args: cli::CompileArgs) -> Result<()> {
             println!("session: {}", request.source_session.id);
             println!("rewind: {}", request.rewind_event_id);
             println!("compiler: {}", request.compiler);
+            print_redaction_report(&request.redaction);
         }
     } else {
         println!("No session selected");
@@ -233,6 +235,7 @@ fn print_compile_output(args: cli::CompileArgs) -> Result<()> {
             println!("compiler: {}", output.capsule.compiler);
             println!("goal: {}", output.capsule.goal);
             println!("handoff_label: {}", output.capsule.handoff_label);
+            print_redaction_report(&output.capsule.redaction);
         }
     } else {
         println!("No session selected");
@@ -538,6 +541,13 @@ fn print_replay_eval(args: cli::JsonArgs) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn print_redaction_report(report: &core::model::RedactionReport) {
+    println!(
+        "redaction: {} secrets={} paths={} events_removed={}",
+        report.policy, report.secrets_redacted, report.paths_redacted, report.events_removed
+    );
 }
 
 fn print_docs_snapshot(args: cli::DocsSnapshotArgs) -> Result<()> {

@@ -9,10 +9,11 @@ use super::{
     fixture::FixtureSourceAdapter,
     model::{
         BranchNode, CanonicalTimeline, CapsuleCompileOutput, CapsuleCompileRequest,
-        CapsuleCoverage, CliTool, SessionStatus, SessionSummary, SourceAdapterReport,
-        SourceProvenance, TimelineEvent, TimelineKind, WorkCapsule, WorkbenchData,
+        CapsuleCoverage, CliTool, RedactionReport, SessionStatus, SessionSummary,
+        SourceAdapterReport, SourceProvenance, TimelineEvent, TimelineKind, WorkCapsule,
+        WorkbenchData,
     },
-    sources,
+    redaction, sources,
 };
 
 pub fn workbench_data(source: CliTool, target: CliTool) -> Result<WorkbenchData, CoreError> {
@@ -361,7 +362,7 @@ fn compile_request_from_parts(
     compiler: &str,
 ) -> CapsuleCompileRequest {
     let source = source_session.cli;
-    CapsuleCompileRequest {
+    redaction::redact_compile_request(CapsuleCompileRequest {
         version: 1,
         source_cli: source,
         target_cli: target,
@@ -375,7 +376,8 @@ fn compile_request_from_parts(
             source_session: timeline.source_session,
             events: timeline.events,
         },
-    }
+        redaction: RedactionReport::default(),
+    })
 }
 
 fn compile_capsule_for_session(
@@ -385,7 +387,7 @@ fn compile_capsule_for_session(
     rewind_event_id: &str,
     compiler: &str,
 ) -> Result<WorkCapsule, CoreError> {
-    let request = CapsuleCompileRequest {
+    let request = redaction::redact_compile_request(CapsuleCompileRequest {
         version: 1,
         source_cli: session.cli,
         target_cli: target,
@@ -394,7 +396,8 @@ fn compile_capsule_for_session(
         token_budget: 100_000,
         compiler: compiler.into(),
         timeline: timeline.clone(),
-    };
+        redaction: RedactionReport::default(),
+    });
     Ok(compile_with_configured_runner(&request)?.capsule)
 }
 
@@ -453,6 +456,7 @@ fn pending_work_capsule(
         raw_source_map: None,
         raw_refs: Vec::new(),
         coverage: CapsuleCoverage::default(),
+        redaction: RedactionReport::default(),
     }
 }
 
@@ -462,7 +466,7 @@ fn compile_capsule_for_session_with_fixture_compiler(
     timeline: &CanonicalTimeline,
     rewind_event_id: &str,
 ) -> Result<WorkCapsule, CoreError> {
-    let request = CapsuleCompileRequest {
+    let request = redaction::redact_compile_request(CapsuleCompileRequest {
         version: 1,
         source_cli: session.cli,
         target_cli: target,
@@ -471,7 +475,8 @@ fn compile_capsule_for_session_with_fixture_compiler(
         token_budget: 100_000,
         compiler: DEFAULT_COMPILER_ID.into(),
         timeline: timeline.clone(),
-    };
+        redaction: RedactionReport::default(),
+    });
     Ok(FixtureCapsuleCompiler.compile(&request)?.capsule)
 }
 

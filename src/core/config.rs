@@ -5,7 +5,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use super::model::CliTool;
+use super::model::{CliTool, TimelineKind};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompilerPresetConfig {
@@ -33,10 +33,23 @@ pub struct SshHostConfig {
     pub tags: Vec<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RedactionPolicyConfig {
+    pub enabled: Option<bool>,
+    pub secret_scan: Option<bool>,
+    pub path_redaction: Option<bool>,
+    pub prompt_injection_warnings: Option<bool>,
+    #[serde(default)]
+    pub event_allowlist: Vec<TimelineKind>,
+    #[serde(default)]
+    pub file_allowlist: Vec<String>,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct UserConfig {
     last_target: Option<CliTool>,
     default_compiler: Option<String>,
+    redaction_policy: Option<RedactionPolicyConfig>,
     #[serde(default)]
     compiler_presets: Vec<CompilerPresetConfig>,
     #[serde(default)]
@@ -99,6 +112,12 @@ pub fn load_starred_sessions() -> Vec<String> {
         .into_iter()
         .filter(|id| !id.trim().is_empty())
         .collect()
+}
+
+pub fn load_redaction_policy_config() -> Option<RedactionPolicyConfig> {
+    load_user_config()
+        .ok()
+        .and_then(|config| config.redaction_policy)
 }
 
 pub fn save_starred_sessions(sessions: &[String]) -> Result<(), Box<dyn std::error::Error>> {
@@ -166,8 +185,16 @@ mod tests {
     fn parses_compiler_presets_with_enabled_default() {
         let config = serde_json::from_str::<UserConfig>(
             r#"{
-  "default_compiler": "handoff",
-  "compiler_presets": [
+	  "default_compiler": "handoff",
+	  "redaction_policy": {
+	    "enabled": true,
+	    "secret_scan": true,
+	    "path_redaction": true,
+	    "prompt_injection_warnings": true,
+	    "event_allowlist": ["user", "assistant", "tool", "rewind_point"],
+	    "file_allowlist": ["README.md", "src/"]
+	  },
+	  "compiler_presets": [
     {"id": "handoff", "command": "/bin/moonbox-handoff", "args": ["--mode", "handoff"], "timeout_ms": 12000, "description": "Compresses source timelines for target CLIs.", "homepage": "https://github.com/example/handoff", "github_stars": 42}
   ],
   "ssh_hosts": [
@@ -179,6 +206,17 @@ mod tests {
         .expect("config");
 
         assert_eq!(config.default_compiler.as_deref(), Some("handoff"));
+        let redaction = config.redaction_policy.expect("redaction policy");
+        assert_eq!(
+            redaction.event_allowlist,
+            [
+                TimelineKind::User,
+                TimelineKind::Assistant,
+                TimelineKind::Tool,
+                TimelineKind::RewindPoint
+            ]
+        );
+        assert_eq!(redaction.file_allowlist, ["README.md", "src/"]);
         assert_eq!(config.compiler_presets[0].id, "handoff");
         assert!(config.compiler_presets[0].enabled);
         assert_eq!(config.compiler_presets[0].args, ["--mode", "handoff"]);

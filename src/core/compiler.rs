@@ -16,8 +16,9 @@ use super::{
     model::{
         CapsuleCompileOutput, CapsuleCompileRequest, CapsuleCoverage, ChecklistItem,
         CompilerPresetInfo, CompilerPresetKind, CompilerPresetStatus, RawSourceMap, RawSourceRef,
-        TimelineEvent, WorkCapsule,
+        RedactionReport, TimelineEvent, WorkCapsule,
     },
+    redaction,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -352,6 +353,7 @@ impl CapsuleCompiler for FixtureCapsuleCompiler {
                 raw_source_map: None,
                 raw_refs: Vec::new(),
                 coverage: CapsuleCoverage::default(),
+                redaction: RedactionReport::default(),
             },
         };
         Ok(enrich_compile_output(request, output))
@@ -363,6 +365,7 @@ pub fn enrich_compile_output(
     mut output: CapsuleCompileOutput,
 ) -> CapsuleCompileOutput {
     output.capsule = enrich_work_capsule(request, output.capsule);
+    output.capsule = redaction::redact_work_capsule(output.capsule, &request.redaction);
     output
 }
 
@@ -946,7 +949,27 @@ mod tests {
         let script = executable_script(
             "success",
             r#"#!/bin/sh
-cat >/dev/null
+input=$(cat)
+case "$input" in
+  *"~/coding/moonbox"*|*"~/.zshrc"*|*"~/.local/bin"*)
+    echo "raw path leaked to compiler stdin" >&2
+    exit 12
+    ;;
+esac
+case "$input" in
+  *'"redaction"'*) ;;
+  *)
+    echo "missing redaction report in compiler stdin" >&2
+    exit 13
+    ;;
+esac
+case "$input" in
+  *'<path:redacted>'*) ;;
+  *)
+    echo "missing redacted path in compiler stdin" >&2
+    exit 14
+    ;;
+esac
 cat <<'JSON'
 {"version":1,"capsule":{"version":1,"source_cli":"codex","target_cli":"hermes","source_session":"codex-cxcp-design","rewind_point":"evt-091 / external","compiler":"process-skill","handoff_label":"moonbox/hermes-rewind-evt-091","goal":"external compiler","state":"compiled","decisions":["external"],"todo":[{"done":false,"text":"verify"}],"evidence":["stdin read"],"risks":[]}}
 JSON
@@ -988,6 +1011,8 @@ JSON
             output.capsule.coverage.raw_ref_count,
             output.capsule.raw_refs.len()
         );
+        assert!(output.capsule.redaction.enabled);
+        assert!(output.capsule.redaction.paths_redacted > 0);
     }
 
     #[cfg(unix)]

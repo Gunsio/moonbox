@@ -9,7 +9,7 @@ use super::{
         OriginalSessionExecution, OriginalSessionPlan, SessionAction, SessionSummary,
         VerificationReport, WorkCapsule, WorkbenchData,
     },
-    verifier,
+    redaction, verifier,
 };
 
 pub fn load_workbench(source: CliTool, target: CliTool) -> Result<WorkbenchData, CoreError> {
@@ -242,7 +242,10 @@ fn capsule_for_plan(
             reason: error.to_string(),
         }
     })?;
-    Ok((capsule, Some(path.into())))
+    Ok((
+        redaction::redact_work_capsule_for_export(capsule),
+        Some(path.into()),
+    ))
 }
 
 pub fn moonbox_execute_command(
