@@ -247,7 +247,7 @@ fn expected_coverage(cases: &[ReplayEvalCase]) -> Vec<ReplayEvalCoverage> {
     [
         (
             ReplayEvalScenario::SuccessfulHandoff,
-            VerificationStatus::Pass,
+            VerificationStatus::Warn,
         ),
         (
             ReplayEvalScenario::FailedRawResume,
@@ -312,7 +312,10 @@ fn matrix_scenario(
         .any(|check| check.detail.contains("raw resume is known failed"))
     {
         ReplayEvalScenario::FailedRawResume
-    } else if report.status == VerificationStatus::Pass {
+    } else if report.ready
+        && session.status == super::model::SessionStatus::Healthy
+        && session.cli != target
+    {
         ReplayEvalScenario::SuccessfulHandoff
     } else if session.cli == target {
         ReplayEvalScenario::SameCliHandoffWarning
@@ -468,7 +471,6 @@ mod tests {
             .expect("hermes same-cli case");
 
         assert!(report.pipeline_passed);
-        assert!(report.status_counts.pass > 0);
         assert!(report.status_counts.warn > 0);
         assert!(report.status_counts.fail > 0);
         assert_eq!(failed_same_cli.status, VerificationStatus::Fail);
@@ -524,7 +526,7 @@ mod tests {
             .find(|case| case.scenario == ReplayEvalScenario::MissingToolPreflight)
             .expect("missing tool case");
         assert_eq!(missing_tool.status, VerificationStatus::Fail);
-        assert_eq!(missing_tool.check_count, 16);
+        assert_eq!(missing_tool.check_count, 21);
         assert!(
             missing_tool
                 .failures

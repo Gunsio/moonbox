@@ -839,7 +839,19 @@ fn open_launch_and_verify_public_cli_contracts_are_dry_run_by_default() {
             .expect("verify"),
     );
     assert_eq!(verify["ready"], true);
-    assert_eq!(verify["status"], "pass");
+    assert_eq!(verify["status"], "warn");
+    let checks = verify["checks"].as_array().expect("verify checks");
+    assert!(
+        checks
+            .iter()
+            .any(|check| { check["name"] == "semantic_source_map" && check["status"] == "pass" })
+    );
+    assert!(checks.iter().any(|check| {
+        check["name"] == "semantic_compiler_coverage" && check["status"] == "warn"
+    }));
+    assert!(checks.iter().any(|check| {
+        check["name"] == "semantic_diff_applicability" && check["status"] == "warn"
+    }));
 }
 
 #[test]

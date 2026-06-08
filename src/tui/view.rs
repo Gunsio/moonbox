@@ -2166,8 +2166,13 @@ struct ReadinessGroup {
     names: &'static [&'static str],
 }
 
-fn readiness_groups() -> [ReadinessGroup; 3] {
+fn readiness_groups() -> [ReadinessGroup; 4] {
     [
+        ReadinessGroup {
+            title: "Target Readiness",
+            color: theme::GREEN,
+            names: &["target_support", "target_command"],
+        },
         ReadinessGroup {
             title: "Source Health",
             color: theme::BLUE,
@@ -2186,13 +2191,20 @@ fn readiness_groups() -> [ReadinessGroup; 3] {
                 "handoff_label_namespace",
                 "handoff_context",
                 "risk_context",
+                "redaction_policy",
                 "capsule_size",
             ],
         },
         ReadinessGroup {
-            title: "Target Readiness",
-            color: theme::GREEN,
-            names: &["target_support", "target_command"],
+            title: "Semantic Evidence",
+            color: theme::CYAN,
+            names: &[
+                "semantic_source_map",
+                "semantic_compiler_coverage",
+                "semantic_todo_timeline",
+                "semantic_file_refs",
+                "semantic_diff_applicability",
+            ],
         },
     ]
 }
@@ -2814,7 +2826,7 @@ mod tests {
         app.show_launch = true;
         app.launch_review = true;
         app.pending_target = CliTool::Hermes;
-        app.modal_scroll = 24;
+        app.modal_scroll = 30;
         let screen = render_text(&app, 120, 36);
 
         assert_screen_contains(&screen, "Prompt argument");

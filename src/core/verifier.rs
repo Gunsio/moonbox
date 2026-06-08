@@ -1,4 +1,8 @@
-use std::{env, path::Path};
+use std::{
+    collections::BTreeSet,
+    env,
+    path::{Path, PathBuf},
+};
 
 use super::{
     compiler,
@@ -92,6 +96,22 @@ pub fn verify_capsule(
         },
         format!("rewind {rewind_id} in selected timeline"),
     ));
+
+    checks.push(semantic_source_map_check(
+        capsule, session, timeline, rewind_id,
+    ));
+
+    checks.push(semantic_compiler_coverage_check(
+        capsule, timeline, rewind_id,
+    ));
+
+    checks.push(todo_timeline_consistency_check(
+        capsule, timeline, rewind_id,
+    ));
+
+    checks.push(file_references_check(capsule));
+
+    checks.push(diff_applicability_check(capsule, timeline, rewind_id));
 
     checks.push(check(
         "handoff_label",
@@ -224,14 +244,13 @@ pub fn validation_from_report(report: &VerificationReport) -> LaunchValidation {
         return LaunchValidation::blocked(blockers);
     }
 
-    let warnings = report
+    let warning_checks = report
         .checks
         .iter()
         .filter(|check| check.status == VerificationStatus::Warn)
-        .map(|check| check.detail.clone())
         .collect::<Vec<_>>();
-    if !warnings.is_empty() {
-        LaunchValidation::warning(warnings)
+    if !warning_checks.is_empty() {
+        LaunchValidation::warning(validation_warning_reasons(&warning_checks))
     } else {
         LaunchValidation::ready()
     }
@@ -277,6 +296,558 @@ fn target_support_status(session: &SessionSummary, target: CliTool) -> Verificat
         VerificationStatus::Warn
     } else {
         VerificationStatus::Pass
+    }
+}
+
+fn semantic_source_map_check(
+    capsule: &WorkCapsule,
+    session: &SessionSummary,
+    timeline: &[TimelineEvent],
+    rewind_id: &str,
+) -> VerificationCheck {
+    let Some(source_map) = &capsule.raw_source_map else {
+        return check(
+            "semantic_source_map",
+            VerificationStatus::Warn,
+            "raw_source_map missing; semantic coverage checks are limited",
+        );
+    };
+
+    let expected_events = semantic_source_events(capsule, timeline, rewind_id);
+    let mut mismatches = Vec::new();
+    if source_map.version != SUPPORTED_CAPSULE_VERSION {
+        mismatches.push(format!("version {}", source_map.version));
+    }
+    if source_map.source_cli != session.cli {
+        mismatches.push(format!(
+            "source_cli {} vs selected {}",
+            source_map.source_cli, session.cli
+        ));
+    }
+    if source_map.source_session != session.id {
+        mismatches.push(format!(
+            "source_session {} vs selected {}",
+            source_map.source_session, session.id
+        ));
+    }
+    if source_map.rewind_event_id != rewind_id {
+        mismatches.push(format!(
+            "rewind {} vs selected {}",
+            source_map.rewind_event_id, rewind_id
+        ));
+    }
+    if source_map.source_event_count != expected_events.len() {
+        mismatches.push(format!(
+            "event_count {} vs expected {}",
+            source_map.source_event_count,
+            expected_events.len()
+        ));
+    }
+    if source_map.generated_by != capsule.compiler {
+        mismatches.push(format!(
+            "generated_by {} vs compiler {}",
+            source_map.generated_by, capsule.compiler
+        ));
+    }
+
+    if mismatches.is_empty() {
+        check(
+            "semantic_source_map",
+            VerificationStatus::Pass,
+            format!(
+                "raw source map matches selected session and {} event(s) through rewind",
+                expected_events.len()
+            ),
+        )
+    } else {
+        check(
+            "semantic_source_map",
+            VerificationStatus::Fail,
+            format!("raw source map mismatch: {}", mismatches.join("; ")),
+        )
+    }
+}
+
+fn validation_warning_reasons(checks: &[&VerificationCheck]) -> Vec<String> {
+    const PRIORITY: [&str; 8] = [
+        "target_support",
+        "source_health",
+        "semantic_compiler_coverage",
+        "semantic_diff_applicability",
+        "semantic_file_refs",
+        "compiler_mode",
+        "risk_context",
+        "redaction_policy",
+    ];
+    let mut reasons = Vec::new();
+    for name in PRIORITY {
+        if let Some(check) = checks.iter().find(|check| check.name == name) {
+            reasons.push(validation_warning_summary(check));
+        }
+        if reasons.len() >= 2 {
+            break;
+        }
+    }
+    if reasons.is_empty() {
+        reasons.extend(
+            checks
+                .iter()
+                .take(2)
+                .map(|check| truncate(&check.detail, 96)),
+        );
+    }
+    let remaining = checks.len().saturating_sub(reasons.len());
+    if remaining > 0 {
+        reasons.push(format!(
+            "{remaining} additional warning(s); open readiness for details"
+        ));
+    }
+    reasons
+}
+
+fn validation_warning_summary(check: &VerificationCheck) -> String {
+    match check.name.as_str() {
+        "semantic_compiler_coverage" => {
+            "compiler coverage has uncovered critical source refs".into()
+        }
+        "semantic_diff_applicability" => "diff evidence is not patch-applicable".into(),
+        "semantic_file_refs" => "file references could not all be verified".into(),
+        _ => truncate(&check.detail, 112),
+    }
+}
+
+fn semantic_compiler_coverage_check(
+    capsule: &WorkCapsule,
+    timeline: &[TimelineEvent],
+    rewind_id: &str,
+) -> VerificationCheck {
+    if capsule.raw_refs.is_empty() {
+        return check(
+            "semantic_compiler_coverage",
+            VerificationStatus::Warn,
+            "raw_refs missing; cannot verify compiler coverage of source events",
+        );
+    }
+
+    let expected_events = semantic_source_events(capsule, timeline, rewind_id);
+    let expected_ids = expected_events
+        .iter()
+        .map(|event| event.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut seen = BTreeSet::new();
+    let mut duplicates = BTreeSet::new();
+    for raw_ref in &capsule.raw_refs {
+        if !seen.insert(raw_ref.source_event_id.as_str()) {
+            duplicates.insert(raw_ref.source_event_id.as_str());
+        }
+    }
+    let raw_ids = seen;
+    let missing = expected_ids
+        .difference(&raw_ids)
+        .copied()
+        .collect::<Vec<_>>();
+    let extra = raw_ids
+        .difference(&expected_ids)
+        .copied()
+        .collect::<Vec<_>>();
+
+    let covered_ref_count = capsule
+        .raw_refs
+        .iter()
+        .filter(|raw_ref| raw_ref.covered)
+        .count();
+    let uncovered_ref_count = capsule.raw_refs.len().saturating_sub(covered_ref_count);
+    let mut failures = Vec::new();
+    if !duplicates.is_empty() {
+        failures.push(format!(
+            "duplicate refs {}",
+            duplicates.into_iter().collect::<Vec<_>>().join(", ")
+        ));
+    }
+    if !missing.is_empty() {
+        failures.push(format!("missing refs {}", summarize_ids(&missing)));
+    }
+    if !extra.is_empty() {
+        failures.push(format!("unknown refs {}", summarize_ids(&extra)));
+    }
+    if capsule.coverage.raw_ref_count != capsule.raw_refs.len()
+        || capsule.coverage.covered_ref_count != covered_ref_count
+        || capsule.coverage.uncovered_ref_count != uncovered_ref_count
+    {
+        failures.push(format!(
+            "coverage counts {} / {} / {} vs refs {} / {} / {}",
+            capsule.coverage.raw_ref_count,
+            capsule.coverage.covered_ref_count,
+            capsule.coverage.uncovered_ref_count,
+            capsule.raw_refs.len(),
+            covered_ref_count,
+            uncovered_ref_count
+        ));
+    }
+    if !failures.is_empty() {
+        return check(
+            "semantic_compiler_coverage",
+            VerificationStatus::Fail,
+            failures.join("; "),
+        );
+    }
+
+    let uncovered_critical = capsule
+        .raw_refs
+        .iter()
+        .filter(|raw_ref| !raw_ref.covered && critical_source_kind(raw_ref.kind))
+        .map(|raw_ref| raw_ref.source_event_id.as_str())
+        .collect::<Vec<_>>();
+    if !uncovered_critical.is_empty() {
+        return check(
+            "semantic_compiler_coverage",
+            VerificationStatus::Warn,
+            format!(
+                "{} critical source ref(s) are not covered by capsule summary: {}; coverage {} / {}",
+                uncovered_critical.len(),
+                summarize_ids(&uncovered_critical),
+                covered_ref_count,
+                capsule.raw_refs.len()
+            ),
+        );
+    }
+
+    check(
+        "semantic_compiler_coverage",
+        VerificationStatus::Pass,
+        format!(
+            "critical source refs covered; coverage {} / {}",
+            covered_ref_count,
+            capsule.raw_refs.len()
+        ),
+    )
+}
+
+fn todo_timeline_consistency_check(
+    capsule: &WorkCapsule,
+    timeline: &[TimelineEvent],
+    rewind_id: &str,
+) -> VerificationCheck {
+    let timeline_ids = timeline
+        .iter()
+        .map(|event| event.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let mentioned = capsule
+        .todo
+        .iter()
+        .flat_map(|item| event_ids_in_text(&item.text))
+        .collect::<BTreeSet<_>>();
+    let unknown = mentioned
+        .iter()
+        .filter(|event_id| !timeline_ids.contains(event_id.as_str()))
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+
+    if !unknown.is_empty() {
+        return check(
+            "semantic_todo_timeline",
+            VerificationStatus::Fail,
+            format!(
+                "todo references unknown timeline event(s): {}",
+                summarize_ids(&unknown)
+            ),
+        );
+    }
+    if mentioned.is_empty() {
+        return check(
+            "semantic_todo_timeline",
+            VerificationStatus::Warn,
+            "todo items do not reference timeline event ids",
+        );
+    }
+    if !mentioned.contains(rewind_id) {
+        return check(
+            "semantic_todo_timeline",
+            VerificationStatus::Warn,
+            format!("todo references timeline event(s) but not selected rewind {rewind_id}"),
+        );
+    }
+
+    check(
+        "semantic_todo_timeline",
+        VerificationStatus::Pass,
+        format!(
+            "todo references {} known timeline event id(s), including selected rewind {}",
+            mentioned.len(),
+            rewind_id
+        ),
+    )
+}
+
+fn file_references_check(capsule: &WorkCapsule) -> VerificationCheck {
+    let text = capsule_semantic_text(capsule);
+    let refs = text
+        .iter()
+        .flat_map(|value| file_refs_in_text(value))
+        .collect::<BTreeSet<_>>();
+    if refs.is_empty() {
+        let redacted_paths = text
+            .iter()
+            .filter(|value| value.contains("<path:redacted>"))
+            .count();
+        return check(
+            "semantic_file_refs",
+            VerificationStatus::Warn,
+            if redacted_paths > 0 {
+                format!("{redacted_paths} redacted path reference(s) cannot be checked")
+            } else {
+                "no verifiable file references found in capsule summary fields".into()
+            },
+        );
+    }
+
+    let missing = refs
+        .iter()
+        .filter(|path| !file_ref_exists(path))
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        return check(
+            "semantic_file_refs",
+            VerificationStatus::Fail,
+            format!("missing file reference(s): {}", summarize_ids(&missing)),
+        );
+    }
+
+    check(
+        "semantic_file_refs",
+        VerificationStatus::Pass,
+        format!("{} file reference(s) exist locally", refs.len()),
+    )
+}
+
+fn diff_applicability_check(
+    capsule: &WorkCapsule,
+    timeline: &[TimelineEvent],
+    rewind_id: &str,
+) -> VerificationCheck {
+    let diff_events = semantic_source_events(capsule, timeline, rewind_id)
+        .into_iter()
+        .filter(|event| event.kind == super::model::TimelineKind::GitDiff)
+        .collect::<Vec<_>>();
+    if diff_events.is_empty() {
+        return check(
+            "semantic_diff_applicability",
+            VerificationStatus::Pass,
+            "no git diff events through selected rewind",
+        );
+    }
+
+    let mut summary_only = Vec::new();
+    let mut malformed = Vec::new();
+    let mut patch_like = 0usize;
+    for event in diff_events {
+        if is_unified_diff(&event.detail) {
+            patch_like += 1;
+        } else if event.detail.contains("diff --git") {
+            malformed.push(event.id.as_str());
+        } else {
+            summary_only.push(event.id.as_str());
+        }
+    }
+
+    if !malformed.is_empty() {
+        return check(
+            "semantic_diff_applicability",
+            VerificationStatus::Fail,
+            format!(
+                "malformed unified diff event(s): {}",
+                summarize_ids(&malformed)
+            ),
+        );
+    }
+    if !summary_only.is_empty() {
+        return check(
+            "semantic_diff_applicability",
+            VerificationStatus::Warn,
+            format!(
+                "git diff event(s) are summary-only, not patch-applicable: {}",
+                summarize_ids(&summary_only)
+            ),
+        );
+    }
+
+    check(
+        "semantic_diff_applicability",
+        VerificationStatus::Pass,
+        format!("{patch_like} unified diff event(s) have file headers and hunks"),
+    )
+}
+
+fn semantic_source_events<'a>(
+    capsule: &WorkCapsule,
+    timeline: &'a [TimelineEvent],
+    rewind_id: &str,
+) -> Vec<&'a TimelineEvent> {
+    let events = timeline_events_through_rewind(timeline, rewind_id);
+    if capsule.redaction.enabled && !capsule.redaction.event_allowlist.is_empty() {
+        events
+            .into_iter()
+            .filter(|event| {
+                capsule.redaction.event_allowlist.contains(&event.kind) || event.id == rewind_id
+            })
+            .collect()
+    } else {
+        events
+    }
+}
+
+fn timeline_events_through_rewind<'a>(
+    timeline: &'a [TimelineEvent],
+    rewind_id: &str,
+) -> Vec<&'a TimelineEvent> {
+    let mut selected = Vec::new();
+    for event in timeline {
+        selected.push(event);
+        if event.id == rewind_id {
+            break;
+        }
+    }
+    selected
+}
+
+fn critical_source_kind(kind: super::model::TimelineKind) -> bool {
+    matches!(
+        kind,
+        super::model::TimelineKind::User
+            | super::model::TimelineKind::Tool
+            | super::model::TimelineKind::Error
+            | super::model::TimelineKind::GitDiff
+            | super::model::TimelineKind::RewindPoint
+    )
+}
+
+fn event_ids_in_text(value: &str) -> Vec<String> {
+    let mut ids = Vec::new();
+    let mut offset = 0usize;
+    while let Some(index) = value[offset..].find("evt-") {
+        let start = offset + index;
+        let id = value[start..]
+            .chars()
+            .take_while(|character| character.is_ascii_alphanumeric() || *character == '-')
+            .collect::<String>();
+        if id.len() > "evt-".len() {
+            ids.push(id);
+        }
+        offset = start + "evt-".len();
+    }
+    ids
+}
+
+fn capsule_semantic_text(capsule: &WorkCapsule) -> Vec<&str> {
+    let mut text = vec![
+        capsule.rewind_point.as_str(),
+        capsule.goal.as_str(),
+        capsule.state.as_str(),
+        capsule.handoff_label.as_str(),
+    ];
+    text.extend(capsule.decisions.iter().map(String::as_str));
+    text.extend(capsule.todo.iter().map(|item| item.text.as_str()));
+    text.extend(capsule.evidence.iter().map(String::as_str));
+    text.extend(capsule.risks.iter().map(String::as_str));
+    text
+}
+
+fn file_refs_in_text(value: &str) -> Vec<String> {
+    value
+        .split_whitespace()
+        .filter_map(normalize_file_ref)
+        .collect()
+}
+
+fn normalize_file_ref(token: &str) -> Option<String> {
+    let token = token.trim_matches(|character: char| {
+        matches!(
+            character,
+            '"' | '\'' | '`' | ',' | ';' | ':' | ')' | ']' | '}' | '(' | '[' | '{'
+        )
+    });
+    let token = token.strip_prefix("file:").unwrap_or(token);
+    if token.is_empty()
+        || token.contains("://")
+        || token.contains("<path:redacted>")
+        || token.starts_with("moonbox/")
+    {
+        return None;
+    }
+    if looks_like_file_ref(token) {
+        Some(token.to_owned())
+    } else {
+        None
+    }
+}
+
+fn looks_like_file_ref(value: &str) -> bool {
+    value.starts_with("./")
+        || value.starts_with("../")
+        || value.starts_with("~/")
+        || value.starts_with('/')
+        || value.starts_with("src/")
+        || value.starts_with("tests/")
+        || value.starts_with("fixtures/")
+        || matches!(
+            value,
+            "README.md" | "CHANGELOG.md" | "Cargo.toml" | "Cargo.lock"
+        )
+        || [
+            ".rs", ".md", ".toml", ".json", ".jsonl", ".yaml", ".yml", ".lock", ".sh", ".sql",
+            ".txt", ".diff", ".patch",
+        ]
+        .iter()
+        .any(|extension| value.ends_with(extension))
+}
+
+fn file_ref_exists(value: &str) -> bool {
+    let path = if let Some(rest) = value.strip_prefix("~/") {
+        env::var_os("HOME")
+            .map(PathBuf::from)
+            .map(|home| home.join(rest))
+            .unwrap_or_else(|| PathBuf::from(value))
+    } else {
+        PathBuf::from(value)
+    };
+    if path.is_absolute() {
+        path.exists()
+    } else {
+        env::current_dir()
+            .map(|cwd| cwd.join(path).exists())
+            .unwrap_or(false)
+    }
+}
+
+fn is_unified_diff(value: &str) -> bool {
+    value.contains("diff --git")
+        && value.contains("\n--- ")
+        && value.contains("\n+++ ")
+        && value.contains("\n@@")
+}
+
+fn summarize_ids(values: &[&str]) -> String {
+    const LIMIT: usize = 5;
+    let mut summary = values
+        .iter()
+        .take(LIMIT)
+        .copied()
+        .collect::<Vec<_>>()
+        .join(", ");
+    if values.len() > LIMIT {
+        summary.push_str(&format!(", +{} more", values.len() - LIMIT));
+    }
+    summary
+}
+
+fn truncate(value: &str, max_chars: usize) -> String {
+    let mut chars = value.chars();
+    let truncated = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_some() {
+        format!("{truncated}...")
+    } else {
+        value.into()
     }
 }
 
@@ -455,7 +1026,7 @@ mod tests {
     static SCRIPT_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
     #[test]
-    fn healthy_cross_cli_capsule_passes() {
+    fn healthy_cross_cli_capsule_warns_on_semantic_evidence_gaps_but_stays_ready() {
         let data = data::workbench_data(CliTool::Codex, CliTool::Hermes).expect("data");
         let session = data
             .sessions
@@ -465,8 +1036,19 @@ mod tests {
 
         let report = verify_capsule(&data.capsule, session, &data.timeline, CliTool::Hermes);
 
-        assert_eq!(report.status, VerificationStatus::Pass);
+        assert_eq!(report.status, VerificationStatus::Warn);
         assert!(report.ready);
+        assert!(report.checks.iter().any(|check| {
+            check.name == "semantic_source_map" && check.status == VerificationStatus::Pass
+        }));
+        assert!(report.checks.iter().any(|check| {
+            check.name == "semantic_compiler_coverage"
+                && check.status == VerificationStatus::Warn
+                && check.detail.contains("critical source ref")
+        }));
+        assert!(report.checks.iter().any(|check| {
+            check.name == "semantic_todo_timeline" && check.status == VerificationStatus::Pass
+        }));
     }
 
     #[test]
@@ -697,6 +1279,75 @@ mod tests {
                 .any(|check| check.name == "handoff_label"
                     && check.status == VerificationStatus::Fail)
         );
+    }
+
+    #[test]
+    fn semantic_source_map_mismatch_fails() {
+        let data = data::workbench_data(CliTool::Codex, CliTool::Hermes).expect("data");
+        let session = data
+            .sessions
+            .iter()
+            .find(|session| session.id == data.capsule.source_session)
+            .expect("source session");
+        let mut capsule = data.capsule.clone();
+        capsule
+            .raw_source_map
+            .as_mut()
+            .expect("raw source map")
+            .source_event_count = 999;
+
+        let report = verify_capsule(&capsule, session, &data.timeline, CliTool::Hermes);
+
+        assert_eq!(report.status, VerificationStatus::Fail);
+        assert!(report.checks.iter().any(|check| {
+            check.name == "semantic_source_map"
+                && check.status == VerificationStatus::Fail
+                && check.detail.contains("event_count 999")
+        }));
+    }
+
+    #[test]
+    fn semantic_todo_unknown_timeline_event_fails() {
+        let data = data::workbench_data(CliTool::Codex, CliTool::Hermes).expect("data");
+        let session = data
+            .sessions
+            .iter()
+            .find(|session| session.id == data.capsule.source_session)
+            .expect("source session");
+        let mut capsule = data.capsule.clone();
+        capsule.todo[0].text = "Selected rewind point evt-999".into();
+
+        let report = verify_capsule(&capsule, session, &data.timeline, CliTool::Hermes);
+
+        assert_eq!(report.status, VerificationStatus::Fail);
+        assert!(report.checks.iter().any(|check| {
+            check.name == "semantic_todo_timeline"
+                && check.status == VerificationStatus::Fail
+                && check.detail.contains("evt-999")
+        }));
+    }
+
+    #[test]
+    fn semantic_missing_file_reference_fails() {
+        let data = data::workbench_data(CliTool::Codex, CliTool::Hermes).expect("data");
+        let session = data
+            .sessions
+            .iter()
+            .find(|session| session.id == data.capsule.source_session)
+            .expect("source session");
+        let mut capsule = data.capsule.clone();
+        capsule
+            .evidence
+            .push("file:fixtures/adapters/missing-m59-file.md".into());
+
+        let report = verify_capsule(&capsule, session, &data.timeline, CliTool::Hermes);
+
+        assert_eq!(report.status, VerificationStatus::Fail);
+        assert!(report.checks.iter().any(|check| {
+            check.name == "semantic_file_refs"
+                && check.status == VerificationStatus::Fail
+                && check.detail.contains("missing-m59-file.md")
+        }));
     }
 
     #[test]
