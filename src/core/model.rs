@@ -121,7 +121,8 @@ pub struct WorkCapsule {
     pub source_session: String,
     pub rewind_point: String,
     pub compiler: String,
-    pub target_branch: String,
+    #[serde(alias = "target_branch")]
+    pub handoff_label: String,
     pub goal: String,
     pub state: String,
     pub decisions: Vec<String>,
@@ -306,7 +307,9 @@ pub struct LaunchPlan {
     pub dry_run: bool,
     pub source_session: SessionSummary,
     pub target_cli: CliTool,
-    pub target_branch: String,
+    pub compiler: String,
+    #[serde(alias = "target_branch")]
+    pub handoff_label: String,
     pub capsule_path: Option<String>,
     pub command: String,
     pub target_command: TargetLaunchCommand,
@@ -382,4 +385,36 @@ pub struct CompilerPresetInfo {
     pub description: Option<String>,
     pub homepage: Option<String>,
     pub github_stars: Option<u64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn work_capsule_accepts_legacy_target_branch_field() {
+        let capsule: WorkCapsule = serde_json::from_str(
+            r#"{
+                "version": 1,
+                "source_cli": "codex",
+                "target_cli": "hermes",
+                "source_session": "codex-legacy",
+                "rewind_point": "evt-001 / user",
+                "compiler": "engineering-handoff",
+                "target_branch": "moonbox/hermes-rewind-evt-001",
+                "goal": "continue safely",
+                "state": "compiled",
+                "decisions": [],
+                "todo": [],
+                "evidence": [],
+                "risks": []
+            }"#,
+        )
+        .expect("legacy capsule");
+
+        assert_eq!(capsule.handoff_label, "moonbox/hermes-rewind-evt-001");
+        let json = serde_json::to_value(capsule).expect("capsule json");
+        assert_eq!(json["handoff_label"], "moonbox/hermes-rewind-evt-001");
+        assert!(json.get("target_branch").is_none());
+    }
 }

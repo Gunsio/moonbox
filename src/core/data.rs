@@ -183,7 +183,7 @@ fn build_workbench_data(
         },
         BranchNode {
             id: "target".into(),
-            label: capsule.target_branch.clone(),
+            label: capsule.handoff_label.clone(),
             detail: if capsule.state == "compiled" {
                 format!("compiled by {}", capsule.compiler)
             } else {
@@ -438,7 +438,7 @@ fn pending_work_capsule(
         source_session: session.id.clone(),
         rewind_point: format!("{rewind_event_id} / choose a rewind point"),
         compiler: compiler.into(),
-        target_branch: format!("moonbox/{}-rewind-{rewind_event_id}", target.id()),
+        handoff_label: format!("moonbox/{}-rewind-{rewind_event_id}", target.id()),
         goal: format!("Resume or hand off {}", session.title),
         state: "pending_rewind".into(),
         decisions: vec!["Timeline has no loaded rewind event yet.".into()],

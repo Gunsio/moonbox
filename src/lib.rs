@@ -75,7 +75,7 @@ fn execute_tui_exit_action(action: Option<app::TuiExitAction>) -> Result<()> {
             core::launcher::handoff_original_plan(plan)?;
         }
         Some(app::TuiExitAction::TargetHandoff(plan)) => {
-            core::launcher::execute_plan(plan)?;
+            core::launcher::execute_plan(plan, false)?;
         }
         None => {}
     }
@@ -181,7 +181,7 @@ fn print_capsule(args: cli::CompileArgs) -> Result<()> {
             println!("goal: {}", capsule.goal);
             println!("state: {}", capsule.state);
             println!("rewind: {}", capsule.rewind_point);
-            println!("target: {}", capsule.target_branch);
+            println!("handoff_label: {}", capsule.handoff_label);
         }
     } else {
         println!("No session selected");
@@ -231,7 +231,7 @@ fn print_compile_output(args: cli::CompileArgs) -> Result<()> {
             println!("target_cli: {}", output.capsule.target_cli);
             println!("compiler: {}", output.capsule.compiler);
             println!("goal: {}", output.capsule.goal);
-            println!("target: {}", output.capsule.target_branch);
+            println!("handoff_label: {}", output.capsule.handoff_label);
         }
     } else {
         println!("No session selected");
@@ -342,6 +342,7 @@ fn print_launch_plan(args: cli::LaunchArgs) -> Result<()> {
             args.session.as_deref(),
             target,
             args.capsule.as_deref(),
+            args.allow_draft,
         )?;
         if let Some(execution) = execution {
             if args.json {
@@ -374,12 +375,13 @@ fn print_launch_plan(args: cli::LaunchArgs) -> Result<()> {
             println!("action: target-handoff");
             println!("session: {}", plan.source_session.id);
             println!("target: {}", plan.target_cli);
-            println!("branch: {}", plan.target_branch);
+            println!("handoff_label: {}", plan.handoff_label);
             println!(
                 "capsule: {}",
                 plan.capsule_path.as_deref().unwrap_or("generated")
             );
-            println!("ready: {}", plan.verification.ready);
+            println!("preflight_ready: {}", plan.verification.ready);
+            println!("scope: structural preflight; semantic correctness is not guaranteed");
             println!("status: {}", plan.verification.status);
             println!("command: {}", plan.command);
             println!("program: {}", plan.target_command.program);
@@ -399,7 +401,8 @@ fn print_verify_report(args: cli::LaunchArgs) -> Result<()> {
         if args.json {
             println!("{}", serde_json::to_string_pretty(&report)?);
         } else {
-            println!("ready: {}", report.ready);
+            println!("preflight_ready: {}", report.ready);
+            println!("scope: structural preflight; semantic correctness is not guaranteed");
             println!("status: {}", report.status);
             print_checks(&report.checks);
         }

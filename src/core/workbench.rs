@@ -170,7 +170,8 @@ pub fn launch_plan(
         dry_run: true,
         source_session,
         target_cli: target,
-        target_branch: capsule.target_branch,
+        compiler: capsule.compiler.clone(),
+        handoff_label: capsule.handoff_label,
         capsule_path,
         command,
         target_command,
@@ -190,12 +191,13 @@ pub fn execute_launch(
     session_id: Option<&str>,
     target: CliTool,
     capsule_path: Option<&str>,
+    allow_draft: bool,
 ) -> Result<Option<LaunchExecution>, CoreError> {
     require_explicit_session(session_id, "target handoff")?;
     let Some(plan) = launch_plan(session_id, target, capsule_path)? else {
         return Ok(None);
     };
-    launcher::execute_plan(plan).map(Some)
+    launcher::execute_plan(plan, allow_draft).map(Some)
 }
 
 fn require_explicit_session(
@@ -337,7 +339,7 @@ mod tests {
 
     #[test]
     fn execute_launch_requires_explicit_session() {
-        let error = execute_launch(None, CliTool::Hermes, None)
+        let error = execute_launch(None, CliTool::Hermes, None, false)
             .expect_err("implicit launch execute should be blocked");
 
         assert!(matches!(error, CoreError::ExecuteRequiresSession { .. }));
@@ -409,6 +411,7 @@ mod tests {
             Some("codex-cxcp-design"),
             CliTool::Codex,
             Some(path.to_str().expect("utf-8 path")),
+            false,
         )
         .expect_err("blocked launch");
 

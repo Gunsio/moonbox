@@ -258,7 +258,7 @@ The first implementation focuses on the product shell:
 - Single core verifier policy shared by CLI and TUI target validation
 - `--capsule` reads a real Work Capsule JSON file when provided; generated dry-run capsules do not pretend to have a file path
 - Hardened verifier checks for compiler mode, Work Capsule version, required
-  fields, handoff context, risk context, capsule size, target branch markers,
+  fields, handoff context, risk context, capsule size, handoff label markers,
   and execution command preflight
 - First-class `moon` binary alias installed alongside `moonbox`
 - Shell completion generation for `moonbox` and `moon`
@@ -746,17 +746,81 @@ Stable interfaces matter more than any single framework:
   replay evaluation, release artifact/Homebrew docs gates remain wired into the
   full quality gate, and Timeline cursor vs selected rewind markers are visually
   distinct so the workbench does not appear to have two active rows.
+- M54: terminology and launch-safety hardening; Work Capsule and launch plan
+  JSON now emit `handoff_label` instead of the misleading `target_branch` name
+  while accepting legacy capsule input, text verify/launch output calls
+  readiness `preflight_ready` and scopes it to structural preflight, and
+  real-session `launch --execute` blocks built-in draft compiler handoffs unless
+  `--allow-draft` is explicit.
 
 ### Remaining Milestones
 
-- No implementation milestone remains in this branch. Homebrew publication,
-  release tagging, and registry publication stay gated until explicit approval
-  after final validation.
+- M55: Timeline fidelity and Markdown readability. Preserve lightweight list,
+  code, quote, evidence, and tool-output structure without turning the default
+  view into a raw log wall.
+- M56: workspace snapshot package. Capture HEAD, branch, staged/unstaged state,
+  selected diff, key files, recent test commands/results, and environment
+  summary without opening or resuming source sessions.
+- M57: auditable continuation package. Split Work Capsule into readable summary
+  plus raw source map, including source events, tool calls/results, attachment
+  refs, file-change evidence, workspace snapshot refs, compiler coverage, and
+  verifier findings.
+- M58: privacy, redaction, and prompt-injection controls. Add secret scan,
+  path redaction, event/file allowlists, external compiler disclosure, and
+  explicit risk prompts before forwarding historical content to another agent.
+- M59: semantic verifier and adapter contract hardening. Check file references,
+  diff applicability, todo/timeline consistency, compiler coverage, target
+  capability fit, adapter schema/version detection, and fixture contract tests.
+- M60: target import and workspace restore protocol. Define prompt-only
+  handoff, continuation package import, and explicit reversible branch/worktree
+  restore modes.
+- M61: source capability registry. Track each provider's local store, rich RPC,
+  cloud metadata, deep links, export/search, remote control, fork/resume, and
+  native handoff capabilities; distinguish updated time from unknown runtime
+  activity.
+- M62: Codex app-server source adapter. Prefer Codex `app-server`
+  `thread/list`, `thread/read`, and `thread/turns/list` data, use local
+  SQLite/JSONL only as fallback, and add non-executing `codex://threads/<id>`
+  open-app support.
+- M63: Claude multi-surface adapter hardening. Keep local transcript baseline
+  while adding optional stream-json/SDK metadata, hook/partial events, fork
+  semantics, and separate remote / remote-control surfaces.
+- M64: Hermes all-source gateway inventory. List all non-archived Hermes
+  sources by default, add source filters, and preserve platform/user/session
+  metadata, model config, system prompt snapshot, handoff state, and token
+  breakdown.
+- M65: Hermes export/search integration. Use Hermes export/stats/search or
+  equivalent FTS to locate continuation points with snippets, bookends, message
+  ids, and scroll context instead of expanding long sessions blindly.
+- M66: high-fidelity event/source schema. Extend the canonical model beyond
+  `TimelineEvent { id, time, kind, title, detail }` with raw refs, message ids,
+  provider item ids, tool args/results, approvals, attachments, file-change
+  evidence, runtime status, system prompt/config snapshot, and token/cost data.
+- M67: source fallback and contract tests. Prefer documented rich APIs, keep
+  private local stores as read-only fallback, and make every degraded fidelity
+  path visible in Doctor and the TUI.
+- M68: handoff signature. Make `x -> Review -> enter` visibly feel like a
+  Moonbox handoff by rendering an Action Path arrow and a short, optional
+  handoff trail animation that stays under 800 ms.
+- M69: session portrait. Add lightweight per-session density/sparkline badges
+  for session shape and activity using indexed or cached data only, never
+  fake token/status values.
+- M70: pre-flight pill. Collapse Compiler, Doctor, and Verify into a single
+  expandable `Pre-flight: PASS/WARN/BLOCKED` signal with Strong/Medium/Weak
+  confidence language and evidence details.
+- M71: command palette. Add `:` command discovery for core actions such as
+  open original, review handoff, switch source/data space, skill picker,
+  doctor, and help while preserving the hotkeys.
+- M72: visual system polish. Keep the broader color palette, but enforce stable
+  semantic roles, narrow-screen brand fallback from `MOONBOX 月光宝盒` to
+  `MOONBOX`, and consistent source badges, confidence, and rewind markers.
 
 ### Can Build Now
 
-- Use the staged release artifacts and generated checksums for a tagged release
-  once publication is accepted.
+- Use the staged release artifacts and generated checksums for a tagged
+  prerelease only after the remaining experience and continuation milestones
+  are accepted. Formal Homebrew / registry publication stays intentionally
+  deferred.
 
 ### Prototype Now, Improve With Real Data
 

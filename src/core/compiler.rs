@@ -309,7 +309,7 @@ impl CapsuleCompiler for FixtureCapsuleCompiler {
                 source_session: session.id.clone(),
                 rewind_point,
                 compiler: request.compiler.clone(),
-                target_branch: format!(
+                handoff_label: format!(
                     "moonbox/{}-rewind-{}",
                     request.target_cli.id(),
                     request.rewind_event_id
@@ -795,7 +795,7 @@ mod tests {
             r#"#!/bin/sh
 cat >/dev/null
 cat <<'JSON'
-{"version":1,"capsule":{"version":1,"source_cli":"codex","target_cli":"hermes","source_session":"codex-cxcp-design","rewind_point":"evt-091 / external","compiler":"process-skill","target_branch":"moonbox/hermes-rewind-evt-091","goal":"external compiler","state":"compiled","decisions":["external"],"todo":[{"done":false,"text":"verify"}],"evidence":["stdin read"],"risks":[]}}
+{"version":1,"capsule":{"version":1,"source_cli":"codex","target_cli":"hermes","source_session":"codex-cxcp-design","rewind_point":"evt-091 / external","compiler":"process-skill","handoff_label":"moonbox/hermes-rewind-evt-091","goal":"external compiler","state":"compiled","decisions":["external"],"todo":[{"done":false,"text":"verify"}],"evidence":["stdin read"],"risks":[]}}
 JSON
 "#,
         );
@@ -1020,7 +1020,7 @@ cat >/dev/null
             r#"#!/bin/sh
 cat >/dev/null
 cat <<'JSON'
-{"version":1,"capsule":{"version":1,"source_cli":"codex","target_cli":"hermes","source_session":"codex-cxcp-design","rewind_point":"evt-091 / preset","compiler":"preset-skill","target_branch":"moonbox/hermes-rewind-evt-091","goal":"preset compiler","state":"compiled","decisions":["preset"],"todo":[{"done":false,"text":"verify"}],"evidence":["stdin read"],"risks":[]}}
+{"version":1,"capsule":{"version":1,"source_cli":"codex","target_cli":"hermes","source_session":"codex-cxcp-design","rewind_point":"evt-091 / preset","compiler":"preset-skill","handoff_label":"moonbox/hermes-rewind-evt-091","goal":"preset compiler","state":"compiled","decisions":["preset"],"todo":[{"done":false,"text":"verify"}],"evidence":["stdin read"],"risks":[]}}
 JSON
 "#,
         );

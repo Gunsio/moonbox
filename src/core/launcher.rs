@@ -5,11 +5,12 @@ use std::{
 };
 
 use super::{
+    compiler,
     error::CoreError,
     model::{
         ChecklistItem, CliTool, LaunchExecution, LaunchExecutionStatus, LaunchPlan,
-        OriginalSessionExecution, OriginalSessionPlan, SessionSummary, TargetLaunchCommand,
-        WorkCapsule,
+        OriginalSessionExecution, OriginalSessionPlan, SessionSummary, SourceProvenance,
+        TargetLaunchCommand, WorkCapsule,
     },
     verifier,
 };
@@ -45,11 +46,14 @@ pub fn target_prompt_preview(session: &SessionSummary, capsule: &WorkCapsule) ->
     handoff_prompt(session, capsule)
 }
 
-pub fn execute_plan(mut plan: LaunchPlan) -> Result<LaunchExecution, CoreError> {
+pub fn execute_plan(mut plan: LaunchPlan, allow_draft: bool) -> Result<LaunchExecution, CoreError> {
     if !plan.verification.ready {
         return Err(CoreError::LaunchBlocked {
             reason: format!("verification status {}", plan.verification.status),
         });
+    }
+    if let Some(reason) = draft_compiler_execute_blocker(&plan, allow_draft) {
+        return Err(CoreError::LaunchBlocked { reason });
     }
     if let Some(reason) = verifier::execution_command_blocker(&plan.target_command) {
         return Err(CoreError::LaunchBlocked { reason });
@@ -67,6 +71,20 @@ pub fn execute_plan(mut plan: LaunchPlan) -> Result<LaunchExecution, CoreError> 
         exit_code: status.code(),
         plan,
     })
+}
+
+fn draft_compiler_execute_blocker(plan: &LaunchPlan, allow_draft: bool) -> Option<String> {
+    if allow_draft
+        || !compiler::compiler_is_builtin(&plan.compiler)
+        || plan.source_session.source_provenance == SourceProvenance::Fixture
+    {
+        return None;
+    }
+
+    Some(format!(
+        "{} is a built-in draft compiler for a non-fixture session; pass --allow-draft to execute or configure an external compiler skill",
+        plan.compiler
+    ))
 }
 
 pub fn original_command(session: &SessionSummary) -> TargetLaunchCommand {
@@ -208,7 +226,7 @@ Source
 
 Target
 - CLI: {}
-- Branch: {}
+- Handoff label: {}
 - Rewind point: {}
 
 Work Capsule Summary
@@ -243,7 +261,7 @@ Instructions
         prompt_value(&session.cwd),
         session_health_prompt(session),
         capsule.target_cli,
-        prompt_value(&capsule.target_branch),
+        prompt_value(&capsule.handoff_label),
         capsule.rewind_point,
         prompt_value(&capsule.goal),
         prompt_value(&capsule.state),
@@ -523,7 +541,7 @@ mod tests {
         plan.target_command.program = format!("/tmp/moonbox-missing-target-{}", std::process::id());
         plan.target_command.display = plan.target_command.program.clone();
 
-        let error = execute_plan(plan).expect_err("missing target should block");
+        let error = execute_plan(plan, false).expect_err("missing target should block");
 
         assert!(matches!(error, CoreError::LaunchBlocked { .. }));
         assert!(error.to_string().contains("not found"));

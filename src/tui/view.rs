@@ -1786,7 +1786,7 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         .current_session()
         .map(|session| format!("{} / {}", session.cli, session.id))
         .unwrap_or_else(|| "No session selected".into());
-    let target_branch = app.launch_branch();
+    let handoff_label = app.launch_handoff_label();
     let pending_validation = app.validate_launch_for_target(app.pending_target);
     let pending_report = app.launch_verification_for_target(app.pending_target);
     if app.launch_review {
@@ -1818,8 +1818,8 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                 Span::raw(app.pending_target.to_string()),
             ]),
             Line::from(vec![
-                Span::styled("Branch: ", Style::default().fg(theme::BLUE)),
-                Span::raw(target_branch),
+                Span::styled("Handoff label: ", Style::default().fg(theme::BLUE)),
+                Span::raw(handoff_label),
             ]),
             Line::from(vec![
                 Span::styled("Rewind: ", Style::default().fg(theme::BLUE)),
@@ -2182,8 +2182,8 @@ fn readiness_groups() -> [ReadinessGroup; 3] {
                 "capsule_required_fields",
                 "capsule_source",
                 "target_cli",
-                "target_branch",
-                "target_branch_namespace",
+                "handoff_label",
+                "handoff_label_namespace",
                 "handoff_context",
                 "risk_context",
                 "capsule_size",

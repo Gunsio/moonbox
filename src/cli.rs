@@ -169,6 +169,9 @@ pub struct LaunchArgs {
     /// Execute the verified target command instead of printing a dry-run plan.
     #[arg(long)]
     pub execute: bool,
+    /// Allow executing a real-session handoff produced by the built-in draft compiler.
+    #[arg(long)]
+    pub allow_draft: bool,
     /// Print JSON output.
     #[arg(long)]
     pub json: bool,
