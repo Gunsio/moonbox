@@ -945,12 +945,14 @@ Stable interfaces matter more than any single framework:
   `source -> rewind -> target` route, target Handoff Review starts a
   non-blocking 720 ms handoff trail through the same path, and closing the
   Review cancels the trail without launching anything.
+- M69: session portrait; the session rail now shows compact indexed activity
+  badges for every visible session, selected sessions use the already hydrated
+  timeline cache for real `U/A/T/R` shape density, and Handoff Review / Session
+  Details surface the same portrait without loading extra source history or
+  inventing unknown token/status data.
 
 ### Remaining Milestones
 
-- M69: session portrait. Add lightweight per-session density/sparkline badges
-  for session shape and activity using indexed or cached data only, never
-  fake token/status values.
 - M70: pre-flight pill. Collapse Compiler, Doctor, and Verify into a single
   expandable `Pre-flight: PASS/WARN/BLOCKED` signal with Strong/Medium/Weak
   confidence language and evidence details.
