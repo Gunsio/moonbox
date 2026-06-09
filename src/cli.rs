@@ -29,6 +29,8 @@ pub enum Command {
     OpenApp(OpenAppArgs),
     /// Print, save, inspect, import, export, or launch Work Capsules.
     Capsule(CapsuleArgs),
+    /// List, inspect, or link local launch ledger records.
+    Launches(LaunchesArgs),
     /// Print the compiler request contract.
     CompileRequest(CompileArgs),
     /// Print the compiler output contract.
@@ -165,6 +167,8 @@ pub enum CapsuleCommand {
     Show(CapsuleShowArgs),
     /// Dry-run or execute a target handoff from a saved Capsule.
     Launch(CapsuleLaunchArgs),
+    /// List launch ledger records linked to a saved Capsule.
+    Launches(CapsuleLaunchesArgs),
     /// Export a saved Capsule as a portable Moonbox Capsule envelope.
     Export(CapsuleExportArgs),
     /// Import a portable Moonbox Capsule envelope into the local store.
@@ -245,6 +249,61 @@ pub struct CapsuleImportArgs {
 pub struct CapsuleDeleteArgs {
     /// Saved Capsule name.
     pub name: String,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct CapsuleLaunchesArgs {
+    /// Saved Capsule name.
+    pub name: String,
+    /// Maximum records to print. 0 uses the default.
+    #[arg(long, default_value_t = 50)]
+    pub limit: usize,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone, Default)]
+pub struct LaunchesArgs {
+    #[command(subcommand)]
+    pub command: Option<LaunchesCommand>,
+}
+
+#[derive(Debug, Subcommand, Clone)]
+pub enum LaunchesCommand {
+    /// List recent local launch records.
+    List(LaunchesListArgs),
+    /// Show one local launch record.
+    Show(LaunchesShowArgs),
+    /// Link an existing launch record to a saved Capsule.
+    Link(LaunchesLinkArgs),
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct LaunchesListArgs {
+    /// Maximum records to print. 0 uses the default.
+    #[arg(long, default_value_t = 50)]
+    pub limit: usize,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct LaunchesShowArgs {
+    /// Launch ledger id.
+    pub id: i64,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct LaunchesLinkArgs {
+    /// Launch ledger id.
+    pub id: i64,
+    /// Saved Capsule name to associate with the launch.
+    #[arg(long)]
+    pub capsule: String,
     #[arg(long)]
     pub json: bool,
 }

@@ -31,6 +31,7 @@ fn fixture_safe_command(binary: &str, test_name: &str) -> Command {
         .env("MOONBOX_HERMES_HOME", hermes_home)
         .env("MOONBOX_CONFIG", home.join("config.json"))
         .env("MOONBOX_CAPSULE_STORE", home.join("capsules.sqlite"))
+        .env("MOONBOX_LAUNCH_LEDGER", home.join("launches.sqlite"))
         .env("MOONBOX_SSH_CONFIG", home.join(".ssh").join("config"))
         .env("MOONBOX_SESSION_LIMIT", "50")
         .env("MOONBOX_SESSION_SCAN_LIMIT", "500")
@@ -107,6 +108,23 @@ fn write_file(root: &Path, relative: &str, contents: &str) {
         fs::create_dir_all(parent).expect("file parent");
     }
     fs::write(path, contents).expect("fixture file");
+}
+
+fn write_executable_script(root: &Path, relative: &str, contents: &str) -> PathBuf {
+    let path = root.join(relative);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("script parent");
+    }
+    fs::write(&path, contents).expect("script file");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut permissions = fs::metadata(&path).expect("script metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&path, permissions).expect("script permissions");
+    }
+    path
 }
 
 fn git(root: &Path, args: &[&str]) {
@@ -1600,6 +1618,34 @@ fn launch_execute_blocks_real_builtin_draft_without_allow_draft() {
     assert!(error.contains("built-in draft compiler"));
     assert!(error.contains("--allow-draft"));
     assert!(error.contains("non-fixture session"));
+
+    let launches = output_json(
+        moonbox_command(test_name)
+            .args(["launches", "list", "--json"])
+            .output()
+            .expect("launches list"),
+    );
+    let blocked = launches
+        .as_array()
+        .expect("launches")
+        .iter()
+        .find(|launch| launch["source_session"] == "codex-real-draft")
+        .expect("blocked launch record");
+    assert_eq!(blocked["status"], "blocked");
+    assert_eq!(blocked["action"], "target_handoff");
+    assert_eq!(blocked["target_cli"], "hermes");
+    assert!(
+        blocked["error_reason"]
+            .as_str()
+            .expect("error reason")
+            .contains("built-in draft compiler")
+    );
+    assert!(
+        !blocked["command"]
+            .as_str()
+            .expect("ledger command")
+            .contains("Work Capsule")
+    );
 }
 
 #[test]
@@ -1845,4 +1891,168 @@ fn capsule_store_cli_roundtrips_saved_capsules_without_launching_sessions() {
         imported_show["capsule"]["handoff_label"],
         saved["capsule"]["handoff_label"]
     );
+}
+
+#[test]
+fn launch_ledger_cli_records_executes_and_links_capsules() {
+    let test_name = "launch-ledger-contract";
+    let home = fixture_home(test_name);
+    let fake_bin = write_executable_script(&home, "bin/fake-target", "#!/bin/sh\nexit 0\n");
+
+    let saved = output_json(
+        moonbox_command(test_name)
+            .args([
+                "capsule",
+                "save",
+                "m74-demo",
+                "--session",
+                "codex-cxcp-design",
+                "--target",
+                "hermes",
+                "--rewind",
+                "evt-091",
+                "--json",
+            ])
+            .output()
+            .expect("capsule save"),
+    );
+    assert_eq!(saved["name"], "m74-demo");
+
+    let capsule_execution = output_json(
+        moonbox_command(test_name)
+            .args([
+                "capsule",
+                "launch",
+                "m74-demo",
+                "--target",
+                "hermes",
+                "--execute",
+                "--json",
+            ])
+            .env("MOONBOX_HERMES_BIN", &fake_bin)
+            .output()
+            .expect("capsule launch execute"),
+    );
+    assert_eq!(capsule_execution["status"], "success");
+    assert_eq!(capsule_execution["exit_code"], 0);
+    let capsule_launch_id = capsule_execution["launch_ledger"]["id"]
+        .as_i64()
+        .expect("capsule launch id");
+
+    let shown = output_json(
+        moonbox_command(test_name)
+            .args(["launches", "show", &capsule_launch_id.to_string(), "--json"])
+            .output()
+            .expect("launches show"),
+    );
+    assert_eq!(shown["id"], capsule_launch_id);
+    assert_eq!(shown["status"], "success");
+    assert_eq!(shown["action"], "target_handoff");
+    assert_eq!(shown["capsule_name"], "m74-demo");
+    assert_eq!(shown["capsule_ref"], "store:m74-demo");
+    assert_eq!(shown["source_session"], "codex-cxcp-design");
+    assert!(
+        shown["rewind_point"]
+            .as_str()
+            .expect("rewind")
+            .starts_with("evt-091")
+    );
+    assert_eq!(shown["target_cli"], "hermes");
+    assert_eq!(shown["dry_run"], false);
+    assert!(
+        shown["command"]
+            .as_str()
+            .expect("safe command")
+            .contains("<handoff-prompt>")
+    );
+    assert!(
+        !shown["command"]
+            .as_str()
+            .expect("safe command")
+            .contains("Work Capsule")
+    );
+
+    let capsule_launches = output_json(
+        moonbox_command(test_name)
+            .args(["capsule", "launches", "m74-demo", "--json"])
+            .output()
+            .expect("capsule launches"),
+    );
+    assert!(
+        capsule_launches
+            .as_array()
+            .expect("capsule launches")
+            .iter()
+            .any(|launch| launch["id"] == capsule_launch_id)
+    );
+
+    let open_execution = output_json(
+        moonbox_command(test_name)
+            .args([
+                "open",
+                "--execute",
+                "--session",
+                "codex-cxcp-design",
+                "--json",
+            ])
+            .env("MOONBOX_CODEX_BIN", &fake_bin)
+            .output()
+            .expect("open execute"),
+    );
+    assert_eq!(open_execution["status"], "success");
+    let open_launch_id = open_execution["launch_ledger"]["id"]
+        .as_i64()
+        .expect("open launch id");
+
+    let linked = output_json(
+        moonbox_command(test_name)
+            .args([
+                "launches",
+                "link",
+                &open_launch_id.to_string(),
+                "--capsule",
+                "m74-demo",
+                "--json",
+            ])
+            .output()
+            .expect("launches link"),
+    );
+    assert_eq!(linked["id"], open_launch_id);
+    assert_eq!(linked["action"], "original_resume");
+    assert_eq!(linked["capsule_name"], "m74-demo");
+    assert_eq!(linked["capsule_ref"], "store:m74-demo");
+    assert_eq!(
+        linked["command"],
+        format!("{} resume codex-cxcp-design", fake_bin.display())
+    );
+
+    let launches = output_json(
+        moonbox_command(test_name)
+            .args(["launches", "list", "--json"])
+            .output()
+            .expect("launches list"),
+    );
+    let ids = launches
+        .as_array()
+        .expect("launches list")
+        .iter()
+        .map(|launch| launch["id"].as_i64().expect("launch id"))
+        .collect::<Vec<_>>();
+    assert!(ids.contains(&capsule_launch_id));
+    assert!(ids.contains(&open_launch_id));
+
+    let linked_capsule_launches = output_json(
+        moonbox_command(test_name)
+            .args(["capsule", "launches", "m74-demo", "--json"])
+            .output()
+            .expect("linked capsule launches"),
+    );
+    let linked_ids = linked_capsule_launches
+        .as_array()
+        .expect("linked capsule launches")
+        .iter()
+        .map(|launch| launch["id"].as_i64().expect("launch id"))
+        .collect::<Vec<_>>();
+    assert!(linked_ids.contains(&capsule_launch_id));
+    assert!(linked_ids.contains(&open_launch_id));
 }

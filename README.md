@@ -322,6 +322,10 @@ The first implementation focuses on the product shell:
   `show`, `launch`, `export`, `import`, and `delete` use
   `MOONBOX_CAPSULE_STORE` for isolated local stores and never mutate source
   session stores
+- Launch Ledger records local `open --execute`, `launch --execute`, and
+  `capsule launch --execute` outcomes in SQLite, exposes
+  `launches list/show/link` plus `capsule launches <name>`, and stays isolated
+  with `MOONBOX_LAUNCH_LEDGER`
 - Canonical Timeline and compiler request/output JSON contract fixtures
 - Target launch dry-run plans with Work Capsule verification reports
 - `open --json`, `open-app --json`, and `launch --json` include an `action`
@@ -413,6 +417,10 @@ MOONBOX_CAPSULE_STORE=target/moonbox-capsules.sqlite cargo run -- capsule launch
 MOONBOX_CAPSULE_STORE=target/moonbox-capsules.sqlite cargo run -- capsule export demo --output demo.moonbox-capsule.json
 MOONBOX_CAPSULE_STORE=target/moonbox-capsules.sqlite cargo run -- capsule import demo.moonbox-capsule.json --name demo-copy
 MOONBOX_CAPSULE_STORE=target/moonbox-capsules.sqlite cargo run -- capsule delete demo-copy
+MOONBOX_LAUNCH_LEDGER=target/moonbox-launches.sqlite cargo run -- launches list --json
+MOONBOX_LAUNCH_LEDGER=target/moonbox-launches.sqlite cargo run -- launches show <launch-id> --json
+MOONBOX_CAPSULE_STORE=target/moonbox-capsules.sqlite MOONBOX_LAUNCH_LEDGER=target/moonbox-launches.sqlite cargo run -- launches link <launch-id> --capsule demo --json
+MOONBOX_CAPSULE_STORE=target/moonbox-capsules.sqlite MOONBOX_LAUNCH_LEDGER=target/moonbox-launches.sqlite cargo run -- capsule launches demo --json
 ```
 
 `sessions` text output prints the active source filter plus each row's
@@ -438,6 +446,14 @@ Moonbox object. The store is SQLite, defaults to
 trusted source marker, checksum, size, and compiler-reference validation on
 import. `capsule launch <name>` remains dry-run by default; `--execute` is
 explicit and still runs through the same verifier and target launch guards.
+Launch Ledger records local `open --execute`, `launch --execute`, and
+`capsule launch --execute` attempts in a separate SQLite database. It defaults
+to `~/.local/share/moonbox/launches.sqlite`, can be isolated with
+`MOONBOX_LAUNCH_LEDGER`, and is queryable with `launches list/show/link` or
+`capsule launches <name>`. Dry-runs do not write launch records; successful,
+failed, and blocked execute attempts do. Ledger `error_reason` values are
+bounded and redaction-safe, and ledger write failures are warnings rather than
+launch blockers.
 `launch` and `verify` also accept `--continuation prompt-only|package-import|workspace-restore`
 and `--workspace-restore branch|worktree`. The default is prompt-only target
 input. Native package import is not claimed for Codex, Claude, or Hermes yet;
@@ -998,13 +1014,15 @@ Stable interfaces matter more than any single framework:
   for schema version, trusted Moonbox envelope source, checksum, size, and
   compiler references. The TUI Command Palette also has a saved Capsule
   inventory overlay.
+- M74: Launch Ledger; local `open --execute`, `launch --execute`, and
+  `capsule launch --execute` attempts are now recorded in a separate SQLite
+  ledger isolated by `MOONBOX_LAUNCH_LEDGER`, with `launches list/show/link`,
+  `capsule launches <name>`, blocked-record capture, and warning-only ledger
+  write failures.
 
 ### Remaining Milestones
 
-- M74: Launch Ledger. Record local `open --execute` and `launch --execute`
-  attempts in a ledger table, expose `launches list/show/link` and capsule
-  launch history, and keep ledger write failures as warnings rather than launch
-  blockers.
+- Next continuation milestones are pending prioritization after M74 acceptance.
 
 ### Can Build Now
 
