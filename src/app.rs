@@ -162,6 +162,271 @@ pub enum TuiExitAction {
     TargetHandoff(Box<LaunchPlan>),
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct CommandPaletteEntry {
+    pub command: &'static str,
+    pub aliases: &'static [&'static str],
+    pub description: &'static str,
+    pub params: &'static str,
+    pub badge: &'static str,
+    pub dangerous: bool,
+}
+
+const COMMAND_PALETTE_ENTRIES: &[CommandPaletteEntry] = &[
+    CommandPaletteEntry {
+        command: "open",
+        aliases: &["o", "original", "resume"],
+        description: "Preview original CLI resume for the selected session",
+        params: "selected session",
+        badge: "PREVIEW",
+        dangerous: false,
+    },
+    CommandPaletteEntry {
+        command: "handoff",
+        aliases: &["x", "target", "launch"],
+        description: "Choose a target CLI and open guarded Handoff Review",
+        params: "target CLI",
+        badge: "DRY-RUN",
+        dangerous: false,
+    },
+    CommandPaletteEntry {
+        command: "capsule",
+        aliases: &["c", "compile", "review"],
+        description: "Refresh the Capsule and open Handoff Review",
+        params: "selected rewind",
+        badge: "REVIEW",
+        dangerous: false,
+    },
+    CommandPaletteEntry {
+        command: "verify",
+        aliases: &["v", "preflight"],
+        description: "Run non-executing verifier checks for the current Capsule",
+        params: "target CLI",
+        badge: "CHECK",
+        dangerous: false,
+    },
+    CommandPaletteEntry {
+        command: "doctor",
+        aliases: &["D", "diag", "health", "pre-flight"],
+        description: "Open Pre-flight evidence for compiler, Doctor, and verifier",
+        params: "no args",
+        badge: "CHECK",
+        dangerous: false,
+    },
+    CommandPaletteEntry {
+        command: "source next",
+        aliases: &["filter", "filter next", "source"],
+        description: "Switch to the next session source filter",
+        params: "All, Starred, Codex, Claude, Hermes",
+        badge: "SWITCH",
+        dangerous: false,
+    },
+    CommandPaletteEntry {
+        command: "source prev",
+        aliases: &["filter prev", "filter previous", "source previous"],
+        description: "Switch to the previous session source filter",
+        params: "All, Starred, Codex, Claude, Hermes",
+        badge: "SWITCH",
+        dangerous: false,
+    },
+    CommandPaletteEntry {
+        command: "source codex",
+        aliases: &["filter codex", "codex"],
+        description: "Show only Codex sessions",
+        params: "source filter",
+        badge: "SWITCH",
+        dangerous: false,
+    },
+    CommandPaletteEntry {
+        command: "source claude",
+        aliases: &["filter claude", "claude"],
+        description: "Show only Claude sessions",
+        params: "source filter",
+        badge: "SWITCH",
+        dangerous: false,
+    },
+    CommandPaletteEntry {
+        command: "source hermes",
+        aliases: &["filter hermes", "hermes"],
+        description: "Show only Hermes sessions",
+        params: "source filter",
+        badge: "SWITCH",
+        dangerous: false,
+    },
+    CommandPaletteEntry {
+        command: "starred",
+        aliases: &["filter star", "filter starred"],
+        description: "Show starred sessions only",
+        params: "source filter",
+        badge: "SWITCH",
+        dangerous: false,
+    },
+    CommandPaletteEntry {
+        command: "clear",
+        aliases: &["all", "filter all", "filter clear"],
+        description: "Clear search and source filters",
+        params: "no args",
+        badge: "SAFE",
+        dangerous: false,
+    },
+    CommandPaletteEntry {
+        command: "data next",
+        aliases: &["data", "space next", "dataspace next"],
+        description: "Switch to the next configured data space",
+        params: "Local or configured SSH/devbox",
+        badge: "SWITCH",
+        dangerous: false,
+    },
+    CommandPaletteEntry {
+        command: "data prev",
+        aliases: &["data previous", "space prev", "dataspace prev"],
+        description: "Switch to the previous configured data space",
+        params: "Local or configured SSH/devbox",
+        badge: "SWITCH",
+        dangerous: false,
+    },
+    CommandPaletteEntry {
+        command: "skill",
+        aliases: &["compiler"],
+        description: "Open the compiler Skill Picker",
+        params: "compiler skill",
+        badge: "PICKER",
+        dangerous: false,
+    },
+    CommandPaletteEntry {
+        command: "help",
+        aliases: &["?"],
+        description: "Open keyboard help",
+        params: "no args",
+        badge: "SAFE",
+        dangerous: false,
+    },
+    CommandPaletteEntry {
+        command: "quit",
+        aliases: &["q", "exit"],
+        description: "Exit Moonbox without launching a session",
+        params: "no args",
+        badge: "EXIT",
+        dangerous: true,
+    },
+];
+
+fn command_palette_matches(query: &str) -> Vec<&'static CommandPaletteEntry> {
+    let query = normalize_command(query);
+    let mut entries = COMMAND_PALETTE_ENTRIES
+        .iter()
+        .enumerate()
+        .filter(|entry| command_palette_entry_matches(&query, entry))
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|(index, entry)| (command_palette_rank(&query, entry), *index));
+    entries.into_iter().map(|(_, entry)| entry).collect()
+}
+
+fn resolve_command_palette_entry(query: &str) -> Option<&'static CommandPaletteEntry> {
+    let query = normalize_command(query);
+    COMMAND_PALETTE_ENTRIES.iter().find(|entry| {
+        normalize_command(entry.command) == query
+            || entry
+                .aliases
+                .iter()
+                .any(|alias| normalize_command(alias) == query)
+    })
+}
+
+fn command_palette_entry_matches(query: &str, (_, entry): &(usize, &CommandPaletteEntry)) -> bool {
+    if query.is_empty() {
+        return true;
+    }
+    command_palette_search_text(entry)
+        .iter()
+        .any(|item| item.contains(query) || fuzzy_contains(item, query))
+}
+
+fn command_palette_rank(query: &str, entry: &CommandPaletteEntry) -> usize {
+    if query.is_empty() {
+        return 10;
+    }
+    let command = normalize_command(entry.command);
+    if command == query {
+        return 0;
+    }
+    if entry
+        .aliases
+        .iter()
+        .any(|alias| normalize_command(alias) == query)
+    {
+        return 1;
+    }
+    if command.starts_with(query) {
+        return 2;
+    }
+    if entry
+        .aliases
+        .iter()
+        .any(|alias| normalize_command(alias).starts_with(query))
+    {
+        return 3;
+    }
+    if command.contains(query) {
+        return 4;
+    }
+    if fuzzy_contains(&command, query) {
+        return 5;
+    }
+    if entry
+        .aliases
+        .iter()
+        .any(|alias| fuzzy_contains(&normalize_command(alias), query))
+    {
+        return 6;
+    }
+    if normalize_command(entry.description).contains(query)
+        || normalize_command(entry.params).contains(query)
+    {
+        return 7;
+    }
+    8
+}
+
+fn command_palette_search_text(entry: &CommandPaletteEntry) -> Vec<String> {
+    let mut text = vec![
+        normalize_command(entry.command),
+        normalize_command(entry.description),
+        normalize_command(entry.params),
+        normalize_command(entry.badge),
+    ];
+    text.extend(entry.aliases.iter().map(|alias| normalize_command(alias)));
+    text
+}
+
+fn normalize_command(value: &str) -> String {
+    value
+        .trim()
+        .to_ascii_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn fuzzy_contains(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    let mut chars = needle.chars();
+    let Some(mut wanted) = chars.next() else {
+        return true;
+    };
+    for ch in haystack.chars() {
+        if ch == wanted {
+            match chars.next() {
+                Some(next) => wanted = next,
+                None => return true,
+            }
+        }
+    }
+    false
+}
+
 #[derive(Debug)]
 pub struct App {
     pub data: WorkbenchData,
@@ -172,6 +437,8 @@ pub struct App {
     pub selected_compiler: usize,
     pub command_mode: bool,
     pub command_input: String,
+    pub command_selection: usize,
+    pub command_selection_active: bool,
     pub show_help: bool,
     pub show_launch: bool,
     pub launch_review: bool,
@@ -233,6 +500,8 @@ impl App {
             selected_compiler: 0,
             command_mode: false,
             command_input: String::new(),
+            command_selection: 0,
+            command_selection_active: false,
             show_help: false,
             show_launch: false,
             launch_review: false,
@@ -420,10 +689,7 @@ impl App {
                 self.open_launch_picker()
             }
             KeyCode::Char('D') => self.open_doctor(),
-            KeyCode::Char(':') => {
-                self.command_mode = true;
-                self.command_input.clear();
-            }
+            KeyCode::Char(':') => self.open_command_palette(),
             KeyCode::Tab => self.next_focus(),
             KeyCode::BackTab => self.prev_focus(),
             KeyCode::Char('j') | KeyCode::Down => self.move_down(),
@@ -435,6 +701,8 @@ impl App {
             KeyCode::Char('/') => {
                 self.command_mode = true;
                 self.command_input = format!("/{}", self.search_query);
+                self.command_selection = 0;
+                self.command_selection_active = false;
             }
             KeyCode::Char(' ') => self.set_rewind_point(),
             KeyCode::Char('c') => self.review_capsule(),
@@ -454,10 +722,12 @@ impl App {
                 let was_search = self.is_search_command();
                 self.command_mode = false;
                 self.command_input.clear();
+                self.command_selection = 0;
+                self.command_selection_active = false;
                 if was_search {
                     self.set_search_status();
                 } else {
-                    self.set_status("Command cancelled");
+                    self.set_status("Command palette closed");
                 }
             }
             KeyCode::Enter => {
@@ -465,50 +735,47 @@ impl App {
                     self.sync_live_search();
                     self.command_mode = false;
                     self.command_input.clear();
+                    self.command_selection = 0;
+                    self.command_selection_active = false;
                     self.set_search_status();
                     return;
                 }
 
                 let command = self.command_input.trim().to_ascii_lowercase();
+                let selected = self
+                    .selected_command_palette_entry()
+                    .map(|entry| entry.command);
                 self.command_mode = false;
                 self.command_input.clear();
-                match command.as_str() {
-                    "q" | "quit" => self.should_quit = true,
-                    "" => self.set_status("Command cancelled"),
-                    "open" | "o" => self.open_original(),
-                    "review" | "compile" | "c" => self.review_capsule(),
-                    "verify" | "v" => self.mark_verify_passed(),
-                    "help" | "?" => self.open_help(),
-                    "doctor" | "diag" | "health" => self.open_doctor(),
-                    "filter" | "filter next" => self.cycle_session_filter(true),
-                    "filter prev" | "filter previous" => self.cycle_session_filter(false),
-                    "filter star" | "filter starred" | "starred" => {
-                        self.apply_session_filter(SessionFilter::Starred)
-                    }
-                    "filter all" | "filter clear" | "clear" | "all" => self.clear_session_filters(),
-                    "filter codex" | "source codex" => {
-                        self.apply_session_filter(SessionFilter::Tool(CliTool::Codex))
-                    }
-                    "filter claude" => {
-                        self.apply_session_filter(SessionFilter::Tool(CliTool::Claude))
-                    }
-                    "filter hermes" => {
-                        self.apply_session_filter(SessionFilter::Tool(CliTool::Hermes))
-                    }
-                    "source claude" => {
-                        self.apply_session_filter(SessionFilter::Tool(CliTool::Claude))
-                    }
-                    "source hermes" => {
-                        self.apply_session_filter(SessionFilter::Tool(CliTool::Hermes))
-                    }
-                    "source" | "source next" => self.cycle_session_filter(true),
-                    "source prev" | "source previous" => self.cycle_session_filter(false),
-                    "star" | "s" | "*" => self.toggle_starred_session(),
-                    "skill" | "compiler" => self.open_skill_picker(),
-                    "handoff" | "target" | "launch" | "x" => self.open_launch_picker(),
-                    _ => self.set_status(format!("Unknown command: {command}")),
+                self.command_selection = 0;
+                let selection_active = self.command_selection_active;
+                self.command_selection_active = false;
+                if command.is_empty() && !selection_active {
+                    self.set_status("Command cancelled");
+                } else if let Some(entry) = resolve_command_palette_entry(&command) {
+                    self.run_palette_command(entry.command);
+                } else if let Some(command) = selected {
+                    self.run_palette_command(command);
+                } else {
+                    self.set_status(format!("Unknown command: {command}"));
                 }
             }
+            KeyCode::Tab | KeyCode::BackTab if !self.is_search_command() => {
+                if let Some(entry) = self.selected_command_palette_entry() {
+                    self.command_input = entry.command.into();
+                    self.command_selection = 0;
+                    self.command_selection_active = false;
+                    self.set_status(format!("Completed command: {}", entry.command));
+                }
+            }
+            KeyCode::Char('j') if !self.is_search_command() && self.command_input.is_empty() => {
+                self.move_command_selection(true)
+            }
+            KeyCode::Char('k') if !self.is_search_command() && self.command_input.is_empty() => {
+                self.move_command_selection(false)
+            }
+            KeyCode::Down if !self.is_search_command() => self.move_command_selection(true),
+            KeyCode::Up if !self.is_search_command() => self.move_command_selection(false),
             KeyCode::Backspace => {
                 if self.is_search_command() {
                     if self.command_input.len() > 1 {
@@ -517,12 +784,17 @@ impl App {
                     self.sync_live_search();
                 } else {
                     self.command_input.pop();
+                    self.command_selection = 0;
+                    self.command_selection_active = false;
                 }
             }
             KeyCode::Char(ch) => {
                 self.command_input.push(ch);
                 if self.is_search_command() {
                     self.sync_live_search();
+                } else {
+                    self.command_selection = 0;
+                    self.command_selection_active = false;
                 }
             }
             _ => {}
@@ -552,6 +824,71 @@ impl App {
             self.set_status(format!("Search cleared{suffix}"));
         } else {
             self.set_status(format!("Search: /{}{suffix}", self.search_query));
+        }
+    }
+
+    fn open_command_palette(&mut self) {
+        self.command_mode = true;
+        self.command_input.clear();
+        self.command_selection = 0;
+        self.command_selection_active = false;
+        self.set_status("Command palette opened");
+        self.pending_g = false;
+    }
+
+    pub fn command_palette_matches(&self) -> Vec<&'static CommandPaletteEntry> {
+        command_palette_matches(&self.command_input)
+    }
+
+    pub fn selected_command_palette_entry(&self) -> Option<&'static CommandPaletteEntry> {
+        let matches = self.command_palette_matches();
+        if matches.is_empty() {
+            return None;
+        }
+        Some(matches[self.command_selection.min(matches.len() - 1)])
+    }
+
+    fn move_command_selection(&mut self, forward: bool) {
+        let count = self.command_palette_matches().len();
+        if count == 0 {
+            self.command_selection = 0;
+            self.command_selection_active = false;
+            self.set_status("No matching commands");
+            return;
+        }
+        if forward {
+            self.command_selection = (self.command_selection + 1) % count;
+        } else if self.command_selection == 0 {
+            self.command_selection = count - 1;
+        } else {
+            self.command_selection -= 1;
+        }
+        self.command_selection_active = true;
+        if let Some(entry) = self.selected_command_palette_entry() {
+            self.set_status(format!("Command candidate: {}", entry.command));
+        }
+    }
+
+    fn run_palette_command(&mut self, command: &str) {
+        match command {
+            "quit" => self.should_quit = true,
+            "open" => self.open_original(),
+            "capsule" => self.review_capsule(),
+            "verify" => self.mark_verify_passed(),
+            "help" => self.open_help(),
+            "doctor" => self.open_doctor(),
+            "source next" => self.cycle_session_filter(true),
+            "source prev" => self.cycle_session_filter(false),
+            "starred" => self.apply_session_filter(SessionFilter::Starred),
+            "clear" => self.clear_session_filters(),
+            "source codex" => self.apply_session_filter(SessionFilter::Tool(CliTool::Codex)),
+            "source claude" => self.apply_session_filter(SessionFilter::Tool(CliTool::Claude)),
+            "source hermes" => self.apply_session_filter(SessionFilter::Tool(CliTool::Hermes)),
+            "data next" => self.cycle_data_space(true),
+            "data prev" => self.cycle_data_space(false),
+            "skill" => self.open_skill_picker(),
+            "handoff" => self.open_launch_picker(),
+            _ => self.set_status(format!("Unknown command: {command}")),
         }
     }
 
@@ -2634,6 +2971,67 @@ mod tests {
         assert!(app.show_doctor);
         assert!(!app.command_mode);
         assert!(app.status_message.starts_with("Pre-flight: "));
+    }
+
+    #[test]
+    fn command_palette_fuzzy_runs_capsule_review() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+
+        app.handle_key(key(':'));
+        for ch in "cap".chars() {
+            app.handle_key(key(ch));
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(!app.command_mode);
+        assert!(app.show_launch);
+        assert!(app.launch_review);
+        assert_eq!(app.status_message, "Capsule refreshed");
+    }
+
+    #[test]
+    fn command_palette_tab_completes_selected_command() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+
+        app.handle_key(key(':'));
+        for ch in "sk".chars() {
+            app.handle_key(key(ch));
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+
+        assert_eq!(app.command_input, "skill");
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(!app.command_mode);
+        assert!(app.show_skill_picker);
+        assert_eq!(app.status_message, "Choose compiler skill");
+    }
+
+    #[test]
+    fn command_palette_empty_enter_cancels_without_running_first_item() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+
+        app.handle_key(key(':'));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(!app.command_mode);
+        assert!(!app.show_open_original);
+        assert_eq!(app.status_message, "Command cancelled");
+    }
+
+    #[test]
+    fn command_palette_vim_selection_runs_selected_command() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+
+        app.handle_key(key(':'));
+        app.handle_key(key('j'));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(!app.command_mode);
+        assert!(app.show_launch);
+        assert!(!app.launch_review);
+        assert_eq!(app.status_message, "Choose target CLI");
     }
 
     #[test]

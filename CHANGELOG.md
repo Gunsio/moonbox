@@ -368,6 +368,9 @@ and this project uses semantic versioning once tagged releases start.
 - The TUI top bar now exposes one `Pre-flight: PASS/WARN/BLOCKED` signal with
   Strong/Medium/Weak confidence language, and the `D` panel expands Compiler,
   Doctor, and Verify evidence in one place.
+- `:` now opens a floating Command Palette with fuzzy completion, descriptions,
+  parameter hints, aliases, empty-state guidance, and dry-run / review / exit
+  risk labels for existing TUI actions.
 - Replay-eval fixture invariants now return structured `CoreError` failures
   instead of panicking, and generated SVG docs snapshot code no longer relies on
   infallible string-write `expect` calls.

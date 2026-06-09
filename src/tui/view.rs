@@ -11,7 +11,7 @@ use ratatui::{
 };
 
 use crate::{
-    app::{App, Focus, HandoffTrailFrame},
+    app::{App, CommandPaletteEntry, Focus, HandoffTrailFrame},
     core::compiler,
     core::model::{
         CliTool, CompilerPresetInfo, CompilerPresetKind, CompilerPresetStatus,
@@ -79,6 +79,9 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
     if app.show_skill_picker {
         render_skill_picker(frame, root, app);
+    }
+    if app.command_mode && !app.command_input.starts_with('/') {
+        render_command_palette(frame, root, app);
     }
 }
 
@@ -1718,7 +1721,7 @@ fn short_identifier(value: &str, keep: usize) -> String {
 }
 
 fn render_command_bar(frame: &mut Frame, area: Rect, app: &App) {
-    let lines = if app.command_mode {
+    let lines = if app.command_mode && app.command_input.starts_with('/') {
         let (prompt, input) = if let Some(query) = app.command_input.strip_prefix('/') {
             ("/", query)
         } else {
@@ -1734,6 +1737,16 @@ fn render_command_bar(frame: &mut Frame, area: Rect, app: &App) {
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(input, Style::default().fg(theme::TEXT)),
+            ]),
+        ]
+    } else if app.command_mode {
+        vec![
+            status_line(app),
+            hint_line(&[
+                ("enter", "Run"),
+                ("tab", "Complete"),
+                ("j/k", "Select"),
+                ("Esc", "Close"),
             ]),
         ]
     } else {
@@ -1959,6 +1972,168 @@ fn render_help(frame: &mut Frame, root: Rect, app: &App) {
             .wrap(Wrap { trim: true }),
         area,
     );
+}
+
+fn render_command_palette(frame: &mut Frame, root: Rect, app: &App) {
+    let area = modal_area(root, 78, 64);
+    frame.render_widget(Clear, area);
+
+    let matches = app.command_palette_matches();
+    let selected = app.selected_command_palette_entry();
+    let selected_index = if matches.is_empty() {
+        0
+    } else {
+        app.command_selection.min(matches.len() - 1)
+    };
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled(
+                "Command Palette",
+                Style::default()
+                    .fg(theme::GOLD)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "  fuzzy command discovery",
+                Style::default().fg(theme::MUTED),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                ": ",
+                Style::default()
+                    .fg(theme::GOLD)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(app.command_input.clone(), Style::default().fg(theme::TEXT)),
+            Span::styled("▏", Style::default().fg(theme::CYAN)),
+        ]),
+        Line::from(Span::styled(
+            "Tab complete   Enter run selected   j/k choose   Esc close",
+            Style::default().fg(theme::MUTED),
+        )),
+        Line::raw(""),
+    ];
+
+    if matches.is_empty() {
+        lines.extend([
+            Line::from(Span::styled(
+                "No commands match",
+                Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(
+                "Try open, capsule, handoff, source, data, skill, doctor, or help.",
+                Style::default().fg(theme::MUTED),
+            )),
+        ]);
+    } else {
+        lines.push(Line::from(Span::styled(
+            "Matches",
+            Style::default()
+                .fg(theme::BLUE)
+                .add_modifier(Modifier::BOLD),
+        )));
+        for (index, entry) in matches.iter().take(8).enumerate() {
+            lines.push(command_palette_row(entry, index == selected_index));
+        }
+        if matches.len() > 8 {
+            lines.push(Line::from(Span::styled(
+                format!(
+                    "  {} more commands hidden by the current terminal height",
+                    matches.len() - 8
+                ),
+                Style::default().fg(theme::MUTED),
+            )));
+        }
+        if let Some(entry) = selected {
+            lines.extend(command_palette_details(entry));
+        }
+    }
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(panel_block(" Command Palette ", true))
+            .wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
+fn command_palette_row(entry: &CommandPaletteEntry, selected: bool) -> Line<'static> {
+    let marker = if selected { "›" } else { " " };
+    let command_style = if selected {
+        Style::default()
+            .fg(theme::TEXT)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::TEXT)
+    };
+    Line::from(vec![
+        Span::styled(marker, Style::default().fg(theme::CYAN)),
+        Span::raw(" "),
+        Span::styled(format!("{:<14}", entry.command), command_style),
+        Span::styled(
+            format!(" {:<8} ", entry.badge),
+            command_palette_badge_style(entry),
+        ),
+        Span::styled(entry.description, Style::default().fg(theme::MUTED)),
+    ])
+}
+
+fn command_palette_details(entry: &CommandPaletteEntry) -> Vec<Line<'static>> {
+    let aliases = if entry.aliases.is_empty() {
+        "-".into()
+    } else {
+        entry.aliases.join(", ")
+    };
+    let risk = if entry.dangerous {
+        "Danger: exits Moonbox; no session is opened or launched."
+    } else if entry.badge == "DRY-RUN" || entry.badge == "PREVIEW" || entry.badge == "REVIEW" {
+        "Danger: no execute path; command opens a preview or review flow."
+    } else {
+        "Danger: none; command stays inside Moonbox."
+    };
+    vec![
+        Line::raw(""),
+        Line::from(Span::styled(
+            "Selected command",
+            Style::default()
+                .fg(theme::BLUE)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(vec![
+            Span::styled("Params: ", Style::default().fg(theme::BLUE)),
+            Span::styled(entry.params, Style::default().fg(theme::TEXT)),
+        ]),
+        Line::from(vec![
+            Span::styled("Aliases: ", Style::default().fg(theme::BLUE)),
+            Span::styled(aliases, Style::default().fg(theme::MUTED)),
+        ]),
+        Line::from(vec![
+            Span::styled("Risk: ", Style::default().fg(theme::BLUE)),
+            Span::styled(
+                risk,
+                Style::default().fg(if entry.dangerous {
+                    theme::RED
+                } else {
+                    theme::MUTED
+                }),
+            ),
+        ]),
+    ]
+}
+
+fn command_palette_badge_style(entry: &CommandPaletteEntry) -> Style {
+    let color = if entry.dangerous {
+        theme::RED
+    } else {
+        match entry.badge {
+            "CHECK" => theme::GREEN,
+            "DRY-RUN" | "PREVIEW" | "REVIEW" => theme::GOLD,
+            "SWITCH" | "PICKER" => theme::CYAN,
+            _ => theme::MUTED,
+        }
+    };
+    Style::default().fg(color).add_modifier(Modifier::BOLD)
 }
 
 fn render_doctor(frame: &mut Frame, root: Rect, app: &App) {
@@ -3452,6 +3627,48 @@ mod tests {
         assert_screen_contains(&screen, "fidelity=fallback");
         assert_screen_contains(&screen, "fixtures/adapters/codex");
         assert_screen_contains(&screen, "Copy JSON");
+    }
+
+    #[test]
+    fn command_palette_renders_floating_completion_details() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.command_mode = true;
+        app.command_input = "cap".into();
+        let screen = render_text(&app, 140, 40);
+
+        assert_screen_contains(&screen, "Command Palette");
+        assert_screen_contains(&screen, ": cap");
+        assert_screen_contains(&screen, "capsule");
+        assert_screen_contains(&screen, "Refresh the Capsule");
+        assert_screen_contains(&screen, "REVIEW");
+        assert_screen_contains(&screen, "Params:");
+        assert_screen_contains(&screen, "selected rewind");
+        assert_screen_contains(&screen, "Risk:");
+        assert_screen_contains(&screen, "no execute path");
+    }
+
+    #[test]
+    fn command_palette_renders_empty_state() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.command_mode = true;
+        app.command_input = "zzzz".into();
+        let screen = render_text(&app, 140, 40);
+
+        assert_screen_contains(&screen, "Command Palette");
+        assert_screen_contains(&screen, "No commands match");
+        assert_screen_contains(&screen, "Try open, capsule, handoff");
+    }
+
+    #[test]
+    fn command_palette_marks_exit_as_dangerous() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.command_mode = true;
+        app.command_input = "quit".into();
+        let screen = render_text(&app, 140, 40);
+
+        assert_screen_contains(&screen, "quit");
+        assert_screen_contains(&screen, "EXIT");
+        assert_screen_contains(&screen, "exits Moonbox");
     }
 
     #[test]
