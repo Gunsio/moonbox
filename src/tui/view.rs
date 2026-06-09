@@ -2605,6 +2605,7 @@ mod tests {
             source_provenance: SourceProvenance::Real,
             source_path: None,
             parse_skip_count: 0,
+            provider_metadata: None,
         }
     }
 

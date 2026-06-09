@@ -1,10 +1,12 @@
 use std::env;
 
+use serde_json::Value;
+
 use super::{
     config,
     model::{
-        CanonicalTimeline, CapsuleCompileRequest, ChecklistItem, RedactionReport, SessionSummary,
-        TimelineKind, WorkCapsule,
+        CanonicalTimeline, CapsuleCompileRequest, ChecklistItem, ProviderSessionMetadata,
+        RedactionReport, SessionSummary, TimelineKind, WorkCapsule,
     },
 };
 
@@ -249,7 +251,76 @@ fn redact_session_summary(
     session.source_path = session
         .source_path
         .map(|path| redact_text(&path, policy, stats));
+    session.provider_metadata = session
+        .provider_metadata
+        .map(|metadata| redact_provider_metadata(metadata, policy, stats));
     session
+}
+
+fn redact_provider_metadata(
+    mut metadata: ProviderSessionMetadata,
+    policy: &RedactionPolicy,
+    stats: &mut RedactionStats,
+) -> ProviderSessionMetadata {
+    metadata.source = metadata
+        .source
+        .map(|value| redact_text(&value, policy, stats));
+    metadata.platform = metadata
+        .platform
+        .map(|value| redact_text(&value, policy, stats));
+    metadata.user_id = metadata
+        .user_id
+        .map(|value| redact_text(&value, policy, stats));
+    metadata.session_key = metadata
+        .session_key
+        .map(|value| redact_text(&value, policy, stats));
+    metadata.parent_session_id = metadata
+        .parent_session_id
+        .map(|value| redact_text(&value, policy, stats));
+    metadata.model = metadata
+        .model
+        .map(|value| redact_text(&value, policy, stats));
+    metadata.system_prompt_snapshot = metadata
+        .system_prompt_snapshot
+        .map(|value| redact_text(&value, policy, stats));
+    metadata.model_config = metadata
+        .model_config
+        .map(|value| redact_json_value(value, policy, stats));
+    metadata.origin = metadata
+        .origin
+        .map(|value| redact_json_value(value, policy, stats));
+    if let Some(mut handoff) = metadata.handoff {
+        handoff.state = handoff
+            .state
+            .map(|value| redact_text(&value, policy, stats));
+        handoff.platform = handoff
+            .platform
+            .map(|value| redact_text(&value, policy, stats));
+        handoff.error = handoff
+            .error
+            .map(|value| redact_text(&value, policy, stats));
+        metadata.handoff = Some(handoff);
+    }
+    metadata
+}
+
+fn redact_json_value(value: Value, policy: &RedactionPolicy, stats: &mut RedactionStats) -> Value {
+    match value {
+        Value::String(text) => Value::String(redact_text(&text, policy, stats)),
+        Value::Array(values) => Value::Array(
+            values
+                .into_iter()
+                .map(|value| redact_json_value(value, policy, stats))
+                .collect(),
+        ),
+        Value::Object(object) => Value::Object(
+            object
+                .into_iter()
+                .map(|(key, value)| (key, redact_json_value(value, policy, stats)))
+                .collect(),
+        ),
+        value => value,
+    }
 }
 
 fn redact_timeline(
@@ -646,6 +717,17 @@ mod tests {
                 source_provenance: SourceProvenance::Fixture,
                 source_path: Some("/Users/alice/.codex/session.jsonl".into()),
                 parse_skip_count: 0,
+                provider_metadata: Some(ProviderSessionMetadata {
+                    user_id: Some("user=/Users/alice".into()),
+                    system_prompt_snapshot: Some(
+                        "token=sk-abcdef1234567890 in /Users/alice".into(),
+                    ),
+                    origin: Some(serde_json::json!({
+                        "path": "/Users/alice/provider",
+                        "secret": "sk-origin1234567890"
+                    })),
+                    ..ProviderSessionMetadata::default()
+                }),
             },
             rewind_event_id: "evt-001".into(),
             token_budget: 100,
@@ -676,6 +758,23 @@ mod tests {
                 .runtime_reason
                 .as_deref()
                 .is_some_and(|reason| reason.contains("<path:redacted>"))
+        );
+        let metadata = redacted
+            .source_session
+            .provider_metadata
+            .as_ref()
+            .expect("provider metadata");
+        assert_eq!(metadata.user_id.as_deref(), Some("<path:redacted>"));
+        assert!(
+            metadata
+                .system_prompt_snapshot
+                .as_deref()
+                .expect("system prompt")
+                .contains("<secret:redacted>")
+        );
+        assert_eq!(
+            metadata.origin.as_ref().expect("origin")["path"],
+            "<path:redacted>"
         );
         assert!(
             redacted

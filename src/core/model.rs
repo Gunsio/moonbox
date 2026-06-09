@@ -2,6 +2,7 @@ use std::fmt::{Display, Formatter};
 
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "snake_case")]
@@ -113,10 +114,66 @@ pub struct SessionSummary {
     pub source_path: Option<String>,
     #[serde(default)]
     pub parse_skip_count: usize,
+    #[serde(default)]
+    pub provider_metadata: Option<ProviderSessionMetadata>,
 }
 
 pub fn unknown_runtime_reason(tool: CliTool) -> String {
     format!("{tool} source adapter does not expose live runtime activity yet")
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ProviderSessionMetadata {
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub platform: Option<String>,
+    #[serde(default)]
+    pub user_id: Option<String>,
+    #[serde(default)]
+    pub session_key: Option<String>,
+    #[serde(default)]
+    pub parent_session_id: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub model_config: Option<Value>,
+    #[serde(default)]
+    pub system_prompt_snapshot: Option<String>,
+    #[serde(default)]
+    pub origin: Option<Value>,
+    #[serde(default)]
+    pub handoff: Option<ProviderHandoffMetadata>,
+    #[serde(default)]
+    pub token_breakdown: Option<TokenBreakdown>,
+    #[serde(default)]
+    pub archived: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderHandoffMetadata {
+    #[serde(default)]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub platform: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TokenBreakdown {
+    #[serde(default)]
+    pub input: usize,
+    #[serde(default)]
+    pub output: usize,
+    #[serde(default)]
+    pub cache_read: usize,
+    #[serde(default)]
+    pub cache_write: usize,
+    #[serde(default)]
+    pub reasoning: usize,
+    #[serde(default)]
+    pub total: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

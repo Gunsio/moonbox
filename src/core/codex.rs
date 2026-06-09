@@ -317,6 +317,7 @@ impl CodexSourceAdapter {
             source_provenance: SourceProvenance::Real,
             source_path: rollout_exists.then(|| source_path.to_owned()),
             parse_skip_count: 0,
+            provider_metadata: None,
         }
     }
 
@@ -883,6 +884,7 @@ impl SummaryBuilder {
             source_provenance: SourceProvenance::Real,
             source_path: Some(self.path.display().to_string()),
             parse_skip_count: self.malformed_lines,
+            provider_metadata: None,
         }
     }
 }

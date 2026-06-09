@@ -161,15 +161,15 @@ fn real_capabilities(tool: CliTool) -> SourceCapabilities {
         CliTool::Hermes => SourceCapabilities {
             local_store: cap(
                 SourceCapabilityStatus::Available,
-                "read-only Hermes state.db plus local registry supplements",
+                "read-only Hermes state.db plus local registry supplements; all non-archived sources are listed by default",
             ),
             rich_local_rpc: cap(
-                SourceCapabilityStatus::Planned,
-                "Hermes gateway all-source inventory is planned for M64",
+                SourceCapabilityStatus::Available,
+                "Hermes all-source inventory metadata is parsed from captured local state; Moonbox does not invoke the gateway",
             ),
             cloud_metadata: cap(
-                SourceCapabilityStatus::Planned,
-                "gateway platform and source metadata are planned for M64",
+                SourceCapabilityStatus::Available,
+                "source platform, user/session key, origin, model/config, system prompt snapshot, handoff, and token metadata are preserved when present",
             ),
             deep_link: cap(
                 SourceCapabilityStatus::Unknown,

@@ -836,6 +836,7 @@ impl SummaryBuilder {
             source_provenance: SourceProvenance::Real,
             source_path: Some(self.path.display().to_string()),
             parse_skip_count: self.malformed_lines,
+            provider_metadata: None,
         }
     }
 }

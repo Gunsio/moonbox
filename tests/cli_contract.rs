@@ -169,6 +169,91 @@ fn write_codex_thread_index(root: &Path, rollout_path: &Path, id: &str, title: &
     .expect("codex state row");
 }
 
+fn write_hermes_state_db(root: &Path) {
+    fs::create_dir_all(root).expect("hermes home");
+    let db = Connection::open(root.join("state.db")).expect("hermes state db");
+    db.execute_batch(
+        r#"
+        create table sessions (
+            id text primary key,
+            source text not null,
+            user_id text,
+            model text,
+            model_config text,
+            system_prompt text,
+            parent_session_id text,
+            started_at real not null,
+            ended_at real,
+            end_reason text,
+            message_count integer default 0,
+            tool_call_count integer default 0,
+            input_tokens integer default 0,
+            output_tokens integer default 0,
+            cache_read_tokens integer default 0,
+            cache_write_tokens integer default 0,
+            reasoning_tokens integer default 0,
+            cwd text,
+            title text,
+            handoff_state text,
+            handoff_platform text,
+            handoff_error text,
+            rewind_count integer not null default 0,
+            archived integer not null default 0
+        );
+        create table messages (
+            id integer primary key autoincrement,
+            session_id text not null,
+            role text not null,
+            content text,
+            tool_calls text,
+            tool_name text,
+            timestamp real not null,
+            token_count integer,
+            finish_reason text,
+            reasoning text,
+            reasoning_content text,
+            reasoning_details text,
+            active integer not null default 1
+        );
+        insert into sessions (
+            id, source, user_id, model, model_config, system_prompt, parent_session_id,
+            started_at, message_count, tool_call_count, input_tokens, output_tokens,
+            cache_read_tokens, cache_write_tokens, reasoning_tokens, cwd, title,
+            handoff_state, handoff_platform, archived
+        ) values
+            ('hermes-cli-real', 'cli', 'local-user', 'gpt-5', '{"temperature":0.1}', 'CLI system prompt', null, 1780640474, 2, 0, 8, 7, 0, 0, 0, '/repo', 'CLI session', null, null, 0),
+            ('hermes-feishu-real', 'feishu', 'ou_123', 'claude-sonnet', '{"mode":"ops"}', 'Feishu system prompt', 'parent-feishu', 1780641494, 3, 1, 10, 20, 3, 4, 5, null, null, 'ready', 'feishu', 0),
+            ('hermes-discord-archived', 'discord', 'du_123', 'gpt-5', null, null, null, 1780649999, 1, 0, 1, 1, 0, 0, 0, null, 'Archived Discord', null, null, 1);
+        insert into messages (session_id, role, content, timestamp, active) values
+            ('hermes-cli-real', 'user', 'Fix CLI source', 1780640475, 1),
+            ('hermes-cli-real', 'assistant', 'Done', 1780640476, 1),
+            ('hermes-feishu-real', 'user', 'Investigate Feishu gateway', 1780641495, 1);
+        "#,
+    )
+    .expect("hermes schema");
+
+    let sessions_json = root.join("sessions").join("sessions.json");
+    fs::create_dir_all(sessions_json.parent().expect("sessions parent")).expect("sessions dir");
+    fs::write(
+        sessions_json,
+        r#"{
+  "agent:main:feishu:dm:chat": {
+    "session_id": "hermes-feishu-real",
+    "session_key": "agent:main:feishu:dm:chat",
+    "display_name": "Feishu Ops",
+    "platform": "feishu",
+    "chat_type": "dm",
+    "total_tokens": 42,
+    "suspended": false,
+    "resume_pending": false,
+    "expiry_finalized": false,
+    "origin": {"chat_name": "Feishu Ops", "thread_ts": "t-1"}
+  }
+}"#,
+    )
+    .expect("hermes sessions json");
+}
+
 fn codex_app_server_fixture_json() -> &'static str {
     r#"{
       "responses": [
@@ -581,6 +666,117 @@ fn session_listing_source_filter_matches_global_entry_model() {
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0]["id"], "hermes-cxcp-502");
     assert_eq!(sessions[0]["cli"], "hermes");
+}
+
+#[test]
+fn hermes_real_store_lists_all_sources_and_filters_by_provider_source() {
+    let test_name = "hermes-all-source-inventory";
+    let home = fixture_home(test_name);
+    let hermes_home = home.join("hermes");
+    write_hermes_state_db(&hermes_home);
+
+    let all = output_json(
+        moonbox_command(test_name)
+            .args(["sessions", "--json", "--filter", "hermes"])
+            .output()
+            .expect("sessions all"),
+    );
+    let all = all.as_array().expect("session array");
+    let ids = all
+        .iter()
+        .map(|session| session["id"].as_str().expect("id"))
+        .collect::<Vec<_>>();
+
+    assert_eq!(ids, ["hermes-feishu-real", "hermes-cli-real"]);
+    assert!(!ids.contains(&"hermes-discord-archived"));
+    assert_eq!(all[0]["provider_metadata"]["source"], "feishu");
+    assert_eq!(all[0]["provider_metadata"]["platform"], "feishu");
+    assert_eq!(all[0]["provider_metadata"]["user_id"], "ou_123");
+    assert_eq!(
+        all[0]["provider_metadata"]["session_key"],
+        "agent:main:feishu:dm:chat"
+    );
+    assert_eq!(
+        all[0]["provider_metadata"]["parent_session_id"],
+        "parent-feishu"
+    );
+    assert_eq!(all[0]["provider_metadata"]["token_breakdown"]["total"], 42);
+    assert_eq!(all[0]["provider_metadata"]["token_breakdown"]["input"], 10);
+    assert_eq!(all[0]["provider_metadata"]["token_breakdown"]["output"], 20);
+    assert_eq!(all[0]["provider_metadata"]["handoff"]["state"], "ready");
+    assert_eq!(
+        all[0]["provider_metadata"]["origin"]["chat_name"],
+        "Feishu Ops"
+    );
+    assert!(
+        all[0]["provider_metadata"]["system_prompt_snapshot"]
+            .as_str()
+            .expect("system prompt")
+            .contains("Feishu system")
+    );
+
+    let cli_only = output_json(
+        moonbox_command(test_name)
+            .args([
+                "sessions",
+                "--json",
+                "--filter",
+                "hermes",
+                "--hermes-source",
+                "cli",
+            ])
+            .output()
+            .expect("sessions cli"),
+    );
+    let cli_only = cli_only.as_array().expect("cli sessions");
+
+    assert_eq!(cli_only.len(), 1);
+    assert_eq!(cli_only[0]["id"], "hermes-cli-real");
+    assert_eq!(cli_only[0]["provider_metadata"]["source"], "cli");
+
+    let api_server = output_json(
+        moonbox_command(test_name)
+            .args(["sessions", "--json", "--hermes-source", "api-server"])
+            .output()
+            .expect("sessions api-server"),
+    );
+
+    assert_eq!(api_server.as_array().expect("api sessions").len(), 0);
+
+    let binary = env!("CARGO_BIN_EXE_moonbox");
+    let doctor = output_json(
+        moonbox_command(test_name)
+            .arg("doctor")
+            .arg("--json")
+            .env("MOONBOX_CODEX_BIN", binary)
+            .env("MOONBOX_CLAUDE_BIN", binary)
+            .env("MOONBOX_HERMES_BIN", binary)
+            .output()
+            .expect("doctor"),
+    );
+    let hermes = doctor["source_adapters"]
+        .as_array()
+        .expect("adapters")
+        .iter()
+        .find(|adapter| adapter["cli"] == "hermes")
+        .expect("hermes adapter")
+        .clone();
+
+    assert_eq!(hermes["session_count"], 2);
+    assert_eq!(
+        hermes["capabilities"]["rich_local_rpc"]["status"],
+        "available"
+    );
+    assert_eq!(
+        hermes["capabilities"]["cloud_metadata"]["status"],
+        "available"
+    );
+    assert!(
+        hermes["capabilities"]["export_search"]["detail"]
+            .as_str()
+            .expect("export detail")
+            .contains("M65")
+    );
 }
 
 #[test]

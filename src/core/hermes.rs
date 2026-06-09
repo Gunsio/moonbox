@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     env, fs,
     path::{Path, PathBuf},
 };
@@ -19,8 +19,9 @@ use super::{
         timeline_preview_truncated_event, title_case, truncate, truncate_timeline_detail,
     },
     model::{
-        CanonicalTimeline, CliTool, SessionRuntimeStatus, SessionStatus, SessionSummary,
-        SourceProvenance, TimelineEvent, TimelineKind, unknown_runtime_reason,
+        CanonicalTimeline, CliTool, ProviderHandoffMetadata, ProviderSessionMetadata,
+        SessionRuntimeStatus, SessionStatus, SessionSummary, SourceProvenance, TimelineEvent,
+        TimelineKind, TokenBreakdown, unknown_runtime_reason,
     },
 };
 
@@ -36,7 +37,11 @@ pub struct HermesSourceAdapter {
 struct HermesSessionRow {
     id: String,
     source: String,
+    user_id: Option<String>,
     model: Option<String>,
+    model_config: Option<String>,
+    system_prompt: Option<String>,
+    parent_session_id: Option<String>,
     updated_at: String,
     end_reason: Option<String>,
     message_count: usize,
@@ -159,13 +164,14 @@ impl HermesSourceAdapter {
         limit: Option<usize>,
     ) -> Result<Vec<HermesSessionRow>, AdapterError> {
         let db = self.open_connection()?;
+        let columns = session_columns(&db, &self.state_db_path())?;
+        let select = session_select_sql(&columns);
+        let unarchived = unarchived_clause(&columns);
         let query = format!(
-            "{} {}",
-            SESSION_SELECT,
+            "{select} where {unarchived} order by s.started_at desc{}",
             match limit {
-                Some(_) =>
-                    "where s.source = 'cli' and s.archived = 0 order by s.started_at desc limit :limit",
-                None => "where s.source = 'cli' and s.archived = 0 order by s.started_at desc",
+                Some(_) => " limit :limit",
+                None => "",
             }
         );
         let mut statement = db
@@ -186,8 +192,10 @@ impl HermesSourceAdapter {
 
     fn find_session_row(&self, session_id: &str) -> Result<Option<HermesSessionRow>, AdapterError> {
         let db = self.open_connection()?;
+        let columns = session_columns(&db, &self.state_db_path())?;
+        let select = session_select_sql(&columns);
         let mut statement = db
-            .prepare(&format!("{SESSION_SELECT} where s.id = ?1"))
+            .prepare(&format!("{select} where s.id = ?1"))
             .map_err(|error| read_error(HERMES_TOOL, &self.state_db_path(), error))?;
         statement
             .query_row(params![session_id], session_row)
@@ -252,6 +260,7 @@ impl HermesSourceAdapter {
             .or_else(|| total_tokens(&row));
         let status = session_status(&row, supplement);
         let health_reason = health_reason(&row, supplement);
+        let provider_metadata = provider_metadata(&row, supplement, token_count);
         let title = row
             .title
             .clone()
@@ -285,6 +294,7 @@ impl HermesSourceAdapter {
             source_provenance: SourceProvenance::Real,
             source_path: Some(self.state_db_path().display().to_string()),
             parse_skip_count: 0,
+            provider_metadata: Some(provider_metadata),
         }
     }
 }
@@ -393,31 +403,74 @@ impl HermesSourceAdapter {
     }
 }
 
-const SESSION_SELECT: &str = r#"
+fn session_columns(db: &Connection, path: &Path) -> Result<HashSet<String>, AdapterError> {
+    let mut statement = db
+        .prepare("pragma table_info(sessions)")
+        .map_err(|error| read_error(HERMES_TOOL, path, error))?;
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| read_error(HERMES_TOOL, path, error))?;
+    collect_rows(rows, path).map(|columns| columns.into_iter().collect())
+}
+
+fn session_select_sql(columns: &HashSet<String>) -> String {
+    let user_id = session_column(columns, "user_id", "NULL");
+    let model = session_column(columns, "model", "NULL");
+    let model_config = session_column(columns, "model_config", "NULL");
+    let system_prompt = session_column(columns, "system_prompt", "NULL");
+    let parent_session_id = session_column(columns, "parent_session_id", "NULL");
+    let started_at = session_column(columns, "started_at", "0");
+    let ended_at = session_column(columns, "ended_at", "NULL");
+    let end_reason = session_column(columns, "end_reason", "NULL");
+    let message_count = session_integer_column(columns, "message_count");
+    let tool_call_count = session_integer_column(columns, "tool_call_count");
+    let input_tokens = session_integer_column(columns, "input_tokens");
+    let output_tokens = session_integer_column(columns, "output_tokens");
+    let cache_read_tokens = session_integer_column(columns, "cache_read_tokens");
+    let cache_write_tokens = session_integer_column(columns, "cache_write_tokens");
+    let reasoning_tokens = session_integer_column(columns, "reasoning_tokens");
+    let cwd = session_column(columns, "cwd", "NULL");
+    let title = session_column(columns, "title", "NULL");
+    let handoff_state = session_column(columns, "handoff_state", "NULL");
+    let handoff_platform = session_column(columns, "handoff_platform", "NULL");
+    let handoff_error = session_column(columns, "handoff_error", "NULL");
+    let rewind_count = session_integer_column(columns, "rewind_count");
+    let archived = if columns.contains("archived") {
+        "s.archived != 0"
+    } else {
+        "0"
+    };
+
+    format!(
+        r#"
     select
         s.id,
         s.source,
-        s.model,
+        {user_id},
+        {model},
+        {model_config},
+        {system_prompt},
+        {parent_session_id},
         strftime(
             '%Y-%m-%dT%H:%M:%SZ',
-            coalesce((select max(timestamp) from messages where session_id = s.id), s.ended_at, s.started_at),
+            coalesce((select max(timestamp) from messages where session_id = s.id), {ended_at}, {started_at}),
             'unixepoch'
         ) as updated_at,
-        s.end_reason,
-        coalesce(s.message_count, 0) as message_count,
-        coalesce(s.tool_call_count, 0) as tool_call_count,
-        coalesce(s.input_tokens, 0) as input_tokens,
-        coalesce(s.output_tokens, 0) as output_tokens,
-        coalesce(s.cache_read_tokens, 0) as cache_read_tokens,
-        coalesce(s.cache_write_tokens, 0) as cache_write_tokens,
-        coalesce(s.reasoning_tokens, 0) as reasoning_tokens,
-        s.cwd,
-        s.title,
-        s.handoff_state,
-        s.handoff_platform,
-        s.handoff_error,
-        coalesce(s.rewind_count, 0) as rewind_count,
-        s.archived != 0 as archived,
+        {end_reason},
+        {message_count} as message_count,
+        {tool_call_count} as tool_call_count,
+        {input_tokens} as input_tokens,
+        {output_tokens} as output_tokens,
+        {cache_read_tokens} as cache_read_tokens,
+        {cache_write_tokens} as cache_write_tokens,
+        {reasoning_tokens} as reasoning_tokens,
+        {cwd},
+        {title},
+        {handoff_state},
+        {handoff_platform},
+        {handoff_error},
+        {rewind_count} as rewind_count,
+        {archived} as archived,
         coalesce((select count(*) from messages where session_id = s.id and active = 1), 0) as active_message_count,
         coalesce(
             (
@@ -430,31 +483,61 @@ const SESSION_SELECT: &str = r#"
             ''
         ) as preview
     from sessions s
-"#;
+"#
+    )
+}
+
+fn session_column(columns: &HashSet<String>, column: &str, fallback: &str) -> String {
+    if columns.contains(column) {
+        format!("s.{column}")
+    } else {
+        fallback.to_owned()
+    }
+}
+
+fn session_integer_column(columns: &HashSet<String>, column: &str) -> String {
+    if columns.contains(column) {
+        format!("coalesce(s.{column}, 0)")
+    } else {
+        "0".to_owned()
+    }
+}
+
+fn unarchived_clause(columns: &HashSet<String>) -> &'static str {
+    if columns.contains("archived") {
+        "s.archived = 0"
+    } else {
+        "1 = 1"
+    }
+}
 
 fn session_row(row: &Row<'_>) -> rusqlite::Result<HermesSessionRow> {
     Ok(HermesSessionRow {
         id: row.get(0)?,
         source: row.get(1)?,
-        model: row.get(2)?,
-        updated_at: row.get(3)?,
-        end_reason: row.get(4)?,
-        message_count: integer(row, 5)?,
-        tool_call_count: integer(row, 6)?,
-        input_tokens: integer(row, 7)?,
-        output_tokens: integer(row, 8)?,
-        cache_read_tokens: integer(row, 9)?,
-        cache_write_tokens: integer(row, 10)?,
-        reasoning_tokens: integer(row, 11)?,
-        cwd: row.get(12)?,
-        title: row.get(13)?,
-        handoff_state: row.get(14)?,
-        handoff_platform: row.get(15)?,
-        handoff_error: row.get(16)?,
-        rewind_count: integer(row, 17)?,
-        archived: row.get(18)?,
-        active_message_count: integer(row, 19)?,
-        preview: row.get(20)?,
+        user_id: row.get(2)?,
+        model: row.get(3)?,
+        model_config: row.get(4)?,
+        system_prompt: row.get(5)?,
+        parent_session_id: row.get(6)?,
+        updated_at: row.get(7)?,
+        end_reason: row.get(8)?,
+        message_count: integer(row, 9)?,
+        tool_call_count: integer(row, 10)?,
+        input_tokens: integer(row, 11)?,
+        output_tokens: integer(row, 12)?,
+        cache_read_tokens: integer(row, 13)?,
+        cache_write_tokens: integer(row, 14)?,
+        reasoning_tokens: integer(row, 15)?,
+        cwd: row.get(16)?,
+        title: row.get(17)?,
+        handoff_state: row.get(18)?,
+        handoff_platform: row.get(19)?,
+        handoff_error: row.get(20)?,
+        rewind_count: integer(row, 21)?,
+        archived: row.get(22)?,
+        active_message_count: integer(row, 23)?,
+        preview: row.get(24)?,
     })
 }
 
@@ -534,8 +617,26 @@ fn health_reason(row: &HermesSessionRow, supplement: Option<&SessionRegistryEntr
         "real Hermes SQLite session, source: {}",
         row.source
     )];
+    if let Some(platform) = supplement
+        .and_then(|entry| entry.platform.as_deref())
+        .filter(|platform| !platform.is_empty() && *platform != row.source)
+    {
+        parts.push(format!("platform: {platform}"));
+    }
+    if let Some(user_id) = row.user_id.as_deref().filter(|value| !value.is_empty()) {
+        parts.push(format!("user: {user_id}"));
+    }
+    if let Some(session_key) = supplement
+        .and_then(|entry| entry.session_key.as_deref())
+        .filter(|value| !value.is_empty())
+    {
+        parts.push(format!("session_key: {session_key}"));
+    }
     if let Some(model) = row.model.as_deref().filter(|model| !model.is_empty()) {
         parts.push(format!("model: {model}"));
+    }
+    if let Some(total) = total_tokens(row) {
+        parts.push(format!("tokens: {total}"));
     }
     if row.tool_call_count > 0 {
         parts.push(format!("{} tool call(s)", row.tool_call_count));
@@ -568,6 +669,91 @@ fn health_reason(row: &HermesSessionRow, supplement: Option<&SessionRegistryEntr
         parts.push("expiry finalized".into());
     }
     parts.join("; ")
+}
+
+fn provider_metadata(
+    row: &HermesSessionRow,
+    supplement: Option<&SessionRegistryEntry>,
+    token_count: Option<usize>,
+) -> ProviderSessionMetadata {
+    ProviderSessionMetadata {
+        source: non_empty_string(&row.source),
+        platform: supplement
+            .and_then(|entry| entry.platform.as_deref())
+            .and_then(non_empty_string)
+            .or_else(|| non_empty_string(&row.source)),
+        user_id: row.user_id.as_deref().and_then(non_empty_string),
+        session_key: supplement
+            .and_then(|entry| entry.session_key.as_deref())
+            .and_then(non_empty_string),
+        parent_session_id: row.parent_session_id.as_deref().and_then(non_empty_string),
+        model: row.model.as_deref().and_then(non_empty_string),
+        model_config: row.model_config.as_deref().and_then(json_value_from_text),
+        system_prompt_snapshot: row
+            .system_prompt
+            .as_deref()
+            .and_then(non_empty_string)
+            .map(|prompt| truncate(&prompt, 4000)),
+        origin: supplement.and_then(origin_metadata),
+        handoff: handoff_metadata(row),
+        token_breakdown: token_breakdown(row, token_count),
+        archived: Some(row.archived),
+    }
+}
+
+fn non_empty_string(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_owned())
+}
+
+fn json_value_from_text(value: &str) -> Option<Value> {
+    let value = value.trim();
+    if value.is_empty() {
+        return None;
+    }
+    Some(serde_json::from_str::<Value>(value).unwrap_or_else(|_| Value::String(value.to_owned())))
+}
+
+fn origin_metadata(entry: &SessionRegistryEntry) -> Option<Value> {
+    if entry.origin.is_null() {
+        None
+    } else {
+        Some(entry.origin.clone())
+    }
+}
+
+fn handoff_metadata(row: &HermesSessionRow) -> Option<ProviderHandoffMetadata> {
+    let handoff = ProviderHandoffMetadata {
+        state: row.handoff_state.as_deref().and_then(non_empty_string),
+        platform: row.handoff_platform.as_deref().and_then(non_empty_string),
+        error: row.handoff_error.as_deref().and_then(non_empty_string),
+    };
+    (handoff.state.is_some() || handoff.platform.is_some() || handoff.error.is_some())
+        .then_some(handoff)
+}
+
+fn token_breakdown(
+    row: &HermesSessionRow,
+    total_override: Option<usize>,
+) -> Option<TokenBreakdown> {
+    let total = total_override.or_else(|| total_tokens(row)).unwrap_or(0);
+    if total == 0
+        && row.input_tokens == 0
+        && row.output_tokens == 0
+        && row.cache_read_tokens == 0
+        && row.cache_write_tokens == 0
+        && row.reasoning_tokens == 0
+    {
+        return None;
+    }
+    Some(TokenBreakdown {
+        input: row.input_tokens,
+        output: row.output_tokens,
+        cache_read: row.cache_read_tokens,
+        cache_write: row.cache_write_tokens,
+        reasoning: row.reasoning_tokens,
+        total,
+    })
 }
 
 fn display_name(entry: &SessionRegistryEntry) -> Option<String> {
@@ -720,11 +906,78 @@ mod tests {
             .list_sessions()
             .expect("sessions");
 
-        assert_eq!(sessions.len(), 1);
-        assert_eq!(sessions[0].id, "hermes-cli");
-        assert_eq!(sessions[0].title, "CLI bugfix");
-        assert_eq!(sessions[0].token_count, Some(15));
-        assert_eq!(sessions[0].resume_command, "hermes --resume hermes-cli");
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(sessions[0].id, "hermes-feishu");
+        assert_eq!(sessions[0].title, "Ops Room");
+        assert_eq!(sessions[0].token_count, Some(88));
+        assert_eq!(sessions[0].resume_command, "hermes --resume hermes-feishu");
+        let metadata = sessions[0].provider_metadata.as_ref().expect("metadata");
+        assert_eq!(metadata.source.as_deref(), Some("feishu"));
+        assert_eq!(metadata.platform.as_deref(), Some("feishu"));
+        assert_eq!(metadata.user_id.as_deref(), Some("ou_feishu"));
+        assert_eq!(
+            metadata.session_key.as_deref(),
+            Some("agent:main:feishu:dm:chat")
+        );
+        assert_eq!(metadata.model.as_deref(), Some("claude-sonnet"));
+        assert_eq!(metadata.parent_session_id.as_deref(), Some("parent-feishu"));
+        assert_eq!(metadata.archived, Some(false));
+        assert_eq!(
+            metadata
+                .token_breakdown
+                .as_ref()
+                .expect("token breakdown")
+                .total,
+            88
+        );
+        assert_eq!(
+            metadata
+                .handoff
+                .as_ref()
+                .expect("handoff")
+                .platform
+                .as_deref(),
+            Some("feishu")
+        );
+        assert!(metadata.model_config.is_some());
+        assert!(
+            metadata
+                .system_prompt_snapshot
+                .as_deref()
+                .expect("system prompt")
+                .contains("Feishu system")
+        );
+        assert_eq!(sessions[1].id, "hermes-cli");
+        assert_eq!(sessions[1].title, "CLI bugfix");
+        assert_eq!(sessions[1].token_count, Some(15));
+        assert_eq!(sessions[1].resume_command, "hermes --resume hermes-cli");
+        assert!(
+            sessions
+                .iter()
+                .all(|session| session.id != "hermes-discord-archived")
+        );
+    }
+
+    #[test]
+    fn lists_legacy_hermes_schema_without_provider_columns() {
+        let root = test_root("legacy-schema");
+        write_legacy_state_db(&root);
+
+        let sessions = HermesSourceAdapter::new(&root)
+            .list_sessions()
+            .expect("sessions");
+
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(sessions[0].id, "legacy-feishu");
+        assert_eq!(sessions[0].token_count, Some(5));
+        let metadata = sessions[0].provider_metadata.as_ref().expect("metadata");
+        assert_eq!(metadata.source.as_deref(), Some("feishu"));
+        assert_eq!(metadata.platform.as_deref(), Some("feishu"));
+        assert_eq!(metadata.user_id, None);
+        assert_eq!(metadata.model_config, None);
+        assert_eq!(metadata.system_prompt_snapshot, None);
+        assert_eq!(metadata.archived, Some(false));
+        assert_eq!(sessions[1].id, "legacy-cli");
     }
 
     #[test]
@@ -779,18 +1032,16 @@ mod tests {
 
         let listed = adapter.list_sessions().expect("sessions");
         let found = adapter
-            .find_session("hermes-feishu")
+            .find_session("hermes-cli")
             .expect("find session")
             .expect("old session");
-        let timeline = adapter
-            .load_timeline("hermes-feishu")
-            .expect("old timeline");
+        let timeline = adapter.load_timeline("hermes-cli").expect("old timeline");
 
         assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].id, "hermes-cli");
-        assert_eq!(found.id, "hermes-feishu");
-        assert_eq!(timeline.source_session, "hermes-feishu");
-        assert_eq!(timeline.events[1].detail, "Investigate handoff");
+        assert_eq!(listed[0].id, "hermes-feishu");
+        assert_eq!(found.id, "hermes-cli");
+        assert_eq!(timeline.source_session, "hermes-cli");
+        assert_eq!(timeline.events[0].detail, "Fix CLI state");
     }
 
     fn test_root(name: &str) -> PathBuf {
@@ -870,12 +1121,14 @@ mod tests {
                 active integer not null default 1
             );
             insert into sessions (
-                id, source, model, started_at, message_count, tool_call_count,
+                id, source, user_id, model, model_config, system_prompt, parent_session_id,
+                started_at, message_count, tool_call_count,
                 input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-                reasoning_tokens, cwd, title
+                reasoning_tokens, cwd, title, handoff_state, handoff_platform, handoff_error, archived
             ) values
-                ('hermes-cli', 'cli', 'gpt-5', 1780640474, 2, 0, 10, 5, 0, 0, 0, '/repo', 'CLI bugfix'),
-                ('hermes-feishu', 'feishu', 'claude-sonnet', 1780641494, 5, 1, 0, 0, 0, 0, 0, null, null);
+                ('hermes-cli', 'cli', 'local-user', 'gpt-5', '{"temperature":0.2}', 'CLI system prompt', null, 1780640474, 2, 0, 10, 5, 0, 0, 0, '/repo', 'CLI bugfix', null, null, null, 0),
+                ('hermes-feishu', 'feishu', 'ou_feishu', 'claude-sonnet', '{"mode":"ops"}', 'Feishu system prompt snapshot', 'parent-feishu', 1780641494, 5, 1, 0, 0, 0, 0, 0, null, null, 'ready', 'feishu', null, 0),
+                ('hermes-discord-archived', 'discord', 'discord-user', 'gpt-5', null, null, null, 1780649999, 1, 0, 1, 1, 0, 0, 0, null, 'Archived Discord', null, null, null, 1);
             insert into messages (session_id, role, content, timestamp, active) values
                 ('hermes-cli', 'user', 'Fix CLI state', 1780640475, 1),
                 ('hermes-cli', 'assistant', 'Done', 1780640476, 1),
@@ -889,5 +1142,53 @@ mod tests {
             "#,
         )
         .expect("schema");
+    }
+
+    fn write_legacy_state_db(root: &std::path::Path) {
+        let path = root.join("state.db");
+        let db = Connection::open(path).expect("db");
+        db.execute_batch(
+            r#"
+            create table sessions (
+                id text primary key,
+                source text not null,
+                model text,
+                started_at real not null,
+                message_count integer default 0,
+                tool_call_count integer default 0,
+                input_tokens integer default 0,
+                output_tokens integer default 0,
+                cache_read_tokens integer default 0,
+                cache_write_tokens integer default 0,
+                reasoning_tokens integer default 0,
+                cwd text,
+                title text
+            );
+            create table messages (
+                id integer primary key autoincrement,
+                session_id text not null,
+                role text not null,
+                content text,
+                tool_calls text,
+                tool_name text,
+                timestamp real not null,
+                token_count integer,
+                finish_reason text,
+                reasoning text,
+                reasoning_content text,
+                reasoning_details text,
+                active integer not null default 1
+            );
+            insert into sessions (
+                id, source, model, started_at, message_count, input_tokens, output_tokens, title
+            ) values
+                ('legacy-cli', 'cli', 'gpt-5', 1780640474, 1, 1, 2, 'Legacy CLI'),
+                ('legacy-feishu', 'feishu', 'claude-sonnet', 1780641494, 1, 2, 3, 'Legacy Feishu');
+            insert into messages (session_id, role, content, timestamp, active) values
+                ('legacy-cli', 'user', 'Fix legacy CLI', 1780640475, 1),
+                ('legacy-feishu', 'user', 'Fix legacy Feishu', 1780641495, 1);
+            "#,
+        )
+        .expect("legacy schema");
     }
 }

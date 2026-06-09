@@ -21,9 +21,9 @@ and this project uses semantic versioning once tagged releases start.
   index, with rollout fallback from `~/.codex/sessions`.
 - Real read-only Claude adapter for the `~/.claude/history.jsonl` resume index,
   with timeline and detail hydration from `~/.claude/projects`.
-- Real read-only Hermes adapter for `~/.hermes/state.db`, with default
-  `source = cli` listing to mirror Hermes `/resume` and explicit ID lookup
-  across the wider Hermes store.
+- Real read-only Hermes adapter for `~/.hermes/state.db`, listing all
+  non-archived Hermes sources by default while keeping explicit ID lookup
+  available across the wider Hermes store.
 - Fallible `SourceAdapter` discovery.
 - Replaceable `CapsuleCompiler` trait with fixture and process-backed compilers.
 - External compiler runner using JSON stdin/stdout, timeout handling, and
@@ -169,6 +169,13 @@ and this project uses semantic versioning once tagged releases start.
   records, including `system` init, `result`, `session_id`, cost, duration, API
   duration, turn count, hook events, partial stream events, fork parent metadata,
   and remote / remote-control observability records without invoking Claude.
+- Hermes all-source inventory metadata in `sessions --json` through
+  serde-default `provider_metadata`, including source, platform, user id,
+  session key, parent session id, origin metadata, model config, system prompt
+  snapshot, handoff state, archived state, and token breakdown.
+- `moonbox sessions --hermes-source <source>` / `moon sessions --hermes-source
+  <source>` provider-source filtering for Hermes inventories, with comma or
+  repeated values and aliases such as `api-server`.
 
 ### Changed
 
@@ -206,10 +213,11 @@ and this project uses semantic versioning once tagged releases start.
 - Codex, Claude, and Hermes source discovery use real local stores when any
   real store is present; fixture fallback is reserved for the no-real-store
   demo/CI case or explicit fixture mode.
-- Codex, Claude, and Hermes default session lists now mirror each source CLI's
-  own resume surface: Codex thread titles from `state_5.sqlite`, Claude order
-  and membership from `history.jsonl`, and Hermes CLI sessions from
-  `source = cli` rows.
+- Codex and Claude default session lists continue to mirror each source CLI's
+  own resume surface, while Hermes now defaults to all non-archived provider
+  sources instead of only `source = cli` rows.
+- Hermes Doctor capabilities now report all-source local inventory and captured
+  source metadata as available, while export/search remains planned for M65.
 - Explicit session lookup routes obvious Hermes/Codex/Claude ids to the likely
   adapter before expensive full-store fallback.
 - CLI launch/verify uses lightweight session artifacts instead of constructing
