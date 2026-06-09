@@ -5,11 +5,11 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::{
     adapter::{AdapterError, SourceScanStats},
-    model::{CliTool, TimelineEvent, TimelineKind},
+    model::{CliTool, TimelineAttachment, TimelineEvent, TimelineKind},
 };
 
 pub const DEFAULT_SESSION_LIMIT: usize = 200;
@@ -252,6 +252,103 @@ pub fn text_from_value(value: &Value) -> Option<String> {
         }
         _ => None,
     }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TimelineImageMarkup {
+    pub text: String,
+    pub attachments: Vec<TimelineAttachment>,
+}
+
+pub fn extract_timeline_image_markup(text: &str) -> TimelineImageMarkup {
+    let mut rest = text;
+    let mut output = String::new();
+    let mut attachments = Vec::new();
+
+    while let Some(start) = rest.find("<image") {
+        output.push_str(&rest[..start]);
+        let marker = &rest[start..];
+        let Some(tag_end) = marker.find('>') else {
+            output.push_str(marker);
+            rest = "";
+            break;
+        };
+        let start_tag = &marker[..=tag_end];
+        let after_tag = &marker[tag_end + 1..];
+        let Some(close_start) = after_tag.find("</image>") else {
+            output.push_str(marker);
+            rest = "";
+            break;
+        };
+
+        let inner = &after_tag[..close_start];
+        let after_close = &after_tag[close_start + "</image>".len()..];
+        let name = image_name_from_tag(start_tag)
+            .or_else(|| bracketed_image_label(inner))
+            .or_else(|| bracketed_image_label(after_close))
+            .unwrap_or_else(|| format!("Image #{}", attachments.len() + 1));
+        attachments.push(TimelineAttachment {
+            id: Some(name.clone()),
+            name: Some(name.clone()),
+            mime_type: Some("image/unknown".into()),
+            raw: Some(json!({
+                "source": "inline_image_markup",
+                "marker": start_tag.trim(),
+                "label": name,
+            })),
+            ..TimelineAttachment::default()
+        });
+        rest = consume_duplicate_image_label(after_close, &name);
+    }
+    output.push_str(rest);
+
+    TimelineImageMarkup {
+        text: normalize_text(&output).unwrap_or_default(),
+        attachments,
+    }
+}
+
+fn image_name_from_tag(tag: &str) -> Option<String> {
+    let name_start = tag.find("name=")?;
+    let value = tag[name_start + "name=".len()..].trim_start();
+    if let Some(value) = value.strip_prefix('"') {
+        return value
+            .find('"')
+            .and_then(|end| clean_image_label(&value[..end]));
+    }
+    if let Some(value) = value.strip_prefix('\'') {
+        return value
+            .find('\'')
+            .and_then(|end| clean_image_label(&value[..end]));
+    }
+    if let Some(value) = value.strip_prefix('[') {
+        return value
+            .find(']')
+            .and_then(|end| clean_image_label(&format!("[{}]", &value[..end])));
+    }
+    let end = value
+        .find(|character: char| character.is_whitespace() || character == '>')
+        .unwrap_or(value.len());
+    clean_image_label(&value[..end])
+}
+
+fn bracketed_image_label(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    let start = trimmed.find("[Image #")?;
+    let label = &trimmed[start..];
+    let end = label.find(']')?;
+    clean_image_label(&label[..=end])
+}
+
+fn clean_image_label(label: &str) -> Option<String> {
+    let label = label.trim().trim_matches(&['[', ']'][..]);
+    (!label.is_empty()).then_some(label.to_owned())
+}
+
+fn consume_duplicate_image_label<'a>(text: &'a str, name: &str) -> &'a str {
+    let trimmed = text.trim_start();
+    let label = format!("[{name}]");
+    trimmed.strip_prefix(&label).unwrap_or(text)
 }
 
 pub fn find_token_count(value: &Value) -> Option<usize> {
@@ -555,6 +652,21 @@ mod tests {
             detail: detail.into(),
             metadata: Default::default(),
         }
+    }
+
+    #[test]
+    fn extracts_inline_image_markup_from_timeline_text() {
+        let markup = extract_timeline_image_markup(
+            "<image name=[Image #1]> </image> [Image #1]\n看下这个问题",
+        );
+
+        assert_eq!(markup.text, "看下这个问题");
+        assert_eq!(markup.attachments.len(), 1);
+        assert_eq!(markup.attachments[0].name.as_deref(), Some("Image #1"));
+        assert_eq!(
+            markup.attachments[0].mime_type.as_deref(),
+            Some("image/unknown")
+        );
     }
 
     #[test]
