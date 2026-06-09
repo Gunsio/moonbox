@@ -2477,7 +2477,9 @@ fn render_capsules(frame: &mut Frame, root: Rect, app: &App) {
 fn render_timeline_detail(frame: &mut Frame, root: Rect, app: &App) {
     let area = modal_area(root, 88, 82);
     frame.render_widget(Clear, area);
-    let Some(event) = app.data.timeline.get(app.selected_event) else {
+    let visible_groups = visible_timeline_groups(app);
+    let selected_group = selected_timeline_group_position(&visible_groups, app.selected_event);
+    let Some(group) = visible_groups.get(selected_group) else {
         frame.render_widget(
             Paragraph::new(vec![Line::from(Span::styled(
                 "No timeline event selected",
@@ -2491,29 +2493,137 @@ fn render_timeline_detail(frame: &mut Frame, root: Rect, app: &App) {
         return;
     };
 
+    let mut lines = timeline_detail_group_header_lines(group, app);
+    for (position, (_, event)) in group.events().enumerate() {
+        if group.len() > 1 {
+            if position > 0 {
+                lines.push(Line::raw(""));
+            }
+            lines.push(timeline_detail_event_header_line(
+                position + 1,
+                group.len(),
+                event,
+            ));
+        }
+        lines.extend(timeline_detail_event_lines(event, group.len() > 1));
+    }
+    lines.push(Line::raw(""));
+    lines.push(Line::from(Span::styled(
+        "j/k scroll   PgUp/PgDn page   Esc/q close",
+        Style::default().fg(theme::MUTED),
+    )));
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(panel_block(" Timeline Detail ", true))
+            .scroll((app.modal_scroll, 0))
+            .wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
+fn timeline_detail_group_header_lines(group: &TimelineGroup<'_>, app: &App) -> Vec<Line<'static>> {
+    let is_rewind = group.is_rewind(&app.rewind_event_id);
+    let (label, color) = timeline_group_label(group, is_rewind, app.data.source);
+    let primary = group.primary_event();
+    let id = if group.len() == 1 {
+        primary.id.clone()
+    } else {
+        format!("{}..{}", primary.id, group.last_event().id)
+    };
+    let kind = if group.len() == 1 {
+        timeline_kind_label(primary.kind).to_owned()
+    } else {
+        format!("{label} group")
+    };
     let mut lines = vec![
         Line::from(vec![
             Span::styled(
-                format!("{} ", event.id),
+                format!("{id} "),
                 Style::default()
                     .fg(theme::CYAN)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                timeline_kind_label(event.kind),
-                Style::default()
-                    .fg(timeline_kind_color(event.kind))
-                    .add_modifier(Modifier::BOLD),
+                kind,
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
             ),
             Span::raw("  "),
-            Span::styled(&event.time, Style::default().fg(theme::MUTED)),
+            Span::styled(
+                timeline_group_time(group),
+                Style::default().fg(theme::MUTED),
+            ),
         ]),
         Line::from(vec![
             Span::styled("Title: ", Style::default().fg(theme::MUTED)),
-            Span::styled(&event.title, Style::default().fg(theme::TEXT)),
+            Span::styled(
+                timeline_detail_group_title(group),
+                Style::default().fg(theme::TEXT),
+            ),
         ]),
     ];
+    if group.len() > 1 {
+        lines.push(Line::from(vec![
+            Span::styled("Events: ", Style::default().fg(theme::MUTED)),
+            Span::styled(
+                group.len().to_string(),
+                Style::default()
+                    .fg(theme::GOLD)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        lines.push(Line::raw(""));
+    }
+    lines
+}
 
+fn timeline_detail_group_title(group: &TimelineGroup<'_>) -> String {
+    if group.len() == 1 {
+        return group.primary_event().title.clone();
+    }
+    let title = group.primary_event().title.trim();
+    if title.is_empty() {
+        format!("{} events", group.len())
+    } else {
+        format!("{title} x{}", group.len())
+    }
+}
+
+fn timeline_detail_event_header_line(
+    position: usize,
+    total: usize,
+    event: &TimelineEvent,
+) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(
+            format!("{position}/{total} "),
+            Style::default().fg(theme::MUTED),
+        ),
+        Span::styled(
+            format!("{} ", event.id),
+            Style::default()
+                .fg(theme::CYAN)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            timeline_kind_label(event.kind),
+            Style::default()
+                .fg(timeline_kind_color(event.kind))
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled(event.time.clone(), Style::default().fg(theme::MUTED)),
+    ])
+}
+
+fn timeline_detail_event_lines(event: &TimelineEvent, include_title: bool) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    if include_title {
+        lines.push(Line::from(vec![
+            Span::styled("Title: ", Style::default().fg(theme::MUTED)),
+            Span::styled(event.title.clone(), Style::default().fg(theme::TEXT)),
+        ]));
+    }
     if !event.metadata.attachments.is_empty() {
         lines.push(Line::raw(""));
         lines.push(Line::from(Span::styled(
@@ -2541,19 +2651,7 @@ fn render_timeline_detail(frame: &mut Frame, root: Rect, app: &App) {
             .add_modifier(Modifier::BOLD),
     )));
     lines.extend(timeline_detail_body_lines(&event.detail));
-    lines.push(Line::raw(""));
-    lines.push(Line::from(Span::styled(
-        "j/k scroll   PgUp/PgDn page   Esc/q close",
-        Style::default().fg(theme::MUTED),
-    )));
-
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(panel_block(" Timeline Detail ", true))
-            .scroll((app.modal_scroll, 0))
-            .wrap(Wrap { trim: false }),
-        area,
-    );
+    lines
 }
 
 fn timeline_detail_body_lines(detail: &str) -> Vec<Line<'static>> {
@@ -3790,6 +3888,61 @@ mod tests {
         assert_screen_contains(&screen, "第二行完整内容");
         assert_screen_contains(&screen, "Esc");
         assert_screen_contains(&screen, "close");
+    }
+
+    #[test]
+    fn timeline_detail_overlay_expands_selected_assistant_group() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.show_timeline_detail = true;
+        app.data.timeline = vec![
+            TimelineEvent {
+                id: "evt-001".into(),
+                time: "12:58".into(),
+                kind: TimelineKind::User,
+                title: "User".into(),
+                detail: "先看仓库状态".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-119".into(),
+                time: "12:59".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "我会从当前仓库和 GitHub 状态重新开始。".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-120".into(),
+                time: "13:00".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "复核结果：当前本地在 chore/restart-governance。".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-121".into(),
+                time: "13:01".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "新的 CI 全绿，我会合入治理 PR。".into(),
+                metadata: Default::default(),
+            },
+        ];
+        app.selected_event = 1;
+        app.rewind_event_id = "evt-001".into();
+
+        let screen = render_text(&app, 120, 36);
+
+        assert_screen_contains(&screen, "evt-119..evt-121");
+        assert_screen_contains(&screen, "Codex x3 group");
+        assert_screen_contains(&screen, "Events:");
+        assert_screen_contains(&screen, "1/3");
+        assert_screen_contains(&screen, "2/3");
+        assert_screen_contains(&screen, "3/3");
+        assert_screen_contains(&screen, "我会从当前仓库和 GitHub 状态重新开始。");
+        assert_screen_contains(&screen, "复核结果：当前本地在 chore/restart-governance。");
+        assert_screen_contains(&screen, "新的 CI 全绿，我会合入治理 PR。");
     }
 
     #[test]

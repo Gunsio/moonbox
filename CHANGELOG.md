@@ -391,6 +391,9 @@ and this project uses semantic versioning once tagged releases start.
   instead of leaking raw image markup into user turns.
 - Timeline-focused `e` opens a scrollable selected-event detail overlay without
   changing `enter` original resume/open semantics or `space` rewind selection.
+- Timeline detail overlays now expand folded assistant groups, so rows such as
+  `Codex x88` show every grouped event id, timestamp, and body instead of only
+  the first event.
 - Replay-eval fixture invariants now return structured `CoreError` failures
   instead of panicking, and generated SVG docs snapshot code no longer relies on
   infallible string-write `expect` calls.
