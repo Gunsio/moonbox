@@ -131,15 +131,7 @@ pub fn render_loading(frame: &mut Frame, tick: usize) {
 fn render_header(frame: &mut Frame, area: Rect, app: &App) {
     let preflight = preflight_summary(app);
 
-    let title = Line::from(vec![
-        Span::styled(
-            " MOONBOX ",
-            Style::default()
-                .fg(theme::TEXT)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("月光宝盒", Style::default().fg(theme::MUTED)),
-    ]);
+    let title = Line::from(header_title_spans(area.width));
     let state = Line::from(vec![
         Span::raw("Filter "),
         Span::styled("[ ]", Style::default().fg(theme::MUTED)),
@@ -182,7 +174,9 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
         Span::raw(" "),
         Span::styled(
             preflight.confidence.label(),
-            Style::default().fg(theme::MUTED),
+            Style::default()
+                .fg(preflight.confidence.color())
+                .add_modifier(Modifier::BOLD),
         ),
     ]);
 
@@ -207,6 +201,19 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
             .alignment(Alignment::Left),
         area,
     );
+}
+
+fn header_title_spans(width: u16) -> Vec<Span<'static>> {
+    let mut spans = vec![Span::styled(
+        " MOONBOX ",
+        Style::default()
+            .fg(theme::TEXT)
+            .add_modifier(Modifier::BOLD),
+    )];
+    if width >= 120 {
+        spans.push(Span::styled("月光宝盒", Style::default().fg(theme::MUTED)));
+    }
+    spans
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -247,6 +254,14 @@ impl PreflightConfidence {
             Self::Strong => "Strong",
             Self::Medium => "Medium",
             Self::Weak => "Weak",
+        }
+    }
+
+    fn color(self) -> Color {
+        match self {
+            Self::Strong => theme::CONFIDENCE_STRONG,
+            Self::Medium => theme::CONFIDENCE_MEDIUM,
+            Self::Weak => theme::CONFIDENCE_WEAK,
         }
     }
 }
@@ -825,12 +840,17 @@ fn source_pill(tool: CliTool) -> &'static str {
 }
 
 fn source_tool_style(tool: CliTool) -> Style {
-    let color = match tool {
+    Style::default()
+        .fg(source_tool_color(tool))
+        .add_modifier(Modifier::BOLD)
+}
+
+fn source_tool_color(tool: CliTool) -> Color {
+    match tool {
         CliTool::Codex => theme::BLUE,
         CliTool::Claude => theme::PURPLE,
         CliTool::Hermes => theme::ORANGE,
-    };
-    Style::default().fg(color).add_modifier(Modifier::BOLD)
+    }
 }
 
 fn session_position_label(total: usize, selected: usize) -> String {
@@ -1054,7 +1074,7 @@ fn timeline_group_title<'a>(group: &TimelineGroup<'a>) -> Option<&'a str> {
 }
 
 fn timeline_group_accent(color: Color, is_rewind: bool) -> Color {
-    if is_rewind { theme::GOLD } else { color }
+    if is_rewind { theme::ROLE_REWIND } else { color }
 }
 
 fn timeline_prefix_style(active: bool, accent: Color) -> Style {
@@ -1072,7 +1092,7 @@ fn timeline_marker_style(active: bool, selected: bool, is_rewind: bool) -> Style
             .add_modifier(Modifier::BOLD)
     } else if is_rewind {
         Style::default()
-            .fg(theme::GOLD)
+            .fg(theme::ROLE_REWIND)
             .add_modifier(Modifier::BOLD)
     } else if selected {
         Style::default()
@@ -1587,17 +1607,20 @@ fn render_branch_tree(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn handoff_path_line(app: &App, width: u16) -> Line<'static> {
-    let session = app
+    let (session, source_color) = app
         .current_session()
         .map(|session| {
             let keep = if width < 96 { 8 } else { 14 };
-            format!(
-                "source {} {}",
-                session.cli,
-                short_identifier(&session.id, keep)
+            (
+                format!(
+                    "source {} {}",
+                    session.cli,
+                    short_identifier(&session.id, keep)
+                ),
+                source_tool_color(session.cli),
             )
         })
-        .unwrap_or_else(|| "no session".into());
+        .unwrap_or_else(|| ("no session".into(), theme::MUTED));
     let rewind = format!("rewind {}", short_identifier(&app.rewind_event_id, 12));
     let target_cli = if app.show_launch {
         app.pending_target
@@ -1606,9 +1629,9 @@ fn handoff_path_line(app: &App, width: u16) -> Line<'static> {
     };
     let target = format!("target {target_cli}");
     let nodes = [
-        (session, theme::TEXT),
-        (rewind, theme::GOLD),
-        (target, theme::CYAN),
+        (session, source_color),
+        (rewind, theme::ROLE_REWIND),
+        (target, theme::ROLE_TARGET),
     ];
 
     let mut spans = vec![Span::styled("   ", Style::default().fg(theme::MUTED))];
@@ -1659,15 +1682,15 @@ fn handoff_trail_line(frame: HandoffTrailFrame) -> Line<'static> {
     Line::from(vec![
         Span::styled("   handoff trail  ", Style::default().fg(theme::MUTED)),
         Span::styled("source", source_style),
-        Span::styled(arrow_one, Style::default().fg(theme::GOLD)),
+        Span::styled(arrow_one, Style::default().fg(theme::ROLE_REWIND)),
         Span::styled("rewind", rewind_style),
-        Span::styled(arrow_two, Style::default().fg(theme::CYAN)),
+        Span::styled(arrow_two, Style::default().fg(theme::ROLE_TARGET)),
         Span::styled("target", target_style),
         Span::styled("  ", Style::default().fg(theme::BORDER)),
         Span::styled(
             frame.phase.label(),
             Style::default()
-                .fg(theme::CYAN)
+                .fg(theme::ROLE_TARGET)
                 .add_modifier(Modifier::BOLD),
         ),
     ])
@@ -1691,13 +1714,19 @@ fn cwd_inventory_line(app: &App, width: u16) -> Line<'static> {
             Style::default().fg(theme::TEXT),
         ),
         Span::styled(" · ", Style::default().fg(theme::BORDER)),
-        Span::styled(format!("Codex {codex}"), Style::default().fg(theme::BLUE)),
+        Span::styled(
+            format!("Codex {codex}"),
+            Style::default().fg(source_tool_color(CliTool::Codex)),
+        ),
         Span::styled(" · ", Style::default().fg(theme::BORDER)),
-        Span::styled(format!("Claude {claude}"), Style::default().fg(theme::CYAN)),
+        Span::styled(
+            format!("Claude {claude}"),
+            Style::default().fg(source_tool_color(CliTool::Claude)),
+        ),
         Span::styled(" · ", Style::default().fg(theme::BORDER)),
         Span::styled(
             format!("Hermes {hermes}"),
-            Style::default().fg(theme::ORANGE),
+            Style::default().fg(source_tool_color(CliTool::Hermes)),
         ),
     ])
 }
@@ -2159,7 +2188,9 @@ fn render_doctor(frame: &mut Frame, root: Rect, app: &App) {
             ),
             Span::styled(
                 format!("  {}", preflight.confidence.label()),
-                Style::default().fg(theme::MUTED),
+                Style::default()
+                    .fg(preflight.confidence.color())
+                    .add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(vec![
@@ -3293,6 +3324,21 @@ mod tests {
     }
 
     #[test]
+    fn header_brand_degrades_on_narrow_width() {
+        let narrow = header_title_spans(80)
+            .into_iter()
+            .map(|span| span.content.into_owned())
+            .collect::<String>();
+        let wide = header_title_spans(140)
+            .into_iter()
+            .map(|span| span.content.into_owned())
+            .collect::<String>();
+
+        assert_eq!(narrow, " MOONBOX ");
+        assert_eq!(wide, " MOONBOX 月光宝盒");
+    }
+
+    #[test]
     fn header_collapses_preflight_signals() {
         let app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
         let screen = render_text(&app, 160, 40);
@@ -3303,6 +3349,19 @@ mod tests {
         assert!(!screen.contains("Compiler:"), "{screen}");
         assert!(!screen.contains("Doctor:"), "{screen}");
         assert!(!screen.contains("Verify:"), "{screen}");
+    }
+
+    #[test]
+    fn confidence_uses_stable_semantic_colors() {
+        assert_eq!(
+            PreflightConfidence::Strong.color(),
+            theme::CONFIDENCE_STRONG
+        );
+        assert_eq!(
+            PreflightConfidence::Medium.color(),
+            theme::CONFIDENCE_MEDIUM
+        );
+        assert_eq!(PreflightConfidence::Weak.color(), theme::CONFIDENCE_WEAK);
     }
 
     #[test]
@@ -3346,6 +3405,17 @@ mod tests {
         assert_screen_contains(&screen, "shape U▂ A▂ T▇ R▂");
         assert_screen_contains(&screen, "Portrait");
         assert_screen_contains(&screen, "shape U▂A▂T▇R▂");
+    }
+
+    #[test]
+    fn source_badges_share_one_color_mapping() {
+        assert_eq!(source_tool_color(CliTool::Codex), theme::BLUE);
+        assert_eq!(source_tool_color(CliTool::Claude), theme::PURPLE);
+        assert_eq!(source_tool_color(CliTool::Hermes), theme::ORANGE);
+        assert_eq!(
+            source_tool_style(CliTool::Claude).fg,
+            Some(source_tool_color(CliTool::Claude))
+        );
     }
 
     #[test]
@@ -3557,6 +3627,31 @@ mod tests {
     }
 
     #[test]
+    fn action_path_uses_source_rewind_target_semantic_colors() {
+        let app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        let line = handoff_path_line(&app, 140);
+        let source = line
+            .spans
+            .iter()
+            .find(|span| span.content.contains("source Codex"))
+            .expect("source span");
+        let rewind = line
+            .spans
+            .iter()
+            .find(|span| span.content.contains("rewind evt-091"))
+            .expect("rewind span");
+        let target = line
+            .spans
+            .iter()
+            .find(|span| span.content.contains("target Hermes"))
+            .expect("target span");
+
+        assert_eq!(source.style.fg, Some(source_tool_color(CliTool::Codex)));
+        assert_eq!(rewind.style.fg, Some(theme::ROLE_REWIND));
+        assert_eq!(target.style.fg, Some(theme::ROLE_TARGET));
+    }
+
+    #[test]
     fn action_path_renders_short_handoff_trail() {
         let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
         app.start_handoff_trail_for_review();
@@ -3573,7 +3668,7 @@ mod tests {
     fn selected_timeline_rows_keep_role_accent_colors() {
         assert_eq!(timeline_group_accent(theme::BLUE, false), theme::BLUE);
         assert_eq!(timeline_group_accent(theme::GOLD, false), theme::GOLD);
-        assert_eq!(timeline_group_accent(theme::BLUE, true), theme::GOLD);
+        assert_eq!(timeline_group_accent(theme::BLUE, true), theme::ROLE_REWIND);
 
         let selected_user_prefix = timeline_prefix_style(true, theme::BLUE);
         assert_eq!(selected_user_prefix.fg, Some(theme::BLUE));
@@ -3588,7 +3683,7 @@ mod tests {
         assert!(active_cursor_marker.add_modifier.contains(Modifier::BOLD));
 
         let inactive_rewind_marker = timeline_marker_style(false, false, true);
-        assert_eq!(inactive_rewind_marker.fg, Some(theme::GOLD));
+        assert_eq!(inactive_rewind_marker.fg, Some(theme::ROLE_REWIND));
         assert!(inactive_rewind_marker.add_modifier.contains(Modifier::BOLD));
     }
 
