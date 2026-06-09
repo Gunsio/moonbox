@@ -77,6 +77,9 @@ pub fn render(frame: &mut Frame, app: &App) {
     if app.show_doctor {
         render_doctor(frame, root, app);
     }
+    if app.show_capsules {
+        render_capsules(frame, root, app);
+    }
     if app.show_skill_picker {
         render_skill_picker(frame, root, app);
     }
@@ -514,7 +517,7 @@ fn session_list_window(total: usize, selected: usize, area_height: u16) -> (usiz
 }
 
 fn session_list_secondary_line(
-    app: &App,
+    _app: &App,
     session: &crate::core::model::SessionSummary,
     selected: bool,
     width: u16,
@@ -522,16 +525,15 @@ fn session_list_secondary_line(
     let updated = relative_time_label(&session.updated_at, current_unix_timestamp())
         .unwrap_or_else(|| session.updated.clone());
     let mut spans = vec![Span::raw("    ")];
-    let hydrated = hydrated_session_shape(app, session);
-    if selected && let Some(counts) = hydrated {
-        spans.push(Span::styled("shape ", Style::default().fg(theme::MUTED)));
-        spans.extend(session_shape_spans(counts));
+    let metric_style = if selected {
+        Style::default().fg(theme::CYAN)
     } else {
-        spans.push(Span::styled(
-            indexed_portrait_text(session),
-            Style::default().fg(theme::MUTED),
-        ));
-    }
+        Style::default().fg(theme::MUTED)
+    };
+    spans.push(Span::styled(
+        session_inventory_metric(session),
+        metric_style,
+    ));
     spans.push(Span::styled(" · ", Style::default().fg(theme::BORDER)));
     spans.push(Span::styled(updated, Style::default().fg(theme::MUTED)));
     if width >= 48
@@ -557,13 +559,14 @@ fn session_list_secondary_at(
 ) -> String {
     let updated = relative_time_label(&session.updated_at, now_unix_seconds)
         .unwrap_or_else(|| session.updated.clone());
+    let metric = session_inventory_metric(session);
     match session
         .branch
         .as_deref()
         .filter(|branch| !branch.is_empty())
     {
-        Some(branch) => format!("        {updated}  ·  {branch}"),
-        None => format!("        {updated}"),
+        Some(branch) => format!("    {metric}  ·  {updated}  ·  {branch}"),
+        None => format!("    {metric}  ·  {updated}"),
     }
 }
 
@@ -573,15 +576,6 @@ struct SessionShapeCounts {
     assistant: usize,
     tool: usize,
     rewind: usize,
-}
-
-impl SessionShapeCounts {
-    fn max_role_count(self) -> usize {
-        [self.user, self.assistant, self.tool, self.rewind]
-            .into_iter()
-            .max()
-            .unwrap_or(0)
-    }
 }
 
 fn hydrated_session_shape(
@@ -610,116 +604,47 @@ fn timeline_shape_counts(events: &[TimelineEvent]) -> SessionShapeCounts {
     counts
 }
 
-fn session_shape_spans(counts: SessionShapeCounts) -> Vec<Span<'static>> {
-    let max = counts.max_role_count();
-    vec![
-        role_span("U", counts.user, max, theme::BLUE),
-        Span::raw(" "),
-        role_span("A", counts.assistant, max, theme::PURPLE),
-        Span::raw(" "),
-        role_span("T", counts.tool, max, theme::GOLD),
-        Span::raw(" "),
-        role_span("R", counts.rewind, max, theme::CYAN),
-    ]
-}
-
-fn role_span(label: &'static str, count: usize, max: usize, color: Color) -> Span<'static> {
-    Span::styled(
-        format!("{label}{}", role_density_glyph(count, max)),
-        Style::default().fg(color).add_modifier(Modifier::BOLD),
-    )
-}
-
-fn session_shape_text(counts: SessionShapeCounts) -> String {
-    let max = counts.max_role_count();
-    format!(
-        "U{} A{} T{} R{}",
-        role_density_glyph(counts.user, max),
-        role_density_glyph(counts.assistant, max),
-        role_density_glyph(counts.tool, max),
-        role_density_glyph(counts.rewind, max),
-    )
-}
-
 fn session_shape_count_text(counts: SessionShapeCounts) -> String {
     format!(
-        "U{} A{} T{} R{}",
+        "user {} / assistant {} / tool {} / rewind {}",
         counts.user, counts.assistant, counts.tool, counts.rewind
     )
 }
 
-fn role_density_glyph(count: usize, max: usize) -> char {
-    if count == 0 || max == 0 {
-        return '·';
-    }
-    let bars = ['▁', '▂', '▃', '▄', '▅', '▆', '▇'];
-    let index = ((count * bars.len()).saturating_sub(1) / max).min(bars.len() - 1);
-    bars[index]
-}
-
-fn indexed_portrait_text(session: &crate::core::model::SessionSummary) -> String {
-    let mut text = format!(
-        "idx E{} {}e",
-        event_density_glyph(session.event_count),
-        session.event_count
-    );
+fn session_inventory_metric(session: &crate::core::model::SessionSummary) -> String {
+    let mut text = format_event_count(session.event_count);
     if let Some(tokens) = session.token_count {
-        text.push(' ');
+        text.push_str(" · ");
         text.push_str(&format_token_count(Some(tokens)));
     }
     text
 }
 
-fn event_density_glyph(event_count: usize) -> char {
-    match event_count {
-        0 => '·',
-        1..=12 => '▁',
-        13..=32 => '▂',
-        33..=64 => '▃',
-        65..=96 => '▄',
-        97..=144 => '▅',
-        145..=220 => '▆',
-        _ => '▇',
+fn format_event_count(event_count: usize) -> String {
+    if event_count == 1 {
+        "1 event".into()
+    } else {
+        format!("{event_count} events")
     }
 }
 
 fn session_portrait_detail(app: &App, session: &crate::core::model::SessionSummary) -> String {
     if let Some(counts) = hydrated_session_shape(app, session) {
-        format!(
-            "shape {} · {} · cached timeline",
-            session_shape_text(counts),
-            session_shape_count_text(counts)
-        )
+        format!("{} · cached timeline", session_shape_count_text(counts),)
     } else {
-        format!("{} · indexed summary only", indexed_portrait_text(session))
+        format!(
+            "{} · indexed summary only",
+            session_inventory_metric(session)
+        )
     }
 }
 
 fn session_portrait_summary(app: &App, session: &crate::core::model::SessionSummary) -> String {
     if let Some(counts) = hydrated_session_shape(app, session) {
-        format!("shape {}", session_shape_compact_text(counts))
+        session_shape_count_text(counts)
     } else {
-        indexed_portrait_summary_text(session)
+        session_inventory_metric(session)
     }
-}
-
-fn session_shape_compact_text(counts: SessionShapeCounts) -> String {
-    let max = counts.max_role_count();
-    format!(
-        "U{}A{}T{}R{}",
-        role_density_glyph(counts.user, max),
-        role_density_glyph(counts.assistant, max),
-        role_density_glyph(counts.tool, max),
-        role_density_glyph(counts.rewind, max),
-    )
-}
-
-fn indexed_portrait_summary_text(session: &crate::core::model::SessionSummary) -> String {
-    format!(
-        "idx E{} {}e",
-        event_density_glyph(session.event_count),
-        session.event_count
-    )
 }
 
 fn current_unix_timestamp() -> i64 {
@@ -1862,6 +1787,14 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("Esc", "Close"),
         ];
     }
+    if app.show_capsules {
+        return vec![
+            ("r", "Refresh"),
+            ("j/k", "Scroll"),
+            ("PgUp/Dn", "Scroll"),
+            ("Esc", "Close"),
+        ];
+    }
     if app.show_help {
         return vec![
             ("j/k", "Scroll"),
@@ -2015,18 +1948,6 @@ fn render_command_palette(frame: &mut Frame, root: Rect, app: &App) {
         app.command_selection.min(matches.len() - 1)
     };
     let mut lines = vec![
-        Line::from(vec![
-            Span::styled(
-                "Command Palette",
-                Style::default()
-                    .fg(theme::GOLD)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "  fuzzy command discovery",
-                Style::default().fg(theme::MUTED),
-            ),
-        ]),
         Line::from(vec![
             Span::styled(
                 ": ",
@@ -2402,6 +2323,97 @@ fn render_skill_picker(frame: &mut Frame, root: Rect, app: &App) {
     frame.render_widget(
         Paragraph::new(lines)
             .block(panel_block(" Skill Picker ", true))
+            .scroll((app.modal_scroll, 0))
+            .wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
+fn render_capsules(frame: &mut Frame, root: Rect, app: &App) {
+    let area = modal_area(root, 96, 78);
+    frame.render_widget(Clear, area);
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "Saved Capsules",
+            Style::default()
+                .fg(theme::GOLD)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "Local continuation objects. Listing never opens, resumes, or launches source sessions.",
+            Style::default().fg(theme::MUTED),
+        )),
+        Line::raw(""),
+    ];
+
+    if let Some(error) = &app.saved_capsule_error {
+        lines.push(Line::from(Span::styled(
+            "Capsule store unavailable",
+            Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(Span::styled(
+            review_snippet(error, 120),
+            Style::default().fg(theme::MUTED),
+        )));
+    } else if app.saved_capsules.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No saved Capsules",
+            Style::default()
+                .fg(theme::MUTED)
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(Span::styled(
+            "Use `moonbox capsule save <name> --session <id> --target <cli>` to create one.",
+            Style::default().fg(theme::MUTED),
+        )));
+    } else {
+        lines.push(Line::from(vec![
+            Span::styled("Name", Style::default().fg(theme::BLUE)),
+            Span::styled(
+                "                     Target   Source session              Updated",
+                Style::default().fg(theme::MUTED),
+            ),
+        ]));
+        for capsule in &app.saved_capsules {
+            let source_color = source_tool_color(capsule.source_cli);
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{:<24}", review_snippet(&capsule.name, 24)),
+                    Style::default()
+                        .fg(theme::TEXT)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{:<8}", capsule.target_cli.id()),
+                    Style::default().fg(theme::ROLE_TARGET),
+                ),
+                Span::styled(
+                    format!("{:<28}", review_snippet(&capsule.source_session, 28)),
+                    Style::default().fg(source_color),
+                ),
+                Span::styled(&capsule.updated_at, Style::default().fg(theme::MUTED)),
+            ]));
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled("rewind ", Style::default().fg(theme::MUTED)),
+                Span::styled(
+                    review_snippet(&capsule.rewind_point, 52),
+                    Style::default().fg(theme::ROLE_REWIND),
+                ),
+                Span::styled("  checksum ", Style::default().fg(theme::MUTED)),
+                Span::styled(&capsule.checksum, Style::default().fg(theme::CYAN)),
+            ]));
+            lines.push(Line::raw(""));
+        }
+    }
+    lines.push(Line::from(Span::styled(
+        "r refresh   Esc/q close",
+        Style::default().fg(theme::MUTED),
+    )));
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(panel_block(" Capsule Inventory ", true))
             .scroll((app.modal_scroll, 0))
             .wrap(Wrap { trim: true }),
         area,
@@ -3371,40 +3383,42 @@ mod tests {
 
         assert_eq!(
             session_list_secondary_at(&session, now),
-            "        16s ago  ·  dev"
+            "    0 events  ·  16s ago  ·  dev"
         );
     }
 
     #[test]
-    fn indexed_portrait_omits_unknown_tokens() {
+    fn session_inventory_metric_omits_unknown_tokens() {
         let mut session = test_session("2026-06-07T13:33:44+08:00", Some("dev"));
         session.event_count = 24;
 
-        assert_eq!(indexed_portrait_text(&session), "idx E▂ 24e");
+        assert_eq!(session_inventory_metric(&session), "24 events");
 
         session.token_count = Some(42_000);
-        assert_eq!(indexed_portrait_text(&session), "idx E▂ 24e 42K");
+        assert_eq!(session_inventory_metric(&session), "24 events · 42K");
     }
 
     #[test]
-    fn selected_session_portrait_uses_cached_timeline_shape() {
+    fn selected_session_portrait_uses_readable_cached_timeline_roles() {
         let app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
         let session = app.current_session().expect("session");
 
         assert_eq!(
             session_portrait_detail(&app, session),
-            "shape U▂ A▂ T▇ R▂ · U1 A1 T4 R1 · cached timeline"
+            "user 1 / assistant 1 / tool 4 / rewind 1 · cached timeline"
         );
     }
 
     #[test]
-    fn session_list_renders_selected_portrait_badge() {
+    fn session_list_renders_readable_activity_metric() {
         let app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
         let screen = render_text(&app, 140, 40);
 
-        assert_screen_contains(&screen, "shape U▂ A▂ T▇ R▂");
+        assert_screen_contains(&screen, "148 events");
         assert_screen_contains(&screen, "Portrait");
-        assert_screen_contains(&screen, "shape U▂A▂T▇R▂");
+        assert_screen_contains(&screen, "user 1 / assistant 1 / tool");
+        assert_screen_contains(&screen, "4 / rewind 1");
+        assert!(!screen.contains("shape U"), "{screen}");
     }
 
     #[test]
@@ -3604,6 +3618,35 @@ mod tests {
     }
 
     #[test]
+    fn capsule_inventory_overlay_renders_saved_capsules() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.show_capsules = true;
+        app.saved_capsules = vec![crate::core::capsule_store::CapsuleSummary {
+            version: 1,
+            name: "demo".into(),
+            created_at: "unix:1780732800".into(),
+            updated_at: "unix:1780736400".into(),
+            checksum: "fnv64:0123456789abcdef".into(),
+            size_bytes: 4096,
+            source_cli: CliTool::Codex,
+            target_cli: CliTool::Hermes,
+            source_session: "codex-cxcp-design".into(),
+            rewind_point: "evt-091 / Continue".into(),
+            compiler: "engineering-handoff".into(),
+            handoff_label: "moonbox/hermes-rewind-evt-091".into(),
+        }];
+        let screen = render_text(&app, 140, 40);
+
+        assert_screen_contains(&screen, "Capsule Inventory");
+        assert_screen_contains(&screen, "Saved Capsules");
+        assert_screen_contains(&screen, "Local continuation objects");
+        assert_screen_contains(&screen, "demo");
+        assert_screen_contains(&screen, "codex-cxcp-design");
+        assert_screen_contains(&screen, "fnv64:0123456789abcdef");
+        assert_screen_contains(&screen, "r refresh");
+    }
+
+    #[test]
     fn zoomed_timeline_uses_full_body_without_side_panels() {
         let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
         app.focus = Focus::Timeline;
@@ -3697,7 +3740,7 @@ mod tests {
         assert_screen_contains(&screen, "fallback · embedded_fixture");
         assert_screen_contains(&screen, "Handoff Snapshot");
         assert_screen_contains(&screen, "draft_from_builtin_compiler");
-        assert_screen_contains(&screen, "Press c to refresh and review");
+        assert_screen_contains(&screen, "Risk: Built-in draft compiler");
         assert!(
             !screen.contains("Production handoff should use"),
             "{screen}"
@@ -3732,6 +3775,7 @@ mod tests {
         let screen = render_text(&app, 140, 40);
 
         assert_screen_contains(&screen, "Command Palette");
+        assert_eq!(screen.matches("Command Palette").count(), 1, "{screen}");
         assert_screen_contains(&screen, ": cap");
         assert_screen_contains(&screen, "capsule");
         assert_screen_contains(&screen, "Refresh the Capsule");
@@ -3801,7 +3845,7 @@ mod tests {
         assert_screen_contains(&screen, "source Codex codex-cxcp-des...");
         assert_screen_contains(&screen, "-> rewind evt-091 -> target Hermes");
         assert_screen_contains(&screen, "Portrait:");
-        assert_screen_contains(&screen, "shape U▂ A▂ T▇ R▂");
+        assert_screen_contains(&screen, "user 1 / assistant 1 / tool 4 / rewind 1");
         assert_screen_contains(&screen, "Target receives");
         assert_screen_contains(&screen, "Prompt");
         assert_screen_contains(&screen, "Draft Work Capsule");

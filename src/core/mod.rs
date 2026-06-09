@@ -1,5 +1,6 @@
 pub mod adapter;
 pub mod capability;
+pub mod capsule_store;
 pub mod claude;
 pub mod codex;
 pub mod codex_app_server;

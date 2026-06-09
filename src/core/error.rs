@@ -8,6 +8,7 @@ pub enum CoreError {
     Compiler(CompilerError),
     CapsuleRead { path: String, reason: String },
     CapsuleParse { path: String, reason: String },
+    CapsuleStore { reason: String },
     ExecuteRequiresSession { action: &'static str },
     LaunchBlocked { reason: String },
     LaunchStart { command: String, reason: String },
@@ -28,6 +29,7 @@ impl fmt::Display for CoreError {
             Self::CapsuleParse { path, reason } => {
                 write!(f, "cannot parse Work Capsule {path}: {reason}")
             }
+            Self::CapsuleStore { reason } => write!(f, "capsule store error: {reason}"),
             Self::ExecuteRequiresSession { action } => write!(
                 f,
                 "{action} execution requires an explicit --session; run a dry-run first or pass --session to avoid opening the newest active session by accident"

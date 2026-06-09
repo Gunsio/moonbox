@@ -318,6 +318,10 @@ The first implementation focuses on the product shell:
 - `capsule`, `compile-request`, and `compile-output` support explicit
   `--session`, `--target`, `--rewind`, and `--compiler`, so CLI automation can
   inspect the same selected session and rewind as the TUI and launch flow
+- First-class local Capsule objects backed by SQLite: `capsule save`, `list`,
+  `show`, `launch`, `export`, `import`, and `delete` use
+  `MOONBOX_CAPSULE_STORE` for isolated local stores and never mutate source
+  session stores
 - Canonical Timeline and compiler request/output JSON contract fixtures
 - Target launch dry-run plans with Work Capsule verification reports
 - `open --json`, `open-app --json`, and `launch --json` include an `action`
@@ -402,6 +406,13 @@ cargo run -- launch --target hermes --session <session-id> --workspace-restore w
 cargo run -- launch --execute --target hermes --session <session-id>
 cargo run -- verify --target hermes --session <session-id> --capsule ./capsule.json --json
 cargo run -- verify --target hermes --session hermes-cxcp-502 --json
+MOONBOX_CAPSULE_STORE=target/moonbox-capsules.sqlite cargo run -- capsule save demo --session <session-id> --target hermes
+MOONBOX_CAPSULE_STORE=target/moonbox-capsules.sqlite cargo run -- capsule list
+MOONBOX_CAPSULE_STORE=target/moonbox-capsules.sqlite cargo run -- capsule show demo --json
+MOONBOX_CAPSULE_STORE=target/moonbox-capsules.sqlite cargo run -- capsule launch demo --target hermes --json
+MOONBOX_CAPSULE_STORE=target/moonbox-capsules.sqlite cargo run -- capsule export demo --output demo.moonbox-capsule.json
+MOONBOX_CAPSULE_STORE=target/moonbox-capsules.sqlite cargo run -- capsule import demo.moonbox-capsule.json --name demo-copy
+MOONBOX_CAPSULE_STORE=target/moonbox-capsules.sqlite cargo run -- capsule delete demo-copy
 ```
 
 `sessions` text output prints the active source filter plus each row's
@@ -420,6 +431,13 @@ resume or launch a real process.
 `capsule`, `compile-request`, and `compile-output` accept `--session`,
 `--target`, `--rewind`, and `--compiler`, so scripts can inspect an exact
 selected rewind without relying on the old Codex-to-Hermes fixture defaults.
+`capsule save/list/show/launch/export/import/delete` makes Capsule a local
+Moonbox object. The store is SQLite, defaults to
+`~/.local/share/moonbox/capsules.sqlite`, and can be isolated with
+`MOONBOX_CAPSULE_STORE`. Export writes a Moonbox envelope with schema version,
+trusted source marker, checksum, size, and compiler-reference validation on
+import. `capsule launch <name>` remains dry-run by default; `--execute` is
+explicit and still runs through the same verifier and target launch guards.
 `launch` and `verify` also accept `--continuation prompt-only|package-import|workspace-restore`
 and `--workspace-restore branch|worktree`. The default is prompt-only target
 input. Native package import is not claimed for Codex, Claude, or Hermes yet;
@@ -955,11 +973,11 @@ Stable interfaces matter more than any single framework:
   `source -> rewind -> target` route, target Handoff Review starts a
   non-blocking 720 ms handoff trail through the same path, and closing the
   Review cancels the trail without launching anything.
-- M69: session portrait; the session rail now shows compact indexed activity
-  badges for every visible session, selected sessions use the already hydrated
-  timeline cache for real `U/A/T/R` shape density, and Handoff Review / Session
-  Details surface the same portrait without loading extra source history or
-  inventing unknown token/status data.
+- M69: session portrait; the session rail now shows readable event/token
+  activity for every visible session, and Handoff Review / Session Details use
+  the already hydrated timeline cache for explicit user / assistant / tool /
+  rewind role counts without loading extra source history or inventing unknown
+  token/status data.
 - M70: pre-flight pill; the TUI top bar now collapses Compiler, Doctor, and
   Verify into a single `Pre-flight: PASS/WARN/BLOCKED` signal with
   Strong/Medium/Weak confidence language, and `D` opens expandable evidence
@@ -974,12 +992,15 @@ Stable interfaces matter more than any single framework:
   confidence, source badges, rewind/target path nodes, and Action Path
   inventory counts, while narrow headers degrade the brand from
   `MOONBOX 月光宝盒` to `MOONBOX` instead of crowding compact terminals.
+- M73: Capsule first-class local object; Capsules can now be saved, listed,
+  shown, launched as dry-run plans, exported, imported, and deleted from a
+  local SQLite store isolated by `MOONBOX_CAPSULE_STORE`, with import validation
+  for schema version, trusted Moonbox envelope source, checksum, size, and
+  compiler references. The TUI Command Palette also has a saved Capsule
+  inventory overlay.
 
 ### Remaining Milestones
 
-- M73: Capsule first-class local object. Add capsule save/list/show/launch,
-  export/import, and delete commands backed by a local SQLite capsule store,
-  isolated with `MOONBOX_CAPSULE_STORE`.
 - M74: Launch Ledger. Record local `open --execute` and `launch --execute`
   attempts in a ledger table, expose `launches list/show/link` and capsule
   launch history, and keep ledger write failures as warnings rather than launch

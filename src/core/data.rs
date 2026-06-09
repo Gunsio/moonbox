@@ -354,6 +354,16 @@ pub fn launch_artifacts_for_session_id(
     Ok(Some((source_session, timeline, capsule)))
 }
 
+pub fn launch_context_for_session_id(
+    session_id: &str,
+) -> Result<Option<(SessionSummary, CanonicalTimeline)>, CoreError> {
+    let Some(source_session) = find_session(session_id)? else {
+        return Ok(None);
+    };
+    let timeline = canonical_timeline_for_session(&source_session)?;
+    Ok(Some((source_session, timeline)))
+}
+
 fn compile_request_from_parts(
     source_session: SessionSummary,
     target: CliTool,

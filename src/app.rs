@@ -8,6 +8,7 @@ use std::{
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::core::{
+    capsule_store::CapsuleSummary,
     compiler, config, continuation, dataspace, doctor,
     error::CoreError,
     launcher,
@@ -195,6 +196,14 @@ const COMMAND_PALETTE_ENTRIES: &[CommandPaletteEntry] = &[
         description: "Refresh the Capsule and open Handoff Review",
         params: "selected rewind",
         badge: "REVIEW",
+        dangerous: false,
+    },
+    CommandPaletteEntry {
+        command: "capsules",
+        aliases: &["saved capsules", "capsule list", "store"],
+        description: "Open saved local Capsule inventory",
+        params: "local Capsule store",
+        badge: "PICKER",
         dangerous: false,
     },
     CommandPaletteEntry {
@@ -445,6 +454,9 @@ pub struct App {
     pub show_open_original: bool,
     pub show_doctor: bool,
     pub show_skill_picker: bool,
+    pub show_capsules: bool,
+    pub saved_capsules: Vec<CapsuleSummary>,
+    pub saved_capsule_error: Option<String>,
     pub session_filter: SessionFilter,
     pub starred_sessions: Vec<String>,
     pub search_query: String,
@@ -508,6 +520,9 @@ impl App {
             show_open_original: false,
             show_doctor: false,
             show_skill_picker: false,
+            show_capsules: false,
+            saved_capsules: Vec::new(),
+            saved_capsule_error: None,
             session_filter: SessionFilter::All,
             starred_sessions: config::load_starred_sessions(),
             search_query: String::new(),
@@ -874,6 +889,7 @@ impl App {
             "quit" => self.should_quit = true,
             "open" => self.open_original(),
             "capsule" => self.review_capsule(),
+            "capsules" => self.open_capsules(),
             "verify" => self.mark_verify_passed(),
             "help" => self.open_help(),
             "doctor" => self.open_doctor(),
@@ -959,6 +975,7 @@ impl App {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => self.back_or_quit(),
             KeyCode::Char('r') if self.show_doctor => self.refresh_doctor(),
+            KeyCode::Char('r') if self.show_capsules => self.refresh_capsules(),
             KeyCode::Char('v') if self.show_doctor => self.toggle_verify(),
             KeyCode::Char('y') if self.show_doctor => self.copy_doctor_report(),
             KeyCode::Char('y') => self.copy_focused_command(),
@@ -987,6 +1004,10 @@ impl App {
             self.show_doctor = false;
             self.modal_scroll = 0;
             self.set_status("Pre-flight closed");
+        } else if self.show_capsules {
+            self.show_capsules = false;
+            self.modal_scroll = 0;
+            self.set_status("Capsule inventory closed");
         } else if self.show_open_original {
             self.show_open_original = false;
             self.modal_scroll = 0;
@@ -1269,6 +1290,12 @@ impl App {
         self.pending_g = false;
     }
 
+    fn open_capsules(&mut self) {
+        self.show_capsules = true;
+        self.modal_scroll = 0;
+        self.refresh_capsules();
+    }
+
     fn open_doctor(&mut self) {
         self.refresh_doctor();
         self.show_doctor = true;
@@ -1283,6 +1310,23 @@ impl App {
             self.doctor_report.status,
             self.doctor_report.checks.len()
         ));
+    }
+
+    fn refresh_capsules(&mut self) {
+        match workbench::list_saved_capsules() {
+            Ok(capsules) => {
+                let count = capsules.len();
+                self.saved_capsules = capsules;
+                self.saved_capsule_error = None;
+                self.set_status(format!("Capsules: {count} saved"));
+            }
+            Err(error) => {
+                self.saved_capsules.clear();
+                self.saved_capsule_error = Some(error.to_string());
+                self.set_status(format!("Capsules failed: {error}"));
+            }
+        }
+        self.pending_g = false;
     }
 
     fn open_original(&mut self) {
@@ -1495,7 +1539,11 @@ impl App {
     }
 
     fn has_overlay(&self) -> bool {
-        self.show_help || self.show_open_original || self.show_doctor || self.show_skill_picker
+        self.show_help
+            || self.show_open_original
+            || self.show_doctor
+            || self.show_skill_picker
+            || self.show_capsules
     }
 
     fn cycle_target(&mut self, forward: bool) {
@@ -2987,6 +3035,15 @@ mod tests {
         assert!(app.show_launch);
         assert!(app.launch_review);
         assert_eq!(app.status_message, "Capsule refreshed");
+    }
+
+    #[test]
+    fn command_palette_resolves_saved_capsule_inventory() {
+        let entry = resolve_command_palette_entry("capsule list").expect("capsules command");
+
+        assert_eq!(entry.command, "capsules");
+        assert_eq!(entry.badge, "PICKER");
+        assert!(entry.description.contains("saved local Capsule"));
     }
 
     #[test]
