@@ -455,6 +455,7 @@ pub struct App {
     pub show_doctor: bool,
     pub show_skill_picker: bool,
     pub show_capsules: bool,
+    pub show_timeline_detail: bool,
     pub saved_capsules: Vec<CapsuleSummary>,
     pub saved_capsule_error: Option<String>,
     pub session_filter: SessionFilter,
@@ -521,6 +522,7 @@ impl App {
             show_doctor: false,
             show_skill_picker: false,
             show_capsules: false,
+            show_timeline_detail: false,
             saved_capsules: Vec::new(),
             saved_capsule_error: None,
             session_filter: SessionFilter::All,
@@ -721,6 +723,7 @@ impl App {
             }
             KeyCode::Char(' ') => self.set_rewind_point(),
             KeyCode::Char('c') => self.review_capsule(),
+            KeyCode::Char('e') if self.focus == Focus::Timeline => self.open_timeline_detail(),
             KeyCode::Char('v') => self.toggle_verify(),
             KeyCode::Char('S') => self.open_skill_picker(),
             KeyCode::Char('+') | KeyCode::Char('=') => self.zoom_current_panel(),
@@ -1008,6 +1011,10 @@ impl App {
             self.show_capsules = false;
             self.modal_scroll = 0;
             self.set_status("Capsule inventory closed");
+        } else if self.show_timeline_detail {
+            self.show_timeline_detail = false;
+            self.modal_scroll = 0;
+            self.set_status("Timeline detail closed");
         } else if self.show_open_original {
             self.show_open_original = false;
             self.modal_scroll = 0;
@@ -1544,6 +1551,7 @@ impl App {
             || self.show_doctor
             || self.show_skill_picker
             || self.show_capsules
+            || self.show_timeline_detail
     }
 
     fn cycle_target(&mut self, forward: bool) {
@@ -1571,6 +1579,27 @@ impl App {
         self.clear_handoff_trail();
         self.modal_scroll = 0;
         self.set_status("Choose target CLI");
+        self.pending_g = false;
+    }
+
+    fn open_timeline_detail(&mut self) {
+        if !self.ensure_session_details_ready("Timeline detail") {
+            return;
+        }
+        if self.data.timeline.is_empty() {
+            self.set_status("No timeline event selected");
+            self.pending_g = false;
+            return;
+        }
+        self.selected_event =
+            nearest_visible_timeline_event(&self.data, &self.rewind_event_id, self.selected_event);
+        self.show_timeline_detail = true;
+        self.modal_scroll = 0;
+        if let Some(event) = self.data.timeline.get(self.selected_event) {
+            self.set_status(format!("Timeline detail: {}", event.id));
+        } else {
+            self.set_status("No timeline event selected");
+        }
         self.pending_g = false;
     }
 
@@ -2942,6 +2971,56 @@ mod tests {
         };
         assert_eq!(plan.source_session.id, "codex-cxcp-design");
         assert_eq!(plan.command.display, "codex resume codex-cxcp-design");
+    }
+
+    #[test]
+    fn timeline_e_opens_detail_overlay_without_original_resume() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.focus = Focus::Timeline;
+        app.selected_event = 2;
+        let event_id = app.data.timeline[2].id.clone();
+
+        app.handle_key(key('e'));
+
+        assert!(app.show_timeline_detail);
+        assert!(!app.should_quit());
+        assert!(app.take_exit_action().is_none());
+        assert_eq!(app.selected_event, 2);
+        assert_eq!(app.modal_scroll, 0);
+        assert_eq!(app.status_message, format!("Timeline detail: {event_id}"));
+    }
+
+    #[test]
+    fn timeline_enter_still_queues_original_resume() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.focus = Focus::Timeline;
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(!app.show_timeline_detail);
+        assert!(app.should_quit());
+        let Some(TuiExitAction::OriginalResume(plan)) = app.take_exit_action() else {
+            panic!("expected original resume action");
+        };
+        assert_eq!(plan.source_session.id, "codex-cxcp-design");
+        assert_eq!(plan.command.display, "codex resume codex-cxcp-design");
+    }
+
+    #[test]
+    fn timeline_detail_overlay_scrolls_and_closes_without_moving_selection() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.focus = Focus::Timeline;
+        app.selected_event = 2;
+        app.handle_key(key('e'));
+
+        app.handle_key(key('j'));
+        assert_eq!(app.selected_event, 2);
+        assert_eq!(app.modal_scroll, 1);
+
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+        assert!(!app.show_timeline_detail);
+        assert_eq!(app.modal_scroll, 0);
+        assert_eq!(app.status_message, "Timeline detail closed");
     }
 
     #[test]

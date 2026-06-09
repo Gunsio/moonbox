@@ -80,6 +80,9 @@ pub fn render(frame: &mut Frame, app: &App) {
     if app.show_capsules {
         render_capsules(frame, root, app);
     }
+    if app.show_timeline_detail {
+        render_timeline_detail(frame, root, app);
+    }
     if app.show_skill_picker {
         render_skill_picker(frame, root, app);
     }
@@ -1054,7 +1057,7 @@ fn timeline_detail_prefix(
     if ai_group && event_offset > 0 && line_index == 0 {
         return "  · ";
     }
-    "   "
+    "     "
 }
 
 fn timeline_event_detail_lines(event: &TimelineEvent, area_width: u16) -> Vec<String> {
@@ -1834,6 +1837,14 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("Esc", "Close"),
         ];
     }
+    if app.show_timeline_detail {
+        return vec![
+            ("j/k", "Scroll"),
+            ("PgUp/Dn", "Scroll"),
+            ("Esc", "Close"),
+            ("q", "Close"),
+        ];
+    }
     if app.show_help {
         return vec![
             ("j/k", "Scroll"),
@@ -1863,6 +1874,7 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
         Focus::Timeline => vec![
             ("j/k", "Events"),
             ("gg/G", "Jump"),
+            ("e", "Detail"),
             ("space", "Rewind"),
             ("c", "Review"),
             ("+", "Zoom"),
@@ -1910,29 +1922,31 @@ fn hint_line(hints: &[KeyHint]) -> Line<'static> {
 }
 
 fn status_line(app: &App) -> Line<'_> {
-    let color = if app.status_message.contains("cancelled")
+    let (color, bold) = if app.status_message.contains("cancelled")
         || app.status_message.contains("No session")
         || app.status_message.contains("Unknown")
         || app.status_message.contains("NEEDS REVIEW")
     {
-        theme::ORANGE
+        (theme::ORANGE, true)
     } else if app.status_message.contains("PASS")
         || app.status_message.contains("saved")
         || app.status_message.contains("compiled")
         || app.status_message.contains("refreshed")
         || app.status_message.contains("cleared")
     {
-        theme::GREEN
+        (theme::GREEN, true)
     } else {
-        theme::CYAN
+        (theme::MUTED, false)
+    };
+    let message_style = if bold {
+        Style::default().fg(color).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(color)
     };
 
     Line::from(vec![
         Span::styled("Status ", Style::default().fg(theme::MUTED)),
-        Span::styled(
-            &app.status_message,
-            Style::default().fg(color).add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(&app.status_message, message_style),
     ])
 }
 
@@ -1956,6 +1970,7 @@ fn render_help(frame: &mut Frame, root: Rect, app: &App) {
         Line::raw("/text           filter sessions by text"),
         Line::raw("o               open original session with original CLI"),
         Line::raw("enter           open selected session with original CLI"),
+        Line::raw("e               open selected Timeline event detail"),
         Line::raw("x / H           choose target for handoff"),
         Line::raw("D               open pre-flight details"),
         Line::raw("[ / ]           previous / next session source filter"),
@@ -2457,6 +2472,130 @@ fn render_capsules(frame: &mut Frame, root: Rect, app: &App) {
             .wrap(Wrap { trim: true }),
         area,
     );
+}
+
+fn render_timeline_detail(frame: &mut Frame, root: Rect, app: &App) {
+    let area = modal_area(root, 88, 82);
+    frame.render_widget(Clear, area);
+    let Some(event) = app.data.timeline.get(app.selected_event) else {
+        frame.render_widget(
+            Paragraph::new(vec![Line::from(Span::styled(
+                "No timeline event selected",
+                Style::default()
+                    .fg(theme::GOLD)
+                    .add_modifier(Modifier::BOLD),
+            ))])
+            .block(panel_block(" Timeline Detail ", true)),
+            area,
+        );
+        return;
+    };
+
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled(
+                format!("{} ", event.id),
+                Style::default()
+                    .fg(theme::CYAN)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                timeline_kind_label(event.kind),
+                Style::default()
+                    .fg(timeline_kind_color(event.kind))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(&event.time, Style::default().fg(theme::MUTED)),
+        ]),
+        Line::from(vec![
+            Span::styled("Title: ", Style::default().fg(theme::MUTED)),
+            Span::styled(&event.title, Style::default().fg(theme::TEXT)),
+        ]),
+    ];
+
+    if !event.metadata.attachments.is_empty() {
+        lines.push(Line::raw(""));
+        lines.push(Line::from(Span::styled(
+            "Attachments",
+            Style::default()
+                .fg(theme::BLUE)
+                .add_modifier(Modifier::BOLD),
+        )));
+        for attachment in &event.metadata.attachments {
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(
+                    timeline_attachment_label(attachment),
+                    Style::default().fg(theme::CYAN),
+                ),
+            ]));
+        }
+    }
+
+    lines.push(Line::raw(""));
+    lines.push(Line::from(Span::styled(
+        "Body",
+        Style::default()
+            .fg(theme::BLUE)
+            .add_modifier(Modifier::BOLD),
+    )));
+    lines.extend(timeline_detail_body_lines(&event.detail));
+    lines.push(Line::raw(""));
+    lines.push(Line::from(Span::styled(
+        "j/k scroll   PgUp/PgDn page   Esc/q close",
+        Style::default().fg(theme::MUTED),
+    )));
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(panel_block(" Timeline Detail ", true))
+            .scroll((app.modal_scroll, 0))
+            .wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
+fn timeline_detail_body_lines(detail: &str) -> Vec<Line<'static>> {
+    if detail.trim().is_empty() {
+        return vec![Line::from(Span::styled(
+            "(empty)",
+            Style::default().fg(theme::MUTED),
+        ))];
+    }
+    detail
+        .lines()
+        .map(|line| {
+            Line::from(Span::styled(
+                line.to_owned(),
+                Style::default().fg(theme::TEXT),
+            ))
+        })
+        .collect()
+}
+
+fn timeline_kind_label(kind: TimelineKind) -> &'static str {
+    match kind {
+        TimelineKind::User => "USER",
+        TimelineKind::Assistant => "ASSISTANT",
+        TimelineKind::Tool => "TOOL",
+        TimelineKind::Compact => "COMPACT",
+        TimelineKind::Error => "ERROR",
+        TimelineKind::GitDiff => "GIT DIFF",
+        TimelineKind::RewindPoint => "REWIND",
+    }
+}
+
+fn timeline_kind_color(kind: TimelineKind) -> Color {
+    match kind {
+        TimelineKind::User => theme::BLUE,
+        TimelineKind::Assistant => theme::GOLD,
+        TimelineKind::Tool => theme::MUTED,
+        TimelineKind::Compact => theme::CYAN,
+        TimelineKind::Error => theme::RED,
+        TimelineKind::GitDiff => theme::GREEN,
+        TimelineKind::RewindPoint => theme::ROLE_REWIND,
+    }
 }
 
 fn fallback_compiler_info(id: &str) -> CompilerPresetInfo {
@@ -3347,6 +3486,29 @@ mod tests {
     }
 
     #[test]
+    fn timeline_detail_prefixes_keep_stable_width_across_focus() {
+        let active = timeline_detail_prefix(true, false, 0, 0);
+        let inactive = timeline_detail_prefix(false, false, 0, 0);
+        let active_ai_group = timeline_detail_prefix(true, true, 1, 0);
+        let inactive_ai_group = timeline_detail_prefix(false, true, 1, 0);
+
+        assert_eq!(display_width(active), 5);
+        assert_eq!(display_width(inactive), 5);
+        assert_eq!(display_width(active_ai_group), 5);
+        assert_eq!(display_width(inactive_ai_group), 5);
+    }
+
+    #[test]
+    fn neutral_status_line_is_auxiliary_not_selected() {
+        let app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        let line = status_line(&app);
+        let message = &line.spans[1];
+
+        assert_eq!(message.style.fg, Some(theme::MUTED));
+        assert!(!message.style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
     fn unselected_session_titles_are_muted() {
         assert_eq!(session_title_style(false).fg, Some(theme::MUTED));
         assert_eq!(session_title_style(true).fg, Some(theme::TEXT));
@@ -3581,6 +3743,53 @@ mod tests {
         let detail_pos = screen.find("看下这个问题").expect("detail row");
         assert!(image_pos < detail_pos, "{screen}");
         assert!(!screen.contains("<image"), "{screen}");
+    }
+
+    #[test]
+    fn timeline_focus_keybar_exposes_event_detail_key() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+
+        let hints = active_key_hints(&app);
+
+        assert!(hints.contains(&("e", "Detail")));
+        assert!(!hints.contains(&("enter", "Detail")));
+    }
+
+    #[test]
+    fn timeline_detail_overlay_renders_selected_event_body_and_attachments() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.show_timeline_detail = true;
+        app.data.timeline = vec![TimelineEvent {
+            id: "evt-777".into(),
+            time: "12:18".into(),
+            kind: TimelineKind::User,
+            title: "User".into(),
+            detail: "第一行\n第二行完整内容".into(),
+            metadata: crate::core::model::TimelineEventMetadata {
+                attachments: vec![TimelineAttachment {
+                    name: Some("Image #1".into()),
+                    mime_type: Some("image/unknown".into()),
+                    ..TimelineAttachment::default()
+                }],
+                ..Default::default()
+            },
+        }];
+        app.selected_event = 0;
+        app.rewind_event_id = "evt-777".into();
+
+        let screen = render_text(&app, 120, 32);
+
+        assert_screen_contains(&screen, "Timeline Detail");
+        assert_screen_contains(&screen, "evt-777");
+        assert_screen_contains(&screen, "USER");
+        assert_screen_contains(&screen, "Attachments");
+        assert_screen_contains(&screen, "[image] Image #1");
+        assert_screen_contains(&screen, "第一行");
+        assert_screen_contains(&screen, "第二行完整内容");
+        assert_screen_contains(&screen, "Esc");
+        assert_screen_contains(&screen, "close");
     }
 
     #[test]

@@ -389,6 +389,8 @@ and this project uses semantic versioning once tagged releases start.
 - Codex and Claude inline `<image ...>` timeline markers are promoted into
   `TimelineAttachment` metadata, and the TUI renders image attachment rows
   instead of leaking raw image markup into user turns.
+- Timeline-focused `e` opens a scrollable selected-event detail overlay without
+  changing `enter` original resume/open semantics or `space` rewind selection.
 - Replay-eval fixture invariants now return structured `CoreError` failures
   instead of panicking, and generated SVG docs snapshot code no longer relies on
   infallible string-write `expect` calls.
