@@ -22,9 +22,9 @@ use super::{
     model::{
         CanonicalTimeline, CliTool, ProviderContinuationPoint, ProviderHandoffMetadata,
         ProviderScrollContext, ProviderSearchMetadata, ProviderSessionMetadata,
-        SessionRuntimeStatus, SessionStatus, SessionSummary, SourceProvenance, TimelineEvent,
-        TimelineEventMetadata, TimelineEventRawRef, TimelineKind, TimelineToolCall, TokenBreakdown,
-        unknown_runtime_reason,
+        SessionRuntimeStatus, SessionStatus, SessionSummary, SourceFidelity, SourceFidelityStatus,
+        SourceProvenance, TimelineEvent, TimelineEventMetadata, TimelineEventRawRef, TimelineKind,
+        TimelineToolCall, TokenBreakdown, unknown_runtime_reason,
     },
 };
 
@@ -505,6 +505,7 @@ impl SourceAdapter for HermesSourceAdapter {
                 store_path: self.store_path(),
                 filter_status: filter_status.into(),
                 reason: reason.into(),
+                fidelity: Some(hermes_local_fidelity()),
                 capabilities: None,
             },
             &sessions,
@@ -1363,6 +1364,15 @@ fn short_id(id: &str) -> String {
     id.chars().take(8).collect()
 }
 
+fn hermes_local_fidelity() -> SourceFidelity {
+    SourceFidelity {
+        status: SourceFidelityStatus::Fallback,
+        primary_surface: "hermes_local_sqlite".into(),
+        fallback_surface: Some("hermes_gateway_export_search".into()),
+        detail: "read-only local SQLite/registry fallback; Hermes gateway/export/search commands are not invoked".into(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1526,7 +1536,9 @@ mod tests {
         write_state_db(&root);
         let adapter = HermesSourceAdapter::with_session_limit(&root, Some(1));
 
-        let listed = adapter.list_sessions().expect("sessions");
+        let (listed, report) = adapter
+            .list_sessions_with_report("included_real_store", "test")
+            .expect("sessions");
         let found = adapter
             .find_session("hermes-cli")
             .expect("find session")
@@ -1538,6 +1550,12 @@ mod tests {
         assert_eq!(found.id, "hermes-cli");
         assert_eq!(timeline.source_session, "hermes-cli");
         assert_eq!(timeline.events[0].detail, "Fix CLI state");
+        assert_eq!(report.fidelity.status, SourceFidelityStatus::Fallback);
+        assert_eq!(report.fidelity.primary_surface, "hermes_local_sqlite");
+        assert_eq!(
+            report.fidelity.fallback_surface.as_deref(),
+            Some("hermes_gateway_export_search")
+        );
     }
 
     #[test]

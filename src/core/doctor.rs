@@ -164,15 +164,18 @@ fn source_adapter_check(report: &SourceAdapterReport) -> VerificationCheck {
         .map(|limit| limit.to_string())
         .unwrap_or_else(|| "unlimited".into());
     let capabilities = capability_summary(report);
+    let fallback = report.fidelity.fallback_surface.as_deref().unwrap_or("-");
     check(
         format!("source_{}_adapter", report.cli.id()),
         status,
         format!(
-            "{} {}; active={}; filter={}; path={path}; sessions={}; skipped={}; last={last}; list_limit={list_limit}; scan_entries={}; scan_limit={scan_limit}; summary_line_limit={summary_limit}; scan_truncated={}; capabilities={capabilities}; {}",
+            "{} {}; active={}; filter={}; fidelity={}; surface={}; fallback={fallback}; path={path}; sessions={}; skipped={}; last={last}; list_limit={list_limit}; scan_entries={}; scan_limit={scan_limit}; summary_line_limit={summary_limit}; scan_truncated={}; capabilities={capabilities}; {}",
             report.cli,
             report.provenance,
             report.active,
             report.filter_status,
+            report.fidelity.status,
+            report.fidelity.primary_surface,
             report.session_count,
             report.skipped_record_count,
             report.scan_entry_count,

@@ -98,6 +98,10 @@ and this project uses semantic versioning once tagged releases start.
   cloud metadata, deep links, export/search, remote control, fork/resume, and
   native handoff support, plus per-session `runtime_status` / `runtime_reason`
   fields that keep live runtime activity separate from `updated_at`.
+- Source adapter fidelity reports with serde-default `status`,
+  `primary_surface`, optional `fallback_surface`, and detail text, making
+  full-fidelity, partial, fallback, and missing source surfaces explicit in
+  `doctor --json`.
 - Bounded JSONL real-store discovery through `MOONBOX_SESSION_SCAN_LIMIT`,
   with Doctor scan-cost fields for list limit, scan entry limit, visited entry
   count, and truncation state.
@@ -348,6 +352,9 @@ and this project uses semantic versioning once tagged releases start.
   dry-runs can still omit `--session` to preview the newest discovered session.
 - Doctor diagnostics now use a single source inventory scan for session
   discovery and adapter health reporting, avoiding duplicate real-store scans.
+- Doctor check details and the TUI selected-session metadata now show the same
+  source fidelity status/surface, so degraded local fallback paths are visible
+  without interpreting capability matrices.
 - TUI session rows now include REAL/FIXTURE provenance badges, while the Doctor
   overlay exposes full adapter path and skip-count details.
 - Replay-eval fixture invariants now return structured `CoreError` failures
