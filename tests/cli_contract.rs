@@ -821,6 +821,83 @@ fn doctor_reports_real_and_missing_source_adapters_without_fixture_mixing() {
 }
 
 #[test]
+fn doctor_and_sessions_report_claude_m63_surface_boundaries() {
+    let test_name = "doctor-claude-m63-surfaces";
+    let home = fixture_home(test_name);
+    let claude_store = home.join("claude").join("projects").join("-repo");
+    fs::create_dir_all(&claude_store).expect("claude store");
+    fs::write(
+        claude_store.join("sdk-child.jsonl"),
+        r#"{"type":"system","subtype":"init","session_id":"sdk-child","cwd":"/repo","model":"claude-sonnet-4-20250514","tools":["Read"],"mcp_servers":{"fs":{}}}
+{"type":"user","session_id":"sdk-child","timestamp":"2026-06-08T09:00:00.000Z","cwd":"/repo","message":{"content":"Implement M63"}}
+{"type":"hook","subtype":"PreToolUse","session_id":"sdk-child","timestamp":"2026-06-08T09:00:01.000Z","hook_event_name":"PreToolUse","message":{"content":"allow Read"}}
+{"type":"result","subtype":"success","session_id":"sdk-child","parent_session_id":"parent-session","total_cost_usd":0.0042,"duration_ms":1200,"duration_api_ms":900,"num_turns":3,"result":"done"}"#,
+    )
+    .expect("claude jsonl");
+
+    let binary = env!("CARGO_BIN_EXE_moonbox");
+    let doctor = output_json(
+        moonbox_command(test_name)
+            .arg("doctor")
+            .arg("--json")
+            .env("MOONBOX_CODEX_BIN", binary)
+            .env("MOONBOX_CLAUDE_BIN", binary)
+            .env("MOONBOX_HERMES_BIN", binary)
+            .output()
+            .expect("doctor"),
+    );
+    let adapters = doctor["source_adapters"]
+        .as_array()
+        .expect("source adapters");
+    let claude = adapters
+        .iter()
+        .find(|adapter| adapter["cli"] == "claude")
+        .expect("claude adapter");
+
+    assert_eq!(claude["provenance"], "real");
+    assert_eq!(claude["active"], true);
+    assert_eq!(claude["session_count"], 1);
+    assert_eq!(
+        claude["capabilities"]["rich_local_rpc"]["status"],
+        "available"
+    );
+    assert!(
+        claude["capabilities"]["rich_local_rpc"]["detail"]
+            .as_str()
+            .expect("rich local detail")
+            .contains("does not invoke Claude")
+    );
+    assert_eq!(
+        claude["capabilities"]["remote_control"]["status"],
+        "unavailable"
+    );
+    assert!(
+        claude["capabilities"]["remote_control"]["detail"]
+            .as_str()
+            .expect("remote detail")
+            .contains("not launched")
+    );
+
+    let sessions = output_json(
+        moonbox_command(test_name)
+            .args(["sessions", "--json", "--filter", "claude"])
+            .output()
+            .expect("sessions"),
+    );
+    let sessions = sessions.as_array().expect("session array");
+
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0]["id"], "sdk-child");
+    assert_eq!(sessions[0]["title"], "Implement M63");
+    let health = sessions[0]["health_reason"].as_str().expect("health");
+    assert!(health.contains("stream-json/SDK metadata parsed"));
+    assert!(health.contains("cost_usd=0.004200"));
+    assert!(health.contains("turns=3"));
+    assert!(health.contains("hook_events=1"));
+    assert!(health.contains("forked_from=parent-session"));
+}
+
+#[test]
 fn doctor_reports_bounded_real_store_scan_cost() {
     let test_name = "doctor-real-store-scan-budget";
     let home = fixture_home(test_name);

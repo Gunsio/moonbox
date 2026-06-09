@@ -126,15 +126,15 @@ fn real_capabilities(tool: CliTool) -> SourceCapabilities {
         CliTool::Claude => SourceCapabilities {
             local_store: cap(
                 SourceCapabilityStatus::Available,
-                "read-only history.jsonl and project transcript JSONL stores",
+                "read-only history.jsonl and project transcript JSONL stores remain the local resume baseline",
             ),
             rich_local_rpc: cap(
-                SourceCapabilityStatus::Planned,
-                "Claude SDK and stream-json metadata surfaces are planned for M63",
+                SourceCapabilityStatus::Available,
+                "captured Claude stream-json/SDK init and result metadata is parsed when present; Moonbox does not invoke Claude",
             ),
             cloud_metadata: cap(
                 SourceCapabilityStatus::Unknown,
-                "cloud metadata is not probed by the current adapter",
+                "cloud metadata is not probed or mixed into local Claude resume rows",
             ),
             deep_link: cap(
                 SourceCapabilityStatus::Unknown,
@@ -145,12 +145,12 @@ fn real_capabilities(tool: CliTool) -> SourceCapabilities {
                 "provider export/search surface is not verified",
             ),
             remote_control: cap(
-                SourceCapabilityStatus::Planned,
-                "remote and remote-control surfaces are planned for M63",
+                SourceCapabilityStatus::Unavailable,
+                "remote and remote-control surfaces are recognized as separate surfaces but are not launched, probed, or merged into local resume rows",
             ),
             fork_resume: cap(
                 SourceCapabilityStatus::Available,
-                "original resume command can target claude --resume <session>",
+                "original resume command can target claude --resume <session>; fork parent metadata is parsed when present",
             ),
             native_handoff: cap(
                 SourceCapabilityStatus::Unavailable,
