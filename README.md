@@ -1029,11 +1029,15 @@ Stable interfaces matter more than any single framework:
 - M77: Timeline event detail overlay; pressing `e` with Timeline focused opens
   a scrollable full-detail view for the selected user, assistant, or tool event
   without changing `enter` original-resume or `space` rewind semantics.
+- M78: Timeline group detail expansion; when the selected Timeline row is a
+  folded assistant group such as `Codex x88`, the `e` detail overlay now expands
+  the whole visible group with per-event ids, timestamps, and bodies instead of
+  showing only the first event.
 
 ### Remaining Milestones
 
 - Next high-priority continuation milestones are pending prioritization after
-  M77 acceptance.
+  M78 acceptance.
 - Low-priority backlog:
   - M76: terminal image preview protocol. Detect terminal raster capabilities
     such as Kitty, iTerm2, or Sixel; render timeline image attachments when the
