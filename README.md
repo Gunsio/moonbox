@@ -1033,17 +1033,23 @@ Stable interfaces matter more than any single framework:
   folded assistant group such as `Codex x88`, the `e` detail overlay now expands
   the whole visible group with per-event ids, timestamps, and bodies instead of
   showing only the first event.
+- M79: Timeline image preview in detail overlay; image attachments with safe
+  local PNG/JPEG artifact paths are decoded into bounded truecolor half-block
+  previews inside the `e` detail overlay, while attachments without a local path
+  show an explicit non-previewable reason. Expanded assistant groups also use a
+  compact per-event layout so repeated `Title` / `Body` labels do not dominate
+  long grouped turns.
 
 ### Remaining Milestones
 
 - Next high-priority continuation milestones are pending prioritization after
-  M78 acceptance.
+  M79 acceptance.
 - Low-priority backlog:
-  - M76: terminal image preview protocol. Detect terminal raster capabilities
-    such as Kitty, iTerm2, or Sixel; render timeline image attachments when the
-    terminal and local artifact path are safe; keep a plain `[image]` fallback;
-    cover the behavior with fixture-only protocol tests. This is not a blocker
-    for Capsule, verification, redaction, or launch-ledger continuation work.
+  - M76: native terminal image protocol. Detect terminal raster capabilities
+    such as Kitty, iTerm2, or Sixel and upgrade beyond the M79 text-cell
+    preview when the terminal and local artifact path are safe. This is not a
+    blocker for Capsule, verification, redaction, or launch-ledger continuation
+    work.
 
 ### Can Build Now
 

@@ -13,6 +13,7 @@ use ratatui::{
 use crate::{
     app::{App, CommandPaletteEntry, Focus, HandoffTrailFrame},
     core::compiler,
+    core::image_preview::{ImagePreviewStatus, PreviewCell, PreviewRgb, TimelineImagePreview},
     core::model::{
         CliTool, CompilerPresetInfo, CompilerPresetKind, CompilerPresetStatus,
         LaunchValidationState, SessionRuntimeStatus, SessionStatus, SourceAdapterReport,
@@ -2505,7 +2506,11 @@ fn render_timeline_detail(frame: &mut Frame, root: Rect, app: &App) {
                 event,
             ));
         }
-        lines.extend(timeline_detail_event_lines(event, group.len() > 1));
+        lines.extend(timeline_detail_event_lines(
+            event,
+            group.len() == 1,
+            &app.timeline_image_previews,
+        ));
     }
     lines.push(Line::raw(""));
     lines.push(Line::from(Span::styled(
@@ -2536,33 +2541,29 @@ fn timeline_detail_group_header_lines(group: &TimelineGroup<'_>, app: &App) -> V
     } else {
         format!("{label} group")
     };
-    let mut lines = vec![
-        Line::from(vec![
-            Span::styled(
-                format!("{id} "),
-                Style::default()
-                    .fg(theme::CYAN)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                kind,
-                Style::default().fg(color).add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  "),
-            Span::styled(
-                timeline_group_time(group),
-                Style::default().fg(theme::MUTED),
-            ),
-        ]),
-        Line::from(vec![
+    let mut lines = vec![Line::from(vec![
+        Span::styled(
+            format!("{id} "),
+            Style::default()
+                .fg(theme::CYAN)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            kind,
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            timeline_group_time(group),
+            Style::default().fg(theme::MUTED),
+        ),
+    ])];
+    if group.len() == 1 {
+        lines.push(Line::from(vec![
             Span::styled("Title: ", Style::default().fg(theme::MUTED)),
-            Span::styled(
-                timeline_detail_group_title(group),
-                Style::default().fg(theme::TEXT),
-            ),
-        ]),
-    ];
-    if group.len() > 1 {
+            Span::styled(primary.title.clone(), Style::default().fg(theme::TEXT)),
+        ]));
+    } else {
         lines.push(Line::from(vec![
             Span::styled("Events: ", Style::default().fg(theme::MUTED)),
             Span::styled(
@@ -2575,18 +2576,6 @@ fn timeline_detail_group_header_lines(group: &TimelineGroup<'_>, app: &App) -> V
         lines.push(Line::raw(""));
     }
     lines
-}
-
-fn timeline_detail_group_title(group: &TimelineGroup<'_>) -> String {
-    if group.len() == 1 {
-        return group.primary_event().title.clone();
-    }
-    let title = group.primary_event().title.trim();
-    if title.is_empty() {
-        format!("{} events", group.len())
-    } else {
-        format!("{title} x{}", group.len())
-    }
 }
 
 fn timeline_detail_event_header_line(
@@ -2616,14 +2605,12 @@ fn timeline_detail_event_header_line(
     ])
 }
 
-fn timeline_detail_event_lines(event: &TimelineEvent, include_title: bool) -> Vec<Line<'static>> {
+fn timeline_detail_event_lines(
+    event: &TimelineEvent,
+    include_section_labels: bool,
+    image_previews: &[TimelineImagePreview],
+) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    if include_title {
-        lines.push(Line::from(vec![
-            Span::styled("Title: ", Style::default().fg(theme::MUTED)),
-            Span::styled(event.title.clone(), Style::default().fg(theme::TEXT)),
-        ]));
-    }
     if !event.metadata.attachments.is_empty() {
         lines.push(Line::raw(""));
         lines.push(Line::from(Span::styled(
@@ -2642,16 +2629,129 @@ fn timeline_detail_event_lines(event: &TimelineEvent, include_title: bool) -> Ve
             ]));
         }
     }
+    let event_image_previews = image_previews
+        .iter()
+        .filter(|preview| preview.event_id == event.id)
+        .collect::<Vec<_>>();
+    if !event_image_previews.is_empty() {
+        lines.push(Line::raw(""));
+        lines.push(Line::from(Span::styled(
+            "Image Preview",
+            Style::default()
+                .fg(theme::BLUE)
+                .add_modifier(Modifier::BOLD),
+        )));
+        for preview in event_image_previews {
+            lines.extend(timeline_image_preview_lines(preview));
+        }
+    }
 
-    lines.push(Line::raw(""));
-    lines.push(Line::from(Span::styled(
-        "Body",
-        Style::default()
-            .fg(theme::BLUE)
-            .add_modifier(Modifier::BOLD),
-    )));
+    if include_section_labels {
+        lines.push(Line::raw(""));
+        lines.push(Line::from(Span::styled(
+            "Body",
+            Style::default()
+                .fg(theme::BLUE)
+                .add_modifier(Modifier::BOLD),
+        )));
+    }
     lines.extend(timeline_detail_body_lines(&event.detail));
     lines
+}
+
+fn timeline_image_preview_lines(preview: &TimelineImagePreview) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from(vec![
+        Span::raw("  "),
+        Span::styled(
+            preview.label.clone(),
+            Style::default()
+                .fg(theme::CYAN)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            timeline_image_preview_status(preview),
+            Style::default().fg(timeline_image_preview_status_color(preview)),
+        ),
+    ])];
+    if let Some((width, height)) = preview.dimensions {
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled(
+                format!("{width}x{height}"),
+                Style::default().fg(theme::MUTED),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                preview.path.clone().unwrap_or_default(),
+                Style::default().fg(theme::MUTED),
+            ),
+        ]));
+    } else if let Some(path) = &preview.path {
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled(path.clone(), Style::default().fg(theme::MUTED)),
+        ]));
+    }
+    if preview.is_rendered() {
+        for row in &preview.rows {
+            lines.push(Line::from(
+                std::iter::once(Span::raw("  "))
+                    .chain(row.iter().map(timeline_image_preview_cell_span))
+                    .collect::<Vec<_>>(),
+            ));
+        }
+    }
+    lines
+}
+
+fn timeline_image_preview_cell_span(cell: &PreviewCell) -> Span<'static> {
+    let top = preview_color(cell.top);
+    let bottom = cell
+        .bottom
+        .map(preview_color)
+        .unwrap_or(Color::Rgb(20, 24, 32));
+    Span::styled("▀", Style::default().fg(top).bg(bottom))
+}
+
+fn preview_color(color: PreviewRgb) -> Color {
+    Color::Rgb(color.red, color.green, color.blue)
+}
+
+fn timeline_image_preview_status(preview: &TimelineImagePreview) -> String {
+    match &preview.status {
+        ImagePreviewStatus::Rendered => "rendered".into(),
+        ImagePreviewStatus::MissingPath => "no local artifact path".into(),
+        ImagePreviewStatus::UnsupportedPath(reason) => format!("not previewable: {reason}"),
+        ImagePreviewStatus::TooLarge { bytes, limit } => {
+            format!(
+                "too large: {} / {}",
+                format_bytes(*bytes),
+                format_bytes(*limit)
+            )
+        }
+        ImagePreviewStatus::DecodeError(error) => {
+            format!("decode failed: {}", review_snippet(error, 72))
+        }
+    }
+}
+
+fn timeline_image_preview_status_color(preview: &TimelineImagePreview) -> Color {
+    match preview.status {
+        ImagePreviewStatus::Rendered => theme::GREEN,
+        ImagePreviewStatus::MissingPath | ImagePreviewStatus::UnsupportedPath(_) => theme::MUTED,
+        ImagePreviewStatus::TooLarge { .. } | ImagePreviewStatus::DecodeError(_) => theme::ORANGE,
+    }
+}
+
+fn format_bytes(bytes: u64) -> String {
+    if bytes >= 1024 * 1024 {
+        format!("{:.1} MiB", bytes as f64 / 1024.0 / 1024.0)
+    } else if bytes >= 1024 {
+        format!("{:.1} KiB", bytes as f64 / 1024.0)
+    } else {
+        format!("{bytes} B")
+    }
 }
 
 fn timeline_detail_body_lines(detail: &str) -> Vec<Line<'static>> {
@@ -3891,6 +3991,67 @@ mod tests {
     }
 
     #[test]
+    fn timeline_detail_overlay_renders_image_preview_pixels_when_cached() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.show_timeline_detail = true;
+        app.data.timeline = vec![TimelineEvent {
+            id: "evt-img".into(),
+            time: "12:18".into(),
+            kind: TimelineKind::User,
+            title: "User".into(),
+            detail: "看下这个问题".into(),
+            metadata: crate::core::model::TimelineEventMetadata {
+                attachments: vec![TimelineAttachment {
+                    name: Some("Image #1".into()),
+                    path: Some("/tmp/moonbox-image-preview.png".into()),
+                    mime_type: Some("image/png".into()),
+                    ..TimelineAttachment::default()
+                }],
+                ..Default::default()
+            },
+        }];
+        app.timeline_image_previews = vec![TimelineImagePreview {
+            event_id: "evt-img".into(),
+            label: "Image #1".into(),
+            path: Some("/tmp/moonbox-image-preview.png".into()),
+            dimensions: Some((4, 2)),
+            status: ImagePreviewStatus::Rendered,
+            rows: vec![vec![
+                PreviewCell {
+                    top: PreviewRgb {
+                        red: 255,
+                        green: 0,
+                        blue: 0,
+                    },
+                    bottom: Some(PreviewRgb {
+                        red: 0,
+                        green: 0,
+                        blue: 255,
+                    }),
+                },
+                PreviewCell {
+                    top: PreviewRgb {
+                        red: 0,
+                        green: 255,
+                        blue: 0,
+                    },
+                    bottom: None,
+                },
+            ]],
+        }];
+        app.selected_event = 0;
+        app.rewind_event_id = "evt-img".into();
+
+        let screen = render_text(&app, 120, 32);
+
+        assert_screen_contains(&screen, "Image Preview");
+        assert_screen_contains(&screen, "rendered");
+        assert_screen_contains(&screen, "4x2");
+        assert_screen_contains(&screen, "▀▀");
+    }
+
+    #[test]
     fn timeline_detail_overlay_expands_selected_assistant_group() {
         let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
         app.focus = Focus::Timeline;
@@ -3940,6 +4101,8 @@ mod tests {
         assert_screen_contains(&screen, "1/3");
         assert_screen_contains(&screen, "2/3");
         assert_screen_contains(&screen, "3/3");
+        assert!(!screen.contains("Title: Assistant"), "{screen}");
+        assert!(!screen.contains("Body"), "{screen}");
         assert_screen_contains(&screen, "我会从当前仓库和 GitHub 状态重新开始。");
         assert_screen_contains(&screen, "复核结果：当前本地在 chore/restart-governance。");
         assert_screen_contains(&screen, "新的 CI 全绿，我会合入治理 PR。");
