@@ -1454,11 +1454,12 @@ mod tests {
         write_session(
             &root,
             "2026/06/06/rollout-2026-06-06T08-00-00-context.jsonl",
-            r#"{"timestamp":"2026-06-06T08:00:00.000Z","type":"session_meta","payload":{"id":"codex-context","cwd":"/repo"}}
+            r##"{"timestamp":"2026-06-06T08:00:00.000Z","type":"session_meta","payload":{"id":"codex-context","cwd":"/repo"}}
 {"timestamp":"2026-06-06T08:01:00.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/repo</cwd>\n  <shell>zsh</shell>\n</environment_context>"}]}}
+{"timestamp":"2026-06-06T08:01:30.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /repo\n<INSTRUCTIONS>\n# Project Instructions\nUse Ant Design.\n</INSTRUCTIONS>\n<environment_context>\n  <cwd>/repo</cwd>\n  <shell>zsh</shell>\n  <filesystem><permission_profile type=\"managed\"></permission_profile></filesystem>\n</environment_context>"}]}}
 {"timestamp":"2026-06-06T08:02:00.000Z","type":"event_msg","payload":{"type":"user_message","message":"分析下 cxcp"}}
 {"timestamp":"2026-06-06T08:03:00.000Z","type":"event_msg","payload":{"type":"agent_message","message":"先定位项目"}}
-"#,
+"##,
         );
 
         let adapter = CodexSourceAdapter::new(&root);
@@ -1471,6 +1472,12 @@ mod tests {
                 .events
                 .iter()
                 .all(|event| !event.detail.contains("<environment_context>"))
+        );
+        assert!(
+            timeline
+                .events
+                .iter()
+                .all(|event| !event.detail.contains("AGENTS.md instructions"))
         );
         assert_eq!(
             timeline

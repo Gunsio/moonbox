@@ -190,6 +190,11 @@ and this project uses semantic versioning once tagged releases start.
   calls/results, approvals, attachments, file-change evidence, runtime
   snapshots, system/config snapshots, and token/cost data.
 
+### Fixed
+
+- Codex provider-injected AGENTS / environment context envelopes are no longer
+  rendered as user timeline turns or used as user rewind anchors.
+
 ### Changed
 
 - Work Capsule and launch plan JSON now emit `handoff_label` instead of the
