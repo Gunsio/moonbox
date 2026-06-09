@@ -386,6 +386,9 @@ and this project uses semantic versioning once tagged releases start.
   isolated SQLite ledger via `MOONBOX_LAUNCH_LEDGER`; `launches list/show/link`
   and `capsule launches <name>` expose the local audit trail without opening or
   resuming source sessions.
+- Codex and Claude inline `<image ...>` timeline markers are promoted into
+  `TimelineAttachment` metadata, and the TUI renders image attachment rows
+  instead of leaking raw image markup into user turns.
 - Replay-eval fixture invariants now return structured `CoreError` failures
   instead of panicking, and generated SVG docs snapshot code no longer relies on
   infallible string-write `expect` calls.

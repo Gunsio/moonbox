@@ -15,10 +15,11 @@ use super::{
     local_jsonl::{
         DiscoveryOrder, collect_jsonl_files, configured_session_limit,
         configured_session_scan_entry_limit, configured_session_summary_line_limit,
-        discover_jsonl_files, display_time, event_id, find_token_count, human_timestamp,
-        is_provider_context_text, max_timestamp, open_reader, push_timeline_event, read_error,
-        replace_time_dashes, stable_text_digest, stable_value_digest, string_field,
-        text_from_value, title_case, truncate, truncate_timeline_detail,
+        discover_jsonl_files, display_time, event_id, extract_timeline_image_markup,
+        find_token_count, human_timestamp, is_provider_context_text, max_timestamp, open_reader,
+        push_timeline_event, read_error, replace_time_dashes, stable_text_digest,
+        stable_value_digest, string_field, text_from_value, title_case, truncate,
+        truncate_timeline_detail,
     },
     model::{
         CanonicalTimeline, CliTool, SessionRuntimeStatus, SessionStatus, SessionSummary,
@@ -947,13 +948,20 @@ fn timeline_event(
     let role = string_field(&record.payload, "role");
     let kind = timeline_kind(record_type, payload_type, role)?;
     let title = timeline_title(record_type, payload_type, role);
-    let detail = timeline_detail(&record.payload, record_type, payload_type);
-    if detail.is_empty() && !matches!(kind, TimelineKind::Error) {
+    let image_markup =
+        extract_timeline_image_markup(&timeline_detail(&record.payload, record_type, payload_type));
+    let detail = image_markup.text;
+    if detail.is_empty()
+        && image_markup.attachments.is_empty()
+        && !matches!(kind, TimelineKind::Error)
+    {
         return None;
     }
     if kind == TimelineKind::User && is_provider_context_text(&detail) {
         return None;
     }
+    let mut metadata = timeline_metadata(&record, session_id, path, line_number, kind);
+    metadata.attachments.extend(image_markup.attachments);
 
     Some(TimelineEvent {
         id: event_id(number),
@@ -961,7 +969,7 @@ fn timeline_event(
         kind,
         title,
         detail,
-        metadata: timeline_metadata(&record, session_id, path, line_number, kind),
+        metadata,
     })
 }
 
@@ -1487,6 +1495,35 @@ mod tests {
                 .map(|event| event.detail.as_str())
                 .collect::<Vec<_>>(),
             vec!["分析下 cxcp"]
+        );
+    }
+
+    #[test]
+    fn timeline_promotes_inline_image_markup_to_attachment() {
+        let root = test_root("timeline-inline-image");
+        write_session(
+            &root,
+            "2026/06/06/rollout-2026-06-06T08-00-00-image.jsonl",
+            r##"{"timestamp":"2026-06-06T08:00:00.000Z","type":"session_meta","payload":{"id":"codex-image","cwd":"/repo"}}
+{"timestamp":"2026-06-06T08:01:00.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<image name=[Image #1]> </image> [Image #1]\n看下这个问题"}]}}
+"##,
+        );
+
+        let timeline = CodexSourceAdapter::new(&root)
+            .load_timeline("codex-image")
+            .expect("timeline");
+        let event = timeline
+            .events
+            .iter()
+            .find(|event| event.kind == TimelineKind::User)
+            .expect("user event");
+
+        assert_eq!(event.detail, "看下这个问题");
+        assert!(!event.detail.contains("<image"));
+        assert_eq!(event.metadata.attachments.len(), 1);
+        assert_eq!(
+            event.metadata.attachments[0].name.as_deref(),
+            Some("Image #1")
         );
     }
 

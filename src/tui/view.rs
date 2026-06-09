@@ -16,8 +16,8 @@ use crate::{
     core::model::{
         CliTool, CompilerPresetInfo, CompilerPresetKind, CompilerPresetStatus,
         LaunchValidationState, SessionRuntimeStatus, SessionStatus, SourceAdapterReport,
-        SourceFidelityStatus, SourceProvenance, TimelineEvent, TimelineKind, VerificationReport,
-        VerificationStatus, WorkCapsule,
+        SourceFidelityStatus, SourceProvenance, TimelineAttachment, TimelineEvent, TimelineKind,
+        VerificationReport, VerificationStatus, WorkCapsule,
     },
 };
 
@@ -901,7 +901,7 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(theme::MUTED)
         };
         for (event_offset, (_, event)) in group.events().enumerate() {
-            for (line_index, detail) in timeline_detail_lines(&event.detail, area.width)
+            for (line_index, detail) in timeline_event_detail_lines(event, area.width)
                 .into_iter()
                 .enumerate()
             {
@@ -1031,7 +1031,7 @@ fn timeline_marker_style(active: bool, selected: bool, is_rewind: bool) -> Style
 fn timeline_group_line_count(group: &TimelineGroup<'_>, area_width: u16) -> usize {
     1 + group
         .events()
-        .map(|(_, event)| timeline_detail_lines(&event.detail, area_width).len())
+        .map(|(_, event)| timeline_event_detail_lines(event, area_width).len())
         .sum::<usize>()
         + 1
 }
@@ -1055,6 +1055,45 @@ fn timeline_detail_prefix(
         return "  · ";
     }
     "   "
+}
+
+fn timeline_event_detail_lines(event: &TimelineEvent, area_width: u16) -> Vec<String> {
+    let mut lines = timeline_attachment_lines(&event.metadata.attachments, area_width);
+    if !event.detail.trim().is_empty() {
+        lines.extend(timeline_detail_lines(&event.detail, area_width));
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
+}
+
+fn timeline_attachment_lines(attachments: &[TimelineAttachment], area_width: u16) -> Vec<String> {
+    attachments
+        .iter()
+        .flat_map(|attachment| {
+            wrap_timeline_text(
+                &timeline_attachment_label(attachment),
+                timeline_detail_width(area_width),
+            )
+        })
+        .collect()
+}
+
+fn timeline_attachment_label(attachment: &TimelineAttachment) -> String {
+    let label = attachment
+        .name
+        .as_deref()
+        .or(attachment.path.as_deref())
+        .or(attachment.id.as_deref())
+        .unwrap_or("unnamed");
+    let kind = attachment
+        .mime_type
+        .as_deref()
+        .filter(|mime_type| mime_type.starts_with("image/"))
+        .map(|_| "image")
+        .unwrap_or("attachment");
+    format!("[{kind}] {label}")
 }
 
 fn timeline_detail_lines(detail: &str, area_width: u16) -> Vec<String> {
@@ -3221,8 +3260,8 @@ mod tests {
     use crate::{
         app::App,
         core::model::{
-            CliTool, SessionStatus, SourceProvenance, TimelineEvent, TimelineKind,
-            VerificationStatus,
+            CliTool, SessionStatus, SourceProvenance, TimelineAttachment, TimelineEvent,
+            TimelineKind, VerificationStatus,
         },
     };
 
@@ -3510,6 +3549,38 @@ mod tests {
         let scroll = timeline_scroll(&app, Rect::new(0, 0, 48, 8));
 
         assert!(scroll > 6, "scroll should include wrapped detail height");
+    }
+
+    #[test]
+    fn timeline_renders_image_attachments_without_raw_markup() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.data.timeline = vec![TimelineEvent {
+            id: "evt-001".into(),
+            time: "09:08".into(),
+            kind: TimelineKind::User,
+            title: "User".into(),
+            detail: "看下这个问题".into(),
+            metadata: crate::core::model::TimelineEventMetadata {
+                attachments: vec![TimelineAttachment {
+                    name: Some("Image #1".into()),
+                    mime_type: Some("image/unknown".into()),
+                    ..TimelineAttachment::default()
+                }],
+                ..Default::default()
+            },
+        }];
+        app.selected_event = 0;
+        app.rewind_event_id = "evt-001".into();
+
+        let screen = render_text(&app, 100, 18);
+
+        assert_screen_contains(&screen, "[image] Image #1");
+        assert_screen_contains(&screen, "看下这个问题");
+        let image_pos = screen.find("[image] Image #1").expect("image row");
+        let detail_pos = screen.find("看下这个问题").expect("detail row");
+        assert!(image_pos < detail_pos, "{screen}");
+        assert!(!screen.contains("<image"), "{screen}");
     }
 
     #[test]

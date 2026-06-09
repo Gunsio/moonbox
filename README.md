@@ -231,6 +231,9 @@ The first implementation focuses on the product shell:
   message/provider item ids, tool calls/results, approvals, attachments,
   file-change evidence, runtime snapshots, system/config snapshots, and
   token/cost data when a source store exposes them
+- Codex/Claude inline image markers are promoted into timeline attachment
+  metadata, and the TUI renders image attachment rows without leaking raw
+  `<image ...>` markup into user-message text
 - Redaction policy runs before compiler stdin, Capsule JSON export, and target
   handoff prompts: secret-like values are scanned, sensitive paths are masked,
   event/file allowlists can narrow forwarded context, and every Capsule carries
@@ -1019,10 +1022,13 @@ Stable interfaces matter more than any single framework:
   ledger isolated by `MOONBOX_LAUNCH_LEDGER`, with `launches list/show/link`,
   `capsule launches <name>`, blocked-record capture, and warning-only ledger
   write failures.
+- M75: Timeline image attachment hygiene; Codex and Claude inline
+  `<image ...>` markers are now parsed into `TimelineAttachment` metadata, and
+  the TUI shows image attachment rows instead of raw markup in user turns.
 
 ### Remaining Milestones
 
-- Next continuation milestones are pending prioritization after M74 acceptance.
+- Next continuation milestones are pending prioritization after M75 acceptance.
 
 ### Can Build Now
 

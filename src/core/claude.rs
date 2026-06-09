@@ -14,10 +14,10 @@ use super::{
     local_jsonl::{
         collect_project_jsonl_files, configured_session_limit, configured_session_scan_entry_limit,
         configured_session_summary_line_limit, discover_project_jsonl_files, display_time,
-        event_id, find_token_count, human_timestamp, is_provider_context_text, max_timestamp,
-        open_reader, push_timeline_event, read_error, sort_paths_by_modified_desc,
-        stable_text_digest, stable_value_digest, text_from_value, title_case, truncate,
-        truncate_timeline_detail,
+        event_id, extract_timeline_image_markup, find_token_count, human_timestamp,
+        is_provider_context_text, max_timestamp, open_reader, push_timeline_event, read_error,
+        sort_paths_by_modified_desc, stable_text_digest, stable_value_digest, text_from_value,
+        title_case, truncate, truncate_timeline_detail,
     },
     model::{
         CanonicalTimeline, CliTool, SessionRuntimeStatus, SessionStatus, SessionSummary,
@@ -869,13 +869,19 @@ fn timeline_event(
 ) -> Option<TimelineEvent> {
     let record_type = record.record_type();
     let kind = timeline_kind(record_type, &record)?;
-    let detail = timeline_detail(record_type, &record);
-    if detail.is_empty() && !matches!(kind, TimelineKind::Error) {
+    let image_markup = extract_timeline_image_markup(&timeline_detail(record_type, &record));
+    let detail = image_markup.text;
+    if detail.is_empty()
+        && image_markup.attachments.is_empty()
+        && !matches!(kind, TimelineKind::Error)
+    {
         return None;
     }
     if kind == TimelineKind::User && is_provider_context_text(&detail) {
         return None;
     }
+    let mut metadata = timeline_metadata(&record, session_id, path, line_number, kind);
+    metadata.attachments.extend(image_markup.attachments);
 
     Some(TimelineEvent {
         id: event_id(number),
@@ -883,7 +889,7 @@ fn timeline_event(
         kind,
         title: timeline_title(record_type, &record),
         detail,
-        metadata: timeline_metadata(&record, session_id, path, line_number, kind),
+        metadata,
     })
 }
 
@@ -1646,6 +1652,34 @@ mod tests {
         assert_eq!(timeline.events[1].title, "Internal event");
         assert_eq!(timeline.events[2].kind, TimelineKind::User);
         assert_eq!(timeline.events[2].detail, "Plan the next milestone");
+    }
+
+    #[test]
+    fn timeline_promotes_inline_image_markup_to_attachment() {
+        let root = test_root("timeline-inline-image");
+        write_session(
+            &root,
+            "repo/claude-inline-image.jsonl",
+            r##"{"type":"user","sessionId":"claude-inline-image","timestamp":"2026-05-19T07:55:10.994Z","cwd":"/repo","message":{"role":"user","content":"<image name=[Image #1]> </image> [Image #1]\n看下这个问题"}}
+"##,
+        );
+
+        let timeline = ClaudeSourceAdapter::new(&root)
+            .load_timeline("claude-inline-image")
+            .expect("timeline");
+        let event = timeline
+            .events
+            .iter()
+            .find(|event| event.kind == TimelineKind::User)
+            .expect("user event");
+
+        assert_eq!(event.detail, "看下这个问题");
+        assert!(!event.detail.contains("<image"));
+        assert_eq!(event.metadata.attachments.len(), 1);
+        assert_eq!(
+            event.metadata.attachments[0].name.as_deref(),
+            Some("Image #1")
+        );
     }
 
     #[test]
