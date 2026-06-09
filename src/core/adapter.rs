@@ -2,7 +2,10 @@ use std::{error::Error, fmt};
 
 use super::{
     capability,
-    model::{CanonicalTimeline, CliTool, SessionSummary, SourceAdapterReport, SourceProvenance},
+    model::{
+        CanonicalTimeline, CliTool, SessionSummary, SourceAdapterReport, SourceCapabilities,
+        SourceProvenance,
+    },
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -22,6 +25,7 @@ pub struct SourceReportMeta {
     pub store_path: Option<String>,
     pub filter_status: String,
     pub reason: String,
+    pub capabilities: Option<SourceCapabilities>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,6 +120,7 @@ pub fn report_from_sessions(
             store_path,
             filter_status: filter_status.into(),
             reason: reason.into(),
+            capabilities: None,
         },
         sessions,
         SourceScanStats {
@@ -147,7 +152,9 @@ pub fn report_from_sessions_with_scan(
             .map(str::to_owned),
         filter_status: meta.filter_status,
         reason: meta.reason,
-        capabilities: capability::source_capabilities(meta.cli, meta.provenance),
+        capabilities: meta
+            .capabilities
+            .unwrap_or_else(|| capability::source_capabilities(meta.cli, meta.provenance)),
         list_limit: scan_stats.list_limit,
         scan_entry_limit: scan_stats.scan_entry_limit,
         summary_line_limit: scan_stats.summary_line_limit,

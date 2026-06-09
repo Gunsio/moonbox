@@ -455,6 +455,7 @@ impl SourceAdapter for ClaudeSourceAdapter {
                     store_path: self.store_path(),
                     filter_status: filter_status.into(),
                     reason: reason.into(),
+                    capabilities: None,
                 },
                 &sessions,
                 SourceScanStats {
@@ -479,6 +480,7 @@ impl SourceAdapter for ClaudeSourceAdapter {
                 store_path: self.store_path(),
                 filter_status: filter_status.into(),
                 reason: reason.into(),
+                capabilities: None,
             },
             &sessions,
             super::adapter::SourceScanStats {

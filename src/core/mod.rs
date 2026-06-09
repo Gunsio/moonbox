@@ -2,6 +2,7 @@ pub mod adapter;
 pub mod capability;
 pub mod claude;
 pub mod codex;
+pub mod codex_app_server;
 pub mod compiler;
 pub mod config;
 pub mod continuation;

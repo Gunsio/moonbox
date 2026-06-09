@@ -163,6 +163,14 @@ The first implementation focuses on the product shell:
   stale `state_5.sqlite` titles, so Moonbox search/listing follows Codex
   resume-picker names
 - Runtime Codex home override via `MOONBOX_CODEX_HOME` or `CODEX_HOME`
+- Optional Codex app-server source discovery is explicit opt-in through
+  `MOONBOX_CODEX_APP_SERVER_FIXTURE=/path/to/fixture.json` for isolated
+  tests or `MOONBOX_CODEX_APP_SERVER_PROXY=1` for an already-running Codex
+  app-server proxy. When configured, Moonbox prefers `thread/list`,
+  `thread/read`, and `thread/turns/list`; local `state_5.sqlite` / JSONL
+  discovery remains the fallback and no Codex daemon is started by Moonbox.
+- `moonbox open-app --session <id> --json` previews `codex://threads/<id>`
+  links for Codex sessions without launching the desktop app.
 - Real Claude resume-index discovery from `~/.claude/history.jsonl`,
   with timeline/details hydrated from `~/.claude/projects`
 - Runtime Claude home override via `MOONBOX_CLAUDE_HOME` or `CLAUDE_HOME`
@@ -212,7 +220,8 @@ The first implementation focuses on the product shell:
   branch/worktree workspace restore modes are previewed but blocked until a
   target/import or restore executor is verified.
 - Original resume and target handoff are explicit action intents:
-  `original_resume` for `open`, `target_handoff` for `launch`
+  `original_resume` for `open`, `app_deep_link` for `open-app`, and
+  `target_handoff` for `launch`
 - Target selection lives inside the launch flow, with explicit `> [x]` radio-list selection
 - Target picker validates each target as `READY`, `WARN`, or `BLOCKED`; blocked targets cannot confirm or copy launch commands
 - Target picker and Handoff Review show verifier-backed readiness rows so users can see the exact PASS/WARN/FAIL signal behind each target state
@@ -287,7 +296,9 @@ The first implementation focuses on the product shell:
   inspect the same selected session and rewind as the TUI and launch flow
 - Canonical Timeline and compiler request/output JSON contract fixtures
 - Target launch dry-run plans with Work Capsule verification reports
-- `open --json` and `launch --json` include an `action` discriminator so tooling can distinguish original resume from target handoff
+- `open --json`, `open-app --json`, and `launch --json` include an `action`
+  discriminator so tooling can distinguish original resume, provider app
+  deep-link previews, and target handoff
 - Single core verifier policy shared by CLI and TUI target validation
 - `--capsule` reads a real Work Capsule JSON file when provided; generated dry-run capsules do not pretend to have a file path
 - Hardened verifier checks for compiler mode, Work Capsule version, required
@@ -349,6 +360,7 @@ MOONBOX_TIMELINE_EVENT_LIMIT=100 cargo run -- tui
 MOONBOX_TIMELINE_DETAIL_CHAR_LIMIT=8000 cargo run -- tui
 cargo run -- open --session <session-id>
 cargo run -- open --session <session-id> --json
+cargo run -- open-app --session <session-id> --json
 cargo run -- open --execute --session <session-id>
 cargo run -- capsule --session <session-id> --target hermes --rewind <event-id> --json
 cargo run -- compile-request --session <session-id> --target hermes --rewind <event-id> --json
@@ -374,12 +386,13 @@ adds per-session `source_provenance`, `source_path`, `parse_skip_count`,
 `runtime_status`, and `runtime_reason` fields. Runtime status is never inferred
 from `updated_at`; adapters that cannot prove live activity report `unknown`.
 
-`open`, `launch`, `capsule`, `compile-request`, and `compile-output` are dry-run
-by default. Dry-runs may omit `--session` and will preview the newest discovered
-session. Passing `--execute` runs the original CLI resume command or verified
-target command and therefore requires an explicit `--session`, so automation
-cannot accidentally open the newest active session. `verify`, `capsule`,
-`compile-request`, and `compile-output` never resume or launch a real process.
+`open`, `open-app`, `launch`, `capsule`, `compile-request`, and
+`compile-output` are dry-run by default. Dry-runs may omit `--session` and will
+preview the newest discovered session. Passing `--execute` runs the original CLI
+resume command or verified target command and therefore requires an explicit
+`--session`, so automation cannot accidentally open the newest active session.
+`open-app`, `verify`, `capsule`, `compile-request`, and `compile-output` never
+resume or launch a real process.
 `capsule`, `compile-request`, and `compile-output` accept `--session`,
 `--target`, `--rewind`, and `--compiler`, so scripts can inspect an exact
 selected rewind without relying on the old Codex-to-Hermes fixture defaults.
@@ -407,6 +420,10 @@ unbounded default scan or full-file summary parse. Target
 binaries can be overridden with `MOONBOX_CODEX_BIN`,
 `MOONBOX_CLAUDE_BIN`, or `MOONBOX_HERMES_BIN` for local testing and custom
 installs.
+Codex app-server integration is also opt-in: `MOONBOX_CODEX_APP_SERVER_PROXY=1`
+uses `codex app-server proxy` against an already-running server, and
+`MOONBOX_CODEX_APP_SERVER_SOCKET=/path/to/socket` can pin the socket. Tests and
+smokes should use `MOONBOX_CODEX_APP_SERVER_FIXTURE` instead of a live proxy.
 
 `snapshot` is the first workspace side of the continuation package. It reads
 only the selected filesystem path and git worktree, then emits JSON or a compact
@@ -861,13 +878,14 @@ Stable interfaces matter more than any single framework:
   metadata, deep links, export/search, remote control, fork/resume, and native
   handoff support, while session listings and the TUI distinguish `updated_at`
   from live runtime status and report unknown when activity cannot be proven.
+- M62: Codex app-server source adapter; explicit app-server fixture/proxy
+  sources prefer `thread/list`, `thread/read`, and `thread/turns/list` while
+  local SQLite/JSONL remains fallback, Doctor reports app-server/deep-link
+  capability state, and `moonbox open-app` previews `codex://threads/<id>`
+  without launching the Codex app.
 
 ### Remaining Milestones
 
-- M62: Codex app-server source adapter. Prefer Codex `app-server`
-  `thread/list`, `thread/read`, and `thread/turns/list` data, use local
-  SQLite/JSONL only as fallback, and add non-executing `codex://threads/<id>`
-  open-app support.
 - M63: Claude multi-surface adapter hardening. Keep local transcript baseline
   while adding optional stream-json/SDK metadata, hook/partial events, fork
   semantics, and separate remote / remote-control surfaces.

@@ -325,6 +325,7 @@ impl SourceAdapter for HermesSourceAdapter {
                 store_path: self.store_path(),
                 filter_status: filter_status.into(),
                 reason: reason.into(),
+                capabilities: None,
             },
             &sessions,
             SourceScanStats {

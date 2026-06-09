@@ -94,24 +94,24 @@ fn real_capabilities(tool: CliTool) -> SourceCapabilities {
                 "read-only state_5.sqlite thread index plus rollout JSONL fallback",
             ),
             rich_local_rpc: cap(
-                SourceCapabilityStatus::Planned,
-                "Codex app-server thread/list/read/turns source is planned for M62",
+                SourceCapabilityStatus::Unavailable,
+                "Codex app-server support is implemented but not configured; set MOONBOX_CODEX_APP_SERVER_FIXTURE or MOONBOX_CODEX_APP_SERVER_PROXY=1 to opt in",
             ),
             cloud_metadata: cap(
                 SourceCapabilityStatus::Unknown,
-                "cloud metadata is not probed by the current adapter",
+                "Codex cloud task metadata is modeled separately and is not mixed into local threads",
             ),
             deep_link: cap(
-                SourceCapabilityStatus::Planned,
-                "codex://threads deep links are planned for M62 open-app support",
+                SourceCapabilityStatus::Available,
+                "open-app can preview codex://threads/<id> deep links without launching",
             ),
             export_search: cap(
                 SourceCapabilityStatus::Unknown,
                 "provider export/search surface is not verified",
             ),
             remote_control: cap(
-                SourceCapabilityStatus::Unknown,
-                "live runtime control is not probed by the current adapter",
+                SourceCapabilityStatus::Unavailable,
+                "Moonbox does not start Codex remote-control or app-server daemons",
             ),
             fork_resume: cap(
                 SourceCapabilityStatus::Available,
