@@ -11,7 +11,7 @@ use ratatui::{
 };
 
 use crate::{
-    app::{App, Focus},
+    app::{App, Focus, HandoffTrailFrame},
     core::compiler,
     core::model::{
         CliTool, CompilerPresetInfo, CompilerPresetKind, CompilerPresetStatus,
@@ -1292,12 +1292,44 @@ fn session_runtime_style(status: SessionRuntimeStatus) -> Style {
 }
 
 fn render_branch_tree(frame: &mut Frame, area: Rect, app: &App) {
+    let lines = if area.height < 4 {
+        vec![handoff_path_line(app, area.width)]
+    } else if let Some(trail) = app.handoff_trail_frame() {
+        vec![
+            handoff_path_line(app, area.width),
+            handoff_trail_line(trail),
+        ]
+    } else {
+        vec![
+            handoff_path_line(app, area.width),
+            cwd_inventory_line(app, area.width),
+        ]
+    };
+    frame.render_widget(
+        Paragraph::new(lines).block(panel_block(" Action Path ", app.focus == Focus::Branches)),
+        area,
+    );
+}
+
+fn handoff_path_line(app: &App, width: u16) -> Line<'static> {
     let session = app
         .current_session()
-        .map(|session| format!("{} {}", session.cli, short_identifier(&session.id, 10)))
+        .map(|session| {
+            let keep = if width < 96 { 8 } else { 14 };
+            format!(
+                "source {} {}",
+                session.cli,
+                short_identifier(&session.id, keep)
+            )
+        })
         .unwrap_or_else(|| "no session".into());
     let rewind = format!("rewind {}", short_identifier(&app.rewind_event_id, 12));
-    let target = format!("handoff {}", app.data.target);
+    let target_cli = if app.show_launch {
+        app.pending_target
+    } else {
+        app.data.target
+    };
+    let target = format!("target {target_cli}");
     let nodes = [
         (session, theme::TEXT),
         (rewind, theme::GOLD),
@@ -1307,22 +1339,63 @@ fn render_branch_tree(frame: &mut Frame, area: Rect, app: &App) {
     let mut spans = vec![Span::styled("   ", Style::default().fg(theme::MUTED))];
     for (idx, (label, color)) in nodes.iter().enumerate() {
         if idx > 0 {
-            spans.push(Span::styled(" ── ", Style::default().fg(theme::BORDER)));
+            spans.push(Span::styled(" -> ", Style::default().fg(theme::BORDER)));
         }
         spans.push(Span::styled(
             label.clone(),
             Style::default().fg(*color).add_modifier(Modifier::BOLD),
         ));
     }
-    let lines = if area.height < 4 {
-        vec![Line::from(spans)]
-    } else {
-        vec![Line::from(spans), cwd_inventory_line(app, area.width)]
+    Line::from(spans)
+}
+
+fn handoff_trail_line(frame: HandoffTrailFrame) -> Line<'static> {
+    let arrow_one = match frame.step {
+        0 => " ◆-> ",
+        1 => " -◆> ",
+        _ => " --> ",
     };
-    frame.render_widget(
-        Paragraph::new(lines).block(panel_block(" Action Path ", app.focus == Focus::Branches)),
-        area,
-    );
+    let arrow_two = match frame.step {
+        3 => " ◆-> ",
+        4 => " -◆> ",
+        _ => " --> ",
+    };
+    let source_style = if frame.step == 0 {
+        Style::default()
+            .fg(theme::GOLD)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::MUTED)
+    };
+    let rewind_style = if (2..=3).contains(&frame.step) {
+        Style::default()
+            .fg(theme::GOLD)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::MUTED)
+    };
+    let target_style = if frame.step >= 5 {
+        Style::default()
+            .fg(theme::CYAN)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::MUTED)
+    };
+    Line::from(vec![
+        Span::styled("   handoff trail  ", Style::default().fg(theme::MUTED)),
+        Span::styled("source", source_style),
+        Span::styled(arrow_one, Style::default().fg(theme::GOLD)),
+        Span::styled("rewind", rewind_style),
+        Span::styled(arrow_two, Style::default().fg(theme::CYAN)),
+        Span::styled("target", target_style),
+        Span::styled("  ", Style::default().fg(theme::BORDER)),
+        Span::styled(
+            frame.phase.label(),
+            Style::default()
+                .fg(theme::CYAN)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ])
 }
 
 fn cwd_inventory_line(app: &App, width: u16) -> Line<'static> {
@@ -1881,6 +1954,7 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                         .add_modifier(Modifier::BOLD),
                 ),
             ]),
+            handoff_review_path_line(app),
             Line::from(vec![
                 Span::styled("Session: ", Style::default().fg(theme::BLUE)),
                 Span::raw(session),
@@ -2088,6 +2162,42 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             .wrap(Wrap { trim: true }),
         area,
     );
+}
+
+fn handoff_review_path_line(app: &App) -> Line<'static> {
+    let session = app
+        .current_session()
+        .map(|session| {
+            format!(
+                "source {} {}",
+                session.cli,
+                short_identifier(&session.id, 14)
+            )
+        })
+        .unwrap_or_else(|| "source no session".into());
+    Line::from(vec![
+        Span::styled("Path: ", Style::default().fg(theme::BLUE)),
+        Span::styled(
+            session,
+            Style::default()
+                .fg(theme::TEXT)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" -> ", Style::default().fg(theme::BORDER)),
+        Span::styled(
+            format!("rewind {}", short_identifier(&app.rewind_event_id, 12)),
+            Style::default()
+                .fg(theme::GOLD)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" -> ", Style::default().fg(theme::BORDER)),
+        Span::styled(
+            format!("target {}", app.pending_target),
+            Style::default()
+                .fg(theme::CYAN)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ])
 }
 
 fn capsule_review_lines(capsule: &WorkCapsule, _max_rows: usize) -> Vec<Line<'static>> {
@@ -2815,6 +2925,28 @@ mod tests {
     }
 
     #[test]
+    fn action_path_renders_explicit_handoff_arrow() {
+        let app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        let screen = render_text(&app, 140, 40);
+
+        assert_screen_contains(&screen, "source Codex codex-cxcp-des...");
+        assert_screen_contains(&screen, "-> rewind evt-091 -> target Hermes");
+    }
+
+    #[test]
+    fn action_path_renders_short_handoff_trail() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.start_handoff_trail_for_review();
+        let screen = render_text(&app, 140, 40);
+
+        assert_screen_contains(&screen, "handoff trail");
+        assert_screen_contains(&screen, "source");
+        assert_screen_contains(&screen, "rewind");
+        assert_screen_contains(&screen, "target");
+        assert_screen_contains(&screen, "Review");
+    }
+
+    #[test]
     fn selected_timeline_rows_keep_role_accent_colors() {
         assert_eq!(timeline_group_accent(theme::BLUE, false), theme::BLUE);
         assert_eq!(timeline_group_accent(theme::GOLD, false), theme::GOLD);
@@ -2901,6 +3033,9 @@ mod tests {
         assert_screen_contains(&screen, "Handoff Review");
         assert_screen_contains(&screen, "Capsule Review");
         assert_screen_contains(&screen, "handoff");
+        assert_screen_contains(&screen, "Path:");
+        assert_screen_contains(&screen, "source Codex codex-cxcp-des...");
+        assert_screen_contains(&screen, "-> rewind evt-091 -> target Hermes");
         assert_screen_contains(&screen, "Target receives");
         assert_screen_contains(&screen, "Prompt");
         assert_screen_contains(&screen, "Draft Work Capsule");

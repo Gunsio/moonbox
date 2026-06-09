@@ -2,7 +2,7 @@ use std::{
     fmt,
     sync::mpsc::{self, TryRecvError},
     thread,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -21,6 +21,36 @@ use crate::core::{
 
 type SessionLoadResult = Result<WorkbenchData, CoreError>;
 type DataSpaceLoadResult = Result<WorkbenchData, CoreError>;
+
+pub const HANDOFF_TRAIL_DURATION_MS: u64 = 720;
+const HANDOFF_TRAIL_FRAME_COUNT: usize = 6;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandoffTrailPhase {
+    Review,
+}
+
+impl HandoffTrailPhase {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Review => "Review",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HandoffTrailFrame {
+    pub phase: HandoffTrailPhase,
+    pub step: usize,
+    pub elapsed_ms: u64,
+    pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct HandoffTrail {
+    phase: HandoffTrailPhase,
+    started_at: Instant,
+}
 
 struct PendingSessionLoad {
     request_id: u64,
@@ -168,6 +198,7 @@ pub struct App {
     pending_session_load: Option<PendingSessionLoad>,
     data_space_load_request_id: u64,
     pending_data_space_load: Option<PendingDataSpaceLoad>,
+    handoff_trail: Option<HandoffTrail>,
     clipboard_text: Option<String>,
     exit_action: Option<TuiExitAction>,
     should_quit: bool,
@@ -227,6 +258,7 @@ impl App {
             pending_session_load: None,
             data_space_load_request_id: 0,
             pending_data_space_load: None,
+            handoff_trail: None,
             clipboard_text: None,
             exit_action: None,
             should_quit: false,
@@ -259,27 +291,75 @@ impl App {
     }
 
     pub fn poll_background(&mut self) -> bool {
-        let mut changed = false;
-        let Some(pending) = self.pending_session_load.take() else {
-            return self.poll_data_space_background();
-        };
+        let mut changed = self.prune_handoff_trail();
 
-        match pending.receiver.try_recv() {
-            Ok(result) => {
-                self.apply_session_load_result(pending, result);
-                changed = true;
-            }
-            Err(TryRecvError::Empty) => {
-                self.pending_session_load = Some(pending);
-            }
-            Err(TryRecvError::Disconnected) => {
-                self.compile_status = "FAILED";
-                self.set_status(format!("Session load failed: {}", pending.session_id));
-                changed = true;
+        if let Some(pending) = self.pending_session_load.take() {
+            match pending.receiver.try_recv() {
+                Ok(result) => {
+                    self.apply_session_load_result(pending, result);
+                    changed = true;
+                }
+                Err(TryRecvError::Empty) => {
+                    self.pending_session_load = Some(pending);
+                }
+                Err(TryRecvError::Disconnected) => {
+                    self.compile_status = "FAILED";
+                    self.set_status(format!("Session load failed: {}", pending.session_id));
+                    changed = true;
+                }
             }
         }
 
         self.poll_data_space_background() || changed
+    }
+
+    fn prune_handoff_trail(&mut self) -> bool {
+        if self.handoff_trail_frame().is_some() {
+            return false;
+        }
+        self.handoff_trail.take().is_some()
+    }
+
+    pub fn handoff_trail_frame(&self) -> Option<HandoffTrailFrame> {
+        let trail = self.handoff_trail?;
+        let elapsed = trail.started_at.elapsed();
+        let duration = Duration::from_millis(HANDOFF_TRAIL_DURATION_MS);
+        let elapsed_ms = elapsed.as_millis();
+        if elapsed >= duration {
+            return None;
+        }
+        let step = ((elapsed_ms * HANDOFF_TRAIL_FRAME_COUNT as u128)
+            / u128::from(HANDOFF_TRAIL_DURATION_MS))
+        .min((HANDOFF_TRAIL_FRAME_COUNT - 1) as u128) as usize;
+        Some(HandoffTrailFrame {
+            phase: trail.phase,
+            step,
+            elapsed_ms: elapsed_ms as u64,
+            duration_ms: HANDOFF_TRAIL_DURATION_MS,
+        })
+    }
+
+    pub(crate) fn start_handoff_trail_for_review(&mut self) {
+        self.start_handoff_trail(HandoffTrailPhase::Review);
+    }
+
+    fn start_handoff_trail(&mut self, phase: HandoffTrailPhase) {
+        self.handoff_trail = Some(HandoffTrail {
+            phase,
+            started_at: Instant::now(),
+        });
+    }
+
+    fn clear_handoff_trail(&mut self) {
+        self.handoff_trail = None;
+    }
+
+    #[cfg(test)]
+    fn set_handoff_trail_elapsed_for_test(&mut self, elapsed: Duration) {
+        self.handoff_trail = Some(HandoffTrail {
+            phase: HandoffTrailPhase::Review,
+            started_at: Instant::now() - elapsed,
+        });
     }
 
     fn poll_data_space_background(&mut self) -> bool {
@@ -482,6 +562,7 @@ impl App {
                     self.show_launch = false;
                     self.launch_review = false;
                     self.modal_scroll = 0;
+                    self.clear_handoff_trail();
                     self.set_status("Launch review closed");
                 }
                 KeyCode::Char('y') => self.copy_launch_command(),
@@ -506,6 +587,7 @@ impl App {
                 self.show_launch = false;
                 self.launch_review = false;
                 self.modal_scroll = 0;
+                self.clear_handoff_trail();
                 self.set_status("Launch cancelled");
             }
             KeyCode::Enter => self.confirm_launch_target(),
@@ -575,6 +657,7 @@ impl App {
             self.show_launch = false;
             self.launch_review = false;
             self.modal_scroll = 0;
+            self.clear_handoff_trail();
             self.set_status("Launch cancelled");
         } else if self.show_help {
             self.show_help = false;
@@ -1099,6 +1182,7 @@ impl App {
         self.pending_target = self.data.target;
         self.show_launch = true;
         self.launch_review = false;
+        self.clear_handoff_trail();
         self.modal_scroll = 0;
         self.set_status("Choose target CLI");
         self.pending_g = false;
@@ -1129,6 +1213,7 @@ impl App {
         let _ = config::save_last_target(target);
         self.show_launch = true;
         self.launch_review = true;
+        self.start_handoff_trail_for_review();
         self.modal_scroll = 0;
         if validation.state == LaunchValidationState::Warning {
             self.set_status(format!(
@@ -2265,12 +2350,47 @@ mod tests {
         assert!(app.show_launch);
         assert!(app.launch_review);
         assert_eq!(app.data.target, CliTool::Codex);
+        assert!(app.handoff_trail_frame().is_some());
         assert!(app.status_message.starts_with("Review launch: Codex"));
         assert_eq!(app.data.source, CliTool::Codex);
         assert_eq!(app.data.capsule.source_cli, CliTool::Codex);
         assert_eq!(app.data.capsule.source_session, "codex-cxcp-design");
         assert!(app.data.capsule.handoff_label.contains("codex"));
         assert!(app.data.branches[2].label.contains("codex"));
+    }
+
+    #[test]
+    fn handoff_trail_starts_for_review_and_expires_under_800ms() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+
+        app.handle_key(key('x'));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        let frame = app.handoff_trail_frame().expect("handoff trail frame");
+        assert_eq!(frame.phase, HandoffTrailPhase::Review);
+        assert!(frame.duration_ms <= 800);
+
+        app.set_handoff_trail_elapsed_for_test(Duration::from_millis(
+            HANDOFF_TRAIL_DURATION_MS + 1,
+        ));
+        assert!(app.handoff_trail_frame().is_none());
+        assert!(app.poll_background());
+        assert!(app.handoff_trail.is_none());
+    }
+
+    #[test]
+    fn closing_launch_review_clears_handoff_trail() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+
+        app.handle_key(key('x'));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        assert!(app.handoff_trail_frame().is_some());
+
+        app.handle_key(key('q'));
+
+        assert!(!app.show_launch);
+        assert!(!app.launch_review);
+        assert!(app.handoff_trail_frame().is_none());
     }
 
     #[test]

@@ -277,6 +277,9 @@ and this project uses semantic versioning once tagged releases start.
   `not configured` instead of ambiguous `unknown`.
 - Action Path now shows the selected cwd plus Codex / Claude / Hermes session
   counts for that same path.
+- Action Path now renders an explicit `source -> rewind -> target` route and a
+  short 720 ms handoff trail when the target picker enters Handoff Review; Esc
+  or `q` closes the Review and cancels the trail.
 - TUI `+` / `=` now zooms the focused panel and `-` restores the default
   layout; zoom follows tab focus so Sessions, Timeline, Details, and Action
   Path can each be expanded without resetting selection or scroll state.
