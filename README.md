@@ -654,6 +654,12 @@ path, session count, skipped record count, and last indexed timestamp. It is
 read-only and does not load timelines, resume sessions, launch targets, or
 spawn target binaries.
 
+Press `:` to open the floating Command Palette. It filters commands with fuzzy
+matching, shows command descriptions, parameters, aliases, and dry-run / review
+/ exit risk labels, and supports `tab` completion, `enter` to run the selected
+command, `j/k` selection before typing, arrow-key selection while typing, and
+`Esc` close. Search stays separate on `/` and remains a lightweight live filter.
+
 Session search matches id, title/raw title, cwd, source path, source, branch,
 and health reason. When a different session becomes selected by movement, source filter, or search,
 Moonbox immediately marks the selected session as loading, then hydrates that
@@ -693,7 +699,7 @@ commands, remains available through the dry-run JSON surfaces and
 | `{` / `}` | Previous / next data space: Local or configured SSH/devbox |
 | `enter` | Open selected session with original CLI |
 | `x` / `H` / `t` | Choose target for handoff |
-| `:` | Command mode |
+| `:` | Command Palette |
 | `?` | Help |
 | `q` / `Ctrl-C` | Quit |
 | `Esc` | Cancel command/search or close overlays; does not quit from the main screen |
@@ -959,12 +965,14 @@ Stable interfaces matter more than any single framework:
   Strong/Medium/Weak confidence language, and `D` opens expandable evidence
   for compiler state, Doctor diagnostics, and verifier readiness without
   launching or resuming sessions.
+- M71: command palette; `:` now opens a floating Command Palette with fuzzy
+  completion, descriptions, parameter hints, aliases, empty-state guidance, and
+  dry-run / review / exit risk labels for existing actions such as open
+  original, Handoff Review, Capsule refresh, source/data-space switching, Skill
+  Picker, Pre-flight, help, and quit.
 
 ### Remaining Milestones
 
-- M71: command palette. Add `:` command discovery for core actions such as
-  open original, review handoff, switch source/data space, skill picker,
-  doctor, and help while preserving the hotkeys.
 - M72: visual system polish. Keep the broader color palette, but enforce stable
   semantic roles, narrow-screen brand fallback from `MOONBOX 月光宝盒` to
   `MOONBOX`, and consistent source badges, confidence, and rewind markers.
