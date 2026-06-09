@@ -15,14 +15,16 @@ use super::{
     },
     local_jsonl::{
         configured_session_limit, display_time, event_id, human_timestamp,
-        is_provider_context_text, push_timeline_event, read_error, text_from_value,
-        timeline_preview_truncated_event, title_case, truncate, truncate_timeline_detail,
+        is_provider_context_text, push_timeline_event, read_error, stable_text_digest,
+        text_from_value, timeline_preview_truncated_event, title_case, truncate,
+        truncate_timeline_detail,
     },
     model::{
         CanonicalTimeline, CliTool, ProviderContinuationPoint, ProviderHandoffMetadata,
         ProviderScrollContext, ProviderSearchMetadata, ProviderSessionMetadata,
         SessionRuntimeStatus, SessionStatus, SessionSummary, SourceProvenance, TimelineEvent,
-        TimelineKind, TokenBreakdown, unknown_runtime_reason,
+        TimelineEventMetadata, TimelineEventRawRef, TimelineKind, TimelineToolCall, TokenBreakdown,
+        unknown_runtime_reason,
     },
 };
 
@@ -65,6 +67,8 @@ struct HermesSessionRow {
 
 #[derive(Debug, Clone)]
 struct HermesMessageRow {
+    message_id: String,
+    platform_message_id: Option<String>,
     role: String,
     content: Option<String>,
     tool_calls: Option<String>,
@@ -230,6 +234,8 @@ impl HermesSourceAdapter {
         event_limit: Option<usize>,
     ) -> Result<Vec<HermesMessageRow>, AdapterError> {
         let db = self.open_connection()?;
+        let columns = message_columns(&db, &self.state_db_path())?;
+        let platform_message_id = message_column(&columns, "platform_message_id", "NULL");
         let limit_clause = if event_limit.is_some() {
             "limit ?2"
         } else {
@@ -239,6 +245,8 @@ impl HermesSourceAdapter {
             .prepare(&format!(
                 r#"
                 select
+                    id,
+                    {platform_message_id},
                     role,
                     content,
                     tool_calls,
@@ -249,8 +257,8 @@ impl HermesSourceAdapter {
                     reasoning,
                     reasoning_content,
                     reasoning_details
-                from messages
-                where session_id = ?1 and active = 1
+                from messages m
+                where m.session_id = ?1 and active = 1
                 order by timestamp asc, id asc
                 {limit_clause}
                 "#,
@@ -545,7 +553,7 @@ impl HermesSourceAdapter {
         let messages = self.load_messages(session_id, event_limit)?;
         let mut events = Vec::new();
         for row in messages {
-            if let Some(event) = timeline_event(row, events.len() + 1) {
+            if let Some(event) = timeline_event(row, events.len() + 1, session_id) {
                 push_timeline_event(&mut events, event, None);
             }
         }
@@ -715,16 +723,18 @@ fn session_row(row: &Row<'_>) -> rusqlite::Result<HermesSessionRow> {
 
 fn message_row(row: &Row<'_>) -> rusqlite::Result<HermesMessageRow> {
     Ok(HermesMessageRow {
-        role: row.get(0)?,
-        content: row.get(1)?,
-        tool_calls: row.get(2)?,
-        tool_name: row.get(3)?,
-        timestamp: row.get(4)?,
-        token_count: optional_integer(row, 5)?,
-        finish_reason: row.get(6)?,
-        reasoning: row.get(7)?,
-        reasoning_content: row.get(8)?,
-        reasoning_details: row.get(9)?,
+        message_id: row.get::<_, i64>(0)?.to_string(),
+        platform_message_id: row.get(1)?,
+        role: row.get(2)?,
+        content: row.get(3)?,
+        tool_calls: row.get(4)?,
+        tool_name: row.get(5)?,
+        timestamp: row.get(6)?,
+        token_count: optional_integer(row, 7)?,
+        finish_reason: row.get(8)?,
+        reasoning: row.get(9)?,
+        reasoning_content: row.get(10)?,
+        reasoning_details: row.get(11)?,
     })
 }
 
@@ -1173,7 +1183,7 @@ fn context_from_supplement(entry: &SessionRegistryEntry) -> Option<String> {
     Some(context)
 }
 
-fn timeline_event(row: HermesMessageRow, number: usize) -> Option<TimelineEvent> {
+fn timeline_event(row: HermesMessageRow, number: usize, session_id: &str) -> Option<TimelineEvent> {
     let kind = timeline_kind(&row)?;
     let detail = timeline_detail(&row);
     if detail.is_empty() && !matches!(kind, TimelineKind::Error) {
@@ -1189,7 +1199,67 @@ fn timeline_event(row: HermesMessageRow, number: usize) -> Option<TimelineEvent>
         kind,
         title: timeline_title(&row),
         detail,
+        metadata: timeline_metadata(&row, kind, session_id),
     })
+}
+
+fn timeline_metadata(
+    row: &HermesMessageRow,
+    kind: TimelineKind,
+    session_id: &str,
+) -> TimelineEventMetadata {
+    let mut message_ids = vec![row.message_id.clone()];
+    if let Some(platform_message_id) = row
+        .platform_message_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        message_ids.push(platform_message_id.to_owned());
+    }
+    TimelineEventMetadata {
+        raw_refs: vec![TimelineEventRawRef {
+            source_cli: Some(HERMES_TOOL),
+            source_session: Some(session_id.into()),
+            row_id: Some(row.message_id.clone()),
+            provider_kind: Some(row.role.clone()),
+            role: Some(row.role.clone()),
+            digest: Some(stable_text_digest(&format!(
+                "{}\n{}\n{}\n{}\n{}",
+                row.message_id,
+                row.role,
+                row.content.as_deref().unwrap_or_default(),
+                row.tool_calls.as_deref().unwrap_or_default(),
+                row.timestamp
+            ))),
+            ..TimelineEventRawRef::default()
+        }],
+        message_ids,
+        provider_item_ids: row
+            .platform_message_id
+            .clone()
+            .into_iter()
+            .filter(|value| !value.trim().is_empty())
+            .collect(),
+        tool_calls: row
+            .tool_calls
+            .as_deref()
+            .and_then(tool_call_metadata)
+            .into_iter()
+            .collect(),
+        file_changes: (kind == TimelineKind::GitDiff)
+            .then_some(super::model::TimelineFileChange {
+                summary: Some(timeline_detail(row)),
+                diff: row.content.clone(),
+                ..super::model::TimelineFileChange::default()
+            })
+            .into_iter()
+            .collect(),
+        token_usage: row.token_count.map(|total| TokenBreakdown {
+            total,
+            ..TokenBreakdown::default()
+        }),
+        ..TimelineEventMetadata::default()
+    }
 }
 
 fn timeline_kind(row: &HermesMessageRow) -> Option<TimelineKind> {
@@ -1258,6 +1328,35 @@ fn has_tool_call(row: &HermesMessageRow) -> bool {
 fn tool_call_detail(tool_calls: &str) -> Option<String> {
     let value = serde_json::from_str::<Value>(tool_calls).ok()?;
     text_from_value(&value).or_else(|| Some("tool call".into()))
+}
+
+fn tool_call_metadata(tool_calls: &str) -> Option<TimelineToolCall> {
+    let value = serde_json::from_str::<Value>(tool_calls).ok()?;
+    let item = value
+        .as_array()
+        .and_then(|items| items.first())
+        .unwrap_or(&value);
+    Some(TimelineToolCall {
+        id: item
+            .get("id")
+            .or_else(|| item.get("call_id"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned),
+        name: item
+            .get("name")
+            .or_else(|| item.get("tool_name"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned),
+        arguments: item
+            .get("arguments")
+            .or_else(|| item.get("args"))
+            .or_else(|| item.get("input"))
+            .filter(|value| !value.is_null())
+            .cloned(),
+        raw: Some(value),
+    })
 }
 
 fn short_id(id: &str) -> String {
@@ -1386,6 +1485,14 @@ mod tests {
         assert_eq!(timeline.events[3].kind, TimelineKind::Tool);
         assert_eq!(timeline.events[4].kind, TimelineKind::Assistant);
         assert_eq!(timeline.events[3].title, "Tool: skill_view");
+        assert_eq!(
+            timeline.events[1].metadata.message_ids,
+            vec!["4", "feishu-msg-4"]
+        );
+        assert_eq!(
+            timeline.events[2].metadata.tool_calls[0].name.as_deref(),
+            Some("skill_view")
+        );
     }
 
     #[test]
@@ -1569,6 +1676,7 @@ mod tests {
             insert into messages (session_id, role, content, tool_name, timestamp, active) values
                 ('hermes-feishu', 'tool', 'skill body', 'skill_view', 1780641498, 1),
                 ('hermes-feishu', 'assistant', 'Root cause found', 'skill_view', 1780641499, 1);
+            update messages set platform_message_id = 'feishu-msg-4' where id = 4;
             "#,
         )
         .expect("schema");

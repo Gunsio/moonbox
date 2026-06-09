@@ -274,6 +274,20 @@ pub fn find_token_count(value: &Value) -> Option<usize> {
     }
 }
 
+pub fn stable_value_digest(value: &Value) -> String {
+    let serialized = serde_json::to_string(value).unwrap_or_default();
+    stable_text_digest(&serialized)
+}
+
+pub fn stable_text_digest(value: &str) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in value.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("fnv64:{hash:016x}")
+}
+
 pub fn max_timestamp(current: Option<String>, candidate: &str) -> String {
     match current {
         Some(current) if current.as_str() > candidate => current,
@@ -343,6 +357,7 @@ pub fn timeline_preview_truncated_event(number: usize, limit: usize) -> Timeline
         detail: format!(
             "showing first {limit} events; set MOONBOX_TIMELINE_EVENT_LIMIT=0 for full TUI preview"
         ),
+        metadata: Default::default(),
     }
 }
 
@@ -531,6 +546,7 @@ mod tests {
             kind: TimelineKind::User,
             title: "User".into(),
             detail: detail.into(),
+            metadata: Default::default(),
         }
     }
 

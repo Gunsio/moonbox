@@ -226,6 +226,11 @@ The first implementation focuses on the product shell:
 - Work Capsule JSON carries an auditable source map: `raw_source_map`,
   `raw_refs`, and `coverage` are enriched from the canonical timeline even when
   an external compiler omits them
+- Canonical timeline events retain the stable `id`, `time`, `kind`, `title`,
+  and `detail` fields while adding serde-default `metadata` for raw refs,
+  message/provider item ids, tool calls/results, approvals, attachments,
+  file-change evidence, runtime snapshots, system/config snapshots, and
+  token/cost data when a source store exposes them
 - Redaction policy runs before compiler stdin, Capsule JSON export, and target
   handoff prompts: secret-like values are scanned, sensitive paths are masked,
   event/file allowlists can narrow forwarded context, and every Capsule carries
@@ -918,13 +923,16 @@ Stable interfaces matter more than any single framework:
   continuation points with snippets, bookends, message ids, and scroll context
   in serde-default `provider_metadata` without invoking Hermes gateway/export
   commands.
+- M66: high-fidelity event/source schema; canonical timeline events now carry
+  serde-default `metadata` for raw refs, message/provider item ids, tool
+  calls/results, approvals, attachments, file-change evidence, runtime
+  snapshots, system/config snapshots, and token/cost data. Codex JSONL, Claude
+  JSONL, Hermes SQLite, and opt-in Codex app-server fixture/proxy sources fill
+  proven fields without launching provider runtimes, and Capsule `raw_refs`
+  preserve message/provider ids for audit.
 
 ### Remaining Milestones
 
-- M66: high-fidelity event/source schema. Extend the canonical model beyond
-  `TimelineEvent { id, time, kind, title, detail }` with raw refs, message ids,
-  provider item ids, tool args/results, approvals, attachments, file-change
-  evidence, runtime status, system prompt/config snapshot, and token/cost data.
 - M67: source fallback and contract tests. Prefer documented rich APIs, keep
   private local stores as read-only fallback, and make every degraded fidelity
   path visible in Doctor and the TUI.

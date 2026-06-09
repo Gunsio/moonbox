@@ -17,13 +17,15 @@ use super::{
         configured_session_scan_entry_limit, configured_session_summary_line_limit,
         discover_jsonl_files, display_time, event_id, find_token_count, human_timestamp,
         is_provider_context_text, max_timestamp, open_reader, push_timeline_event, read_error,
-        replace_time_dashes, string_field, text_from_value, title_case, truncate,
-        truncate_timeline_detail,
+        replace_time_dashes, stable_text_digest, stable_value_digest, string_field,
+        text_from_value, title_case, truncate, truncate_timeline_detail,
     },
     model::{
         CanonicalTimeline, CliTool, SessionRuntimeStatus, SessionStatus, SessionSummary,
         SourceCapabilities, SourceCapability, SourceCapabilityStatus, SourceProvenance,
-        TimelineEvent, TimelineKind, unknown_runtime_reason,
+        TimelineApproval, TimelineEvent, TimelineEventMetadata, TimelineEventRawRef,
+        TimelineFileChange, TimelineKind, TimelineRuntimeMetadata, TimelineToolCall,
+        TokenBreakdown, unknown_runtime_reason,
     },
 };
 
@@ -430,6 +432,18 @@ impl CodexSourceAdapter {
                         kind: TimelineKind::Error,
                         title: "Malformed event".into(),
                         detail: format!("line {}: {}", line_index + 1, error),
+                        metadata: TimelineEventMetadata {
+                            raw_refs: vec![TimelineEventRawRef {
+                                source_cli: Some(CODEX_TOOL),
+                                source_session: Some(session_id.into()),
+                                source_path: Some(path.display().to_string()),
+                                line_number: Some(line_index + 1),
+                                record_type: Some("malformed".into()),
+                                digest: Some(stable_text_digest(&line)),
+                                ..TimelineEventRawRef::default()
+                            }],
+                            ..TimelineEventMetadata::default()
+                        },
                     };
                     if push_timeline_event(&mut events, event, event_limit) {
                         break;
@@ -438,7 +452,8 @@ impl CodexSourceAdapter {
                 }
             };
 
-            if let Some(event) = timeline_event(record, events.len() + 1)
+            if let Some(event) =
+                timeline_event(record, events.len() + 1, session_id, path, line_index + 1)
                 && push_timeline_event(&mut events, event, event_limit)
             {
                 break;
@@ -889,7 +904,13 @@ impl SummaryBuilder {
     }
 }
 
-fn timeline_event(record: CodexRecord, number: usize) -> Option<TimelineEvent> {
+fn timeline_event(
+    record: CodexRecord,
+    number: usize,
+    session_id: &str,
+    path: &Path,
+    line_number: usize,
+) -> Option<TimelineEvent> {
     let record_type = record.record_type.as_deref().unwrap_or_default();
     let payload_type = string_field(&record.payload, "type").unwrap_or_default();
     let role = string_field(&record.payload, "role");
@@ -909,7 +930,51 @@ fn timeline_event(record: CodexRecord, number: usize) -> Option<TimelineEvent> {
         kind,
         title,
         detail,
+        metadata: timeline_metadata(&record, session_id, path, line_number, kind),
     })
+}
+
+fn timeline_metadata(
+    record: &CodexRecord,
+    session_id: &str,
+    path: &Path,
+    line_number: usize,
+    kind: TimelineKind,
+) -> TimelineEventMetadata {
+    let payload_type = string_field(&record.payload, "type").map(str::to_owned);
+    let role = string_field(&record.payload, "role").map(str::to_owned);
+    let message_ids = id_fields(&record.payload, &["message_id", "msg_id", "messageId"]);
+    let provider_item_ids = id_fields(&record.payload, &["id", "item_id", "itemId", "call_id"]);
+    let token_usage = find_token_count(&record.payload).map(token_breakdown);
+    let duration_ms = record.payload.get("duration_ms").and_then(Value::as_u64);
+    let record_type = record.record_type.clone();
+    TimelineEventMetadata {
+        raw_refs: vec![TimelineEventRawRef {
+            source_cli: Some(CODEX_TOOL),
+            source_session: Some(session_id.into()),
+            source_path: Some(path.display().to_string()),
+            line_number: Some(line_number),
+            record_type: record_type.clone(),
+            provider_kind: payload_type.clone(),
+            role,
+            digest: Some(stable_value_digest(&record.payload)),
+            ..TimelineEventRawRef::default()
+        }],
+        message_ids,
+        provider_item_ids,
+        tool_calls: tool_calls_from_codex_payload(&record.payload, payload_type.as_deref()),
+        approvals: approvals_from_payload(
+            &record.payload,
+            record_type.as_deref(),
+            payload_type.as_deref(),
+        ),
+        file_changes: file_changes_from_payload(&record.payload, kind),
+        runtime: runtime_from_codex_payload(payload_type.as_deref(), duration_ms),
+        system_prompt_snapshot: system_prompt_snapshot(&record.payload),
+        config_snapshot: config_snapshot(&record.payload),
+        token_usage,
+        ..TimelineEventMetadata::default()
+    }
 }
 
 fn timeline_kind(
@@ -972,6 +1037,132 @@ fn timeline_detail(payload: &Value, record_type: &str, payload_type: &str) -> St
     text_from_value(payload)
         .map(|text| truncate_timeline_detail(&text))
         .unwrap_or_default()
+}
+
+fn id_fields(payload: &Value, keys: &[&str]) -> Vec<String> {
+    keys.iter()
+        .filter_map(|key| string_field(payload, key))
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_owned)
+        .fold(Vec::new(), |mut values, value| {
+            if !values.contains(&value) {
+                values.push(value);
+            }
+            values
+        })
+}
+
+fn token_breakdown(total: usize) -> TokenBreakdown {
+    TokenBreakdown {
+        total,
+        ..TokenBreakdown::default()
+    }
+}
+
+fn clone_non_null(value: Option<&Value>) -> Option<Value> {
+    value.filter(|value| !value.is_null()).cloned()
+}
+
+fn first_string(payload: &Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| string_field(payload, key))
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_owned)
+}
+
+fn tool_calls_from_codex_payload(
+    payload: &Value,
+    payload_type: Option<&str>,
+) -> Vec<TimelineToolCall> {
+    let is_tool_call = payload_type.is_some_and(|value| value.contains("call"))
+        || payload.get("arguments").is_some()
+        || payload.get("input").is_some();
+    if !is_tool_call {
+        return Vec::new();
+    }
+    vec![TimelineToolCall {
+        id: first_string(payload, &["call_id", "id", "item_id"]),
+        name: first_string(payload, &["name", "tool_name", "function_name", "command"]),
+        arguments: clone_non_null(
+            payload
+                .get("arguments")
+                .or_else(|| payload.get("args"))
+                .or_else(|| payload.get("input"))
+                .or_else(|| payload.get("params")),
+        ),
+        raw: Some(payload.clone()),
+    }]
+}
+
+fn approvals_from_payload(
+    payload: &Value,
+    record_type: Option<&str>,
+    payload_type: Option<&str>,
+) -> Vec<TimelineApproval> {
+    let is_approval = record_type.is_some_and(|value| value.contains("approval"))
+        || payload_type.is_some_and(|value| value.contains("approval"))
+        || payload.get("approval").is_some();
+    if !is_approval {
+        return Vec::new();
+    }
+    vec![TimelineApproval {
+        action: first_string(payload, &["action", "command", "cmd"]),
+        decision: first_string(payload, &["decision", "status", "result"]),
+        reason: first_string(payload, &["reason", "message"]),
+        raw: Some(payload.clone()),
+    }]
+}
+
+fn file_changes_from_payload(payload: &Value, kind: TimelineKind) -> Vec<TimelineFileChange> {
+    if kind != TimelineKind::GitDiff {
+        return Vec::new();
+    }
+    vec![TimelineFileChange {
+        path: first_string(payload, &["path", "file", "file_path"]),
+        operation: first_string(payload, &["operation", "op", "change_type"]),
+        summary: text_from_value(payload).map(|text| truncate_timeline_detail(&text)),
+        diff: text_from_value(payload),
+        raw: Some(payload.clone()),
+    }]
+}
+
+fn runtime_from_codex_payload(
+    payload_type: Option<&str>,
+    duration_ms: Option<u64>,
+) -> Option<TimelineRuntimeMetadata> {
+    match payload_type {
+        Some("task_started") => Some(TimelineRuntimeMetadata {
+            status: SessionRuntimeStatus::Active,
+            reason: Some("Codex task started".into()),
+            ..TimelineRuntimeMetadata::default()
+        }),
+        Some("task_complete") => Some(TimelineRuntimeMetadata {
+            status: SessionRuntimeStatus::Inactive,
+            reason: Some("Codex task completed".into()),
+            duration_ms,
+            ..TimelineRuntimeMetadata::default()
+        }),
+        _ => duration_ms.map(|duration_ms| TimelineRuntimeMetadata {
+            duration_ms: Some(duration_ms),
+            ..TimelineRuntimeMetadata::default()
+        }),
+    }
+}
+
+fn system_prompt_snapshot(payload: &Value) -> Option<String> {
+    first_string(
+        payload,
+        &["system_prompt", "instructions", "developer_message"],
+    )
+}
+
+fn config_snapshot(payload: &Value) -> Option<Value> {
+    clone_non_null(
+        payload
+            .get("model_config")
+            .or_else(|| payload.get("config"))
+            .or_else(|| payload.get("settings")),
+    )
 }
 
 const THREAD_SELECT: &str = r#"
@@ -1161,7 +1352,7 @@ mod tests {
             &root,
             "2026/06/06/rollout-2026-06-06T08-00-00-test.jsonl",
             r#"{"timestamp":"2026-06-06T08:00:00.000Z","type":"session_meta","payload":{"id":"codex-real-2","cwd":"/repo"}}
-{"timestamp":"2026-06-06T08:01:00.000Z","type":"event_msg","payload":{"type":"user_message","message":"Start here"}}
+{"timestamp":"2026-06-06T08:01:00.000Z","type":"event_msg","payload":{"type":"user_message","message_id":"msg-codex-1","message":"Start here"}}
 {"timestamp":"2026-06-06T08:02:00.000Z","type":"event_msg","payload":{"type":"agent_message","message":"Done"}}
 {"timestamp":"2026-06-06T08:03:00.000Z","type":"event_msg","payload":{"type":"error","message":"resume failed"}}
 "#,
@@ -1177,6 +1368,19 @@ mod tests {
         assert_eq!(timeline.events[1].kind, TimelineKind::User);
         assert_eq!(timeline.events[2].kind, TimelineKind::Assistant);
         assert_eq!(timeline.events[3].kind, TimelineKind::Error);
+        assert_eq!(timeline.events[1].metadata.message_ids, vec!["msg-codex-1"]);
+        assert_eq!(
+            timeline.events[1].metadata.raw_refs[0]
+                .source_session
+                .as_deref(),
+            Some("codex-real-2")
+        );
+        assert_eq!(
+            timeline.events[1].metadata.raw_refs[0]
+                .provider_kind
+                .as_deref(),
+            Some("user_message")
+        );
     }
 
     #[test]

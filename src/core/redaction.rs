@@ -6,7 +6,9 @@ use super::{
     config,
     model::{
         CanonicalTimeline, CapsuleCompileRequest, ChecklistItem, ProviderSessionMetadata,
-        RedactionReport, SessionSummary, TimelineKind, WorkCapsule,
+        RedactionReport, SessionSummary, TimelineApproval, TimelineAttachment,
+        TimelineCostMetadata, TimelineEventMetadata, TimelineEventRawRef, TimelineFileChange,
+        TimelineKind, TimelineRuntimeMetadata, TimelineToolCall, TimelineToolResult, WorkCapsule,
     },
 };
 
@@ -184,6 +186,9 @@ pub fn redact_work_capsule(mut capsule: WorkCapsule, base_report: &RedactionRepo
         .into_iter()
         .map(|mut raw_ref| {
             raw_ref.excerpt = redact_text(&raw_ref.excerpt, &policy, &mut stats);
+            raw_ref.message_ids = redact_strings(raw_ref.message_ids, &policy, &mut stats);
+            raw_ref.provider_item_ids =
+                redact_strings(raw_ref.provider_item_ids, &policy, &mut stats);
             raw_ref
         })
         .collect();
@@ -370,10 +375,214 @@ fn redact_timeline(
         }
         event.title = redact_text(&event.title, policy, stats);
         event.detail = redact_text(&event.detail, policy, stats);
+        event.metadata = redact_event_metadata(event.metadata, policy, stats);
         events.push(event);
     }
     timeline.events = events;
     timeline
+}
+
+fn redact_event_metadata(
+    mut metadata: TimelineEventMetadata,
+    policy: &RedactionPolicy,
+    stats: &mut RedactionStats,
+) -> TimelineEventMetadata {
+    metadata.raw_refs = metadata
+        .raw_refs
+        .into_iter()
+        .map(|raw_ref| redact_event_raw_ref(raw_ref, policy, stats))
+        .collect();
+    metadata.message_ids = redact_strings(metadata.message_ids, policy, stats);
+    metadata.provider_item_ids = redact_strings(metadata.provider_item_ids, policy, stats);
+    metadata.tool_calls = metadata
+        .tool_calls
+        .into_iter()
+        .map(|tool_call| redact_tool_call(tool_call, policy, stats))
+        .collect();
+    metadata.tool_results = metadata
+        .tool_results
+        .into_iter()
+        .map(|tool_result| redact_tool_result(tool_result, policy, stats))
+        .collect();
+    metadata.approvals = metadata
+        .approvals
+        .into_iter()
+        .map(|approval| redact_approval(approval, policy, stats))
+        .collect();
+    metadata.attachments = metadata
+        .attachments
+        .into_iter()
+        .map(|attachment| redact_attachment(attachment, policy, stats))
+        .collect();
+    metadata.file_changes = metadata
+        .file_changes
+        .into_iter()
+        .map(|file_change| redact_file_change(file_change, policy, stats))
+        .collect();
+    metadata.runtime = metadata
+        .runtime
+        .map(|runtime| redact_runtime(runtime, policy, stats));
+    metadata.system_prompt_snapshot = metadata
+        .system_prompt_snapshot
+        .map(|value| redact_text(&value, policy, stats));
+    metadata.config_snapshot = metadata
+        .config_snapshot
+        .map(|value| redact_json_value(value, policy, stats));
+    metadata.cost = metadata.cost.map(|cost| redact_cost(cost, policy, stats));
+    metadata
+}
+
+fn redact_event_raw_ref(
+    mut raw_ref: TimelineEventRawRef,
+    policy: &RedactionPolicy,
+    stats: &mut RedactionStats,
+) -> TimelineEventRawRef {
+    raw_ref.source_session = raw_ref
+        .source_session
+        .map(|value| redact_text(&value, policy, stats));
+    raw_ref.source_path = raw_ref
+        .source_path
+        .map(|value| redact_text(&value, policy, stats));
+    raw_ref.row_id = raw_ref
+        .row_id
+        .map(|value| redact_text(&value, policy, stats));
+    raw_ref.record_type = raw_ref
+        .record_type
+        .map(|value| redact_text(&value, policy, stats));
+    raw_ref.provider_kind = raw_ref
+        .provider_kind
+        .map(|value| redact_text(&value, policy, stats));
+    raw_ref.role = raw_ref.role.map(|value| redact_text(&value, policy, stats));
+    raw_ref
+}
+
+fn redact_tool_call(
+    mut tool_call: TimelineToolCall,
+    policy: &RedactionPolicy,
+    stats: &mut RedactionStats,
+) -> TimelineToolCall {
+    tool_call.id = tool_call.id.map(|value| redact_text(&value, policy, stats));
+    tool_call.name = tool_call
+        .name
+        .map(|value| redact_text(&value, policy, stats));
+    tool_call.arguments = tool_call
+        .arguments
+        .map(|value| redact_json_value(value, policy, stats));
+    tool_call.raw = tool_call
+        .raw
+        .map(|value| redact_json_value(value, policy, stats));
+    tool_call
+}
+
+fn redact_tool_result(
+    mut tool_result: TimelineToolResult,
+    policy: &RedactionPolicy,
+    stats: &mut RedactionStats,
+) -> TimelineToolResult {
+    tool_result.call_id = tool_result
+        .call_id
+        .map(|value| redact_text(&value, policy, stats));
+    tool_result.name = tool_result
+        .name
+        .map(|value| redact_text(&value, policy, stats));
+    tool_result.content = tool_result
+        .content
+        .map(|value| redact_text(&value, policy, stats));
+    tool_result.raw = tool_result
+        .raw
+        .map(|value| redact_json_value(value, policy, stats));
+    tool_result
+}
+
+fn redact_approval(
+    mut approval: TimelineApproval,
+    policy: &RedactionPolicy,
+    stats: &mut RedactionStats,
+) -> TimelineApproval {
+    approval.action = approval
+        .action
+        .map(|value| redact_text(&value, policy, stats));
+    approval.decision = approval
+        .decision
+        .map(|value| redact_text(&value, policy, stats));
+    approval.reason = approval
+        .reason
+        .map(|value| redact_text(&value, policy, stats));
+    approval.raw = approval
+        .raw
+        .map(|value| redact_json_value(value, policy, stats));
+    approval
+}
+
+fn redact_attachment(
+    mut attachment: TimelineAttachment,
+    policy: &RedactionPolicy,
+    stats: &mut RedactionStats,
+) -> TimelineAttachment {
+    attachment.id = attachment
+        .id
+        .map(|value| redact_text(&value, policy, stats));
+    attachment.name = attachment
+        .name
+        .map(|value| redact_text(&value, policy, stats));
+    attachment.path = attachment
+        .path
+        .map(|value| redact_text(&value, policy, stats));
+    attachment.mime_type = attachment
+        .mime_type
+        .map(|value| redact_text(&value, policy, stats));
+    attachment.raw = attachment
+        .raw
+        .map(|value| redact_json_value(value, policy, stats));
+    attachment
+}
+
+fn redact_file_change(
+    mut file_change: TimelineFileChange,
+    policy: &RedactionPolicy,
+    stats: &mut RedactionStats,
+) -> TimelineFileChange {
+    file_change.path = file_change
+        .path
+        .map(|value| redact_text(&value, policy, stats));
+    file_change.operation = file_change
+        .operation
+        .map(|value| redact_text(&value, policy, stats));
+    file_change.summary = file_change
+        .summary
+        .map(|value| redact_text(&value, policy, stats));
+    file_change.diff = file_change
+        .diff
+        .map(|value| redact_text(&value, policy, stats));
+    file_change.raw = file_change
+        .raw
+        .map(|value| redact_json_value(value, policy, stats));
+    file_change
+}
+
+fn redact_runtime(
+    mut runtime: TimelineRuntimeMetadata,
+    policy: &RedactionPolicy,
+    stats: &mut RedactionStats,
+) -> TimelineRuntimeMetadata {
+    runtime.reason = runtime
+        .reason
+        .map(|value| redact_text(&value, policy, stats));
+    runtime
+}
+
+fn redact_cost(
+    mut cost: TimelineCostMetadata,
+    policy: &RedactionPolicy,
+    stats: &mut RedactionStats,
+) -> TimelineCostMetadata {
+    cost.currency = cost
+        .currency
+        .map(|value| redact_text(&value, policy, stats));
+    cost.billing_source = cost
+        .billing_source
+        .map(|value| redact_text(&value, policy, stats));
+    cost
 }
 
 fn redact_strings(
@@ -669,7 +878,9 @@ mod tests {
     use super::*;
     use crate::core::model::{
         CliTool, ProviderContinuationPoint, ProviderScrollContext, ProviderSearchMetadata,
-        SessionRuntimeStatus, SessionStatus, SourceProvenance, TimelineEvent,
+        SessionRuntimeStatus, SessionStatus, SourceProvenance, TimelineAttachment,
+        TimelineCostMetadata, TimelineEvent, TimelineEventMetadata, TimelineEventRawRef,
+        TimelineFileChange, TimelineRuntimeMetadata, TimelineToolCall, TimelineToolResult,
     };
 
     #[test]
@@ -729,6 +940,51 @@ mod tests {
 
     #[test]
     fn compile_request_carries_redaction_disclosure() {
+        let mut source_event = event("evt-001", TimelineKind::User, "Use /Users/alice/repo");
+        source_event.metadata = TimelineEventMetadata {
+            raw_refs: vec![TimelineEventRawRef {
+                source_path: Some("/Users/alice/.codex/session.jsonl".into()),
+                row_id: Some("row-sk-row1234567890".into()),
+                ..TimelineEventRawRef::default()
+            }],
+            message_ids: vec!["msg-/Users/alice".into()],
+            provider_item_ids: vec!["sk-item1234567890".into()],
+            tool_calls: vec![TimelineToolCall {
+                id: Some("call-/Users/alice".into()),
+                name: Some("Read".into()),
+                arguments: Some(serde_json::json!({"file_path": "/Users/alice/repo/src/main.rs"})),
+                raw: Some(serde_json::json!({"secret": "sk-tool1234567890"})),
+            }],
+            tool_results: vec![TimelineToolResult {
+                call_id: Some("call-/Users/alice".into()),
+                content: Some("stdout sk-result1234567890 /Users/alice".into()),
+                raw: Some(serde_json::json!({"path": "/Users/alice/result"})),
+                ..TimelineToolResult::default()
+            }],
+            attachments: vec![TimelineAttachment {
+                path: Some("/Users/alice/Desktop/secret.png".into()),
+                raw: Some(serde_json::json!({"name": "sk-attachment1234567890"})),
+                ..TimelineAttachment::default()
+            }],
+            file_changes: vec![TimelineFileChange {
+                path: Some("/Users/alice/repo/src/main.rs".into()),
+                diff: Some("diff --git a/sk-diff1234567890 b/main.rs".into()),
+                raw: Some(serde_json::json!({"path": "/Users/alice/repo"})),
+                ..TimelineFileChange::default()
+            }],
+            runtime: Some(TimelineRuntimeMetadata {
+                status: SessionRuntimeStatus::Unknown,
+                reason: Some("runtime /Users/alice/.codex".into()),
+                ..TimelineRuntimeMetadata::default()
+            }),
+            system_prompt_snapshot: Some("system sk-system1234567890 /Users/alice".into()),
+            config_snapshot: Some(serde_json::json!({"path": "/Users/alice/config"})),
+            cost: Some(TimelineCostMetadata {
+                billing_source: Some("sk-billing1234567890".into()),
+                ..TimelineCostMetadata::default()
+            }),
+            ..TimelineEventMetadata::default()
+        };
         let request = CapsuleCompileRequest {
             version: 1,
             source_cli: CliTool::Codex,
@@ -793,11 +1049,7 @@ mod tests {
                 version: 1,
                 source_cli: CliTool::Codex,
                 source_session: "session".into(),
-                events: vec![event(
-                    "evt-001",
-                    TimelineKind::User,
-                    "Use /Users/alice/repo",
-                )],
+                events: vec![source_event],
             },
             redaction: RedactionReport::default(),
         };
@@ -850,6 +1102,42 @@ mod tests {
             point.bookend_after.as_deref(),
             Some("after <secret:redacted>")
         );
+        let event_metadata = &redacted.timeline.events[0].metadata;
+        assert_eq!(
+            event_metadata.raw_refs[0].source_path.as_deref(),
+            Some("<path:redacted>")
+        );
+        assert_eq!(event_metadata.message_ids[0], "<path:redacted>");
+        assert_eq!(event_metadata.provider_item_ids[0], "<secret:redacted>");
+        assert_eq!(
+            event_metadata.tool_calls[0]
+                .arguments
+                .as_ref()
+                .expect("tool args")["file_path"],
+            "<path:redacted>"
+        );
+        assert!(
+            event_metadata.tool_results[0]
+                .content
+                .as_deref()
+                .expect("tool result")
+                .contains("<secret:redacted> <path:redacted>")
+        );
+        assert_eq!(
+            event_metadata.attachments[0].path.as_deref(),
+            Some("<path:redacted>")
+        );
+        assert_eq!(
+            event_metadata.file_changes[0].path.as_deref(),
+            Some("<path:redacted>")
+        );
+        assert!(
+            event_metadata
+                .system_prompt_snapshot
+                .as_deref()
+                .expect("system prompt")
+                .contains("<secret:redacted> <path:redacted>")
+        );
         assert!(
             redacted
                 .redaction
@@ -865,6 +1153,7 @@ mod tests {
             kind,
             title: format!("{kind:?}"),
             detail: detail.into(),
+            metadata: Default::default(),
         }
     }
 }
