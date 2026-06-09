@@ -50,5 +50,7 @@ grep -Fq 'source Codex' "$svg"
 grep -Fq 'rewind evt' "$svg"
 grep -Fq 'target Hermes' "$svg"
 grep -Fq 'handoff trail' "$svg"
+grep -Fq 'Portrait' "$svg"
+grep -Fq 'cached timeline' "$svg"
 
 echo "moonbox docs asset smoke passed"

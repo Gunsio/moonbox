@@ -280,6 +280,11 @@ and this project uses semantic versioning once tagged releases start.
 - Action Path now renders an explicit `source -> rewind -> target` route and a
   short 720 ms handoff trail when the target picker enters Handoff Review; Esc
   or `q` closes the Review and cancels the trail.
+- Session rows now include compact portraits: summary-only rows show indexed
+  event/token activity, while the selected hydrated session shows a real
+  `U/A/T/R` shape badge from the cached timeline. Handoff Review and Session
+  Details expose the same portrait and label whether it came from cached
+  timeline data or indexed summary data.
 - TUI `+` / `=` now zooms the focused panel and `-` restores the default
   layout; zoom follows tab focus so Sessions, Timeline, Details, and Action
   Path can each be expanded without resetting selection or scroll state.

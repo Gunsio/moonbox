@@ -192,6 +192,8 @@ mod tests {
 
         assert!(svg.contains("Handoff Review"));
         assert!(svg.contains("Capsule Review"));
+        assert!(svg.contains("Portrait"));
+        assert!(svg.contains("cached timeline"));
         assert!(svg.contains("Target receives"));
         assert!(svg.contains("Draft Work Capsule"));
         assert!(svg.contains("moonbox launch --execute"));
