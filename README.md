@@ -180,9 +180,17 @@ The first implementation focuses on the product shell:
   stream events, and fork parent metadata are surfaced without invoking Claude.
   Remote / remote-control records remain separate observability events and are
   not mixed into local resume rows.
-- Real Hermes CLI-resume discovery from `~/.hermes/state.db`
-  `source = cli` sessions, with explicit ID lookup still available across
-  the Hermes store
+- Real Hermes all-source discovery from `~/.hermes/state.db`: Moonbox lists all
+  non-archived Hermes sources by default, including CLI, Discord, Telegram,
+  Slack, API server, cron, and provider-specific rows, with explicit ID lookup
+  still available across the Hermes store
+- `moonbox sessions --filter hermes --hermes-source <source>` narrows Hermes
+  inventory by provider source without changing the cross-CLI `--filter`
+  semantics
+- Hermes session JSON carries provider metadata when present:
+  `provider_metadata.source`, platform, user id, session key, origin metadata,
+  model config, system prompt snapshot, handoff state, archived state, and token
+  breakdown
 - Runtime Hermes home override via `MOONBOX_HERMES_HOME` or `HERMES_HOME`
 - Runtime list limit defaults to the newest 200 sessions per real adapter; explicit session lookup still searches the full store
 - Set `MOONBOX_SESSION_LIMIT=0` for unlimited real-session list discovery
@@ -895,13 +903,14 @@ Stable interfaces matter more than any single framework:
   and fork parent metadata are parsed into summaries, timelines, and Doctor
   capability reports without invoking Claude. Remote / remote-control records
   stay separate from local resume rows.
+- M64: Hermes all-source local inventory; Hermes now lists all non-archived
+  sources by default, supports `sessions --hermes-source` provider-source
+  filtering, and preserves source/platform/user/session metadata, origin
+  metadata, model config, system prompt snapshots, handoff state, archived
+  state, and token breakdown in serde-default `provider_metadata`.
 
 ### Remaining Milestones
 
-- M64: Hermes all-source gateway inventory. List all non-archived Hermes
-  sources by default, add source filters, and preserve platform/user/session
-  metadata, model config, system prompt snapshot, handoff state, and token
-  breakdown.
 - M65: Hermes export/search integration. Use Hermes export/stats/search or
   equivalent FTS to locate continuation points with snippets, bookends, message
   ids, and scroll context instead of expanding long sessions blindly.

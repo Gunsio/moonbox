@@ -26,6 +26,7 @@ use clap::{CommandFactory, Parser};
 use cli::{Cli, Command};
 use color_eyre::Result;
 use std::{
+    collections::HashSet,
     fs,
     io::{self, Write},
     path::Path,
@@ -86,9 +87,13 @@ fn execute_tui_exit_action(action: Option<app::TuiExitAction>) -> Result<()> {
 
 fn print_sessions(args: cli::SessionListArgs) -> Result<()> {
     let filter = args.filter.or(args.source);
+    let hermes_sources = normalized_hermes_sources(&args.hermes_sources);
     let sessions = core::workbench::list_sessions()?
         .into_iter()
         .filter(|session| filter.is_none_or(|filter| session.cli == filter))
+        .filter(|session| {
+            hermes_sources.is_empty() || hermes_source_matches(session, &hermes_sources)
+        })
         .collect::<Vec<_>>();
     if args.json {
         println!("{}", serde_json::to_string_pretty(&sessions)?);
@@ -99,6 +104,11 @@ fn print_sessions(args: cli::SessionListArgs) -> Result<()> {
                 .map(|tool| tool.id().to_owned())
                 .unwrap_or_else(|| "all".into())
         );
+        if !hermes_sources.is_empty() {
+            let mut sources = hermes_sources.iter().cloned().collect::<Vec<_>>();
+            sources.sort();
+            println!("hermes_source: {}", sources.join(","));
+        }
         for session in sessions {
             println!(
                 "{:<8} {:<7} {:<28} {:<24} {}{}",
@@ -112,6 +122,41 @@ fn print_sessions(args: cli::SessionListArgs) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn normalized_hermes_sources(values: &[String]) -> HashSet<String> {
+    values
+        .iter()
+        .filter_map(|value| normalized_hermes_source(value))
+        .collect()
+}
+
+fn hermes_source_matches(
+    session: &core::model::SessionSummary,
+    hermes_sources: &HashSet<String>,
+) -> bool {
+    if session.cli != core::model::CliTool::Hermes {
+        return false;
+    }
+    session
+        .provider_metadata
+        .as_ref()
+        .and_then(|metadata| metadata.source.as_deref())
+        .and_then(normalized_hermes_source)
+        .is_some_and(|source| hermes_sources.contains(&source))
+}
+
+fn normalized_hermes_source(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return None;
+    }
+    let normalized = value.to_ascii_lowercase().replace(['-', ' ', '/'], "_");
+    Some(match normalized.as_str() {
+        "api" | "api_server" | "apiserver" => "api_server".into(),
+        "cli" | "discord" | "telegram" | "slack" | "cron" => normalized,
+        _ => normalized,
+    })
 }
 
 fn parse_skip_suffix(parse_skip_count: usize) -> String {

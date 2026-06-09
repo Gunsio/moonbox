@@ -89,6 +89,9 @@ pub struct SessionListArgs {
     /// Backward-compatible alias for --filter.
     #[arg(long, value_enum, hide = true)]
     pub source: Option<CliTool>,
+    /// Filter Hermes sessions by Hermes source/platform, for example cli, discord, telegram, slack, api-server, or cron.
+    #[arg(long = "hermes-source", value_delimiter = ',')]
+    pub hermes_sources: Vec<String>,
 }
 
 #[derive(Debug, Args, Clone, Default)]

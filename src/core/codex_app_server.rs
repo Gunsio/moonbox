@@ -326,6 +326,7 @@ pub(crate) fn app_thread_summary(thread: CodexAppThread) -> SessionSummary {
         source_provenance: SourceProvenance::Real,
         source_path: Some(CodexAppServerSource::thread_source_path(&thread.id)),
         parse_skip_count: 0,
+        provider_metadata: None,
     }
 }
 

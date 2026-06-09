@@ -611,6 +611,7 @@ fn fallback_session(source: CliTool) -> SessionSummary {
         source_provenance: SourceProvenance::Fixture,
         source_path: None,
         parse_skip_count: 0,
+        provider_metadata: None,
     }
 }
 
