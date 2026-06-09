@@ -941,12 +941,13 @@ Stable interfaces matter more than any single framework:
   and fixture/contract tests lock full-fidelity Codex app-server, Codex local
   fallback, Claude partial JSONL, Hermes local fallback, fixture fallback, and
   missing-source paths.
+- M68: handoff signature; Action Path now renders an explicit
+  `source -> rewind -> target` route, target Handoff Review starts a
+  non-blocking 720 ms handoff trail through the same path, and closing the
+  Review cancels the trail without launching anything.
 
 ### Remaining Milestones
 
-- M68: handoff signature. Make `x -> Review -> enter` visibly feel like a
-  Moonbox handoff by rendering an Action Path arrow and a short, optional
-  handoff trail animation that stays under 800 ms.
 - M69: session portrait. Add lightweight per-session density/sparkline badges
   for session shape and activity using indexed or cached data only, never
   fake token/status values.

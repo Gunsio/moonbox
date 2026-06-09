@@ -24,6 +24,7 @@ pub fn docs_screenshot_svg(width: u16, height: u16) -> Result<String> {
     app.show_launch = true;
     app.launch_review = true;
     app.pending_target = CliTool::Hermes;
+    app.start_handoff_trail_for_review();
     app.doctor_report = DoctorReport {
         version: 1,
         status: VerificationStatus::Pass,
