@@ -644,11 +644,15 @@ every target visible and annotates each option with `READY`, `WARN`, or
 The picker uses the same verifier policy as the CLI, so `moon verify` and the
 TUI cannot disagree on target readiness. The selected target also shows
 readiness detail rows from the verifier report, with blocking failures and
-warnings prioritized over pass checks. Press `D` or run `:doctor` to open the
-environment Doctor panel; `r` refreshes diagnostics and `y` copies the JSON
-report. The panel shows adapter provenance, store path, session count, skipped
-record count, and last indexed timestamp. It is read-only and does not load
-timelines, resume sessions, launch targets, or spawn target binaries.
+warnings prioritized over pass checks. The top bar collapses compiler state,
+environment diagnostics, and verifier readiness into one `Pre-flight:
+PASS/WARN/BLOCKED` signal with Strong, Medium, or Weak confidence language.
+Press `D` or run `:doctor` to open the Pre-flight panel; `v` refreshes verifier
+evidence, `r` refreshes diagnostics, and `y` copies the JSON report. The panel
+shows compiler, Doctor, and verifier evidence before adapter provenance, store
+path, session count, skipped record count, and last indexed timestamp. It is
+read-only and does not load timelines, resume sessions, launch targets, or
+spawn target binaries.
 
 Session search matches id, title/raw title, cwd, source path, source, branch,
 and health reason. When a different session becomes selected by movement, source filter, or search,
@@ -950,12 +954,14 @@ Stable interfaces matter more than any single framework:
   timeline cache for real `U/A/T/R` shape density, and Handoff Review / Session
   Details surface the same portrait without loading extra source history or
   inventing unknown token/status data.
+- M70: pre-flight pill; the TUI top bar now collapses Compiler, Doctor, and
+  Verify into a single `Pre-flight: PASS/WARN/BLOCKED` signal with
+  Strong/Medium/Weak confidence language, and `D` opens expandable evidence
+  for compiler state, Doctor diagnostics, and verifier readiness without
+  launching or resuming sessions.
 
 ### Remaining Milestones
 
-- M70: pre-flight pill. Collapse Compiler, Doctor, and Verify into a single
-  expandable `Pre-flight: PASS/WARN/BLOCKED` signal with Strong/Medium/Weak
-  confidence language and evidence details.
 - M71: command palette. Add `:` command discovery for core actions such as
   open original, review handoff, switch source/data space, skill picker,
   doctor, and help while preserving the hotkeys.
