@@ -180,6 +180,11 @@ and this project uses semantic versioning once tagged releases start.
   <query>` for read-only local Hermes message search, returning matching
   sessions with `provider_metadata.search` and
   `provider_metadata.continuation_points`.
+- High-fidelity canonical timeline event metadata. `TimelineEvent` keeps the
+  stable `id`, `time`, `kind`, `title`, and `detail` fields while adding
+  serde-default `metadata` for raw refs, message/provider item ids, tool
+  calls/results, approvals, attachments, file-change evidence, runtime
+  snapshots, system/config snapshots, and token/cost data.
 
 ### Changed
 
@@ -226,6 +231,9 @@ and this project uses semantic versioning once tagged releases start.
 - Hermes search results carry snippets, bookends, message ids, and scroll
   context so continuation points can be located without expanding long sessions
   blindly.
+- Capsule `raw_refs` now preserve message ids and provider item ids from
+  canonical event metadata, giving verifier/export surfaces a stronger audit
+  link back to source events without breaking legacy Capsule input.
 - Explicit session lookup routes obvious Hermes/Codex/Claude ids to the likely
   adapter before expensive full-store fallback.
 - CLI launch/verify uses lightweight session artifacts instead of constructing

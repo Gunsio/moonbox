@@ -390,6 +390,8 @@ fn enrich_work_capsule(request: &CapsuleCompileRequest, mut capsule: WorkCapsule
                 digest: raw_source_digest(event),
                 excerpt,
                 covered,
+                message_ids: event.metadata.message_ids.clone(),
+                provider_item_ids: event.metadata.provider_item_ids.clone(),
             }
         })
         .collect::<Vec<_>>();
@@ -488,8 +490,12 @@ fn raw_source_excerpt(event: &TimelineEvent) -> String {
 fn raw_source_digest(event: &TimelineEvent) -> String {
     let mut hash = 0xcbf29ce484222325u64;
     for byte in format!(
-        "{}\n{:?}\n{}\n{}",
-        event.id, event.kind, event.title, event.detail
+        "{}\n{:?}\n{}\n{}\n{}",
+        event.id,
+        event.kind,
+        event.title,
+        event.detail,
+        serde_json::to_string(&event.metadata).unwrap_or_default()
     )
     .as_bytes()
     {
@@ -941,6 +947,33 @@ mod tests {
             .expect_err("missing rewind");
 
         assert!(error.to_string().contains("missing"));
+    }
+
+    #[test]
+    fn enriched_capsule_raw_refs_preserve_event_source_ids() {
+        let mut request =
+            data::compile_request(CliTool::Codex, CliTool::Hermes, "evt-001").expect("request");
+        let first_event = request
+            .timeline
+            .events
+            .iter_mut()
+            .find(|event| event.id == "evt-001")
+            .expect("first event");
+        first_event.metadata.message_ids = vec!["msg-001".into()];
+        first_event.metadata.provider_item_ids = vec!["item-001".into()];
+
+        let output = FixtureCapsuleCompiler
+            .compile(&request)
+            .expect("compiled capsule");
+        let raw_ref = output
+            .capsule
+            .raw_refs
+            .iter()
+            .find(|raw_ref| raw_ref.source_event_id == "evt-001")
+            .expect("raw ref");
+
+        assert_eq!(raw_ref.message_ids, vec!["msg-001"]);
+        assert_eq!(raw_ref.provider_item_ids, vec!["item-001"]);
     }
 
     #[cfg(unix)]

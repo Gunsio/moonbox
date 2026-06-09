@@ -750,6 +750,7 @@ mod tests {
                     kind: TimelineKind::User,
                     title: "User".into(),
                     detail: "real request".into(),
+                    metadata: Default::default(),
                 },
                 TimelineEvent {
                     id: "evt-034".into(),
@@ -757,6 +758,7 @@ mod tests {
                     kind: TimelineKind::Assistant,
                     title: "Assistant".into(),
                     detail: "implementation details".into(),
+                    metadata: Default::default(),
                 },
                 TimelineEvent {
                     id: "evt-091".into(),
@@ -764,6 +766,7 @@ mod tests {
                     kind: TimelineKind::Tool,
                     title: "exec_command".into(),
                     detail: "low signal tool call".into(),
+                    metadata: Default::default(),
                 },
             ],
         };

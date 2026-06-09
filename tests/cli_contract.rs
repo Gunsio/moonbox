@@ -1607,6 +1607,20 @@ fn capsule_and_compile_surfaces_accept_explicit_session_target_rewind_and_compil
             .iter()
             .any(|raw_ref| raw_ref["source_event_id"] == "evt-074")
     );
+    let rewind_ref = capsule["raw_refs"]
+        .as_array()
+        .expect("raw refs")
+        .iter()
+        .find(|raw_ref| raw_ref["source_event_id"] == "evt-074")
+        .expect("rewind raw ref");
+    assert_eq!(
+        rewind_ref["message_ids"],
+        serde_json::json!(["msg-claude-074"])
+    );
+    assert_eq!(
+        rewind_ref["provider_item_ids"],
+        serde_json::json!(["item-claude-074"])
+    );
     assert_eq!(
         capsule["coverage"]["raw_ref_count"],
         serde_json::json!(capsule["raw_refs"].as_array().expect("raw refs").len())
@@ -1625,6 +1639,24 @@ fn capsule_and_compile_surfaces_accept_explicit_session_target_rewind_and_compil
     assert_eq!(request["source_session"]["cwd"], "<path:redacted>");
     assert_eq!(request["rewind_event_id"], "evt-074");
     assert_eq!(request["compiler"], "engineering-handoff");
+    let rewind_event = request["timeline"]["events"]
+        .as_array()
+        .expect("timeline events")
+        .iter()
+        .find(|event| event["id"] == "evt-074")
+        .expect("rewind event");
+    assert_eq!(
+        rewind_event["metadata"]["message_ids"],
+        serde_json::json!(["msg-claude-074"])
+    );
+    assert_eq!(
+        rewind_event["metadata"]["provider_item_ids"],
+        serde_json::json!(["item-claude-074"])
+    );
+    assert_eq!(
+        rewind_event["metadata"]["raw_refs"][0]["provider_kind"],
+        "rewind_point"
+    );
     assert_eq!(request["redaction"]["enabled"], true);
     assert!(
         request["redaction"]["external_compiler_disclosure"]

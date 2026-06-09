@@ -29,14 +29,36 @@
       "time": "15:37",
       "kind": "git_diff",
       "title": "Git Diff",
-      "detail": "+ gateway trace propagation, + request_id fallback."
+      "detail": "+ gateway trace propagation, + request_id fallback.",
+      "metadata": {
+        "file_changes": [
+          {
+            "path": "gateway/middleware.rs",
+            "summary": "trace propagation patch"
+          }
+        ]
+      }
     },
     {
       "id": "evt-074",
       "time": "15:48",
       "kind": "rewind_point",
       "title": "Rewind Point",
-      "detail": "Before staging verification. Compile continuation for Codex."
+      "detail": "Before staging verification. Compile continuation for Codex.",
+      "metadata": {
+        "raw_refs": [
+          {
+            "source_cli": "claude",
+            "source_session": "claude-qc-platform",
+            "source_path": "fixtures/adapters/claude/timeline-claude-qc-platform.json",
+            "record_type": "fixture",
+            "provider_kind": "rewind_point",
+            "digest": "fnv64:fixture-rewind"
+          }
+        ],
+        "message_ids": ["msg-claude-074"],
+        "provider_item_ids": ["item-claude-074"]
+      }
     }
   ]
 }

@@ -17,11 +17,14 @@ use super::{
     adapter::AdapterError,
     local_jsonl::{
         display_time, event_id, human_timestamp, is_provider_context_text, push_timeline_event,
-        text_from_value, title_case, truncate, truncate_timeline_detail,
+        stable_text_digest, stable_value_digest, text_from_value, title_case, truncate,
+        truncate_timeline_detail,
     },
     model::{
         CanonicalTimeline, CliTool, SessionRuntimeStatus, SessionStatus, SessionSummary,
-        SourceProvenance, TimelineEvent, TimelineKind,
+        SourceProvenance, TimelineAttachment, TimelineEvent, TimelineEventMetadata,
+        TimelineEventRawRef, TimelineFileChange, TimelineKind, TimelineRuntimeMetadata,
+        TimelineToolCall, TimelineToolResult,
     },
 };
 
@@ -454,13 +457,13 @@ fn timeline_from_turns(
 ) -> CanonicalTimeline {
     let mut events = Vec::new();
     'turns: for turn in turns {
-        if let Some(event) = turn_error_event(turn, events.len() + 1)
+        if let Some(event) = turn_error_event(thread_id, turn, events.len() + 1)
             && push_timeline_event(&mut events, event, event_limit)
         {
             break 'turns;
         }
         for item in &turn.items {
-            if let Some(event) = app_thread_item_event(turn, item, events.len() + 1)
+            if let Some(event) = app_thread_item_event(thread_id, turn, item, events.len() + 1)
                 && push_timeline_event(&mut events, event, event_limit)
             {
                 break 'turns;
@@ -476,6 +479,7 @@ fn timeline_from_turns(
 }
 
 fn app_thread_item_event(
+    thread_id: &str,
     turn: &CodexAppTurn,
     item: &Value,
     number: usize,
@@ -568,10 +572,11 @@ fn app_thread_item_event(
         kind,
         title,
         detail: truncate_timeline_detail(&detail),
+        metadata: app_thread_item_metadata(thread_id, turn, item, item_type, kind),
     })
 }
 
-fn turn_error_event(turn: &CodexAppTurn, number: usize) -> Option<TimelineEvent> {
+fn turn_error_event(thread_id: &str, turn: &CodexAppTurn, number: usize) -> Option<TimelineEvent> {
     if turn.status != "failed" {
         return None;
     }
@@ -591,7 +596,143 @@ fn turn_error_event(turn: &CodexAppTurn, number: usize) -> Option<TimelineEvent>
         kind: TimelineKind::Error,
         title: "Turn failed".into(),
         detail: truncate_timeline_detail(&detail),
+        metadata: TimelineEventMetadata {
+            raw_refs: vec![TimelineEventRawRef {
+                source_cli: Some(CODEX_TOOL),
+                source_session: Some(thread_id.into()),
+                provider_kind: Some("turn_error".into()),
+                digest: Some(stable_text_digest(&detail)),
+                ..TimelineEventRawRef::default()
+            }],
+            runtime: Some(turn_runtime(turn)),
+            ..TimelineEventMetadata::default()
+        },
     })
+}
+
+fn app_thread_item_metadata(
+    thread_id: &str,
+    turn: &CodexAppTurn,
+    item: &Value,
+    item_type: &str,
+    kind: TimelineKind,
+) -> TimelineEventMetadata {
+    let item_id = string_value(item, "id")
+        .or_else(|| string_value(item, "itemId"))
+        .or_else(|| string_value(item, "callId"));
+    let mut provider_item_ids = Vec::new();
+    if let Some(item_id) = item_id.clone() {
+        provider_item_ids.push(item_id);
+    }
+    TimelineEventMetadata {
+        raw_refs: vec![TimelineEventRawRef {
+            source_cli: Some(CODEX_TOOL),
+            source_session: Some(thread_id.into()),
+            source_path: Some(format!("{APP_SOURCE_PREFIX}{thread_id}")),
+            record_type: Some("app_server_turn_item".into()),
+            provider_kind: Some(item_type.into()),
+            digest: Some(stable_value_digest(item)),
+            ..TimelineEventRawRef::default()
+        }],
+        message_ids: if matches!(kind, TimelineKind::User | TimelineKind::Assistant) {
+            provider_item_ids.clone()
+        } else {
+            Vec::new()
+        },
+        provider_item_ids,
+        tool_calls: app_thread_tool_calls(item, item_type),
+        tool_results: app_thread_tool_results(item, item_type),
+        attachments: app_thread_attachments(item, item_type),
+        file_changes: app_thread_file_changes(item, item_type),
+        runtime: Some(turn_runtime(turn)),
+        ..TimelineEventMetadata::default()
+    }
+}
+
+fn app_thread_tool_calls(item: &Value, item_type: &str) -> Vec<TimelineToolCall> {
+    let is_tool = matches!(
+        item_type,
+        "commandExecution" | "mcpToolCall" | "dynamicToolCall" | "collabAgentToolCall"
+    );
+    if !is_tool {
+        return Vec::new();
+    }
+    vec![TimelineToolCall {
+        id: string_value(item, "callId").or_else(|| string_value(item, "id")),
+        name: string_value(item, "tool")
+            .or_else(|| string_value(item, "server"))
+            .or_else(|| string_value(item, "command")),
+        arguments: item
+            .get("args")
+            .or_else(|| item.get("arguments"))
+            .or_else(|| item.get("input"))
+            .filter(|value| !value.is_null())
+            .cloned(),
+        raw: Some(item.clone()),
+    }]
+}
+
+fn app_thread_tool_results(item: &Value, item_type: &str) -> Vec<TimelineToolResult> {
+    if item_type != "commandExecution" {
+        return Vec::new();
+    }
+    vec![TimelineToolResult {
+        call_id: string_value(item, "callId").or_else(|| string_value(item, "id")),
+        name: string_value(item, "command"),
+        content: string_value(item, "aggregatedOutput")
+            .map(|output| truncate_timeline_detail(&output)),
+        is_error: string_value(item, "status").map(|status| {
+            let status = status.to_ascii_lowercase();
+            status.contains("fail") || status.contains("error")
+        }),
+        raw: Some(item.clone()),
+    }]
+}
+
+fn app_thread_attachments(item: &Value, item_type: &str) -> Vec<TimelineAttachment> {
+    if !matches!(item_type, "imageView" | "imageGeneration") {
+        return Vec::new();
+    }
+    vec![TimelineAttachment {
+        id: string_value(item, "id"),
+        path: string_value(item, "path"),
+        name: string_value(item, "name").or_else(|| string_value(item, "result")),
+        raw: Some(item.clone()),
+        ..TimelineAttachment::default()
+    }]
+}
+
+fn app_thread_file_changes(item: &Value, item_type: &str) -> Vec<TimelineFileChange> {
+    if item_type != "fileChange" {
+        return Vec::new();
+    }
+    vec![TimelineFileChange {
+        path: string_value(item, "path").or_else(|| string_value(item, "filePath")),
+        operation: string_value(item, "operation").or_else(|| string_value(item, "changeType")),
+        summary: text_from_value(item).map(|text| truncate_timeline_detail(&text)),
+        diff: text_from_value(item),
+        raw: Some(item.clone()),
+    }]
+}
+
+fn turn_runtime(turn: &CodexAppTurn) -> TimelineRuntimeMetadata {
+    let duration_ms = turn
+        .started_at
+        .zip(turn.completed_at)
+        .and_then(|(started, completed)| completed.checked_sub(started))
+        .and_then(|duration_seconds| u64::try_from(duration_seconds).ok())
+        .and_then(|duration_seconds| duration_seconds.checked_mul(1_000));
+    TimelineRuntimeMetadata {
+        status: match turn.status.as_str() {
+            "running" | "active" | "queued" => SessionRuntimeStatus::Active,
+            "completed" | "succeeded" | "failed" | "cancelled" => SessionRuntimeStatus::Inactive,
+            _ => SessionRuntimeStatus::Unknown,
+        },
+        reason: (!turn.status.is_empty())
+            .then_some(format!("Codex app-server turn {}", turn.status)),
+        duration_ms,
+        ..TimelineRuntimeMetadata::default()
+    }
 }
 
 fn user_message_detail(item: &Value) -> Option<String> {
@@ -802,6 +943,26 @@ mod tests {
                 (&TimelineKind::Assistant, "App-server response"),
                 (&TimelineKind::Tool, "cargo test [completed] exit=0\nok")
             ]
+        );
+        assert_eq!(timeline.events[0].metadata.message_ids, vec!["item-1"]);
+        assert_eq!(
+            timeline.events[2].metadata.tool_calls[0].name.as_deref(),
+            Some("cargo test")
+        );
+        assert_eq!(
+            timeline.events[2].metadata.tool_results[0]
+                .content
+                .as_deref(),
+            Some("ok")
+        );
+        assert_eq!(
+            timeline.events[2]
+                .metadata
+                .runtime
+                .as_ref()
+                .expect("runtime")
+                .status,
+            SessionRuntimeStatus::Inactive
         );
     }
 

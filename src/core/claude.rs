@@ -15,12 +15,16 @@ use super::{
         collect_project_jsonl_files, configured_session_limit, configured_session_scan_entry_limit,
         configured_session_summary_line_limit, discover_project_jsonl_files, display_time,
         event_id, find_token_count, human_timestamp, is_provider_context_text, max_timestamp,
-        open_reader, push_timeline_event, read_error, sort_paths_by_modified_desc, text_from_value,
-        title_case, truncate, truncate_timeline_detail,
+        open_reader, push_timeline_event, read_error, sort_paths_by_modified_desc,
+        stable_text_digest, stable_value_digest, text_from_value, title_case, truncate,
+        truncate_timeline_detail,
     },
     model::{
         CanonicalTimeline, CliTool, SessionRuntimeStatus, SessionStatus, SessionSummary,
-        SourceProvenance, TimelineEvent, TimelineKind, unknown_runtime_reason,
+        SourceProvenance, TimelineAttachment, TimelineCostMetadata, TimelineEvent,
+        TimelineEventMetadata, TimelineEventRawRef, TimelineFileChange, TimelineKind,
+        TimelineRuntimeMetadata, TimelineToolCall, TimelineToolResult, TokenBreakdown,
+        unknown_runtime_reason,
     },
 };
 
@@ -420,6 +424,18 @@ impl ClaudeSourceAdapter {
                         kind: TimelineKind::Error,
                         title: "Malformed event".into(),
                         detail: format!("line {}: {}", line_index + 1, error),
+                        metadata: TimelineEventMetadata {
+                            raw_refs: vec![TimelineEventRawRef {
+                                source_cli: Some(CLAUDE_TOOL),
+                                source_session: Some(session_id.into()),
+                                source_path: Some(path.display().to_string()),
+                                line_number: Some(line_index + 1),
+                                record_type: Some("malformed".into()),
+                                digest: Some(stable_text_digest(&line)),
+                                ..TimelineEventRawRef::default()
+                            }],
+                            ..TimelineEventMetadata::default()
+                        },
                     };
                     if push_timeline_event(&mut events, event, event_limit) {
                         break;
@@ -428,7 +444,8 @@ impl ClaudeSourceAdapter {
                 }
             };
 
-            if let Some(event) = timeline_event(record, events.len() + 1)
+            if let Some(event) =
+                timeline_event(record, events.len() + 1, session_id, path, line_index + 1)
                 && push_timeline_event(&mut events, event, event_limit)
             {
                 break;
@@ -841,7 +858,13 @@ impl SummaryBuilder {
     }
 }
 
-fn timeline_event(record: ClaudeRecord, number: usize) -> Option<TimelineEvent> {
+fn timeline_event(
+    record: ClaudeRecord,
+    number: usize,
+    session_id: &str,
+    path: &Path,
+    line_number: usize,
+) -> Option<TimelineEvent> {
     let record_type = record.record_type();
     let kind = timeline_kind(record_type, &record)?;
     let detail = timeline_detail(record_type, &record);
@@ -858,7 +881,58 @@ fn timeline_event(record: ClaudeRecord, number: usize) -> Option<TimelineEvent> 
         kind,
         title: timeline_title(record_type, &record),
         detail,
+        metadata: timeline_metadata(&record, session_id, path, line_number, kind),
     })
+}
+
+fn timeline_metadata(
+    record: &ClaudeRecord,
+    session_id: &str,
+    path: &Path,
+    line_number: usize,
+    kind: TimelineKind,
+) -> TimelineEventMetadata {
+    let message_ids = id_fields(
+        &record.message,
+        &["id", "message_id", "messageId", "uuid", "leafUuid"],
+    );
+    let mut provider_item_ids = message_ids.clone();
+    if let Some(leaf_uuid) = record
+        .leaf_uuid
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        push_unique(&mut provider_item_ids, leaf_uuid.to_owned());
+    }
+
+    TimelineEventMetadata {
+        raw_refs: vec![TimelineEventRawRef {
+            source_cli: Some(CLAUDE_TOOL),
+            source_session: record
+                .session_id()
+                .map(str::to_owned)
+                .or(Some(session_id.into())),
+            source_path: Some(path.display().to_string()),
+            line_number: Some(line_number),
+            record_type: Some(record.record_type().into()),
+            provider_kind: non_empty(record.subtype()),
+            role: message_role(record),
+            digest: Some(stable_value_digest(&record.message)),
+            ..TimelineEventRawRef::default()
+        }],
+        message_ids,
+        provider_item_ids,
+        tool_calls: tool_calls_from_claude_record(record),
+        tool_results: tool_results_from_claude_record(record),
+        attachments: attachments_from_claude_record(record),
+        file_changes: file_changes_from_claude_record(record, kind),
+        runtime: runtime_from_claude_record(record),
+        system_prompt_snapshot: system_prompt_snapshot(record),
+        config_snapshot: config_snapshot(record),
+        token_usage: token_usage_from_claude_record(record),
+        cost: cost_from_claude_record(record),
+        ..TimelineEventMetadata::default()
+    }
 }
 
 fn timeline_kind(record_type: &str, record: &ClaudeRecord) -> Option<TimelineKind> {
@@ -964,6 +1038,196 @@ fn timeline_detail(record_type: &str, record: &ClaudeRecord) -> String {
 
 fn message_text(record: &ClaudeRecord) -> Option<String> {
     text_from_value(record.message.get("content").unwrap_or(&Value::Null))
+}
+
+fn non_empty(value: &str) -> Option<String> {
+    (!value.trim().is_empty()).then_some(value.to_owned())
+}
+
+fn push_unique(values: &mut Vec<String>, value: String) {
+    if !values.contains(&value) {
+        values.push(value);
+    }
+}
+
+fn id_fields(value: &Value, keys: &[&str]) -> Vec<String> {
+    keys.iter()
+        .filter_map(|key| value.get(*key).and_then(Value::as_str))
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_owned)
+        .fold(Vec::new(), |mut values, value| {
+            push_unique(&mut values, value);
+            values
+        })
+}
+
+fn clone_non_null(value: Option<&Value>) -> Option<Value> {
+    value.filter(|value| !value.is_null()).cloned()
+}
+
+fn message_role(record: &ClaudeRecord) -> Option<String> {
+    if let Some(role) = record
+        .message
+        .get("role")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+    {
+        return Some(role.to_owned());
+    }
+    non_empty(record.record_type())
+}
+
+fn tool_calls_from_claude_record(record: &ClaudeRecord) -> Vec<TimelineToolCall> {
+    record
+        .message
+        .get("content")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("tool_use"))
+        .map(|item| TimelineToolCall {
+            id: item
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned),
+            name: item
+                .get("name")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned),
+            arguments: clone_non_null(item.get("input")),
+            raw: Some(item.clone()),
+        })
+        .collect()
+}
+
+fn tool_results_from_claude_record(record: &ClaudeRecord) -> Vec<TimelineToolResult> {
+    let mut results = record
+        .message
+        .get("content")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("tool_result"))
+        .map(|item| TimelineToolResult {
+            call_id: item
+                .get("tool_use_id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned),
+            name: None,
+            content: text_from_value(item.get("content").unwrap_or(&Value::Null))
+                .map(|text| truncate_timeline_detail(&text)),
+            is_error: item.get("is_error").and_then(Value::as_bool),
+            raw: Some(item.clone()),
+        })
+        .collect::<Vec<_>>();
+    if !record.tool_use_result.is_null() {
+        results.push(TimelineToolResult {
+            content: text_from_value(&record.tool_use_result)
+                .map(|text| truncate_timeline_detail(&text)),
+            is_error: record.is_error,
+            raw: Some(record.tool_use_result.clone()),
+            ..TimelineToolResult::default()
+        });
+    }
+    results
+}
+
+fn attachments_from_claude_record(record: &ClaudeRecord) -> Vec<TimelineAttachment> {
+    if record.record_type() != "attachment" {
+        return Vec::new();
+    }
+    vec![TimelineAttachment {
+        id: record
+            .string_extra(&["id", "attachment_id", "attachmentId"])
+            .or_else(|| record.leaf_uuid.clone()),
+        name: record.string_extra(&["name", "filename", "fileName"]),
+        path: record.string_extra(&["path", "file_path", "filePath"]),
+        mime_type: record.string_extra(&["mime_type", "mimeType"]),
+        size_bytes: record
+            .extra
+            .get("size_bytes")
+            .or_else(|| record.extra.get("sizeBytes"))
+            .and_then(Value::as_u64),
+        raw: Some(record.message.clone()),
+    }]
+}
+
+fn file_changes_from_claude_record(
+    record: &ClaudeRecord,
+    kind: TimelineKind,
+) -> Vec<TimelineFileChange> {
+    if kind != TimelineKind::GitDiff {
+        return Vec::new();
+    }
+    vec![TimelineFileChange {
+        path: record.string_extra(&["path", "file_path", "filePath"]),
+        operation: record.string_extra(&["operation", "op", "change_type", "changeType"]),
+        summary: message_text(record).map(|text| truncate_timeline_detail(&text)),
+        diff: message_text(record),
+        raw: Some(record.message.clone()),
+    }]
+}
+
+fn runtime_from_claude_record(record: &ClaudeRecord) -> Option<TimelineRuntimeMetadata> {
+    if record.duration_ms.is_none()
+        && record.duration_api_ms.is_none()
+        && record.num_turns.is_none()
+    {
+        return None;
+    }
+    Some(TimelineRuntimeMetadata {
+        status: if is_result_record(record) && !record_is_error(record) {
+            SessionRuntimeStatus::Inactive
+        } else {
+            SessionRuntimeStatus::Unknown
+        },
+        reason: is_result_record(record).then_some("Claude stream-json result".into()),
+        duration_ms: record.duration_ms,
+        api_duration_ms: record.duration_api_ms,
+        turn_count: record.num_turns,
+    })
+}
+
+fn system_prompt_snapshot(record: &ClaudeRecord) -> Option<String> {
+    record.string_extra(&[
+        "system_prompt",
+        "systemPrompt",
+        "system_prompt_snapshot",
+        "systemPromptSnapshot",
+    ])
+}
+
+fn config_snapshot(record: &ClaudeRecord) -> Option<Value> {
+    clone_non_null(
+        record
+            .extra
+            .get("model_config")
+            .or_else(|| record.extra.get("modelConfig"))
+            .or_else(|| record.extra.get("config"))
+            .or_else(|| record.extra.get("tools"))
+            .or_else(|| record.extra.get("mcp_servers"))
+            .or_else(|| record.extra.get("mcpServers")),
+    )
+}
+
+fn token_usage_from_claude_record(record: &ClaudeRecord) -> Option<TokenBreakdown> {
+    usage_token_count(&record.message).map(|total| TokenBreakdown {
+        total,
+        ..TokenBreakdown::default()
+    })
+}
+
+fn cost_from_claude_record(record: &ClaudeRecord) -> Option<TimelineCostMetadata> {
+    record
+        .total_cost_usd
+        .map(|total_cost_usd| TimelineCostMetadata {
+            total_cost_usd: Some(total_cost_usd),
+            currency: Some("USD".into()),
+            billing_source: Some("claude_stream_json_result".into()),
+        })
 }
 
 fn record_is_error(record: &ClaudeRecord) -> bool {
@@ -1302,8 +1566,8 @@ mod tests {
             "repo/claude-real-2.jsonl",
             r#"{"type":"user","sessionId":"claude-real-2","timestamp":"2026-05-19T07:55:10.994Z","cwd":"/repo","message":{"role":"user","content":"Start here"}}
 {"type":"assistant","sessionId":"claude-real-2","timestamp":"2026-05-19T07:55:20.994Z","cwd":"/repo","message":{"role":"assistant","content":[{"type":"text","text":"Working"}]}}
-{"type":"assistant","sessionId":"claude-real-2","timestamp":"2026-05-19T07:55:30.994Z","cwd":"/repo","message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{"file_path":"src/main.rs"}}]}}
-{"type":"user","sessionId":"claude-real-2","timestamp":"2026-05-19T07:55:40.994Z","cwd":"/repo","message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","sessionId":"claude-real-2","timestamp":"2026-05-19T07:55:30.994Z","cwd":"/repo","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu-1","name":"Read","input":{"file_path":"src/main.rs"}}]}}
+{"type":"user","sessionId":"claude-real-2","timestamp":"2026-05-19T07:55:40.994Z","cwd":"/repo","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu-1","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
 {"type":"summary","sessionId":"claude-real-2","timestamp":"2026-05-19T07:56:00.994Z","cwd":"/repo","message":{"content":"Compacted summary"}}
 "#,
         );
@@ -1319,6 +1583,24 @@ mod tests {
         assert_eq!(timeline.events[2].kind, TimelineKind::Tool);
         assert_eq!(timeline.events[3].kind, TimelineKind::Tool);
         assert_eq!(timeline.events[4].kind, TimelineKind::Compact);
+        assert_eq!(timeline.events[2].metadata.tool_calls.len(), 1);
+        assert_eq!(
+            timeline.events[2].metadata.tool_calls[0].name.as_deref(),
+            Some("Read")
+        );
+        assert_eq!(
+            timeline.events[2].metadata.tool_calls[0]
+                .arguments
+                .as_ref()
+                .expect("tool args")["file_path"],
+            "src/main.rs"
+        );
+        assert_eq!(
+            timeline.events[3].metadata.tool_results[0]
+                .call_id
+                .as_deref(),
+            Some("toolu-1")
+        );
     }
 
     #[test]
@@ -1383,9 +1665,37 @@ mod tests {
         assert_eq!(timeline.events[0].title, "SDK init");
         assert!(timeline.events[0].detail.contains("model: claude-sonnet"));
         assert!(timeline.events[0].detail.contains("tools: 2"));
+        assert!(timeline.events[0].metadata.config_snapshot.is_some());
+        assert_eq!(
+            timeline.events[2]
+                .metadata
+                .token_usage
+                .as_ref()
+                .expect("token usage")
+                .total,
+            17
+        );
         assert_eq!(timeline.events[3].title, "SDK result");
         assert!(timeline.events[3].detail.contains("session_id: sdk-child"));
         assert!(timeline.events[3].detail.contains("cost_usd: 0.003210"));
+        assert_eq!(
+            timeline.events[3]
+                .metadata
+                .cost
+                .as_ref()
+                .expect("cost")
+                .total_cost_usd,
+            Some(0.00321)
+        );
+        assert_eq!(
+            timeline.events[3]
+                .metadata
+                .runtime
+                .as_ref()
+                .expect("runtime")
+                .duration_ms,
+            Some(1234)
+        );
     }
 
     #[test]

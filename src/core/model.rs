@@ -259,6 +259,152 @@ pub struct TimelineEvent {
     pub kind: TimelineKind,
     pub title: String,
     pub detail: String,
+    #[serde(default)]
+    pub metadata: TimelineEventMetadata,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TimelineEventMetadata {
+    #[serde(default)]
+    pub raw_refs: Vec<TimelineEventRawRef>,
+    #[serde(default)]
+    pub message_ids: Vec<String>,
+    #[serde(default)]
+    pub provider_item_ids: Vec<String>,
+    #[serde(default)]
+    pub tool_calls: Vec<TimelineToolCall>,
+    #[serde(default)]
+    pub tool_results: Vec<TimelineToolResult>,
+    #[serde(default)]
+    pub approvals: Vec<TimelineApproval>,
+    #[serde(default)]
+    pub attachments: Vec<TimelineAttachment>,
+    #[serde(default)]
+    pub file_changes: Vec<TimelineFileChange>,
+    #[serde(default)]
+    pub runtime: Option<TimelineRuntimeMetadata>,
+    #[serde(default)]
+    pub system_prompt_snapshot: Option<String>,
+    #[serde(default)]
+    pub config_snapshot: Option<Value>,
+    #[serde(default)]
+    pub token_usage: Option<TokenBreakdown>,
+    #[serde(default)]
+    pub cost: Option<TimelineCostMetadata>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TimelineEventRawRef {
+    #[serde(default)]
+    pub source_cli: Option<CliTool>,
+    #[serde(default)]
+    pub source_session: Option<String>,
+    #[serde(default)]
+    pub source_path: Option<String>,
+    #[serde(default)]
+    pub line_number: Option<usize>,
+    #[serde(default)]
+    pub row_id: Option<String>,
+    #[serde(default)]
+    pub record_type: Option<String>,
+    #[serde(default)]
+    pub provider_kind: Option<String>,
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub digest: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TimelineToolCall {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub arguments: Option<Value>,
+    #[serde(default)]
+    pub raw: Option<Value>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TimelineToolResult {
+    #[serde(default)]
+    pub call_id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub content: Option<String>,
+    #[serde(default)]
+    pub is_error: Option<bool>,
+    #[serde(default)]
+    pub raw: Option<Value>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TimelineApproval {
+    #[serde(default)]
+    pub action: Option<String>,
+    #[serde(default)]
+    pub decision: Option<String>,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub raw: Option<Value>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TimelineAttachment {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub mime_type: Option<String>,
+    #[serde(default)]
+    pub size_bytes: Option<u64>,
+    #[serde(default)]
+    pub raw: Option<Value>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TimelineFileChange {
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub operation: Option<String>,
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub diff: Option<String>,
+    #[serde(default)]
+    pub raw: Option<Value>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TimelineRuntimeMetadata {
+    #[serde(default)]
+    pub status: SessionRuntimeStatus,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+    #[serde(default)]
+    pub api_duration_ms: Option<u64>,
+    #[serde(default)]
+    pub turn_count: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TimelineCostMetadata {
+    #[serde(default)]
+    pub total_cost_usd: Option<f64>,
+    #[serde(default)]
+    pub currency: Option<String>,
+    #[serde(default)]
+    pub billing_source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -278,6 +424,10 @@ pub struct RawSourceRef {
     pub digest: String,
     pub excerpt: String,
     pub covered: bool,
+    #[serde(default)]
+    pub message_ids: Vec<String>,
+    #[serde(default)]
+    pub provider_item_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -837,6 +987,27 @@ pub struct CompilerPresetInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn timeline_event_accepts_legacy_five_field_json() {
+        let event: TimelineEvent = serde_json::from_str(
+            r#"{
+                "id": "evt-001",
+                "time": "10:00",
+                "kind": "user",
+                "title": "User",
+                "detail": "continue"
+            }"#,
+        )
+        .expect("legacy event");
+
+        assert_eq!(event.id, "evt-001");
+        assert_eq!(event.kind, TimelineKind::User);
+        assert!(event.metadata.raw_refs.is_empty());
+        assert!(event.metadata.message_ids.is_empty());
+        assert!(event.metadata.tool_calls.is_empty());
+        assert!(event.metadata.token_usage.is_none());
+    }
 
     #[test]
     fn work_capsule_accepts_legacy_target_branch_field() {

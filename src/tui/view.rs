@@ -2629,6 +2629,7 @@ mod tests {
                 kind: TimelineKind::User,
                 title: "User".into(),
                 detail: "very long context ".repeat(40),
+                metadata: Default::default(),
             },
             TimelineEvent {
                 id: "evt-002".into(),
@@ -2636,6 +2637,7 @@ mod tests {
                 kind: TimelineKind::User,
                 title: "User".into(),
                 detail: "selected user question".into(),
+                metadata: Default::default(),
             },
         ];
         app.selected_event = 1;
@@ -2657,6 +2659,7 @@ mod tests {
                 kind: TimelineKind::User,
                 title: "User".into(),
                 detail: "分析下 cxcp".into(),
+                metadata: Default::default(),
             },
             TimelineEvent {
                 id: "evt-002".into(),
@@ -2664,6 +2667,7 @@ mod tests {
                 kind: TimelineKind::Assistant,
                 title: "Assistant".into(),
                 detail: "先定位项目。".into(),
+                metadata: Default::default(),
             },
             TimelineEvent {
                 id: "evt-003".into(),
@@ -2671,6 +2675,7 @@ mod tests {
                 kind: TimelineKind::Assistant,
                 title: "Assistant".into(),
                 detail: "继续分析缓存。".into(),
+                metadata: Default::default(),
             },
             TimelineEvent {
                 id: "evt-004".into(),
@@ -2678,6 +2683,7 @@ mod tests {
                 kind: TimelineKind::User,
                 title: "User".into(),
                 detail: "下一步".into(),
+                metadata: Default::default(),
             },
         ];
         app.selected_event = 1;
@@ -2703,6 +2709,7 @@ mod tests {
                 kind: TimelineKind::User,
                 title: "User".into(),
                 detail: "start".into(),
+                metadata: Default::default(),
             },
             TimelineEvent {
                 id: "evt-002".into(),
@@ -2710,6 +2717,7 @@ mod tests {
                 kind: TimelineKind::Assistant,
                 title: "Assistant".into(),
                 detail: "first".into(),
+                metadata: Default::default(),
             },
             TimelineEvent {
                 id: "evt-003".into(),
@@ -2717,6 +2725,7 @@ mod tests {
                 kind: TimelineKind::Assistant,
                 title: "Assistant".into(),
                 detail: "second".into(),
+                metadata: Default::default(),
             },
         ];
         app.selected_event = 1;
