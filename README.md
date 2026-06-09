@@ -370,8 +370,9 @@ cargo run -- verify --target hermes --session hermes-cxcp-502 --json
 
 `sessions` text output prints the active source filter plus each row's
 `real`/`fixture` provenance. JSON output remains an array for compatibility and
-adds per-session `source_provenance`, `source_path`, and `parse_skip_count`
-fields.
+adds per-session `source_provenance`, `source_path`, `parse_skip_count`,
+`runtime_status`, and `runtime_reason` fields. Runtime status is never inferred
+from `updated_at`; adapters that cannot prove live activity report `unknown`.
 
 `open`, `launch`, `capsule`, `compile-request`, and `compile-output` are dry-run
 by default. Dry-runs may omit `--session` and will preview the newest discovered
@@ -394,7 +395,12 @@ summary discovery, target binary availability, and compiler catalog readiness
 without loading timelines, resuming sessions, or spawning targets. Its JSON
 output includes `source_adapters` entries with provenance, active/missing state,
 store path, session count, skipped record count, last indexed timestamp, and
-adapter filter status. It also reports list and scan guardrails through
+adapter filter status. Each adapter report also includes a versioned
+`capabilities` matrix for local store, rich local RPC, cloud metadata, deep
+links, export/search, remote control, fork/resume, and native handoff support,
+with each capability marked `available`, `planned`, `unavailable`, or
+`unknown`. Doctor check details include a compact capability summary for quick
+terminal inspection. Doctor also reports list and scan guardrails through
 `list_limit`, `scan_entry_limit`, `summary_line_limit`, `scan_entry_count`, and
 `scan_truncated`, so a large local store cannot silently degrade into an
 unbounded default scan or full-file summary parse. Target
@@ -850,13 +856,14 @@ Stable interfaces matter more than any single framework:
   prompt-only target input explicit, refuse to claim unsupported native Capsule
   import, and expose reversible branch/worktree workspace restore previews that
   remain blocked from execution until a restore executor is verified.
+- M61: source capability registry; Doctor source adapter reports now include a
+  versioned provider capability matrix for local store, rich local RPC, cloud
+  metadata, deep links, export/search, remote control, fork/resume, and native
+  handoff support, while session listings and the TUI distinguish `updated_at`
+  from live runtime status and report unknown when activity cannot be proven.
 
 ### Remaining Milestones
 
-- M61: source capability registry. Track each provider's local store, rich RPC,
-  cloud metadata, deep links, export/search, remote control, fork/resume, and
-  native handoff capabilities; distinguish updated time from unknown runtime
-  activity.
 - M62: Codex app-server source adapter. Prefer Codex `app-server`
   `thread/list`, `thread/read`, and `thread/turns/list` data, use local
   SQLite/JSONL only as fallback, and add non-executing `codex://threads/<id>`

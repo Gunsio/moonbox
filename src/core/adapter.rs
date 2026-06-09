@@ -1,7 +1,8 @@
 use std::{error::Error, fmt};
 
-use super::model::{
-    CanonicalTimeline, CliTool, SessionSummary, SourceAdapterReport, SourceProvenance,
+use super::{
+    capability,
+    model::{CanonicalTimeline, CliTool, SessionSummary, SourceAdapterReport, SourceProvenance},
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -146,6 +147,7 @@ pub fn report_from_sessions_with_scan(
             .map(str::to_owned),
         filter_status: meta.filter_status,
         reason: meta.reason,
+        capabilities: capability::source_capabilities(meta.cli, meta.provenance),
         list_limit: scan_stats.list_limit,
         scan_entry_limit: scan_stats.scan_entry_limit,
         summary_line_limit: scan_stats.summary_line_limit,

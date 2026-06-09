@@ -70,6 +70,25 @@ impl Display for SourceProvenance {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionRuntimeStatus {
+    Active,
+    Inactive,
+    #[default]
+    Unknown,
+}
+
+impl Display for SessionRuntimeStatus {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Active => f.write_str("active"),
+            Self::Inactive => f.write_str("inactive"),
+            Self::Unknown => f.write_str("unknown"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionSummary {
     pub id: String,
@@ -78,6 +97,10 @@ pub struct SessionSummary {
     pub cwd: String,
     pub updated_at: String,
     pub updated: String,
+    #[serde(default)]
+    pub runtime_status: SessionRuntimeStatus,
+    #[serde(default)]
+    pub runtime_reason: Option<String>,
     pub status: SessionStatus,
     pub branch: Option<String>,
     pub token_count: Option<usize>,
@@ -90,6 +113,10 @@ pub struct SessionSummary {
     pub source_path: Option<String>,
     #[serde(default)]
     pub parse_skip_count: usize,
+}
+
+pub fn unknown_runtime_reason(tool: CliTool) -> String {
+    format!("{tool} source adapter does not expose live runtime activity yet")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -476,6 +503,8 @@ pub struct SourceAdapterReport {
     pub filter_status: String,
     pub reason: String,
     #[serde(default)]
+    pub capabilities: SourceCapabilities,
+    #[serde(default)]
     pub list_limit: Option<usize>,
     #[serde(default)]
     pub scan_entry_limit: Option<usize>,
@@ -485,6 +514,62 @@ pub struct SourceAdapterReport {
     pub scan_entry_count: usize,
     #[serde(default)]
     pub scan_truncated: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceCapabilityStatus {
+    Available,
+    Planned,
+    Unavailable,
+    #[default]
+    Unknown,
+}
+
+impl Display for SourceCapabilityStatus {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Available => f.write_str("available"),
+            Self::Planned => f.write_str("planned"),
+            Self::Unavailable => f.write_str("unavailable"),
+            Self::Unknown => f.write_str("unknown"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceCapability {
+    pub status: SourceCapabilityStatus,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceCapabilities {
+    pub version: u16,
+    pub local_store: SourceCapability,
+    pub rich_local_rpc: SourceCapability,
+    pub cloud_metadata: SourceCapability,
+    pub deep_link: SourceCapability,
+    pub export_search: SourceCapability,
+    pub remote_control: SourceCapability,
+    pub fork_resume: SourceCapability,
+    pub native_handoff: SourceCapability,
+}
+
+impl Default for SourceCapabilities {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            local_store: SourceCapability::default(),
+            rich_local_rpc: SourceCapability::default(),
+            cloud_metadata: SourceCapability::default(),
+            deep_link: SourceCapability::default(),
+            export_search: SourceCapability::default(),
+            remote_control: SourceCapability::default(),
+            fork_resume: SourceCapability::default(),
+            native_handoff: SourceCapability::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

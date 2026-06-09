@@ -20,8 +20,8 @@ use super::{
         truncate_timeline_detail,
     },
     model::{
-        CanonicalTimeline, CliTool, SessionStatus, SessionSummary, SourceProvenance, TimelineEvent,
-        TimelineKind,
+        CanonicalTimeline, CliTool, SessionRuntimeStatus, SessionStatus, SessionSummary,
+        SourceProvenance, TimelineEvent, TimelineKind, unknown_runtime_reason,
     },
 };
 
@@ -267,6 +267,8 @@ impl CodexSourceAdapter {
             },
             updated: human_timestamp(&row.updated_at),
             updated_at: row.updated_at,
+            runtime_status: SessionRuntimeStatus::Unknown,
+            runtime_reason: Some(unknown_runtime_reason(CODEX_TOOL)),
             status,
             branch: row.branch,
             token_count: normalized_token_count(row.token_count),
@@ -665,6 +667,8 @@ impl SummaryBuilder {
             cwd: self.cwd.unwrap_or_else(|| "~".into()),
             updated: human_timestamp(&updated_at),
             updated_at,
+            runtime_status: SessionRuntimeStatus::Unknown,
+            runtime_reason: Some(unknown_runtime_reason(CODEX_TOOL)),
             status,
             branch: self.branch,
             token_count: self.token_count,

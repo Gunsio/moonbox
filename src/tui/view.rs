@@ -15,8 +15,8 @@ use crate::{
     core::compiler,
     core::model::{
         CliTool, CompilerPresetInfo, CompilerPresetKind, CompilerPresetStatus,
-        LaunchValidationState, SessionStatus, SourceProvenance, TimelineEvent, TimelineKind,
-        VerificationReport, VerificationStatus, WorkCapsule,
+        LaunchValidationState, SessionRuntimeStatus, SessionStatus, SourceProvenance,
+        TimelineEvent, TimelineKind, VerificationReport, VerificationStatus, WorkCapsule,
     },
 };
 
@@ -1180,6 +1180,11 @@ fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
             &session.updated,
             Style::default().fg(theme::BLUE),
         ),
+        metadata_line(
+            "Runtime",
+            &session_runtime_detail(session),
+            session_runtime_style(session.runtime_status),
+        ),
         metadata_line("Cwd", &session.cwd, Style::default().fg(theme::TEXT)),
         metadata_line(
             "Branch",
@@ -1217,6 +1222,26 @@ fn metadata_line(label: &'static str, value: &str, style: Style) -> Line<'static
         Span::styled(format!("{label}: "), Style::default().fg(theme::MUTED)),
         Span::styled(value.to_owned(), style),
     ])
+}
+
+fn session_runtime_detail(session: &crate::core::model::SessionSummary) -> String {
+    if session.runtime_status == SessionRuntimeStatus::Unknown {
+        return session.runtime_status.to_string();
+    }
+    match &session.runtime_reason {
+        Some(reason) if !reason.trim().is_empty() => {
+            format!("{} - {reason}", session.runtime_status)
+        }
+        _ => session.runtime_status.to_string(),
+    }
+}
+
+fn session_runtime_style(status: SessionRuntimeStatus) -> Style {
+    match status {
+        SessionRuntimeStatus::Active => Style::default().fg(theme::GREEN),
+        SessionRuntimeStatus::Inactive => Style::default().fg(theme::MUTED),
+        SessionRuntimeStatus::Unknown => Style::default().fg(theme::GOLD),
+    }
 }
 
 fn render_branch_tree(frame: &mut Frame, area: Rect, app: &App) {
@@ -2569,6 +2594,8 @@ mod tests {
             cwd: "/repo".into(),
             updated_at: updated_at.into(),
             updated: "2026-06-07 13:33".into(),
+            runtime_status: SessionRuntimeStatus::Unknown,
+            runtime_reason: Some("test adapter does not expose live runtime activity".into()),
             status: SessionStatus::Healthy,
             branch: branch.map(str::to_owned),
             token_count: None,
