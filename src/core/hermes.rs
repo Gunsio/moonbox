@@ -19,8 +19,8 @@ use super::{
         timeline_preview_truncated_event, title_case, truncate, truncate_timeline_detail,
     },
     model::{
-        CanonicalTimeline, CliTool, SessionStatus, SessionSummary, SourceProvenance, TimelineEvent,
-        TimelineKind,
+        CanonicalTimeline, CliTool, SessionRuntimeStatus, SessionStatus, SessionSummary,
+        SourceProvenance, TimelineEvent, TimelineKind, unknown_runtime_reason,
     },
 };
 
@@ -274,6 +274,8 @@ impl HermesSourceAdapter {
                 .unwrap_or_else(|| "~".into()),
             updated: human_timestamp(&row.updated_at),
             updated_at: row.updated_at,
+            runtime_status: SessionRuntimeStatus::Unknown,
+            runtime_reason: Some(unknown_runtime_reason(HERMES_TOOL)),
             status,
             branch: None,
             token_count,

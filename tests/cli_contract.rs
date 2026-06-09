@@ -469,6 +469,22 @@ fn doctor_cli_contract_is_non_executing_and_fixture_safe() {
                 && adapter["summary_line_limit"].is_null()
                 && adapter["scan_entry_limit"].is_null())
     );
+    for adapter in adapters {
+        let capabilities = &adapter["capabilities"];
+        assert_eq!(capabilities["version"], 1);
+        assert_eq!(capabilities["local_store"]["status"], "available");
+        assert_eq!(capabilities["native_handoff"]["status"], "unavailable");
+        assert_eq!(capabilities["fork_resume"]["status"], "unavailable");
+    }
+    for check in checks.iter().filter(|check| {
+        check["name"]
+            .as_str()
+            .is_some_and(|name| name.starts_with("source_"))
+    }) {
+        let detail = check["detail"].as_str().expect("source check detail");
+        assert!(detail.contains("capabilities=local_store:available"));
+        assert!(detail.contains("native_handoff:unavailable"));
+    }
 }
 
 #[test]
@@ -494,6 +510,10 @@ fn session_listing_uses_fixture_fallback_when_source_homes_are_isolated() {
         sessions.as_array().expect("session array").iter().all(
             |session| session["source_provenance"] == "fixture"
                 && session["parse_skip_count"] == 0
+                && session["runtime_status"] == "unknown"
+                && session["runtime_reason"]
+                    .as_str()
+                    .is_some_and(|reason| !reason.trim().is_empty())
                 && session["source_path"]
                     .as_str()
                     .expect("source path")
@@ -597,6 +617,12 @@ not-json"#,
     let session = &sessions.as_array().expect("session array")[0];
     assert_eq!(session["source_provenance"], "real");
     assert_eq!(session["parse_skip_count"], 1);
+    assert_eq!(session["runtime_status"], "unknown");
+    assert!(
+        session["runtime_reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("does not expose live runtime activity"))
+    );
     assert!(
         session["source_path"]
             .as_str()
@@ -646,6 +672,12 @@ fn doctor_reports_real_and_missing_source_adapters_without_fixture_mixing() {
     assert_eq!(codex["scan_entry_limit"], 500);
     assert_eq!(codex["summary_line_limit"], 800);
     assert_eq!(codex["scan_truncated"], false);
+    assert_eq!(codex["capabilities"]["local_store"]["status"], "available");
+    assert_eq!(codex["capabilities"]["fork_resume"]["status"], "available");
+    assert_eq!(
+        codex["capabilities"]["native_handoff"]["status"],
+        "unavailable"
+    );
 
     for tool in ["claude", "hermes"] {
         let adapter = adapters
@@ -656,6 +688,14 @@ fn doctor_reports_real_and_missing_source_adapters_without_fixture_mixing() {
         assert_eq!(adapter["active"], false);
         assert_eq!(adapter["session_count"], 0);
         assert_eq!(adapter["filter_status"], "excluded_missing_store");
+        assert_eq!(
+            adapter["capabilities"]["local_store"]["status"],
+            "unavailable"
+        );
+        assert_eq!(
+            adapter["capabilities"]["native_handoff"]["status"],
+            "unavailable"
+        );
     }
 }
 
@@ -704,6 +744,7 @@ fn doctor_reports_bounded_real_store_scan_cost() {
     assert_eq!(codex["summary_line_limit"], 800);
     assert_eq!(codex["scan_entry_count"], 2);
     assert_eq!(codex["scan_truncated"], true);
+    assert_eq!(codex["capabilities"]["local_store"]["status"], "available");
 
     let checks = report["checks"].as_array().expect("checks");
     let codex_check = checks
@@ -716,6 +757,12 @@ fn doctor_reports_bounded_real_store_scan_cost() {
             .as_str()
             .expect("detail")
             .contains("scan_truncated=true")
+    );
+    assert!(
+        codex_check["detail"]
+            .as_str()
+            .expect("detail")
+            .contains("capabilities=local_store:available")
     );
 }
 

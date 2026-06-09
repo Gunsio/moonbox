@@ -19,8 +19,8 @@ use super::{
         title_case, truncate, truncate_timeline_detail,
     },
     model::{
-        CanonicalTimeline, CliTool, SessionStatus, SessionSummary, SourceProvenance, TimelineEvent,
-        TimelineKind,
+        CanonicalTimeline, CliTool, SessionRuntimeStatus, SessionStatus, SessionSummary,
+        SourceProvenance, TimelineEvent, TimelineKind, unknown_runtime_reason,
     },
 };
 
@@ -662,6 +662,8 @@ impl SummaryBuilder {
             cwd: self.cwd.unwrap_or_else(|| "~".into()),
             updated: human_timestamp(&updated_at),
             updated_at,
+            runtime_status: SessionRuntimeStatus::Unknown,
+            runtime_reason: Some(unknown_runtime_reason(CLAUDE_TOOL)),
             status,
             branch: self.branch,
             token_count: self.token_count,

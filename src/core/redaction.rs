@@ -243,6 +243,9 @@ fn redact_session_summary(
     session.health_reason = session
         .health_reason
         .map(|reason| redact_text(&reason, policy, stats));
+    session.runtime_reason = session
+        .runtime_reason
+        .map(|reason| redact_text(&reason, policy, stats));
     session.source_path = session
         .source_path
         .map(|path| redact_text(&path, policy, stats));
@@ -560,7 +563,9 @@ fn normalize_allowlist(values: Vec<String>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::model::{CliTool, SessionStatus, SourceProvenance, TimelineEvent};
+    use crate::core::model::{
+        CliTool, SessionRuntimeStatus, SessionStatus, SourceProvenance, TimelineEvent,
+    };
 
     #[test]
     fn redacts_secrets_paths_and_prompt_injection_text() {
@@ -630,6 +635,8 @@ mod tests {
                 cwd: "/Users/alice/repo".into(),
                 updated_at: "2026-06-08T00:00:00Z".into(),
                 updated: "now".into(),
+                runtime_status: SessionRuntimeStatus::Unknown,
+                runtime_reason: Some("Secret path /Users/alice/.codex/runtime".into()),
                 status: SessionStatus::Healthy,
                 branch: None,
                 token_count: None,
@@ -663,6 +670,13 @@ mod tests {
         assert!(redacted.redaction.paths_redacted >= 2);
         assert!(redacted.source_session.title.contains("<secret:redacted>"));
         assert_eq!(redacted.source_session.cwd, "<path:redacted>");
+        assert!(
+            redacted
+                .source_session
+                .runtime_reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("<path:redacted>"))
+        );
         assert!(
             redacted
                 .redaction

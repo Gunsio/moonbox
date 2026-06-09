@@ -2,7 +2,10 @@ use serde::Deserialize;
 
 use super::{
     adapter::{AdapterError, SourceAdapter},
-    model::{CanonicalTimeline, CliTool, SessionSummary, SourceProvenance},
+    model::{
+        CanonicalTimeline, CliTool, SessionRuntimeStatus, SessionSummary, SourceProvenance,
+        unknown_runtime_reason,
+    },
 };
 
 #[derive(Debug, Deserialize)]
@@ -46,6 +49,8 @@ impl FixtureSourceAdapter {
                         session.source_provenance = SourceProvenance::Fixture;
                         session.source_path = Some(self.fixture.sessions_path.into());
                         session.parse_skip_count = 0;
+                        session.runtime_status = SessionRuntimeStatus::Unknown;
+                        session.runtime_reason = Some(unknown_runtime_reason(session.cli));
                         session
                     })
                     .collect()
@@ -187,6 +192,15 @@ mod tests {
             assert_eq!(report.session_count, sessions.len());
             assert_eq!(report.scan_entry_count, sessions.len());
             assert!(!report.scan_truncated);
+            assert_eq!(report.capabilities.version, 1);
+            assert_eq!(
+                report.capabilities.local_store.status,
+                super::super::model::SourceCapabilityStatus::Available
+            );
+            assert_eq!(
+                report.capabilities.native_handoff.status,
+                super::super::model::SourceCapabilityStatus::Unavailable
+            );
             assert!(
                 report
                     .store_path
@@ -208,6 +222,13 @@ mod tests {
                 assert!(!session.id.trim().is_empty());
                 assert!(!session.title.trim().is_empty());
                 assert!(!session.updated_at.trim().is_empty());
+                assert_eq!(session.runtime_status, SessionRuntimeStatus::Unknown);
+                assert!(
+                    session
+                        .runtime_reason
+                        .as_deref()
+                        .is_some_and(|reason| !reason.trim().is_empty())
+                );
                 assert_eq!(session.parse_skip_count, 0);
 
                 let timeline = adapter.load_timeline(&session.id).expect("timeline");

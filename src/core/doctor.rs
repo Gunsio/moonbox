@@ -163,11 +163,12 @@ fn source_adapter_check(report: &SourceAdapterReport) -> VerificationCheck {
         .summary_line_limit
         .map(|limit| limit.to_string())
         .unwrap_or_else(|| "unlimited".into());
+    let capabilities = capability_summary(report);
     check(
         format!("source_{}_adapter", report.cli.id()),
         status,
         format!(
-            "{} {}; active={}; filter={}; path={path}; sessions={}; skipped={}; last={last}; list_limit={list_limit}; scan_entries={}; scan_limit={scan_limit}; summary_line_limit={summary_limit}; scan_truncated={}; {}",
+            "{} {}; active={}; filter={}; path={path}; sessions={}; skipped={}; last={last}; list_limit={list_limit}; scan_entries={}; scan_limit={scan_limit}; summary_line_limit={summary_limit}; scan_truncated={}; capabilities={capabilities}; {}",
             report.cli,
             report.provenance,
             report.active,
@@ -179,6 +180,24 @@ fn source_adapter_check(report: &SourceAdapterReport) -> VerificationCheck {
             report.reason
         ),
     )
+}
+
+fn capability_summary(report: &SourceAdapterReport) -> String {
+    let capabilities = &report.capabilities;
+    [
+        ("local_store", &capabilities.local_store),
+        ("rich_local_rpc", &capabilities.rich_local_rpc),
+        ("cloud_metadata", &capabilities.cloud_metadata),
+        ("deep_link", &capabilities.deep_link),
+        ("export_search", &capabilities.export_search),
+        ("remote_control", &capabilities.remote_control),
+        ("fork_resume", &capabilities.fork_resume),
+        ("native_handoff", &capabilities.native_handoff),
+    ]
+    .into_iter()
+    .map(|(name, capability)| format!("{name}:{}", capability.status))
+    .collect::<Vec<_>>()
+    .join(",")
 }
 
 fn session_summaries_check(sessions: &[SessionSummary]) -> VerificationCheck {

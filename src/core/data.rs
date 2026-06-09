@@ -9,9 +9,9 @@ use super::{
     fixture::FixtureSourceAdapter,
     model::{
         BranchNode, CanonicalTimeline, CapsuleCompileOutput, CapsuleCompileRequest,
-        CapsuleCoverage, CliTool, RedactionReport, SessionStatus, SessionSummary,
-        SourceAdapterReport, SourceProvenance, TimelineEvent, TimelineKind, WorkCapsule,
-        WorkbenchData,
+        CapsuleCoverage, CliTool, RedactionReport, SessionRuntimeStatus, SessionStatus,
+        SessionSummary, SourceAdapterReport, SourceProvenance, TimelineEvent, TimelineKind,
+        WorkCapsule, WorkbenchData, unknown_runtime_reason,
     },
     redaction, sources,
 };
@@ -600,6 +600,8 @@ fn fallback_session(source: CliTool) -> SessionSummary {
         cwd: "~".into(),
         updated_at: "1970-01-01T00:00:00+00:00".into(),
         updated: "unknown".into(),
+        runtime_status: SessionRuntimeStatus::Unknown,
+        runtime_reason: Some(unknown_runtime_reason(source)),
         status: SessionStatus::Warning,
         branch: None,
         token_count: None,

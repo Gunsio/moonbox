@@ -93,6 +93,10 @@ and this project uses semantic versioning once tagged releases start.
 - Structured Doctor source adapter reports under `source_adapters`, including
   provenance, active/missing state, store path, session count, skipped record
   count, last indexed timestamp, and adapter filter status.
+- Versioned source adapter capability reports for local store, rich local RPC,
+  cloud metadata, deep links, export/search, remote control, fork/resume, and
+  native handoff support, plus per-session `runtime_status` / `runtime_reason`
+  fields that keep live runtime activity separate from `updated_at`.
 - Bounded JSONL real-store discovery through `MOONBOX_SESSION_SCAN_LIMIT`,
   with Doctor scan-cost fields for list limit, scan entry limit, visited entry
   count, and truncation state.
