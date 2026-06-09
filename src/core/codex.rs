@@ -11,6 +11,7 @@ use serde_json::Value;
 
 use super::{
     adapter::{AdapterError, SourceAdapter, SourceReportMeta, SourceScanStats},
+    codex_app_server::{CodexAppServerSource, app_thread_summary},
     local_jsonl::{
         DiscoveryOrder, collect_jsonl_files, configured_session_limit,
         configured_session_scan_entry_limit, configured_session_summary_line_limit,
@@ -21,7 +22,8 @@ use super::{
     },
     model::{
         CanonicalTimeline, CliTool, SessionRuntimeStatus, SessionStatus, SessionSummary,
-        SourceProvenance, TimelineEvent, TimelineKind, unknown_runtime_reason,
+        SourceCapabilities, SourceCapability, SourceCapabilityStatus, SourceProvenance,
+        TimelineEvent, TimelineKind, unknown_runtime_reason,
     },
 };
 
@@ -33,6 +35,7 @@ pub struct CodexSourceAdapter {
     list_limit: Option<usize>,
     scan_entry_limit: Option<usize>,
     summary_line_limit: Option<usize>,
+    app_server: Option<CodexAppServerSource>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -86,6 +89,7 @@ impl CodexSourceAdapter {
             list_limit: configured_session_limit(),
             scan_entry_limit: configured_session_scan_entry_limit(),
             summary_line_limit: configured_session_summary_line_limit(),
+            app_server: None,
         }
     }
 
@@ -115,29 +119,48 @@ impl CodexSourceAdapter {
             list_limit,
             scan_entry_limit,
             summary_line_limit,
+            app_server: None,
         }
+    }
+
+    #[cfg(test)]
+    fn with_app_server_fixture(root: impl Into<PathBuf>, fixture_path: impl Into<PathBuf>) -> Self {
+        let mut adapter = Self::with_all_limits(root, Some(200), None, None);
+        adapter.app_server = Some(CodexAppServerSource::fixture(fixture_path));
+        adapter
     }
 
     #[cfg(not(test))]
     pub fn from_default_home() -> Option<Self> {
         if let Some(path) = env::var_os("MOONBOX_CODEX_HOME") {
-            return Some(Self::new(path));
+            return Some(Self::new(path).with_env_app_server());
         }
         if let Some(path) = env::var_os("CODEX_HOME") {
-            return Some(Self::new(path));
+            return Some(Self::new(path).with_env_app_server());
         }
-        env::var_os("HOME").map(|home| Self::new(PathBuf::from(home).join(".codex")))
+        env::var_os("HOME")
+            .map(|home| Self::new(PathBuf::from(home).join(".codex")).with_env_app_server())
+    }
+
+    #[cfg(not(test))]
+    fn with_env_app_server(mut self) -> Self {
+        self.app_server = CodexAppServerSource::from_env();
+        self
     }
 
     #[cfg(not(test))]
     pub fn has_session_store(&self) -> bool {
-        self.state_db_path().is_file() || self.sessions_dir().is_dir()
+        self.has_local_session_store() || self.app_server.is_some()
     }
 
     #[cfg(not(test))]
     pub(crate) fn session_store_path(&self) -> PathBuf {
         if self.state_db_path().is_file() {
             self.state_db_path()
+        } else if let Some(app_server) = &self.app_server
+            && let Some(path) = app_server.store_path()
+        {
+            PathBuf::from(path)
         } else {
             self.sessions_dir()
         }
@@ -157,6 +180,22 @@ impl CodexSourceAdapter {
 
     fn has_state_index(&self) -> bool {
         self.state_db_path().is_file()
+    }
+
+    fn has_local_session_store(&self) -> bool {
+        self.state_db_path().is_file() || self.sessions_dir().is_dir()
+    }
+
+    fn local_store_path(&self) -> Option<String> {
+        Some(
+            if self.has_state_index() {
+                self.state_db_path()
+            } else {
+                self.sessions_dir()
+            }
+            .display()
+            .to_string(),
+        )
     }
 
     fn open_connection(&self) -> Result<Connection, AdapterError> {
@@ -412,30 +451,21 @@ impl CodexSourceAdapter {
             events,
         })
     }
-}
 
-impl SourceAdapter for CodexSourceAdapter {
-    fn tool(&self) -> CliTool {
-        CODEX_TOOL
+    fn list_app_server_sessions(&self) -> Result<Option<Vec<SessionSummary>>, AdapterError> {
+        let Some(app_server) = &self.app_server else {
+            return Ok(None);
+        };
+        Ok(Some(
+            app_server
+                .list_threads(self.list_limit)?
+                .into_iter()
+                .map(app_thread_summary)
+                .collect(),
+        ))
     }
 
-    fn provenance(&self) -> SourceProvenance {
-        SourceProvenance::Real
-    }
-
-    fn store_path(&self) -> Option<String> {
-        Some(
-            if self.has_state_index() {
-                self.state_db_path()
-            } else {
-                self.sessions_dir()
-            }
-            .display()
-            .to_string(),
-        )
-    }
-
-    fn list_sessions(&self) -> Result<Vec<SessionSummary>, AdapterError> {
+    fn list_fallback_sessions(&self) -> Result<Vec<SessionSummary>, AdapterError> {
         if self.has_state_index() {
             let overrides = self.thread_name_overrides()?;
             return Ok(self
@@ -454,21 +484,24 @@ impl SourceAdapter for CodexSourceAdapter {
         Ok(sessions)
     }
 
-    fn list_sessions_with_report(
+    fn fallback_report(
         &self,
         filter_status: &str,
         reason: &str,
+        app_server_error: Option<&AdapterError>,
     ) -> Result<(Vec<SessionSummary>, super::model::SourceAdapterReport), AdapterError> {
         if self.has_state_index() {
-            let sessions = self.list_sessions()?;
+            let sessions = self.list_fallback_sessions()?;
             let report = super::adapter::report_from_sessions_with_scan(
                 SourceReportMeta {
                     cli: self.tool(),
                     provenance: self.provenance(),
                     active: true,
-                    store_path: self.store_path(),
-                    filter_status: filter_status.into(),
-                    reason: reason.into(),
+                    store_path: self.local_store_path(),
+                    filter_status: fallback_filter_status(filter_status, app_server_error),
+                    reason: fallback_report_reason(reason, app_server_error),
+                    capabilities: app_server_error
+                        .map(|error| app_server_unavailable_capabilities(true, error)),
                 },
                 &sessions,
                 SourceScanStats {
@@ -479,6 +512,7 @@ impl SourceAdapter for CodexSourceAdapter {
             );
             return Ok((sessions, report));
         }
+
         let discovery = self.listed_session_discovery()?;
         let mut sessions = Vec::new();
         for path in discovery.files {
@@ -489,9 +523,11 @@ impl SourceAdapter for CodexSourceAdapter {
                 cli: self.tool(),
                 provenance: self.provenance(),
                 active: true,
-                store_path: self.store_path(),
-                filter_status: filter_status.into(),
-                reason: reason.into(),
+                store_path: self.local_store_path(),
+                filter_status: fallback_filter_status(filter_status, app_server_error),
+                reason: fallback_report_reason(reason, app_server_error),
+                capabilities: app_server_error
+                    .map(|error| app_server_unavailable_capabilities(true, error)),
             },
             &sessions,
             super::adapter::SourceScanStats {
@@ -501,8 +537,88 @@ impl SourceAdapter for CodexSourceAdapter {
         );
         Ok((sessions, report))
     }
+}
+
+impl SourceAdapter for CodexSourceAdapter {
+    fn tool(&self) -> CliTool {
+        CODEX_TOOL
+    }
+
+    fn provenance(&self) -> SourceProvenance {
+        SourceProvenance::Real
+    }
+
+    fn store_path(&self) -> Option<String> {
+        if let Some(app_server) = &self.app_server {
+            return app_server.store_path();
+        }
+        self.local_store_path()
+    }
+
+    fn list_sessions(&self) -> Result<Vec<SessionSummary>, AdapterError> {
+        if let Some(app_server) = &self.app_server {
+            match app_server.list_threads(self.list_limit) {
+                Ok(threads) => return Ok(threads.into_iter().map(app_thread_summary).collect()),
+                Err(error) if self.has_local_session_store() => {
+                    let _ = error;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        self.list_fallback_sessions()
+    }
+
+    fn list_sessions_with_report(
+        &self,
+        filter_status: &str,
+        reason: &str,
+    ) -> Result<(Vec<SessionSummary>, super::model::SourceAdapterReport), AdapterError> {
+        if let Some(app_server) = &self.app_server {
+            match self.list_app_server_sessions() {
+                Ok(Some(sessions)) => {
+                    let report = super::adapter::report_from_sessions_with_scan(
+                        SourceReportMeta {
+                            cli: self.tool(),
+                            provenance: self.provenance(),
+                            active: true,
+                            store_path: app_server.store_path(),
+                            filter_status: "included_codex_app_server".into(),
+                            reason:
+                                "Codex app-server thread/list source; SQLite/JSONL remains fallback"
+                                    .into(),
+                            capabilities: Some(app_server_capabilities(
+                                self.has_local_session_store(),
+                            )),
+                        },
+                        &sessions,
+                        SourceScanStats {
+                            list_limit: self.list_limit,
+                            scan_entry_count: sessions.len(),
+                            ..SourceScanStats::default()
+                        },
+                    );
+                    return Ok((sessions, report));
+                }
+                Ok(None) => {}
+                Err(error) if self.has_local_session_store() => {
+                    return self.fallback_report(filter_status, reason, Some(&error));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        self.fallback_report(filter_status, reason, None)
+    }
 
     fn find_session(&self, session_id: &str) -> Result<Option<SessionSummary>, AdapterError> {
+        if let Some(app_server) = &self.app_server {
+            match app_server.read_thread(session_id) {
+                Ok(thread) => return Ok(Some(app_thread_summary(thread))),
+                Err(error) if self.has_local_session_store() => {
+                    let _ = error;
+                }
+                Err(_) => return Ok(None),
+            }
+        }
         if let Some(mut row) = self.find_thread_row(session_id)? {
             let overrides = self.thread_name_overrides()?;
             apply_thread_name_override(&mut row, &overrides);
@@ -515,6 +631,15 @@ impl SourceAdapter for CodexSourceAdapter {
     }
 
     fn load_timeline(&self, session_id: &str) -> Result<CanonicalTimeline, AdapterError> {
+        if let Some(app_server) = &self.app_server {
+            match app_server.load_timeline_limited(session_id, None) {
+                Ok(timeline) => return Ok(timeline),
+                Err(error) if self.has_local_session_store() => {
+                    let _ = error;
+                }
+                Err(error) => return Err(error),
+            }
+        }
         let Some(path) = self.find_session_path(session_id)? else {
             return Err(AdapterError::SessionNotFound {
                 tool: CODEX_TOOL,
@@ -529,6 +654,20 @@ impl SourceAdapter for CodexSourceAdapter {
         session: &SessionSummary,
         event_limit: Option<usize>,
     ) -> Result<CanonicalTimeline, AdapterError> {
+        if let Some(app_server) = &self.app_server
+            && session
+                .source_path
+                .as_deref()
+                .is_some_and(CodexAppServerSource::is_thread_source_path)
+        {
+            match app_server.load_timeline_limited(&session.id, event_limit) {
+                Ok(timeline) => return Ok(timeline),
+                Err(error) if self.has_local_session_store() => {
+                    let _ = error;
+                }
+                Err(error) => return Err(error),
+            }
+        }
         if let Some(path) = session
             .source_path
             .as_deref()
@@ -544,6 +683,72 @@ impl SourceAdapter for CodexSourceAdapter {
             });
         };
         self.parse_timeline(&session.id, &path, event_limit)
+    }
+}
+
+fn fallback_filter_status(filter_status: &str, app_server_error: Option<&AdapterError>) -> String {
+    if app_server_error.is_some() {
+        "included_codex_app_server_fallback".into()
+    } else {
+        filter_status.into()
+    }
+}
+
+fn fallback_report_reason(reason: &str, app_server_error: Option<&AdapterError>) -> String {
+    app_server_error
+        .map(|error| format!("Codex app-server unavailable ({error}); {reason}"))
+        .unwrap_or_else(|| reason.into())
+}
+
+fn app_server_capabilities(local_store_available: bool) -> SourceCapabilities {
+    let mut capabilities =
+        super::capability::source_capabilities(CODEX_TOOL, SourceProvenance::Real);
+    capabilities.local_store = if local_store_available {
+        cap(
+            SourceCapabilityStatus::Available,
+            "read-only state_5.sqlite or rollout JSONL fallback is also available",
+        )
+    } else {
+        cap(
+            SourceCapabilityStatus::Unavailable,
+            "no Codex state_5.sqlite or rollout JSONL fallback discovered",
+        )
+    };
+    capabilities.rich_local_rpc = cap(
+        SourceCapabilityStatus::Available,
+        "Codex app-server thread/list, thread/read, and thread/turns/list are configured",
+    );
+    capabilities.deep_link = cap(
+        SourceCapabilityStatus::Available,
+        "open-app can preview codex://threads/<id> deep links without launching",
+    );
+    capabilities.cloud_metadata = cap(
+        SourceCapabilityStatus::Unknown,
+        "Codex cloud task metadata is modeled separately and is not mixed into local threads",
+    );
+    capabilities.remote_control = cap(
+        SourceCapabilityStatus::Unavailable,
+        "Moonbox does not start Codex remote-control or app-server daemons",
+    );
+    capabilities
+}
+
+fn app_server_unavailable_capabilities(
+    local_store_available: bool,
+    error: &AdapterError,
+) -> SourceCapabilities {
+    let mut capabilities = app_server_capabilities(local_store_available);
+    capabilities.rich_local_rpc = cap(
+        SourceCapabilityStatus::Unavailable,
+        format!("Codex app-server configured but unavailable; fallback used: {error}"),
+    );
+    capabilities
+}
+
+fn cap(status: SourceCapabilityStatus, detail: impl Into<String>) -> SourceCapability {
+    SourceCapability {
+        status,
+        detail: detail.into(),
     }
 }
 
@@ -1179,6 +1384,101 @@ not-json-after-limit"#,
         );
     }
 
+    #[test]
+    fn app_server_source_is_preferred_over_local_store() {
+        let root = test_root("app-server-preferred");
+        write_session(
+            &root,
+            "local.jsonl",
+            r#"{"timestamp":"2026-06-06T10:00:00.000Z","type":"session_meta","payload":{"id":"codex-local","cwd":"/local"}}
+{"timestamp":"2026-06-06T10:01:00.000Z","type":"event_msg","payload":{"type":"user_message","message":"local fallback"}}"#,
+        );
+        let fixture_path = root.join("app-server.json");
+        write_app_server_fixture(&fixture_path, app_server_fixture_json());
+        let adapter = CodexSourceAdapter::with_app_server_fixture(&root, &fixture_path);
+
+        let (sessions, report) = adapter
+            .list_sessions_with_report("included_real_store", "test")
+            .expect("report");
+        let found = adapter
+            .find_session("codex-app-thread")
+            .expect("find")
+            .expect("app thread");
+        let timeline = adapter
+            .load_timeline_limited(&found, None)
+            .expect("timeline");
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "codex-app-thread");
+        assert_eq!(sessions[0].title, "Codex app-server source");
+        assert_eq!(sessions[0].runtime_status, SessionRuntimeStatus::Active);
+        assert_eq!(
+            sessions[0].source_path.as_deref(),
+            Some("codex-app-server://threads/codex-app-thread")
+        );
+        assert_eq!(report.filter_status, "included_codex_app_server");
+        assert_eq!(
+            report.capabilities.rich_local_rpc.status,
+            SourceCapabilityStatus::Available
+        );
+        assert_eq!(
+            report.capabilities.deep_link.status,
+            SourceCapabilityStatus::Available
+        );
+        assert_eq!(
+            report.capabilities.local_store.status,
+            SourceCapabilityStatus::Available
+        );
+        assert_eq!(
+            timeline
+                .events
+                .iter()
+                .map(|event| (event.kind, event.detail.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (TimelineKind::User, "Continue from app-server"),
+                (TimelineKind::Assistant, "App-server answer"),
+                (TimelineKind::Tool, "cargo test [completed] exit=0\nok")
+            ]
+        );
+    }
+
+    #[test]
+    fn app_server_error_falls_back_to_local_store_with_report_reason() {
+        let root = test_root("app-server-fallback");
+        write_session(
+            &root,
+            "local.jsonl",
+            r#"{"timestamp":"2026-06-06T10:00:00.000Z","type":"session_meta","payload":{"id":"codex-local-fallback","cwd":"/local"}}
+{"timestamp":"2026-06-06T10:01:00.000Z","type":"event_msg","payload":{"type":"user_message","message":"local fallback"}}"#,
+        );
+        let fixture_path = root.join("app-server-broken.json");
+        write_app_server_fixture(&fixture_path, r#"{"responses":[]}"#);
+        let adapter = CodexSourceAdapter::with_app_server_fixture(&root, &fixture_path);
+
+        let (sessions, report) = adapter
+            .list_sessions_with_report("included_real_store", "real source store discovered")
+            .expect("fallback report");
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "codex-local-fallback");
+        assert_eq!(report.filter_status, "included_codex_app_server_fallback");
+        assert_eq!(
+            report.store_path.as_deref(),
+            Some(root.join("sessions").to_str().expect("utf-8 sessions path"))
+        );
+        assert!(report.reason.contains("Codex app-server unavailable"));
+        assert!(report.reason.contains("real source store discovered"));
+        assert_eq!(
+            report.capabilities.rich_local_rpc.status,
+            SourceCapabilityStatus::Unavailable
+        );
+        assert_eq!(
+            report.capabilities.local_store.status,
+            SourceCapabilityStatus::Available
+        );
+    }
+
     fn test_root(name: &str) -> PathBuf {
         let root = env::temp_dir().join(format!(
             "moonbox-codex-adapter-{name}-{}",
@@ -1250,5 +1550,58 @@ not-json-after-limit"#,
 
     fn write_session_index(root: &Path, contents: &str) {
         fs::write(root.join("session_index.jsonl"), contents).expect("session index");
+    }
+
+    fn write_app_server_fixture(path: &Path, contents: &str) {
+        fs::write(path, contents).expect("app server fixture");
+    }
+
+    fn app_server_fixture_json() -> &'static str {
+        r#"{
+          "responses": [
+            {"method":"thread/list","result":{"data":[{
+              "cliVersion":"0.0.0-test",
+              "createdAt":1780732800,
+              "cwd":"/repo",
+              "ephemeral":false,
+              "id":"codex-app-thread",
+              "modelProvider":"openai",
+              "name":"Codex app-server source",
+              "preview":"Continue from app-server",
+              "sessionId":"codex-app-thread",
+              "source":"cli",
+              "status":{"type":"active","activeFlags":[]},
+              "turns":[],
+              "updatedAt":1780736400,
+              "gitInfo":{"branch":"main"}
+            }]}},
+            {"method":"thread/read","thread_id":"codex-app-thread","result":{"thread":{
+              "cliVersion":"0.0.0-test",
+              "createdAt":1780732800,
+              "cwd":"/repo",
+              "ephemeral":false,
+              "id":"codex-app-thread",
+              "modelProvider":"openai",
+              "name":"Codex app-server source",
+              "preview":"Continue from app-server",
+              "sessionId":"codex-app-thread",
+              "source":"cli",
+              "status":{"type":"active","activeFlags":[]},
+              "turns":[],
+              "updatedAt":1780736400,
+              "gitInfo":{"branch":"main"}
+            }}},
+            {"method":"thread/turns/list","thread_id":"codex-app-thread","result":{"data":[{
+              "id":"turn-1",
+              "startedAt":1780732860,
+              "status":"completed",
+              "items":[
+                {"id":"item-1","type":"userMessage","content":[{"type":"text","text":"Continue from app-server"}]},
+                {"id":"item-2","type":"agentMessage","text":"App-server answer"},
+                {"id":"item-3","type":"commandExecution","command":"cargo test","commandActions":[],"cwd":"/repo","status":"completed","exitCode":0,"aggregatedOutput":"ok"}
+              ]
+            }]}}
+          ]
+        }"#
     }
 }

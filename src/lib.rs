@@ -40,6 +40,7 @@ pub fn run() -> Result<()> {
         Command::Tui(args) => run_tui(args),
         Command::Sessions(args) => print_sessions(args),
         Command::Open(args) => print_open_command(args),
+        Command::OpenApp(args) => print_open_app_plan(args),
         Command::Capsule(args) => print_capsule(args),
         Command::CompileRequest(args) => print_compile_request(args),
         Command::CompileOutput(args) => print_compile_output(args),
@@ -157,6 +158,27 @@ fn print_open_command(args: cli::OpenArgs) -> Result<()> {
 
     if let Some(command) = core::workbench::open_command(args.session.as_deref())? {
         println!("{command}");
+    } else {
+        println!("No session selected");
+    }
+    Ok(())
+}
+
+fn print_open_app_plan(args: cli::OpenAppArgs) -> Result<()> {
+    let plan = core::workbench::open_app_plan(args.session.as_deref())?;
+    if let Some(plan) = plan {
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&plan)?);
+        } else {
+            println!("open-app: dry-run");
+            println!("action: app-deep-link");
+            println!("session: {}", plan.source_session.id);
+            println!("supported: {}", plan.supported);
+            if let Some(deep_link) = plan.deep_link {
+                println!("deep_link: {deep_link}");
+            }
+            println!("reason: {}", plan.reason);
+        }
     } else {
         println!("No session selected");
     }

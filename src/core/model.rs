@@ -622,6 +622,7 @@ impl LaunchValidation {
 pub enum SessionAction {
     OriginalResume,
     TargetHandoff,
+    AppDeepLink,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -672,6 +673,17 @@ pub struct OriginalSessionPlan {
     pub dry_run: bool,
     pub source_session: SessionSummary,
     pub command: TargetLaunchCommand,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppOpenPlan {
+    pub version: u16,
+    pub action: SessionAction,
+    pub dry_run: bool,
+    pub source_session: SessionSummary,
+    pub supported: bool,
+    pub deep_link: Option<String>,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

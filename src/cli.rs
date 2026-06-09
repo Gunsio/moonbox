@@ -24,6 +24,9 @@ pub enum Command {
     Sessions(SessionListArgs),
     /// Print the command for opening an original session.
     Open(OpenArgs),
+    /// Preview a provider app deep link without launching it.
+    #[command(name = "open-app")]
+    OpenApp(OpenAppArgs),
     /// Print the selected Work Capsule.
     Capsule(CompileArgs),
     /// Print the compiler request contract.
@@ -168,6 +171,16 @@ pub struct OpenArgs {
     /// Execute the original CLI resume command instead of printing a dry-run plan.
     #[arg(long)]
     pub execute: bool,
+    /// Print JSON output.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone, Default)]
+pub struct OpenAppArgs {
+    /// Session id to open in a provider app. Defaults to the newest discovered session.
+    #[arg(long)]
+    pub session: Option<String>,
     /// Print JSON output.
     #[arg(long)]
     pub json: bool,

@@ -44,6 +44,10 @@ fn fixture_safe_command(binary: &str, test_name: &str) -> Command {
         "MOONBOX_COMPILER_ARGS",
         "MOONBOX_COMPILER_TIMEOUT_MS",
         "MOONBOX_CODEX_BIN",
+        "MOONBOX_CODEX_APP_SERVER_FIXTURE",
+        "MOONBOX_CODEX_APP_SERVER_PROXY",
+        "MOONBOX_CODEX_APP_SERVER_SOCKET",
+        "MOONBOX_CODEX_APP_SERVER_TIMEOUT_MS",
         "MOONBOX_CLAUDE_BIN",
         "MOONBOX_HERMES_BIN",
         "MOONBOX_REDACTION",
@@ -165,6 +169,45 @@ fn write_codex_thread_index(root: &Path, rollout_path: &Path, id: &str, title: &
     .expect("codex state row");
 }
 
+fn codex_app_server_fixture_json() -> &'static str {
+    r#"{
+      "responses": [
+        {"method":"thread/list","result":{"data":[{
+          "cliVersion":"0.0.0-test",
+          "createdAt":1780732800,
+          "cwd":"/tmp/moonbox-app-server",
+          "ephemeral":false,
+          "id":"codex-app-cli",
+          "modelProvider":"openai",
+          "name":"Codex app-server CLI fixture",
+          "preview":"Use app-server for inventory",
+          "sessionId":"codex-app-cli",
+          "source":"cli",
+          "status":{"type":"active","activeFlags":[]},
+          "turns":[],
+          "updatedAt":1780736400,
+          "gitInfo":{"branch":"main"}
+        }]}},
+        {"method":"thread/read","thread_id":"codex-app-cli","result":{"thread":{
+          "cliVersion":"0.0.0-test",
+          "createdAt":1780732800,
+          "cwd":"/tmp/moonbox-app-server",
+          "ephemeral":false,
+          "id":"codex-app-cli",
+          "modelProvider":"openai",
+          "name":"Codex app-server CLI fixture",
+          "preview":"Use app-server for inventory",
+          "sessionId":"codex-app-cli",
+          "source":"cli",
+          "status":{"type":"active","activeFlags":[]},
+          "turns":[],
+          "updatedAt":1780736400,
+          "gitInfo":{"branch":"main"}
+        }}}
+      ]
+    }"#
+}
+
 #[test]
 fn moonbox_and_moon_expose_the_same_version_contract() {
     let moonbox = output_text(
@@ -196,6 +239,7 @@ fn completion_generation_uses_requested_or_invoked_binary_name() {
     assert!(bash.contains("moonbox"));
     assert!(bash.contains("replay-eval"));
     assert!(bash.contains("completions"));
+    assert!(bash.contains("open-app"));
     assert!(bash.contains("snapshot"));
     assert!(bash.contains("ssh"));
 
@@ -208,6 +252,7 @@ fn completion_generation_uses_requested_or_invoked_binary_name() {
     assert!(fish.contains("complete -c moon"));
     assert!(fish.contains("replay-eval"));
     assert!(fish.contains("completions"));
+    assert!(fish.contains("open-app"));
     assert!(fish.contains("snapshot"));
     assert!(fish.contains("ssh"));
 
@@ -220,6 +265,7 @@ fn completion_generation_uses_requested_or_invoked_binary_name() {
     assert!(zsh.contains("#compdef moon"));
     assert!(zsh.contains("replay-eval"));
     assert!(zsh.contains("completions"));
+    assert!(zsh.contains("open-app"));
     assert!(zsh.contains("snapshot"));
     assert!(zsh.contains("ssh"));
 }
@@ -585,6 +631,81 @@ fn codex_sessions_json_uses_renamed_thread_name_from_session_index() {
 }
 
 #[test]
+fn codex_app_server_fixture_is_preferred_source_and_open_app_preview() {
+    let test_name = "codex-app-server-fixture";
+    let home = fixture_home(test_name);
+    let fixture_path = home.join("codex-app-server.json");
+    write_file(
+        &home,
+        "codex-app-server.json",
+        codex_app_server_fixture_json(),
+    );
+
+    let sessions = output_json(
+        moonbox_command(test_name)
+            .args(["sessions", "--json", "--filter", "codex"])
+            .env("MOONBOX_CODEX_APP_SERVER_FIXTURE", &fixture_path)
+            .output()
+            .expect("sessions"),
+    );
+    let sessions = sessions.as_array().expect("session array");
+
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0]["id"], "codex-app-cli");
+    assert_eq!(sessions[0]["title"], "Codex app-server CLI fixture");
+    assert_eq!(sessions[0]["source_provenance"], "real");
+    assert_eq!(sessions[0]["runtime_status"], "active");
+    assert_eq!(
+        sessions[0]["source_path"],
+        "codex-app-server://threads/codex-app-cli"
+    );
+
+    let open_app = output_json(
+        moonbox_command(test_name)
+            .args(["open-app", "--session", "codex-app-cli", "--json"])
+            .env("MOONBOX_CODEX_APP_SERVER_FIXTURE", &fixture_path)
+            .output()
+            .expect("open-app"),
+    );
+    assert_eq!(open_app["action"], "app_deep_link");
+    assert_eq!(open_app["dry_run"], true);
+    assert_eq!(open_app["supported"], true);
+    assert_eq!(open_app["deep_link"], "codex://threads/codex-app-cli");
+    assert!(open_app.get("command").is_none());
+
+    let binary = env!("CARGO_BIN_EXE_moonbox");
+    let doctor = output_json(
+        moonbox_command(test_name)
+            .arg("doctor")
+            .arg("--json")
+            .env("MOONBOX_CODEX_APP_SERVER_FIXTURE", &fixture_path)
+            .env("MOONBOX_CODEX_BIN", binary)
+            .env("MOONBOX_CLAUDE_BIN", binary)
+            .env("MOONBOX_HERMES_BIN", binary)
+            .output()
+            .expect("doctor"),
+    );
+    let adapters = doctor["source_adapters"]
+        .as_array()
+        .expect("source adapters");
+    let codex = adapters
+        .iter()
+        .find(|adapter| adapter["cli"] == "codex")
+        .expect("codex adapter");
+
+    assert_eq!(codex["filter_status"], "included_codex_app_server");
+    assert_eq!(
+        codex["capabilities"]["rich_local_rpc"]["status"],
+        "available"
+    );
+    assert_eq!(codex["capabilities"]["deep_link"]["status"], "available");
+    assert_eq!(
+        codex["capabilities"]["local_store"]["status"],
+        "unavailable"
+    );
+}
+
+#[test]
 fn auto_mode_does_not_mix_real_sessions_with_missing_source_fixtures() {
     let test_name = "real-store-no-fixture-mix";
     let home = fixture_home(test_name);
@@ -831,6 +952,24 @@ fn open_launch_and_verify_public_cli_contracts_are_dry_run_by_default() {
         open["command"]["args"],
         serde_json::json!(["resume", "codex-cxcp-design"])
     );
+
+    let open_app = output_json(
+        moonbox_command("dry-run-contract")
+            .args(["open-app", "--session", "codex-cxcp-design", "--json"])
+            .output()
+            .expect("open-app dry-run"),
+    );
+    assert_eq!(open_app["dry_run"], true);
+    assert_eq!(open_app["action"], "app_deep_link");
+    assert_eq!(open_app["supported"], true);
+    assert_eq!(open_app["deep_link"], "codex://threads/codex-cxcp-design");
+    assert!(
+        open_app["reason"]
+            .as_str()
+            .expect("open-app reason")
+            .contains("does not launch")
+    );
+    assert!(open_app.get("command").is_none());
 
     let launch = output_json(
         moonbox_command("dry-run-contract")

@@ -5,9 +5,9 @@ use super::{
     error::CoreError,
     launcher,
     model::{
-        CapsuleCompileOutput, CapsuleCompileRequest, CliTool, ContinuationOptions, LaunchExecution,
-        LaunchPlan, OriginalSessionExecution, OriginalSessionPlan, SessionAction, SessionSummary,
-        VerificationReport, WorkCapsule, WorkbenchData,
+        AppOpenPlan, CapsuleCompileOutput, CapsuleCompileRequest, CliTool, ContinuationOptions,
+        LaunchExecution, LaunchPlan, OriginalSessionExecution, OriginalSessionPlan, SessionAction,
+        SessionSummary, VerificationReport, WorkCapsule, WorkbenchData,
     },
     redaction, verifier,
 };
@@ -83,6 +83,39 @@ pub fn open_plan(session_id: Option<&str>) -> Result<Option<OriginalSessionPlan>
         dry_run: true,
         source_session,
         command,
+    }))
+}
+
+pub fn open_app_plan(session_id: Option<&str>) -> Result<Option<AppOpenPlan>, CoreError> {
+    let Some(source_session) = selected_session(session_id)? else {
+        return Ok(None);
+    };
+    let (supported, deep_link, reason) = if source_session.cli == CliTool::Codex {
+        (
+            true,
+            Some(super::codex_app_server::CodexAppServerSource::deep_link(
+                &source_session.id,
+            )),
+            "Codex desktop app deep link preview; Moonbox does not launch the app".into(),
+        )
+    } else {
+        (
+            false,
+            None,
+            format!(
+                "{} does not have a verified provider app deep-link contract",
+                source_session.cli
+            ),
+        )
+    };
+    Ok(Some(AppOpenPlan {
+        version: 1,
+        action: SessionAction::AppDeepLink,
+        dry_run: true,
+        source_session,
+        supported,
+        deep_link,
+        reason,
     }))
 }
 
@@ -362,6 +395,35 @@ mod tests {
         assert_eq!(plan.command.program, "codex");
         assert_eq!(plan.command.args, ["resume", "codex-cxcp-design"]);
         assert_eq!(plan.command.display, "codex resume codex-cxcp-design");
+    }
+
+    #[test]
+    fn open_app_plan_previews_codex_deep_link_without_execute_path() {
+        let plan = open_app_plan(Some("codex-cxcp-design"))
+            .expect("app open plan result")
+            .expect("app open plan");
+
+        assert!(plan.dry_run);
+        assert_eq!(plan.action, SessionAction::AppDeepLink);
+        assert!(plan.supported);
+        assert_eq!(
+            plan.deep_link.as_deref(),
+            Some("codex://threads/codex-cxcp-design")
+        );
+        assert!(plan.reason.contains("does not launch"));
+    }
+
+    #[test]
+    fn open_app_plan_returns_unsupported_provider_plan() {
+        let plan = open_app_plan(Some("claude-qc-platform"))
+            .expect("app open plan result")
+            .expect("app open plan");
+
+        assert!(plan.dry_run);
+        assert_eq!(plan.action, SessionAction::AppDeepLink);
+        assert!(!plan.supported);
+        assert_eq!(plan.deep_link, None);
+        assert!(plan.reason.contains("deep-link contract"));
     }
 
     #[test]

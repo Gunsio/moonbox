@@ -33,8 +33,9 @@ and this project uses semantic versioning once tagged releases start.
   `target_command` plan output.
 - Guarded original-session execution through `open --execute`.
 - Structured original open plan output through `open --json`.
-- `action` discriminators in dry-run `open --json` and `launch --json`
-  output, using `original_resume` and `target_handoff`.
+- `action` discriminators in dry-run `open --json`, `open-app --json`, and
+  `launch --json` output, using `original_resume`, `app_deep_link`, and
+  `target_handoff`.
 - First-class `moon` binary alias installed alongside `moonbox`.
 - Configurable compiler skill presets in `~/.config/moonbox/config.json`,
   including optional description, homepage, and GitHub stars metadata for the
@@ -157,6 +158,13 @@ and this project uses semantic versioning once tagged releases start.
 - `launch` and `verify` options for `--continuation` and
   `--workspace-restore`, with fixture-safe contract coverage proving unsupported
   import/restore requests are blocked instead of silently downgraded.
+- Explicit opt-in Codex app-server source adapter support through
+  `MOONBOX_CODEX_APP_SERVER_FIXTURE` or `MOONBOX_CODEX_APP_SERVER_PROXY=1`,
+  preferring `thread/list`, `thread/read`, and `thread/turns/list` data while
+  keeping local SQLite/JSONL as fallback.
+- Non-executing `moonbox open-app` / `moon open-app` plans that preview
+  `codex://threads/<id>` deep links for Codex sessions without launching the
+  desktop app.
 
 ### Changed
 
@@ -293,6 +301,10 @@ and this project uses semantic versioning once tagged releases start.
 - Codex session titles now prefer `session_index.jsonl` `thread_name` values
   over stale `state_5.sqlite` titles, so renamed Codex threads are searchable
   and displayed the same way as the Codex resume picker.
+- Codex Doctor capability reports now distinguish unconfigured app-server
+  fallback, configured app-server success, and app-server fallback errors; deep
+  links are reported as non-executing preview support instead of a planned M62
+  item.
 - Timeline cursor and selected rewind anchor markers now use separate visual
   treatment, so the active row and the saved rewind point no longer both look
   like the current selection.
