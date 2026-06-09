@@ -622,6 +622,7 @@ impl App {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => self.back_or_quit(),
             KeyCode::Char('r') if self.show_doctor => self.refresh_doctor(),
+            KeyCode::Char('v') if self.show_doctor => self.toggle_verify(),
             KeyCode::Char('y') if self.show_doctor => self.copy_doctor_report(),
             KeyCode::Char('y') => self.copy_focused_command(),
             KeyCode::Enter if self.show_open_original => self.queue_original_resume(),
@@ -648,7 +649,7 @@ impl App {
         } else if self.show_doctor {
             self.show_doctor = false;
             self.modal_scroll = 0;
-            self.set_status("Doctor closed");
+            self.set_status("Pre-flight closed");
         } else if self.show_open_original {
             self.show_open_original = false;
             self.modal_scroll = 0;
@@ -941,7 +942,7 @@ impl App {
     fn refresh_doctor(&mut self) {
         self.doctor_report = doctor::diagnose();
         self.set_status(format!(
-            "Doctor: {} ({} checks)",
+            "Pre-flight: {} ({} doctor checks)",
             self.doctor_report.status,
             self.doctor_report.checks.len()
         ));
@@ -1608,7 +1609,7 @@ impl App {
         match serde_json::to_string_pretty(&self.doctor_report) {
             Ok(report) => {
                 self.clipboard_text = Some(report);
-                self.set_status("Copied doctor report");
+                self.set_status("Copied pre-flight doctor JSON");
             }
             Err(error) => self.set_status(format!("Doctor copy failed: {error}")),
         }
@@ -2600,7 +2601,7 @@ mod tests {
 
         assert!(app.show_doctor);
         assert_eq!(app.selected_event, 3);
-        assert!(app.status_message.starts_with("Doctor: "));
+        assert!(app.status_message.starts_with("Pre-flight: "));
         assert!(
             app.doctor_report
                 .checks
@@ -2617,7 +2618,7 @@ mod tests {
                 .iter()
                 .any(|check| check["name"] == "session_discovery")
         }));
-        assert_eq!(app.status_message, "Copied doctor report");
+        assert_eq!(app.status_message, "Copied pre-flight doctor JSON");
     }
 
     #[test]
@@ -2632,7 +2633,7 @@ mod tests {
 
         assert!(app.show_doctor);
         assert!(!app.command_mode);
-        assert!(app.status_message.starts_with("Doctor: "));
+        assert!(app.status_message.starts_with("Pre-flight: "));
     }
 
     #[test]

@@ -126,16 +126,7 @@ pub fn render_loading(frame: &mut Frame, tick: usize) {
 }
 
 fn render_header(frame: &mut Frame, area: Rect, app: &App) {
-    let verify = if app.verify_passed {
-        "PASS"
-    } else {
-        "NEEDS REVIEW"
-    };
-    let verify_color = if app.verify_passed {
-        theme::GREEN
-    } else {
-        theme::ORANGE
-    };
+    let preflight = preflight_summary(app);
 
     let title = Line::from(vec![
         Span::styled(
@@ -163,13 +154,6 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
                 .fg(theme::CYAN)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw("   Compiler: "),
-        Span::styled(
-            compile_status_label(app.compile_status),
-            Style::default()
-                .fg(theme::GREEN)
-                .add_modifier(Modifier::BOLD),
-        ),
         Span::raw("   Skill: "),
         Span::styled(&app.data.capsule.compiler, Style::default().fg(theme::CYAN)),
     ]);
@@ -185,19 +169,17 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
                 .fg(theme::GOLD)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw("   Doctor: "),
+        Span::raw("   Pre-flight: "),
         Span::styled(
-            app.doctor_report.status.to_string(),
+            preflight.status.label(),
             Style::default()
-                .fg(verification_color(app.doctor_report.status))
+                .fg(preflight.status.color())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw("   Verify: "),
+        Span::raw(" "),
         Span::styled(
-            verify,
-            Style::default()
-                .fg(verify_color)
-                .add_modifier(Modifier::BOLD),
+            preflight.confidence.label(),
+            Style::default().fg(theme::MUTED),
         ),
     ]);
 
@@ -222,6 +204,106 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
             .alignment(Alignment::Left),
         area,
     );
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PreflightStatus {
+    Pass,
+    Warn,
+    Blocked,
+}
+
+impl PreflightStatus {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Pass => "PASS",
+            Self::Warn => "WARN",
+            Self::Blocked => "BLOCKED",
+        }
+    }
+
+    fn color(self) -> Color {
+        match self {
+            Self::Pass => theme::GREEN,
+            Self::Warn => theme::GOLD,
+            Self::Blocked => theme::RED,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PreflightConfidence {
+    Strong,
+    Medium,
+    Weak,
+}
+
+impl PreflightConfidence {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Strong => "Strong",
+            Self::Medium => "Medium",
+            Self::Weak => "Weak",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PreflightSummary {
+    status: PreflightStatus,
+    confidence: PreflightConfidence,
+    compiler_status: VerificationStatus,
+    verify_status: VerificationStatus,
+    verify_reviewed: bool,
+}
+
+fn preflight_summary(app: &App) -> PreflightSummary {
+    let verification = app.launch_verification_for_target(app.data.target);
+    let compiler_status = compiler_preflight_status(app.compile_status);
+    let verify_status = if app.verify_passed {
+        verification
+            .as_ref()
+            .map(|report| report.status)
+            .unwrap_or(VerificationStatus::Fail)
+    } else {
+        VerificationStatus::Fail
+    };
+    let status = if compiler_status == VerificationStatus::Fail
+        || app.doctor_report.status == VerificationStatus::Fail
+        || verify_status == VerificationStatus::Fail
+    {
+        PreflightStatus::Blocked
+    } else if compiler_status == VerificationStatus::Warn
+        || app.doctor_report.status == VerificationStatus::Warn
+        || verify_status == VerificationStatus::Warn
+    {
+        PreflightStatus::Warn
+    } else {
+        PreflightStatus::Pass
+    };
+    let confidence =
+        if verification.is_none() || !app.verify_passed || app.compile_status == "LOADING" {
+            PreflightConfidence::Weak
+        } else if status == PreflightStatus::Pass {
+            PreflightConfidence::Strong
+        } else {
+            PreflightConfidence::Medium
+        };
+    PreflightSummary {
+        status,
+        confidence,
+        compiler_status,
+        verify_status,
+        verify_reviewed: app.verify_passed,
+    }
+}
+
+fn compiler_preflight_status(status: &str) -> VerificationStatus {
+    match status {
+        "FAILED" => VerificationStatus::Fail,
+        "LOADING" => VerificationStatus::Warn,
+        _ => VerificationStatus::Pass,
+    }
 }
 
 fn render_body(frame: &mut Frame, area: Rect, app: &App) {
@@ -1731,6 +1813,7 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
     }
     if app.show_doctor {
         return vec![
+            ("v", "Verify"),
             ("r", "Refresh"),
             ("y", "Copy JSON"),
             ("j/k", "Scroll"),
@@ -1791,7 +1874,7 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("x/H", "Handoff"),
             ("o", "Original"),
             ("space", "Rewind"),
-            ("D", "Doctor"),
+            ("D", "Pre-flight"),
             ("+", "Zoom"),
             ("-", "Restore"),
             ("tab", "Next"),
@@ -1860,7 +1943,7 @@ fn render_help(frame: &mut Frame, root: Rect, app: &App) {
         Line::raw("o               open original session with original CLI"),
         Line::raw("enter           open selected session with original CLI"),
         Line::raw("x / H           choose target for handoff"),
-        Line::raw("D               open environment doctor"),
+        Line::raw("D               open pre-flight details"),
         Line::raw("[ / ]           previous / next session source filter"),
         Line::raw("space           set rewind point"),
         Line::raw("c               refresh capsule and open handoff review"),
@@ -1879,38 +1962,100 @@ fn render_help(frame: &mut Frame, root: Rect, app: &App) {
 }
 
 fn render_doctor(frame: &mut Frame, root: Rect, app: &App) {
-    let area = modal_area(root, 72, 72);
+    let area = modal_area(root, 84, 88);
     frame.render_widget(Clear, area);
+    let preflight = preflight_summary(app);
+    let verification = app.launch_verification_for_target(app.data.target);
 
     let mut lines = vec![
         Line::from(vec![
             Span::styled(
-                "Environment doctor",
+                "Pre-flight",
                 Style::default()
                     .fg(theme::GOLD)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw("  "),
             Span::styled(
+                preflight.status.label(),
+                Style::default()
+                    .fg(preflight.status.color())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("  {}", preflight.confidence.label()),
+                Style::default().fg(theme::MUTED),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Compiler: ", Style::default().fg(theme::BLUE)),
+            Span::styled(
+                compile_status_label(app.compile_status),
+                Style::default()
+                    .fg(verification_color(preflight.compiler_status))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("  {}", app.data.capsule.compiler),
+                Style::default().fg(theme::MUTED),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Doctor: ", Style::default().fg(theme::BLUE)),
+            Span::styled(
                 app.doctor_report.status.to_string(),
                 Style::default()
                     .fg(verification_color(app.doctor_report.status))
                     .add_modifier(Modifier::BOLD),
             ),
-        ]),
-        Line::from(vec![
-            Span::styled("Ready: ", Style::default().fg(theme::BLUE)),
             Span::styled(
-                app.doctor_report.ready.to_string(),
-                Style::default().fg(if app.doctor_report.ready {
-                    theme::GREEN
-                } else {
-                    theme::RED
-                }),
+                format!("  {} checks", app.doctor_report.checks.len()),
+                Style::default().fg(theme::MUTED),
             ),
         ]),
+        Line::from(vec![
+            Span::styled("Verify: ", Style::default().fg(theme::BLUE)),
+            Span::styled(
+                if preflight.verify_reviewed {
+                    preflight.verify_status.to_string()
+                } else {
+                    "BLOCKED".into()
+                },
+                Style::default()
+                    .fg(if preflight.verify_reviewed {
+                        verification_color(preflight.verify_status)
+                    } else {
+                        theme::RED
+                    })
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                verify_detail_text(verification.as_ref(), preflight.verify_reviewed),
+                Style::default().fg(theme::MUTED),
+            ),
+        ]),
+        Line::from(Span::styled(
+            "v Verify   r Refresh doctor   y Copy JSON   Esc Close",
+            Style::default().fg(theme::MUTED),
+        )),
         Line::raw(""),
+        Line::from(Span::styled(
+            "Verifier evidence",
+            Style::default()
+                .fg(theme::BLUE)
+                .add_modifier(Modifier::BOLD),
+        )),
     ];
+    lines.extend(preflight_readiness_lines(verification.as_ref(), 3));
+    lines.extend([
+        Line::raw(""),
+        Line::from(Span::styled(
+            "Environment doctor",
+            Style::default()
+                .fg(theme::BLUE)
+                .add_modifier(Modifier::BOLD),
+        )),
+    ]);
 
     for check in &app.doctor_report.checks {
         lines.push(Line::from(vec![
@@ -1940,18 +2085,28 @@ fn render_doctor(frame: &mut Frame, root: Rect, app: &App) {
             Style::default().fg(theme::MUTED),
         )),
         Line::from(Span::styled(
-            "r refresh   y copy JSON   Esc close",
+            "v Verify   r Refresh doctor   y Copy JSON   Esc Close",
             Style::default().fg(theme::MUTED),
         )),
     ]);
 
     frame.render_widget(
         Paragraph::new(lines)
-            .block(panel_block(" Doctor ", true))
+            .block(panel_block(" Pre-flight ", true))
             .scroll((app.modal_scroll, 0))
             .wrap(Wrap { trim: true }),
         area,
     );
+}
+
+fn verify_detail_text(report: Option<&VerificationReport>, reviewed: bool) -> String {
+    if !reviewed {
+        return "  needs review".into();
+    }
+    match report {
+        Some(report) => format!("  {} checks", report.checks.len()),
+        None => "  no session selected".into(),
+    }
 }
 
 fn render_skill_picker(frame: &mut Frame, root: Rect, app: &App) {
@@ -2550,6 +2705,46 @@ fn readiness_lines(report: Option<&VerificationReport>, _max_rows: usize) -> Vec
     lines
 }
 
+fn preflight_readiness_lines(
+    report: Option<&VerificationReport>,
+    max_rows: usize,
+) -> Vec<Line<'static>> {
+    let Some(report) = report else {
+        return readiness_lines(None, max_rows);
+    };
+
+    let checks = report
+        .checks
+        .iter()
+        .filter(|check| check.status == VerificationStatus::Fail)
+        .chain(
+            report
+                .checks
+                .iter()
+                .filter(|check| check.status == VerificationStatus::Warn),
+        )
+        .take(max_rows)
+        .collect::<Vec<_>>();
+    let checks = if checks.is_empty() {
+        report.checks.iter().take(max_rows).collect::<Vec<_>>()
+    } else {
+        checks
+    };
+    let shown = checks.len();
+    let mut lines = checks
+        .into_iter()
+        .map(readiness_check_line)
+        .collect::<Vec<_>>();
+    let remaining = report.checks.len().saturating_sub(shown);
+    if remaining > 0 {
+        lines.push(Line::from(Span::styled(
+            format!("  {remaining} more verifier checks"),
+            Style::default().fg(theme::MUTED),
+        )));
+    }
+    lines
+}
+
 struct ReadinessGroup {
     title: &'static str,
     color: Color,
@@ -2923,6 +3118,19 @@ mod tests {
     }
 
     #[test]
+    fn header_collapses_preflight_signals() {
+        let app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        let screen = render_text(&app, 160, 40);
+
+        assert_screen_contains(&screen, "Pre-flight:");
+        assert_screen_contains(&screen, "WARN");
+        assert_screen_contains(&screen, "Medium");
+        assert!(!screen.contains("Compiler:"), "{screen}");
+        assert!(!screen.contains("Doctor:"), "{screen}");
+        assert!(!screen.contains("Verify:"), "{screen}");
+    }
+
+    #[test]
     fn session_list_secondary_uses_relative_time_with_branch() {
         let now = parse_session_timestamp("2026-06-07T13:34:00+08:00").expect("now");
         let session = test_session("2026-06-07T13:33:44+08:00", Some("dev"));
@@ -3234,7 +3442,11 @@ mod tests {
         app.doctor_report.status = VerificationStatus::Pass;
         let screen = render_text(&app, 120, 36);
 
-        assert_screen_contains(&screen, "Doctor");
+        assert_screen_contains(&screen, "Pre-flight");
+        assert_screen_contains(&screen, "Compiler:");
+        assert_screen_contains(&screen, "Doctor:");
+        assert_screen_contains(&screen, "Verify:");
+        assert_screen_contains(&screen, "Verifier evidence");
         assert_screen_contains(&screen, "Environment doctor");
         assert_screen_contains(&screen, "source_codex_adapter");
         assert_screen_contains(&screen, "fidelity=fallback");
