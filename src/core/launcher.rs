@@ -84,6 +84,8 @@ pub fn execute_plan(mut plan: LaunchPlan, allow_draft: bool) -> Result<LaunchExe
         },
         exit_code: status.code(),
         plan,
+        launch_ledger: None,
+        launch_ledger_warning: None,
     })
 }
 
@@ -129,6 +131,8 @@ pub fn execute_original_plan(
         },
         exit_code: status.code(),
         plan,
+        launch_ledger: None,
+        launch_ledger_warning: None,
     })
 }
 

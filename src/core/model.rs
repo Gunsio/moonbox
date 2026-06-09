@@ -937,6 +937,8 @@ pub struct LaunchPlan {
     pub compiler: String,
     #[serde(alias = "target_branch")]
     pub handoff_label: String,
+    #[serde(default)]
+    pub rewind_point: String,
     pub capsule_path: Option<String>,
     pub command: String,
     pub target_command: TargetLaunchCommand,
@@ -966,6 +968,10 @@ pub struct LaunchExecution {
     pub status: LaunchExecutionStatus,
     pub exit_code: Option<i32>,
     pub plan: LaunchPlan,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_ledger: Option<LaunchLedgerLink>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_ledger_warning: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -994,6 +1000,17 @@ pub struct OriginalSessionExecution {
     pub status: LaunchExecutionStatus,
     pub exit_code: Option<i32>,
     pub plan: OriginalSessionPlan,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_ledger: Option<LaunchLedgerLink>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_ledger_warning: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LaunchLedgerLink {
+    pub id: i64,
+    pub status: String,
+    pub launched_at: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

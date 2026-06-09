@@ -10,6 +10,7 @@ pub enum CoreError {
     CapsuleParse { path: String, reason: String },
     CapsuleStore { reason: String },
     ExecuteRequiresSession { action: &'static str },
+    LaunchLedger { reason: String },
     LaunchBlocked { reason: String },
     LaunchStart { command: String, reason: String },
     ReplayEval { reason: String },
@@ -34,6 +35,7 @@ impl fmt::Display for CoreError {
                 f,
                 "{action} execution requires an explicit --session; run a dry-run first or pass --session to avoid opening the newest active session by accident"
             ),
+            Self::LaunchLedger { reason } => write!(f, "launch ledger error: {reason}"),
             Self::LaunchBlocked { reason } => write!(f, "target launch blocked: {reason}"),
             Self::LaunchStart { command, reason } => {
                 write!(f, "cannot start target launch `{command}`: {reason}")

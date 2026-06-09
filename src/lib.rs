@@ -43,6 +43,7 @@ pub fn run() -> Result<()> {
         Command::Open(args) => print_open_command(args),
         Command::OpenApp(args) => print_open_app_plan(args),
         Command::Capsule(args) => print_capsule(args),
+        Command::Launches(args) => print_launches(args),
         Command::CompileRequest(args) => print_compile_request(args),
         Command::CompileOutput(args) => print_compile_output(args),
         Command::Compilers(args) => print_compilers(args),
@@ -78,7 +79,7 @@ fn execute_tui_exit_action(action: Option<app::TuiExitAction>) -> Result<()> {
             core::launcher::handoff_original_plan(*plan)?;
         }
         Some(app::TuiExitAction::TargetHandoff(plan)) => {
-            core::launcher::execute_plan(*plan, false)?;
+            core::workbench::execute_tui_launch_plan(*plan)?;
         }
         None => {}
     }
@@ -195,6 +196,7 @@ fn print_open_command(args: cli::OpenArgs) -> Result<()> {
                         .unwrap_or_else(|| "signal".into())
                 );
                 println!("command: {}", execution.plan.command.display);
+                print_original_execution_ledger(&execution);
             }
         } else {
             println!("No session selected");
@@ -247,6 +249,7 @@ fn print_capsule(args: cli::CapsuleArgs) -> Result<()> {
         Some(cli::CapsuleCommand::List(args)) => print_capsule_list(args),
         Some(cli::CapsuleCommand::Show(args)) => print_capsule_show(args),
         Some(cli::CapsuleCommand::Launch(args)) => print_capsule_launch(args),
+        Some(cli::CapsuleCommand::Launches(args)) => print_capsule_launches(args),
         Some(cli::CapsuleCommand::Export(args)) => print_capsule_export(args),
         Some(cli::CapsuleCommand::Import(args)) => print_capsule_import(args),
         Some(cli::CapsuleCommand::Delete(args)) => print_capsule_delete(args),
@@ -366,6 +369,7 @@ fn print_capsule_launch(args: cli::CapsuleLaunchArgs) -> Result<()> {
                     .unwrap_or_else(|| "signal".into())
             );
             println!("command: {}", execution.plan.command);
+            print_launch_execution_ledger(&execution);
         }
         return Ok(());
     }
@@ -378,6 +382,67 @@ fn print_capsule_launch(args: cli::CapsuleLaunchArgs) -> Result<()> {
         println!("capsule launch: dry-run");
         println!("name: {}", args.name);
         print_launch_plan_text(&plan);
+    }
+    Ok(())
+}
+
+fn print_capsule_launches(args: cli::CapsuleLaunchesArgs) -> Result<()> {
+    let launches = core::workbench::list_capsule_launches(&args.name, args.limit)?;
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&launches)?);
+    } else {
+        println!("capsule launches: {} {}", args.name, launches.len());
+        print_launch_records_table(&launches);
+    }
+    Ok(())
+}
+
+fn print_launches(args: cli::LaunchesArgs) -> Result<()> {
+    match args
+        .command
+        .unwrap_or(cli::LaunchesCommand::List(cli::LaunchesListArgs {
+            limit: 50,
+            json: false,
+        })) {
+        cli::LaunchesCommand::List(args) => print_launches_list(args),
+        cli::LaunchesCommand::Show(args) => print_launches_show(args),
+        cli::LaunchesCommand::Link(args) => print_launches_link(args),
+    }
+}
+
+fn print_launches_list(args: cli::LaunchesListArgs) -> Result<()> {
+    let launches = core::workbench::list_launches(args.limit)?;
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&launches)?);
+    } else {
+        println!("launches: {}", launches.len());
+        print_launch_records_table(&launches);
+    }
+    Ok(())
+}
+
+fn print_launches_show(args: cli::LaunchesShowArgs) -> Result<()> {
+    let launch = core::workbench::show_launch(args.id)?;
+    if let Some(launch) = launch {
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&launch)?);
+        } else {
+            print_launch_record_text(&launch);
+        }
+    } else {
+        println!("No launch record {}", args.id);
+    }
+    Ok(())
+}
+
+fn print_launches_link(args: cli::LaunchesLinkArgs) -> Result<()> {
+    let launch = core::workbench::link_launch_to_capsule(args.id, &args.capsule)?;
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&launch)?);
+    } else {
+        println!("launch linked: {}", launch.id);
+        println!("capsule: {}", args.capsule);
+        print_launch_record_text(&launch);
     }
     Ok(())
 }
@@ -702,6 +767,7 @@ fn print_launch_plan(args: cli::LaunchArgs) -> Result<()> {
                         .unwrap_or_else(|| "signal".into())
                 );
                 println!("command: {}", execution.plan.command);
+                print_launch_execution_ledger(&execution);
             }
         } else {
             println!("No session selected");
@@ -837,11 +903,84 @@ fn print_capsule_record_text(label: &str, record: &core::capsule_store::CapsuleR
     println!("size_bytes: {}", record.summary.size_bytes);
 }
 
+fn print_launch_records_table(records: &[core::launch_ledger::LaunchRecord]) {
+    for record in records {
+        println!(
+            "{:<5} {:<18} {:<14} {:<8} {:<28} {:<12} {}",
+            record.id,
+            record.launched_at,
+            launch_action_label(record.action),
+            record.status.as_str(),
+            record.source_session,
+            record.target_cli.map(|tool| tool.id()).unwrap_or("-"),
+            record.capsule_name.as_deref().unwrap_or("-")
+        );
+    }
+}
+
+fn print_launch_record_text(record: &core::launch_ledger::LaunchRecord) {
+    println!("launch: {}", record.id);
+    println!("launched_at: {}", record.launched_at);
+    println!("action: {}", launch_action_label(record.action));
+    println!("status: {}", record.status.as_str());
+    println!("source: {}", record.source_cli);
+    println!("session: {}", record.source_session);
+    if let Some(rewind) = &record.rewind_point {
+        println!("rewind: {rewind}");
+    }
+    if let Some(target) = record.target_cli {
+        println!("target: {target}");
+    }
+    if let Some(capsule) = &record.capsule_name {
+        println!("capsule: {capsule}");
+    }
+    if let Some(capsule_ref) = &record.capsule_ref {
+        println!("capsule_ref: {capsule_ref}");
+    }
+    if let Some(compiler) = &record.compiler {
+        println!("compiler: {compiler}");
+    }
+    if let Some(label) = &record.handoff_label {
+        println!("handoff_label: {label}");
+    }
+    println!("dry_run: {}", record.dry_run);
+    println!(
+        "exit: {}",
+        record
+            .exit_code
+            .map(|code| code.to_string())
+            .unwrap_or_else(|| "-".into())
+    );
+    if let Some(reason) = &record.error_reason {
+        println!("error_reason: {reason}");
+    }
+    println!("command: {}", record.command);
+}
+
+fn print_launch_execution_ledger(execution: &core::model::LaunchExecution) {
+    if let Some(ledger) = &execution.launch_ledger {
+        println!("launch_ledger: {}", ledger.id);
+    }
+    if let Some(warning) = &execution.launch_ledger_warning {
+        eprintln!("WARN: {warning}");
+    }
+}
+
+fn print_original_execution_ledger(execution: &core::model::OriginalSessionExecution) {
+    if let Some(ledger) = &execution.launch_ledger {
+        println!("launch_ledger: {}", ledger.id);
+    }
+    if let Some(warning) = &execution.launch_ledger_warning {
+        eprintln!("WARN: {warning}");
+    }
+}
+
 fn print_launch_plan_text(plan: &core::model::LaunchPlan) {
     println!("launch: dry-run");
     println!("action: target-handoff");
     println!("session: {}", plan.source_session.id);
     println!("target: {}", plan.target_cli);
+    println!("rewind: {}", plan.rewind_point);
     println!("handoff_label: {}", plan.handoff_label);
     println!(
         "capsule: {}",
@@ -876,6 +1015,14 @@ fn launch_status(status: core::model::LaunchExecutionStatus) -> &'static str {
     match status {
         core::model::LaunchExecutionStatus::Success => "success",
         core::model::LaunchExecutionStatus::Failed => "failed",
+    }
+}
+
+fn launch_action_label(action: core::model::SessionAction) -> &'static str {
+    match action {
+        core::model::SessionAction::OriginalResume => "original",
+        core::model::SessionAction::TargetHandoff => "handoff",
+        core::model::SessionAction::AppDeepLink => "app-deep-link",
     }
 }
 

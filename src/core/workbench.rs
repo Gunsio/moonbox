@@ -6,7 +6,7 @@ use super::{
     },
     compiler, continuation, data, dataspace,
     error::CoreError,
-    launcher,
+    launch_ledger, launcher,
     model::{
         AppOpenPlan, CapsuleCompileOutput, CapsuleCompileRequest, CliTool, ContinuationOptions,
         LaunchExecution, LaunchPlan, OriginalSessionExecution, OriginalSessionPlan, SessionAction,
@@ -136,7 +136,16 @@ pub fn execute_open(
     let Some(plan) = open_plan(session_id)? else {
         return Ok(None);
     };
-    launcher::execute_original_plan(plan).map(Some)
+    match launcher::execute_original_plan(plan.clone()) {
+        Ok(mut execution) => {
+            attach_original_launch_ledger(&mut execution);
+            Ok(Some(execution))
+        }
+        Err(error) => {
+            warn_if_launch_ledger_fails(launch_ledger::record_original_failed(&plan, &error));
+            Err(error)
+        }
+    }
 }
 
 pub fn capsule_for_selection(
@@ -285,6 +294,7 @@ pub fn saved_capsule_launch_plan(
         target_cli: target,
         compiler: record.capsule.compiler,
         handoff_label: record.capsule.handoff_label,
+        rewind_point: record.capsule.rewind_point,
         capsule_path,
         command,
         target_command,
@@ -300,7 +310,20 @@ pub fn execute_saved_capsule_launch(
     continuation_options: ContinuationOptions,
 ) -> Result<LaunchExecution, CoreError> {
     let plan = saved_capsule_launch_plan(name, target, continuation_options)?;
-    launcher::execute_plan(plan, allow_draft)
+    match launcher::execute_plan(plan.clone(), allow_draft) {
+        Ok(mut execution) => {
+            attach_target_launch_ledger(&mut execution, Some(name));
+            Ok(execution)
+        }
+        Err(error) => {
+            warn_if_launch_ledger_fails(launch_ledger::record_target_blocked(
+                &plan,
+                Some(name),
+                &error,
+            ));
+            Err(error)
+        }
+    }
 }
 
 pub fn launch_plan(
@@ -361,6 +384,7 @@ pub fn launch_plan_with_options(
         target_cli: target,
         compiler: capsule.compiler.clone(),
         handoff_label: capsule.handoff_label,
+        rewind_point: capsule.rewind_point.clone(),
         capsule_path,
         command,
         target_command,
@@ -418,7 +442,75 @@ pub fn execute_launch_with_options(
     else {
         return Ok(None);
     };
-    launcher::execute_plan(plan, allow_draft).map(Some)
+    match launcher::execute_plan(plan.clone(), allow_draft) {
+        Ok(mut execution) => {
+            attach_target_launch_ledger(&mut execution, None);
+            Ok(Some(execution))
+        }
+        Err(error) => {
+            warn_if_launch_ledger_fails(launch_ledger::record_target_blocked(&plan, None, &error));
+            Err(error)
+        }
+    }
+}
+
+pub fn execute_tui_launch_plan(plan: LaunchPlan) -> Result<LaunchExecution, CoreError> {
+    match launcher::execute_plan(plan.clone(), false) {
+        Ok(mut execution) => {
+            attach_target_launch_ledger(&mut execution, None);
+            Ok(execution)
+        }
+        Err(error) => {
+            warn_if_launch_ledger_fails(launch_ledger::record_target_blocked(&plan, None, &error));
+            Err(error)
+        }
+    }
+}
+
+pub fn list_launches(limit: usize) -> Result<Vec<launch_ledger::LaunchRecord>, CoreError> {
+    launch_ledger::list_launches(limit)
+}
+
+pub fn show_launch(id: i64) -> Result<Option<launch_ledger::LaunchRecord>, CoreError> {
+    launch_ledger::show_launch(id)
+}
+
+pub fn link_launch_to_capsule(
+    id: i64,
+    capsule_name: &str,
+) -> Result<launch_ledger::LaunchRecord, CoreError> {
+    launch_ledger::link_launch_to_capsule(id, capsule_name)
+}
+
+pub fn list_capsule_launches(
+    capsule_name: &str,
+    limit: usize,
+) -> Result<Vec<launch_ledger::LaunchRecord>, CoreError> {
+    launch_ledger::list_capsule_launches(capsule_name, limit)
+}
+
+fn attach_target_launch_ledger(execution: &mut LaunchExecution, capsule_name: Option<&str>) {
+    match launch_ledger::record_target_execution(execution, capsule_name) {
+        Ok(record) => execution.launch_ledger = Some(record.link()),
+        Err(error) => {
+            execution.launch_ledger_warning = Some(format!("launch ledger write failed: {error}"));
+        }
+    }
+}
+
+fn attach_original_launch_ledger(execution: &mut OriginalSessionExecution) {
+    match launch_ledger::record_original_execution(execution) {
+        Ok(record) => execution.launch_ledger = Some(record.link()),
+        Err(error) => {
+            execution.launch_ledger_warning = Some(format!("launch ledger write failed: {error}"));
+        }
+    }
+}
+
+fn warn_if_launch_ledger_fails(result: Result<launch_ledger::LaunchRecord, CoreError>) {
+    if let Err(error) = result {
+        eprintln!("WARN: launch ledger write failed: {error}");
+    }
 }
 
 fn require_explicit_session(

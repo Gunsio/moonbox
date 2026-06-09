@@ -1971,7 +1971,8 @@ impl App {
         );
         let command = target_command.display.clone();
         let compiler = capsule.compiler.clone();
-        let handoff_label = capsule.handoff_label;
+        let handoff_label = capsule.handoff_label.clone();
+        let rewind_point = capsule.rewind_point.clone();
         self.exit_action = Some(TuiExitAction::TargetHandoff(Box::new(LaunchPlan {
             version: 1,
             action: SessionAction::TargetHandoff,
@@ -1980,6 +1981,7 @@ impl App {
             target_cli: self.pending_target,
             compiler,
             handoff_label,
+            rewind_point,
             capsule_path: None,
             command,
             target_command,
