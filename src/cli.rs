@@ -92,6 +92,12 @@ pub struct SessionListArgs {
     /// Filter Hermes sessions by Hermes source/platform, for example cli, discord, telegram, slack, api-server, or cron.
     #[arg(long = "hermes-source", value_delimiter = ',')]
     pub hermes_sources: Vec<String>,
+    /// Search Hermes message content and return matching continuation points without expanding full timelines.
+    #[arg(long = "hermes-search")]
+    pub hermes_search: Option<String>,
+    /// Maximum continuation points to include per Hermes session search result.
+    #[arg(long = "hermes-search-limit", default_value_t = 3)]
+    pub hermes_search_limit: usize,
 }
 
 #[derive(Debug, Args, Clone, Default)]

@@ -187,10 +187,15 @@ The first implementation focuses on the product shell:
 - `moonbox sessions --filter hermes --hermes-source <source>` narrows Hermes
   inventory by provider source without changing the cross-CLI `--filter`
   semantics
+- `moonbox sessions --filter hermes --hermes-search <query>` searches Hermes
+  local messages through read-only SQLite and returns matching continuation
+  points without expanding full timelines
 - Hermes session JSON carries provider metadata when present:
   `provider_metadata.source`, platform, user id, session key, origin metadata,
   model config, system prompt snapshot, handoff state, archived state, and token
-  breakdown
+  breakdown; Hermes search results additionally include
+  `provider_metadata.search` and `provider_metadata.continuation_points` with
+  snippets, bookends, message ids, and scroll context
 - Runtime Hermes home override via `MOONBOX_HERMES_HOME` or `HERMES_HOME`
 - Runtime list limit defaults to the newest 200 sessions per real adapter; explicit session lookup still searches the full store
 - Set `MOONBOX_SESSION_LIMIT=0` for unlimited real-session list discovery
@@ -908,12 +913,14 @@ Stable interfaces matter more than any single framework:
   filtering, and preserves source/platform/user/session metadata, origin
   metadata, model config, system prompt snapshots, handoff state, archived
   state, and token breakdown in serde-default `provider_metadata`.
+- M65: Hermes export/search integration; `sessions --hermes-search` now uses
+  read-only local SQLite content search as the equivalent FTS path, returning
+  continuation points with snippets, bookends, message ids, and scroll context
+  in serde-default `provider_metadata` without invoking Hermes gateway/export
+  commands.
 
 ### Remaining Milestones
 
-- M65: Hermes export/search integration. Use Hermes export/stats/search or
-  equivalent FTS to locate continuation points with snippets, bookends, message
-  ids, and scroll context instead of expanding long sessions blindly.
 - M66: high-fidelity event/source schema. Extend the canonical model beyond
   `TimelineEvent { id, time, kind, title, detail }` with raw refs, message ids,
   provider item ids, tool args/results, approvals, attachments, file-change

@@ -227,7 +227,10 @@ fn write_hermes_state_db(root: &Path) {
         insert into messages (session_id, role, content, timestamp, active) values
             ('hermes-cli-real', 'user', 'Fix CLI source', 1780640475, 1),
             ('hermes-cli-real', 'assistant', 'Done', 1780640476, 1),
-            ('hermes-feishu-real', 'user', 'Investigate Feishu gateway', 1780641495, 1);
+            ('hermes-feishu-real', 'session_meta', 'Feishu source context', 1780641494, 1),
+            ('hermes-feishu-real', 'user', 'Investigate Feishu gateway', 1780641495, 1),
+            ('hermes-feishu-real', 'assistant', 'Gateway snippet confirmed', 1780641496, 1),
+            ('hermes-feishu-real', 'user', 'Close unrelated item', 1780641497, 1);
         "#,
     )
     .expect("hermes schema");
@@ -743,6 +746,54 @@ fn hermes_real_store_lists_all_sources_and_filters_by_provider_source() {
 
     assert_eq!(api_server.as_array().expect("api sessions").len(), 0);
 
+    let search = output_json(
+        moonbox_command(test_name)
+            .args([
+                "sessions",
+                "--json",
+                "--filter",
+                "hermes",
+                "--hermes-search",
+                "Investigate Feishu gateway",
+                "--hermes-search-limit",
+                "1",
+            ])
+            .output()
+            .expect("sessions search"),
+    );
+    let search = search.as_array().expect("search sessions");
+
+    assert_eq!(search.len(), 1);
+    assert_eq!(search[0]["id"], "hermes-feishu-real");
+    assert_eq!(
+        search[0]["provider_metadata"]["search"]["backend"],
+        "local_sqlite_like"
+    );
+    assert_eq!(
+        search[0]["provider_metadata"]["search"]["matched_message_count"],
+        1
+    );
+    assert_eq!(
+        search[0]["provider_metadata"]["search"]["continuation_point_count"],
+        1
+    );
+    let point = &search[0]["provider_metadata"]["continuation_points"][0];
+    assert_eq!(point["message_id"], "4");
+    assert_eq!(point["event_id"], "evt-002");
+    assert_eq!(point["role"], "user");
+    assert!(
+        point["snippet"]
+            .as_str()
+            .expect("snippet")
+            .contains("Investigate Feishu gateway")
+    );
+    assert_eq!(point["bookend_before"], "Feishu source context");
+    assert_eq!(point["bookend_after"], "Gateway snippet confirmed");
+    assert_eq!(point["scroll_context"]["message_index"], 2);
+    assert_eq!(point["scroll_context"]["total_messages"], 4);
+    assert_eq!(point["scroll_context"]["before_message_id"], "3");
+    assert_eq!(point["scroll_context"]["after_message_id"], "5");
+
     let binary = env!("CARGO_BIN_EXE_moonbox");
     let doctor = output_json(
         moonbox_command(test_name)
@@ -771,11 +822,15 @@ fn hermes_real_store_lists_all_sources_and_filters_by_provider_source() {
         hermes["capabilities"]["cloud_metadata"]["status"],
         "available"
     );
+    assert_eq!(
+        hermes["capabilities"]["export_search"]["status"],
+        "available"
+    );
     assert!(
         hermes["capabilities"]["export_search"]["detail"]
             .as_str()
             .expect("export detail")
-            .contains("M65")
+            .contains("message ids")
     );
 }
 

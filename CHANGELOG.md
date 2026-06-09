@@ -176,6 +176,10 @@ and this project uses semantic versioning once tagged releases start.
 - `moonbox sessions --hermes-source <source>` / `moon sessions --hermes-source
   <source>` provider-source filtering for Hermes inventories, with comma or
   repeated values and aliases such as `api-server`.
+- `moonbox sessions --hermes-search <query>` / `moon sessions --hermes-search
+  <query>` for read-only local Hermes message search, returning matching
+  sessions with `provider_metadata.search` and
+  `provider_metadata.continuation_points`.
 
 ### Changed
 
@@ -216,8 +220,12 @@ and this project uses semantic versioning once tagged releases start.
 - Codex and Claude default session lists continue to mirror each source CLI's
   own resume surface, while Hermes now defaults to all non-archived provider
   sources instead of only `source = cli` rows.
-- Hermes Doctor capabilities now report all-source local inventory and captured
-  source metadata as available, while export/search remains planned for M65.
+- Hermes Doctor capabilities now report all-source local inventory, captured
+  source metadata, and local export/search-equivalent continuation point search
+  as available; Hermes gateway/export commands remain non-invoked.
+- Hermes search results carry snippets, bookends, message ids, and scroll
+  context so continuation points can be located without expanding long sessions
+  blindly.
 - Explicit session lookup routes obvious Hermes/Codex/Claude ids to the likely
   adapter before expensive full-store fallback.
 - CLI launch/verify uses lightweight session artifacts instead of constructing

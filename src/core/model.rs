@@ -148,6 +148,10 @@ pub struct ProviderSessionMetadata {
     pub token_breakdown: Option<TokenBreakdown>,
     #[serde(default)]
     pub archived: Option<bool>,
+    #[serde(default)]
+    pub search: Option<ProviderSearchMetadata>,
+    #[serde(default)]
+    pub continuation_points: Vec<ProviderContinuationPoint>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -174,6 +178,54 @@ pub struct TokenBreakdown {
     pub reasoning: usize,
     #[serde(default)]
     pub total: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderSearchMetadata {
+    #[serde(default)]
+    pub backend: String,
+    #[serde(default)]
+    pub query: Option<String>,
+    #[serde(default)]
+    pub matched_message_count: usize,
+    #[serde(default)]
+    pub continuation_point_count: usize,
+    #[serde(default)]
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderContinuationPoint {
+    #[serde(default)]
+    pub message_id: String,
+    #[serde(default)]
+    pub event_id: Option<String>,
+    #[serde(default)]
+    pub role: String,
+    #[serde(default)]
+    pub timestamp: String,
+    #[serde(default)]
+    pub snippet: String,
+    #[serde(default)]
+    pub bookend_before: Option<String>,
+    #[serde(default)]
+    pub bookend_after: Option<String>,
+    #[serde(default)]
+    pub scroll_context: ProviderScrollContext,
+    #[serde(default)]
+    pub score: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderScrollContext {
+    #[serde(default)]
+    pub message_index: usize,
+    #[serde(default)]
+    pub total_messages: usize,
+    #[serde(default)]
+    pub before_message_id: Option<String>,
+    #[serde(default)]
+    pub after_message_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

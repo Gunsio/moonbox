@@ -19,7 +19,8 @@ use super::{
         timeline_preview_truncated_event, title_case, truncate, truncate_timeline_detail,
     },
     model::{
-        CanonicalTimeline, CliTool, ProviderHandoffMetadata, ProviderSessionMetadata,
+        CanonicalTimeline, CliTool, ProviderContinuationPoint, ProviderHandoffMetadata,
+        ProviderScrollContext, ProviderSearchMetadata, ProviderSessionMetadata,
         SessionRuntimeStatus, SessionStatus, SessionSummary, SourceProvenance, TimelineEvent,
         TimelineKind, TokenBreakdown, unknown_runtime_reason,
     },
@@ -74,6 +75,26 @@ struct HermesMessageRow {
     reasoning: Option<String>,
     reasoning_content: Option<String>,
     reasoning_details: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct HermesContinuationRow {
+    message_id: String,
+    role: String,
+    timestamp: String,
+    detail: String,
+    message_index: usize,
+    total_messages: usize,
+    before_message_id: Option<String>,
+    bookend_before: Option<String>,
+    after_message_id: Option<String>,
+    bookend_after: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct HermesContinuationExport {
+    search: ProviderSearchMetadata,
+    points: Vec<ProviderContinuationPoint>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -249,6 +270,56 @@ impl HermesSourceAdapter {
         }
     }
 
+    fn list_session_rows_matching(
+        &self,
+        query: &str,
+        limit: Option<usize>,
+    ) -> Result<Vec<HermesSessionRow>, AdapterError> {
+        let db = self.open_connection()?;
+        let session_columns = session_columns(&db, &self.state_db_path())?;
+        let message_columns = message_columns(&db, &self.state_db_path())?;
+        let select = session_select_sql(&session_columns);
+        let unarchived = unarchived_clause(&session_columns);
+        let active = active_message_clause(&message_columns, "m");
+        let search_text = message_search_text_sql(&message_columns, "m");
+        let query_sql = format!(
+            r#"
+            {select}
+            where {unarchived}
+              and exists (
+                select 1
+                from messages m
+                where m.session_id = s.id
+                  and {active}
+                  and lower({search_text}) like :pattern escape '\'
+              )
+            order by s.started_at desc{}
+            "#,
+            match limit {
+                Some(_) => " limit :limit",
+                None => "",
+            }
+        );
+        let pattern = like_pattern(query);
+        let mut statement = db
+            .prepare(&query_sql)
+            .map_err(|error| read_error(HERMES_TOOL, &self.state_db_path(), error))?;
+        let rows = if let Some(limit) = limit {
+            let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+            statement
+                .query_map(
+                    named_params! {":pattern": pattern, ":limit": limit},
+                    session_row,
+                )
+                .map_err(|error| read_error(HERMES_TOOL, &self.state_db_path(), error))?
+        } else {
+            statement
+                .query_map(named_params! {":pattern": pattern}, session_row)
+                .map_err(|error| read_error(HERMES_TOOL, &self.state_db_path(), error))?
+        };
+        collect_rows(rows, &self.state_db_path())
+    }
+
     fn summary_for_row(
         &self,
         row: HermesSessionRow,
@@ -258,9 +329,40 @@ impl HermesSourceAdapter {
         let token_count = supplement
             .and_then(|entry| entry.total_tokens)
             .or_else(|| total_tokens(&row));
+        let provider_metadata = provider_metadata(&row, supplement, token_count, None, Vec::new());
+        self.summary_for_row_with_metadata(row, registry, token_count, provider_metadata)
+    }
+
+    fn summary_for_row_with_continuation(
+        &self,
+        row: HermesSessionRow,
+        registry: &HashMap<String, SessionRegistryEntry>,
+        export: HermesContinuationExport,
+    ) -> SessionSummary {
+        let supplement = registry.get(&row.id);
+        let token_count = supplement
+            .and_then(|entry| entry.total_tokens)
+            .or_else(|| total_tokens(&row));
+        let provider_metadata = provider_metadata(
+            &row,
+            supplement,
+            token_count,
+            Some(export.search),
+            export.points,
+        );
+        self.summary_for_row_with_metadata(row, registry, token_count, provider_metadata)
+    }
+
+    fn summary_for_row_with_metadata(
+        &self,
+        row: HermesSessionRow,
+        registry: &HashMap<String, SessionRegistryEntry>,
+        token_count: Option<usize>,
+        provider_metadata: ProviderSessionMetadata,
+    ) -> SessionSummary {
+        let supplement = registry.get(&row.id);
         let status = session_status(&row, supplement);
         let health_reason = health_reason(&row, supplement);
-        let provider_metadata = provider_metadata(&row, supplement, token_count);
         let title = row
             .title
             .clone()
@@ -296,6 +398,66 @@ impl HermesSourceAdapter {
             parse_skip_count: 0,
             provider_metadata: Some(provider_metadata),
         }
+    }
+
+    pub(crate) fn search_sessions(
+        &self,
+        query: &str,
+        point_limit: usize,
+    ) -> Result<Vec<SessionSummary>, AdapterError> {
+        let query = query.trim();
+        if query.is_empty() {
+            return Ok(Vec::new());
+        }
+        let registry = self.registry()?;
+        let rows = self.list_session_rows_matching(query, self.list_limit)?;
+        let db = self.open_connection()?;
+        rows.into_iter()
+            .map(|row| {
+                let export =
+                    self.continuation_export_for_session(&db, &row.id, query, point_limit)?;
+                Ok(self.summary_for_row_with_continuation(row, &registry, export))
+            })
+            .collect()
+    }
+
+    fn continuation_export_for_session(
+        &self,
+        db: &Connection,
+        session_id: &str,
+        query: &str,
+        point_limit: usize,
+    ) -> Result<HermesContinuationExport, AdapterError> {
+        let point_limit = point_limit.max(1);
+        let message_columns = message_columns(db, &self.state_db_path())?;
+        let rows = continuation_rows(
+            db,
+            &self.state_db_path(),
+            &message_columns,
+            session_id,
+            query,
+            point_limit,
+        )?;
+        let matched_message_count = continuation_match_count(
+            db,
+            &self.state_db_path(),
+            &message_columns,
+            session_id,
+            query,
+        )?;
+        let points = rows
+            .into_iter()
+            .enumerate()
+            .map(|(index, row)| continuation_point(row, index + 1))
+            .collect::<Vec<_>>();
+        let search = ProviderSearchMetadata {
+            backend: "local_sqlite_like".into(),
+            query: Some(query.to_owned()),
+            matched_message_count,
+            continuation_point_count: points.len(),
+            truncated: matched_message_count > points.len(),
+        };
+        Ok(HermesContinuationExport { search, points })
     }
 }
 
@@ -406,6 +568,16 @@ impl HermesSourceAdapter {
 fn session_columns(db: &Connection, path: &Path) -> Result<HashSet<String>, AdapterError> {
     let mut statement = db
         .prepare("pragma table_info(sessions)")
+        .map_err(|error| read_error(HERMES_TOOL, path, error))?;
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| read_error(HERMES_TOOL, path, error))?;
+    collect_rows(rows, path).map(|columns| columns.into_iter().collect())
+}
+
+fn message_columns(db: &Connection, path: &Path) -> Result<HashSet<String>, AdapterError> {
+    let mut statement = db
+        .prepare("pragma table_info(messages)")
         .map_err(|error| read_error(HERMES_TOOL, path, error))?;
     let rows = statement
         .query_map([], |row| row.get::<_, String>(1))
@@ -556,6 +728,21 @@ fn message_row(row: &Row<'_>) -> rusqlite::Result<HermesMessageRow> {
     })
 }
 
+fn continuation_row(row: &Row<'_>) -> rusqlite::Result<HermesContinuationRow> {
+    Ok(HermesContinuationRow {
+        message_id: row.get::<_, i64>(0)?.to_string(),
+        role: row.get(1)?,
+        timestamp: row.get(2)?,
+        detail: row.get(3)?,
+        message_index: integer(row, 4)?,
+        total_messages: integer(row, 5)?,
+        before_message_id: row.get::<_, Option<i64>>(6)?.map(|id| id.to_string()),
+        bookend_before: row.get(7)?,
+        after_message_id: row.get::<_, Option<i64>>(8)?.map(|id| id.to_string()),
+        bookend_after: row.get(9)?,
+    })
+}
+
 fn collect_rows<T>(
     rows: MappedRows<'_, impl FnMut(&Row<'_>) -> rusqlite::Result<T>>,
     path: &Path,
@@ -572,6 +759,204 @@ fn integer(row: &Row<'_>, index: usize) -> rusqlite::Result<usize> {
 fn optional_integer(row: &Row<'_>, index: usize) -> rusqlite::Result<Option<usize>> {
     let value = row.get::<_, Option<i64>>(index)?;
     Ok(value.and_then(|value| usize::try_from(value).ok()))
+}
+
+fn continuation_rows(
+    db: &Connection,
+    path: &Path,
+    columns: &HashSet<String>,
+    session_id: &str,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<HermesContinuationRow>, AdapterError> {
+    let active = active_message_clause(columns, "m");
+    let detail = message_detail_sql(columns, "m");
+    let search_text = message_search_text_sql(columns, "m");
+    let sql = format!(
+        r#"
+        with base as (
+            select
+                m.id as id,
+                {role} as role,
+                strftime('%Y-%m-%dT%H:%M:%SZ', {timestamp}, 'unixepoch') as timestamp,
+                {detail} as detail,
+                {search_text} as search_text,
+                {timestamp} as raw_timestamp
+            from messages m
+            where m.session_id = :session_id
+              and {active}
+        ),
+        ordered as (
+            select
+                id,
+                role,
+                timestamp,
+                detail,
+                search_text,
+                row_number() over (order by raw_timestamp asc, id asc) as message_index,
+                count(*) over () as total_messages,
+                lag(id) over (order by raw_timestamp asc, id asc) as before_message_id,
+                lag(detail) over (order by raw_timestamp asc, id asc) as bookend_before,
+                lead(id) over (order by raw_timestamp asc, id asc) as after_message_id,
+                lead(detail) over (order by raw_timestamp asc, id asc) as bookend_after
+            from base
+        )
+        select
+            id,
+            role,
+            timestamp,
+            detail,
+            message_index,
+            total_messages,
+            before_message_id,
+            bookend_before,
+            after_message_id,
+            bookend_after
+        from ordered
+        where lower(search_text) like :pattern escape '\'
+        order by message_index desc
+        limit :limit
+        "#,
+        role = message_column(columns, "role", "''"),
+        timestamp = message_column(columns, "timestamp", "0"),
+    );
+    let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+    let pattern = like_pattern(query);
+    let mut statement = db
+        .prepare(&sql)
+        .map_err(|error| read_error(HERMES_TOOL, path, error))?;
+    let rows = statement
+        .query_map(
+            named_params! {
+                ":session_id": session_id,
+                ":pattern": pattern,
+                ":limit": limit,
+            },
+            continuation_row,
+        )
+        .map_err(|error| read_error(HERMES_TOOL, path, error))?;
+    collect_rows(rows, path)
+}
+
+fn continuation_match_count(
+    db: &Connection,
+    path: &Path,
+    columns: &HashSet<String>,
+    session_id: &str,
+    query: &str,
+) -> Result<usize, AdapterError> {
+    let active = active_message_clause(columns, "m");
+    let search_text = message_search_text_sql(columns, "m");
+    let sql = format!(
+        r#"
+        select count(*)
+        from messages m
+        where m.session_id = :session_id
+          and {active}
+          and lower({search_text}) like :pattern escape '\'
+        "#
+    );
+    let pattern = like_pattern(query);
+    db.query_row(
+        &sql,
+        named_params! {":session_id": session_id, ":pattern": pattern},
+        |row| integer(row, 0),
+    )
+    .map_err(|error| read_error(HERMES_TOOL, path, error))
+}
+
+fn continuation_point(row: HermesContinuationRow, score: usize) -> ProviderContinuationPoint {
+    let snippet = truncate_timeline_detail(&row.detail);
+    ProviderContinuationPoint {
+        message_id: row.message_id,
+        event_id: Some(event_id(row.message_index)),
+        role: row.role,
+        timestamp: row.timestamp,
+        snippet,
+        bookend_before: row
+            .bookend_before
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| truncate(&value, 280)),
+        bookend_after: row
+            .bookend_after
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| truncate(&value, 280)),
+        scroll_context: ProviderScrollContext {
+            message_index: row.message_index,
+            total_messages: row.total_messages,
+            before_message_id: row.before_message_id,
+            after_message_id: row.after_message_id,
+        },
+        score,
+    }
+}
+
+fn active_message_clause(columns: &HashSet<String>, alias: &str) -> String {
+    if columns.contains("active") {
+        format!("coalesce({alias}.active, 1) = 1")
+    } else {
+        "1 = 1".to_owned()
+    }
+}
+
+fn message_column(columns: &HashSet<String>, column: &str, fallback: &str) -> String {
+    if columns.contains(column) {
+        format!("m.{column}")
+    } else {
+        fallback.to_owned()
+    }
+}
+
+fn message_detail_sql(columns: &HashSet<String>, alias: &str) -> String {
+    let values = [
+        "content",
+        "reasoning",
+        "reasoning_content",
+        "reasoning_details",
+        "tool_calls",
+        "tool_name",
+        "finish_reason",
+    ]
+    .into_iter()
+    .filter(|column| columns.contains(*column))
+    .map(|column| format!("nullif(trim(coalesce({alias}.{column}, '')), '')"))
+    .collect::<Vec<_>>();
+    if values.is_empty() {
+        "''".to_owned()
+    } else {
+        format!("coalesce({}, '')", values.join(", "))
+    }
+}
+
+fn message_search_text_sql(columns: &HashSet<String>, alias: &str) -> String {
+    let values = [
+        "content",
+        "reasoning",
+        "reasoning_content",
+        "reasoning_details",
+        "tool_calls",
+        "tool_name",
+        "finish_reason",
+    ]
+    .into_iter()
+    .filter(|column| columns.contains(*column))
+    .map(|column| format!("coalesce({alias}.{column}, '')"))
+    .collect::<Vec<_>>();
+    if values.is_empty() {
+        "''".to_owned()
+    } else {
+        values.join(" || ' ' || ")
+    }
+}
+
+fn like_pattern(query: &str) -> String {
+    let escaped = query
+        .trim()
+        .to_ascii_lowercase()
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    format!("%{escaped}%")
 }
 
 fn total_tokens(row: &HermesSessionRow) -> Option<usize> {
@@ -675,6 +1060,8 @@ fn provider_metadata(
     row: &HermesSessionRow,
     supplement: Option<&SessionRegistryEntry>,
     token_count: Option<usize>,
+    search: Option<ProviderSearchMetadata>,
+    continuation_points: Vec<ProviderContinuationPoint>,
 ) -> ProviderSessionMetadata {
     ProviderSessionMetadata {
         source: non_empty_string(&row.source),
@@ -698,6 +1085,8 @@ fn provider_metadata(
         handoff: handoff_metadata(row),
         token_breakdown: token_breakdown(row, token_count),
         archived: Some(row.archived),
+        search,
+        continuation_points,
     }
 }
 
@@ -1042,6 +1431,47 @@ mod tests {
         assert_eq!(found.id, "hermes-cli");
         assert_eq!(timeline.source_session, "hermes-cli");
         assert_eq!(timeline.events[0].detail, "Fix CLI state");
+    }
+
+    #[test]
+    fn searches_continuation_points_from_local_sqlite_messages() {
+        let root = test_root("continuation-search");
+        write_state_db(&root);
+        let adapter = HermesSourceAdapter::new(&root);
+
+        let sessions = adapter
+            .search_sessions("handoff", 1)
+            .expect("search sessions");
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "hermes-feishu");
+        let metadata = sessions[0].provider_metadata.as_ref().expect("metadata");
+        let search = metadata.search.as_ref().expect("search metadata");
+        assert_eq!(search.backend, "local_sqlite_like");
+        assert_eq!(search.query.as_deref(), Some("handoff"));
+        assert_eq!(search.matched_message_count, 1);
+        assert_eq!(search.continuation_point_count, 1);
+        assert!(!search.truncated);
+        let point = metadata
+            .continuation_points
+            .first()
+            .expect("continuation point");
+        assert_eq!(point.message_id, "4");
+        assert_eq!(point.event_id.as_deref(), Some("evt-002"));
+        assert_eq!(point.role, "user");
+        assert!(point.snippet.contains("Investigate handoff"));
+        assert_eq!(point.bookend_before.as_deref(), Some("source feishu"));
+        assert!(
+            point
+                .bookend_after
+                .as_deref()
+                .expect("after bookend")
+                .contains("skill_view")
+        );
+        assert_eq!(point.scroll_context.message_index, 2);
+        assert_eq!(point.scroll_context.total_messages, 5);
+        assert_eq!(point.scroll_context.before_message_id.as_deref(), Some("3"));
+        assert_eq!(point.scroll_context.after_message_id.as_deref(), Some("5"));
     }
 
     fn test_root(name: &str) -> PathBuf {
