@@ -176,8 +176,8 @@ fn real_capabilities(tool: CliTool) -> SourceCapabilities {
                 "provider deep-link support is not verified",
             ),
             export_search: cap(
-                SourceCapabilityStatus::Planned,
-                "Hermes export/stats/search integration is planned for M65",
+                SourceCapabilityStatus::Available,
+                "local SQLite search exposes Hermes continuation points with snippets, bookends, message ids, and scroll context; Hermes gateway/export commands are not invoked",
             ),
             remote_control: cap(
                 SourceCapabilityStatus::Unknown,

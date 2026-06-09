@@ -88,13 +88,20 @@ fn execute_tui_exit_action(action: Option<app::TuiExitAction>) -> Result<()> {
 fn print_sessions(args: cli::SessionListArgs) -> Result<()> {
     let filter = args.filter.or(args.source);
     let hermes_sources = normalized_hermes_sources(&args.hermes_sources);
-    let sessions = core::workbench::list_sessions()?
-        .into_iter()
-        .filter(|session| filter.is_none_or(|filter| session.cli == filter))
-        .filter(|session| {
-            hermes_sources.is_empty() || hermes_source_matches(session, &hermes_sources)
-        })
-        .collect::<Vec<_>>();
+    let hermes_search = args.hermes_search.as_deref().map(str::trim);
+    let sessions = if let Some(query) = hermes_search.filter(|query| !query.is_empty()) {
+        if filter.is_some_and(|filter| filter != core::model::CliTool::Hermes) {
+            Vec::new()
+        } else {
+            core::workbench::search_hermes_sessions(query, args.hermes_search_limit)?
+        }
+    } else {
+        core::workbench::list_sessions()?
+    }
+    .into_iter()
+    .filter(|session| filter.is_none_or(|filter| session.cli == filter))
+    .filter(|session| hermes_sources.is_empty() || hermes_source_matches(session, &hermes_sources))
+    .collect::<Vec<_>>();
     if args.json {
         println!("{}", serde_json::to_string_pretty(&sessions)?);
     } else {
@@ -108,6 +115,10 @@ fn print_sessions(args: cli::SessionListArgs) -> Result<()> {
             let mut sources = hermes_sources.iter().cloned().collect::<Vec<_>>();
             sources.sort();
             println!("hermes_source: {}", sources.join(","));
+        }
+        if let Some(query) = hermes_search.filter(|query| !query.is_empty()) {
+            println!("hermes_search: {query}");
+            println!("hermes_search_limit: {}", args.hermes_search_limit.max(1));
         }
         for session in sessions {
             println!(

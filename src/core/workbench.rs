@@ -9,7 +9,7 @@ use super::{
         LaunchExecution, LaunchPlan, OriginalSessionExecution, OriginalSessionPlan, SessionAction,
         SessionSummary, VerificationReport, WorkCapsule, WorkbenchData,
     },
-    redaction, verifier,
+    redaction, sources, verifier,
 };
 
 pub fn load_workbench(source: CliTool, target: CliTool) -> Result<WorkbenchData, CoreError> {
@@ -58,6 +58,13 @@ pub fn load_readonly_workbench_from_session_snapshot(
 
 pub fn list_sessions() -> Result<Vec<SessionSummary>, CoreError> {
     data::sessions()
+}
+
+pub fn search_hermes_sessions(
+    query: &str,
+    point_limit: usize,
+) -> Result<Vec<SessionSummary>, CoreError> {
+    sources::search_hermes_sessions(query, point_limit)
 }
 
 pub fn find_session(session_id: &str) -> Result<Option<SessionSummary>, CoreError> {

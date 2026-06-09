@@ -301,6 +301,39 @@ fn redact_provider_metadata(
             .map(|value| redact_text(&value, policy, stats));
         metadata.handoff = Some(handoff);
     }
+    if let Some(mut search) = metadata.search {
+        search.backend = redact_text(&search.backend, policy, stats);
+        search.query = search.query.map(|value| redact_text(&value, policy, stats));
+        metadata.search = Some(search);
+    }
+    metadata.continuation_points = metadata
+        .continuation_points
+        .into_iter()
+        .map(|mut point| {
+            point.message_id = redact_text(&point.message_id, policy, stats);
+            point.event_id = point
+                .event_id
+                .map(|value| redact_text(&value, policy, stats));
+            point.role = redact_text(&point.role, policy, stats);
+            point.timestamp = redact_text(&point.timestamp, policy, stats);
+            point.snippet = redact_text(&point.snippet, policy, stats);
+            point.bookend_before = point
+                .bookend_before
+                .map(|value| redact_text(&value, policy, stats));
+            point.bookend_after = point
+                .bookend_after
+                .map(|value| redact_text(&value, policy, stats));
+            point.scroll_context.before_message_id = point
+                .scroll_context
+                .before_message_id
+                .map(|value| redact_text(&value, policy, stats));
+            point.scroll_context.after_message_id = point
+                .scroll_context
+                .after_message_id
+                .map(|value| redact_text(&value, policy, stats));
+            point
+        })
+        .collect();
     metadata
 }
 
@@ -635,7 +668,8 @@ fn normalize_allowlist(values: Vec<String>) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::core::model::{
-        CliTool, SessionRuntimeStatus, SessionStatus, SourceProvenance, TimelineEvent,
+        CliTool, ProviderContinuationPoint, ProviderScrollContext, ProviderSearchMetadata,
+        SessionRuntimeStatus, SessionStatus, SourceProvenance, TimelineEvent,
     };
 
     #[test]
@@ -726,6 +760,29 @@ mod tests {
                         "path": "/Users/alice/provider",
                         "secret": "sk-origin1234567890"
                     })),
+                    search: Some(ProviderSearchMetadata {
+                        backend: "local_sqlite_like".into(),
+                        query: Some("/Users/alice sk-query1234567890".into()),
+                        matched_message_count: 1,
+                        continuation_point_count: 1,
+                        truncated: false,
+                    }),
+                    continuation_points: vec![ProviderContinuationPoint {
+                        message_id: "msg-/Users/alice".into(),
+                        event_id: Some("evt-001".into()),
+                        role: "user".into(),
+                        timestamp: "2026-06-08T00:00:00Z".into(),
+                        snippet: "snippet sk-snippet1234567890 /Users/alice".into(),
+                        bookend_before: Some("before /Users/alice".into()),
+                        bookend_after: Some("after sk-after1234567890".into()),
+                        scroll_context: ProviderScrollContext {
+                            message_index: 1,
+                            total_messages: 3,
+                            before_message_id: Some("before-/Users/alice".into()),
+                            after_message_id: Some("after-sk-after1234567890".into()),
+                        },
+                        score: 1,
+                    }],
                     ..ProviderSessionMetadata::default()
                 }),
             },
@@ -775,6 +832,23 @@ mod tests {
         assert_eq!(
             metadata.origin.as_ref().expect("origin")["path"],
             "<path:redacted>"
+        );
+        assert_eq!(
+            metadata.search.as_ref().expect("search").query.as_deref(),
+            Some("<path:redacted> <secret:redacted>")
+        );
+        let point = metadata
+            .continuation_points
+            .first()
+            .expect("continuation point");
+        assert!(point.snippet.contains("<secret:redacted> <path:redacted>"));
+        assert_eq!(
+            point.bookend_before.as_deref(),
+            Some("before <path:redacted>")
+        );
+        assert_eq!(
+            point.bookend_after.as_deref(),
+            Some("after <secret:redacted>")
         );
         assert!(
             redacted

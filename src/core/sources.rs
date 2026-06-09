@@ -47,6 +47,34 @@ pub fn list_sessions() -> Result<Vec<SessionSummary>, CoreError> {
     Ok(source_inventory()?.sessions)
 }
 
+pub fn search_hermes_sessions(
+    query: &str,
+    point_limit: usize,
+) -> Result<Vec<SessionSummary>, CoreError> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+    #[cfg(not(test))]
+    {
+        if session_mode() == SessionMode::Fixture {
+            return Ok(Vec::new());
+        }
+        if let Some(adapter) =
+            HermesSourceAdapter::from_default_home().filter(|adapter| adapter.has_session_store())
+        {
+            let mut sessions = adapter.search_sessions(query, point_limit)?;
+            sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+            return Ok(sessions);
+        }
+    }
+    #[cfg(test)]
+    {
+        let _ = point_limit;
+    }
+    Ok(Vec::new())
+}
+
 pub fn source_inventory() -> Result<SourceInventory, CoreError> {
     let adapters = runtime_adapters();
     collect_inventory(&adapters).map_err(CoreError::from)
