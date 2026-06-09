@@ -1028,7 +1028,14 @@ Stable interfaces matter more than any single framework:
 
 ### Remaining Milestones
 
-- Next continuation milestones are pending prioritization after M75 acceptance.
+- Next high-priority continuation milestones are pending prioritization after
+  M75 acceptance.
+- Low-priority backlog:
+  - M76: terminal image preview protocol. Detect terminal raster capabilities
+    such as Kitty, iTerm2, or Sixel; render timeline image attachments when the
+    terminal and local artifact path are safe; keep a plain `[image]` fallback;
+    cover the behavior with fixture-only protocol tests. This is not a blocker
+    for Capsule, verification, redaction, or launch-ledger continuation work.
 
 ### Can Build Now
 
