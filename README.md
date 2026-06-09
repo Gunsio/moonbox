@@ -970,12 +970,20 @@ Stable interfaces matter more than any single framework:
   dry-run / review / exit risk labels for existing actions such as open
   original, Handoff Review, Capsule refresh, source/data-space switching, Skill
   Picker, Pre-flight, help, and quit.
+- M72: visual system polish; the TUI now uses stable semantic color roles for
+  confidence, source badges, rewind/target path nodes, and Action Path
+  inventory counts, while narrow headers degrade the brand from
+  `MOONBOX 月光宝盒` to `MOONBOX` instead of crowding compact terminals.
 
 ### Remaining Milestones
 
-- M72: visual system polish. Keep the broader color palette, but enforce stable
-  semantic roles, narrow-screen brand fallback from `MOONBOX 月光宝盒` to
-  `MOONBOX`, and consistent source badges, confidence, and rewind markers.
+- M73: Capsule first-class local object. Add capsule save/list/show/launch,
+  export/import, and delete commands backed by a local SQLite capsule store,
+  isolated with `MOONBOX_CAPSULE_STORE`.
+- M74: Launch Ledger. Record local `open --execute` and `launch --execute`
+  attempts in a ledger table, expose `launches list/show/link` and capsule
+  launch history, and keep ledger write failures as warnings rather than launch
+  blockers.
 
 ### Can Build Now
 

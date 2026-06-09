@@ -371,6 +371,9 @@ and this project uses semantic versioning once tagged releases start.
 - `:` now opens a floating Command Palette with fuzzy completion, descriptions,
   parameter hints, aliases, empty-state guidance, and dry-run / review / exit
   risk labels for existing TUI actions.
+- TUI visual roles now use stable semantic colors for confidence, source badges,
+  rewind/target path nodes, and Action Path inventory counts; narrow headers
+  collapse the brand to `MOONBOX`.
 - Replay-eval fixture invariants now return structured `CoreError` failures
   instead of panicking, and generated SVG docs snapshot code no longer relies on
   infallible string-write `expect` calls.

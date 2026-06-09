@@ -10,3 +10,9 @@ pub const GREEN: Color = Color::Rgb(92, 214, 137);
 pub const GOLD: Color = Color::Rgb(230, 190, 83);
 pub const RED: Color = Color::Rgb(241, 101, 101);
 pub const ORANGE: Color = Color::Rgb(245, 151, 86);
+
+pub const ROLE_REWIND: Color = GOLD;
+pub const ROLE_TARGET: Color = CYAN;
+pub const CONFIDENCE_STRONG: Color = GREEN;
+pub const CONFIDENCE_MEDIUM: Color = GOLD;
+pub const CONFIDENCE_WEAK: Color = ORANGE;
