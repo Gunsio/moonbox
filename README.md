@@ -174,6 +174,12 @@ The first implementation focuses on the product shell:
 - Real Claude resume-index discovery from `~/.claude/history.jsonl`,
   with timeline/details hydrated from `~/.claude/projects`
 - Runtime Claude home override via `MOONBOX_CLAUDE_HOME` or `CLAUDE_HOME`
+- Claude project transcripts now preserve captured `stream-json` / SDK
+  metadata when it is already present in local JSONL: `system` init, `result`,
+  `session_id`, cost, duration, API duration, turn count, hook events, partial
+  stream events, and fork parent metadata are surfaced without invoking Claude.
+  Remote / remote-control records remain separate observability events and are
+  not mixed into local resume rows.
 - Real Hermes CLI-resume discovery from `~/.hermes/state.db`
   `source = cli` sessions, with explicit ID lookup still available across
   the Hermes store
@@ -883,12 +889,15 @@ Stable interfaces matter more than any single framework:
   local SQLite/JSONL remains fallback, Doctor reports app-server/deep-link
   capability state, and `moonbox open-app` previews `codex://threads/<id>`
   without launching the Codex app.
+- M63: Claude multi-surface adapter hardening; local transcript JSONL remains
+  the resume baseline while captured stream-json / SDK init and result metadata,
+  `session_id`, cost, duration, API duration, turn count, hook/partial events,
+  and fork parent metadata are parsed into summaries, timelines, and Doctor
+  capability reports without invoking Claude. Remote / remote-control records
+  stay separate from local resume rows.
 
 ### Remaining Milestones
 
-- M63: Claude multi-surface adapter hardening. Keep local transcript baseline
-  while adding optional stream-json/SDK metadata, hook/partial events, fork
-  semantics, and separate remote / remote-control surfaces.
 - M64: Hermes all-source gateway inventory. List all non-archived Hermes
   sources by default, add source filters, and preserve platform/user/session
   metadata, model config, system prompt snapshot, handoff state, and token

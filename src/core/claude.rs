@@ -39,8 +39,11 @@ struct ClaudeRecord {
     timestamp: Option<String>,
     #[serde(rename = "type")]
     record_type: Option<String>,
+    subtype: Option<String>,
     #[serde(rename = "sessionId")]
     session_id: Option<String>,
+    #[serde(rename = "session_id")]
+    session_id_snake: Option<String>,
     cwd: Option<String>,
     #[serde(rename = "gitBranch")]
     git_branch: Option<String>,
@@ -54,8 +57,32 @@ struct ClaudeRecord {
     leaf_uuid: Option<String>,
     #[serde(default)]
     message: Value,
+    #[serde(default)]
+    result: Value,
+    #[serde(default)]
+    error: Value,
     #[serde(rename = "toolUseResult", default)]
     tool_use_result: Value,
+    #[serde(rename = "total_cost_usd")]
+    total_cost_usd: Option<f64>,
+    #[serde(rename = "duration_ms")]
+    duration_ms: Option<u64>,
+    #[serde(rename = "duration_api_ms")]
+    duration_api_ms: Option<u64>,
+    #[serde(rename = "num_turns")]
+    num_turns: Option<u64>,
+    #[serde(rename = "is_error")]
+    is_error: Option<bool>,
+    #[serde(rename = "parentSessionId")]
+    parent_session_id_camel: Option<String>,
+    #[serde(rename = "parent_session_id")]
+    parent_session_id_snake: Option<String>,
+    #[serde(rename = "forkedFromSessionId")]
+    forked_from_session_id_camel: Option<String>,
+    #[serde(rename = "forked_from_session_id")]
+    forked_from_session_id_snake: Option<String>,
+    #[serde(flatten)]
+    extra: HashMap<String, Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,6 +117,21 @@ struct SummaryBuilder {
     malformed_lines: usize,
     summary_truncated: bool,
     has_error: bool,
+    metadata: ClaudeMetadataSummary,
+}
+
+#[derive(Debug, Default)]
+struct ClaudeMetadataSummary {
+    has_sdk_init: bool,
+    has_result: bool,
+    total_cost_usd: Option<f64>,
+    duration_ms: Option<u64>,
+    duration_api_ms: Option<u64>,
+    num_turns: Option<u64>,
+    hook_event_count: usize,
+    partial_event_count: usize,
+    remote_surface_count: usize,
+    fork_parent_session: Option<String>,
 }
 
 impl ClaudeSourceAdapter {
@@ -574,6 +616,119 @@ fn history_display_title(display: &str) -> Option<String> {
     }
 }
 
+impl ClaudeRecord {
+    fn record_type(&self) -> &str {
+        self.record_type.as_deref().unwrap_or_default()
+    }
+
+    fn subtype(&self) -> &str {
+        self.subtype.as_deref().unwrap_or_default()
+    }
+
+    fn session_id(&self) -> Option<&str> {
+        self.session_id
+            .as_deref()
+            .or(self.session_id_snake.as_deref())
+    }
+
+    fn fork_parent_session(&self) -> Option<&str> {
+        self.parent_session_id_camel
+            .as_deref()
+            .or(self.parent_session_id_snake.as_deref())
+            .or(self.forked_from_session_id_camel.as_deref())
+            .or(self.forked_from_session_id_snake.as_deref())
+    }
+
+    fn string_extra(&self, keys: &[&str]) -> Option<String> {
+        keys.iter()
+            .filter_map(|key| self.extra.get(*key))
+            .find_map(text_from_value)
+    }
+
+    fn count_extra_items(&self, keys: &[&str]) -> Option<usize> {
+        keys.iter()
+            .filter_map(|key| self.extra.get(*key))
+            .find_map(|value| {
+                if let Some(items) = value.as_array() {
+                    return Some(items.len());
+                }
+                if let Some(object) = value.as_object() {
+                    return Some(object.len());
+                }
+                None
+            })
+    }
+}
+
+impl ClaudeMetadataSummary {
+    fn observe(&mut self, record: &ClaudeRecord) {
+        self.has_sdk_init |= is_sdk_init_record(record);
+        self.has_result |= is_result_record(record);
+        self.total_cost_usd = record.total_cost_usd.or(self.total_cost_usd);
+        self.duration_ms = record.duration_ms.or(self.duration_ms);
+        self.duration_api_ms = record.duration_api_ms.or(self.duration_api_ms);
+        self.num_turns = record.num_turns.or(self.num_turns);
+        if is_hook_event_record(record) {
+            self.hook_event_count += 1;
+        }
+        if is_partial_event_record(record) {
+            self.partial_event_count += 1;
+        }
+        if is_remote_surface_record(record) {
+            self.remote_surface_count += 1;
+        }
+        if self.fork_parent_session.is_none()
+            && let Some(parent) = record.fork_parent_session()
+            && !parent.trim().is_empty()
+        {
+            self.fork_parent_session = Some(parent.to_owned());
+        }
+    }
+
+    fn health_note(&self) -> Option<String> {
+        let mut notes = Vec::new();
+        if self.has_sdk_init || self.has_result {
+            notes.push("Claude stream-json/SDK metadata parsed".to_owned());
+        }
+        let mut result_parts = Vec::new();
+        if let Some(cost) = self.total_cost_usd {
+            result_parts.push(format!("cost_usd={cost:.6}"));
+        }
+        if let Some(duration_ms) = self.duration_ms {
+            result_parts.push(format!("duration_ms={duration_ms}"));
+        }
+        if let Some(duration_api_ms) = self.duration_api_ms {
+            result_parts.push(format!("duration_api_ms={duration_api_ms}"));
+        }
+        if let Some(num_turns) = self.num_turns {
+            result_parts.push(format!("turns={num_turns}"));
+        }
+        if !result_parts.is_empty() {
+            notes.push(format!("result {}", result_parts.join(", ")));
+        }
+        if self.hook_event_count > 0 {
+            notes.push(format!("hook_events={}", self.hook_event_count));
+        }
+        if self.partial_event_count > 0 {
+            notes.push(format!("partial_events={}", self.partial_event_count));
+        }
+        if let Some(parent) = self.fork_parent_session.as_deref() {
+            notes.push(format!("forked_from={parent}"));
+        }
+        if self.remote_surface_count > 0 {
+            notes.push(format!(
+                "remote_surface_records={} kept separate from local resume rows",
+                self.remote_surface_count
+            ));
+        }
+        if notes.is_empty() {
+            None
+        } else {
+            Some(notes.join("; "))
+        }
+    }
+}
+
 impl SummaryBuilder {
     fn new(path: &Path) -> Self {
         Self {
@@ -588,12 +743,13 @@ impl SummaryBuilder {
             malformed_lines: 0,
             summary_truncated: false,
             has_error: false,
+            metadata: ClaudeMetadataSummary::default(),
         }
     }
 
     fn observe(&mut self, record: ClaudeRecord) {
         self.event_count += 1;
-        if let Some(session_id) = record.session_id.as_deref() {
+        if let Some(session_id) = record.session_id() {
             self.id = Some(session_id.into());
         }
         if let Some(timestamp) = record.timestamp.as_deref() {
@@ -609,8 +765,8 @@ impl SummaryBuilder {
             self.title = Some(truncate(&title, 160));
         }
 
-        let record_type = record.record_type.as_deref().unwrap_or_default();
-        self.has_error |= record_type.contains("error");
+        let record_type = record.record_type();
+        self.has_error |= record_is_error(&record);
         if self.title.is_none()
             && record_type == "user"
             && !has_tool_result(&record)
@@ -625,6 +781,7 @@ impl SummaryBuilder {
         {
             self.token_count = Some(self.token_count.unwrap_or(0).max(count));
         }
+        self.metadata.observe(&record);
     }
 
     fn finish(self) -> SessionSummary {
@@ -639,7 +796,7 @@ impl SummaryBuilder {
         } else {
             SessionStatus::Healthy
         };
-        let health_reason = if self.summary_truncated && self.malformed_lines > 0 {
+        let mut health_reason = if self.summary_truncated && self.malformed_lines > 0 {
             format!(
                 "real Claude JSONL session; summary preview truncated; skipped {} malformed line(s)",
                 self.malformed_lines
@@ -654,6 +811,10 @@ impl SummaryBuilder {
         } else {
             "real Claude JSONL session".into()
         };
+        if let Some(metadata_note) = self.metadata.health_note() {
+            health_reason.push_str("; ");
+            health_reason.push_str(&metadata_note);
+        }
 
         SessionSummary {
             id: id.clone(),
@@ -680,7 +841,7 @@ impl SummaryBuilder {
 }
 
 fn timeline_event(record: ClaudeRecord, number: usize) -> Option<TimelineEvent> {
-    let record_type = record.record_type.as_deref().unwrap_or_default();
+    let record_type = record.record_type();
     let kind = timeline_kind(record_type, &record)?;
     let detail = timeline_detail(record_type, &record);
     if detail.is_empty() && !matches!(kind, TimelineKind::Error) {
@@ -700,8 +861,16 @@ fn timeline_event(record: ClaudeRecord, number: usize) -> Option<TimelineEvent> 
 }
 
 fn timeline_kind(record_type: &str, record: &ClaudeRecord) -> Option<TimelineKind> {
-    if record_type.contains("error") {
+    if record_is_error(record) {
         return Some(TimelineKind::Error);
+    }
+    if is_result_record(record)
+        || is_sdk_init_record(record)
+        || is_hook_event_record(record)
+        || is_partial_event_record(record)
+        || is_remote_surface_record(record)
+    {
+        return Some(TimelineKind::Tool);
     }
     if record_type == "summary" || record_type.contains("compact") {
         return Some(TimelineKind::Compact);
@@ -720,6 +889,25 @@ fn timeline_kind(record_type: &str, record: &ClaudeRecord) -> Option<TimelineKin
 }
 
 fn timeline_title(record_type: &str, record: &ClaudeRecord) -> String {
+    if is_result_record(record) {
+        return if record_is_error(record) {
+            "SDK result error".into()
+        } else {
+            "SDK result".into()
+        };
+    }
+    if is_sdk_init_record(record) {
+        return "SDK init".into();
+    }
+    if is_hook_event_record(record) {
+        return "Hook event".into();
+    }
+    if is_partial_event_record(record) {
+        return "Partial stream event".into();
+    }
+    if is_remote_surface_record(record) {
+        return "Remote surface".into();
+    }
     match record_type {
         "user" if has_tool_result(record) => "Tool result".into(),
         "user" if record_has_claude_internal_message(record) => "Internal event".into(),
@@ -737,6 +925,21 @@ fn timeline_title(record_type: &str, record: &ClaudeRecord) -> String {
 }
 
 fn timeline_detail(record_type: &str, record: &ClaudeRecord) -> String {
+    if is_result_record(record) {
+        return result_detail(record);
+    }
+    if is_sdk_init_record(record) {
+        return sdk_init_detail(record);
+    }
+    if is_hook_event_record(record) {
+        return hook_event_detail(record);
+    }
+    if is_partial_event_record(record) {
+        return partial_event_detail(record);
+    }
+    if is_remote_surface_record(record) {
+        return remote_surface_detail(record);
+    }
     match record_type {
         "ai-title" => record.ai_title.clone().unwrap_or_default(),
         "permission-mode" => record
@@ -760,6 +963,169 @@ fn timeline_detail(record_type: &str, record: &ClaudeRecord) -> String {
 
 fn message_text(record: &ClaudeRecord) -> Option<String> {
     text_from_value(record.message.get("content").unwrap_or(&Value::Null))
+}
+
+fn record_is_error(record: &ClaudeRecord) -> bool {
+    record.is_error.unwrap_or(false)
+        || record.record_type().contains("error")
+        || record.subtype().contains("error")
+        || !record.error.is_null()
+}
+
+fn is_result_record(record: &ClaudeRecord) -> bool {
+    record.record_type() == "result"
+        || record
+            .string_extra(&["event_type", "eventType"])
+            .is_some_and(|event| event == "result")
+}
+
+fn is_sdk_init_record(record: &ClaudeRecord) -> bool {
+    (record.record_type() == "system" && record.subtype() == "init")
+        || record.record_type() == "init"
+        || record.record_type() == "system_init"
+}
+
+fn is_hook_event_record(record: &ClaudeRecord) -> bool {
+    contains_surface_name(record.record_type(), "hook")
+        || contains_surface_name(record.subtype(), "hook")
+        || record.extra.contains_key("hook_event_name")
+        || record.extra.contains_key("hookEventName")
+        || record
+            .string_extra(&[
+                "event_type",
+                "eventType",
+                "hook_event_name",
+                "hookEventName",
+            ])
+            .is_some_and(|value| contains_surface_name(&value, "hook"))
+}
+
+fn is_partial_event_record(record: &ClaudeRecord) -> bool {
+    contains_surface_name(record.record_type(), "partial")
+        || contains_surface_name(record.subtype(), "partial")
+        || value_has_type(&record.message, "text_delta")
+        || value_has_type(&record.message, "input_json_delta")
+        || value_has_type(&record.message, "content_block_delta")
+}
+
+fn is_remote_surface_record(record: &ClaudeRecord) -> bool {
+    contains_surface_name(record.record_type(), "remote")
+        || contains_surface_name(record.subtype(), "remote")
+        || record
+            .string_extra(&["surface", "source_surface", "sourceSurface"])
+            .is_some_and(|value| contains_surface_name(&value, "remote"))
+}
+
+fn contains_surface_name(value: &str, name: &str) -> bool {
+    if value.to_ascii_lowercase().contains(name) {
+        return true;
+    }
+    value
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .any(|part| part.eq_ignore_ascii_case(name))
+}
+
+fn result_detail(record: &ClaudeRecord) -> String {
+    let mut parts = Vec::new();
+    if !record.subtype().is_empty() {
+        parts.push(format!("subtype: {}", record.subtype()));
+    }
+    if let Some(session_id) = record.session_id() {
+        parts.push(format!("session_id: {session_id}"));
+    }
+    if let Some(parent) = record.fork_parent_session() {
+        parts.push(format!("forked_from: {parent}"));
+    }
+    if let Some(cost) = record.total_cost_usd {
+        parts.push(format!("cost_usd: {cost:.6}"));
+    }
+    if let Some(duration_ms) = record.duration_ms {
+        parts.push(format!("duration_ms: {duration_ms}"));
+    }
+    if let Some(duration_api_ms) = record.duration_api_ms {
+        parts.push(format!("duration_api_ms: {duration_api_ms}"));
+    }
+    if let Some(num_turns) = record.num_turns {
+        parts.push(format!("turns: {num_turns}"));
+    }
+    if let Some(text) = text_from_value(&record.result)
+        .or_else(|| text_from_value(&record.error))
+        .or_else(|| message_text(record))
+    {
+        parts.push(format!("result: {}", truncate_timeline_detail(&text)));
+    }
+    if parts.is_empty() {
+        "Claude stream-json result metadata".into()
+    } else {
+        parts.join("; ")
+    }
+}
+
+fn sdk_init_detail(record: &ClaudeRecord) -> String {
+    let mut parts = Vec::new();
+    if let Some(session_id) = record.session_id() {
+        parts.push(format!("session_id: {session_id}"));
+    }
+    if let Some(cwd) = record.cwd.as_deref() {
+        parts.push(format!("cwd: {cwd}"));
+    }
+    if let Some(model) = record.string_extra(&["model"]) {
+        parts.push(format!("model: {model}"));
+    }
+    if let Some(mode) = record.permission_mode.as_deref() {
+        parts.push(format!("permission_mode: {mode}"));
+    }
+    if let Some(source) = record.string_extra(&["apiKeySource", "api_key_source"]) {
+        parts.push(format!("api_key_source: {source}"));
+    }
+    if let Some(tool_count) = record.count_extra_items(&["tools"]) {
+        parts.push(format!("tools: {tool_count}"));
+    }
+    if let Some(mcp_count) = record.count_extra_items(&["mcp_servers", "mcpServers"]) {
+        parts.push(format!("mcp_servers: {mcp_count}"));
+    }
+    if parts.is_empty() {
+        "Claude SDK init metadata".into()
+    } else {
+        parts.join("; ")
+    }
+}
+
+fn hook_event_detail(record: &ClaudeRecord) -> String {
+    let mut parts = Vec::new();
+    if let Some(name) = record.string_extra(&["hook_event_name", "hookEventName", "name"]) {
+        parts.push(format!("name: {name}"));
+    }
+    if !record.subtype().is_empty() {
+        parts.push(format!("subtype: {}", record.subtype()));
+    }
+    if let Some(text) = text_from_value(&record.message).or_else(|| text_from_value(&record.result))
+    {
+        parts.push(truncate_timeline_detail(&text));
+    }
+    if parts.is_empty() {
+        "Claude hook event metadata".into()
+    } else {
+        parts.join("; ")
+    }
+}
+
+fn partial_event_detail(record: &ClaudeRecord) -> String {
+    text_from_value(&record.message)
+        .map(|text| truncate_timeline_detail(&text))
+        .unwrap_or_else(|| "Claude partial stream event".into())
+}
+
+fn remote_surface_detail(record: &ClaudeRecord) -> String {
+    let mut parts = vec!["remote / remote-control surface record".to_owned()];
+    if !record.subtype().is_empty() {
+        parts.push(format!("subtype: {}", record.subtype()));
+    }
+    if let Some(session_id) = record.session_id() {
+        parts.push(format!("session_id: {session_id}"));
+    }
+    parts.push("kept separate from local resume rows".into());
+    parts.join("; ")
 }
 
 fn record_has_claude_internal_message(record: &ClaudeRecord) -> bool {
@@ -838,6 +1204,7 @@ fn short_id(id: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::super::model::SourceCapabilityStatus;
     use super::*;
     use std::{fs, io::Write};
 
@@ -981,6 +1348,154 @@ mod tests {
         assert_eq!(timeline.events[1].title, "Internal event");
         assert_eq!(timeline.events[2].kind, TimelineKind::User);
         assert_eq!(timeline.events[2].detail, "Plan the next milestone");
+    }
+
+    #[test]
+    fn parses_stream_json_sdk_metadata_when_captured_in_transcript() {
+        let root = test_root("stream-json-sdk");
+        write_session(
+            &root,
+            "repo/sdk-child.jsonl",
+            r#"{"type":"system","subtype":"init","session_id":"sdk-child","cwd":"/repo","model":"claude-sonnet-4-20250514","permissionMode":"default","apiKeySource":"login","tools":["Read","Edit"],"mcp_servers":{"fs":{}}}
+{"type":"user","session_id":"sdk-child","timestamp":"2026-06-08T09:00:00.000Z","cwd":"/repo","message":{"content":"Implement M63"}}
+{"type":"assistant","session_id":"sdk-child","timestamp":"2026-06-08T09:01:00.000Z","cwd":"/repo","message":{"content":[{"type":"text","text":"Working"}],"usage":{"input_tokens":12,"output_tokens":5}}}
+{"type":"result","subtype":"success","session_id":"sdk-child","total_cost_usd":0.00321,"duration_ms":1234,"duration_api_ms":987,"num_turns":4,"result":"done"}"#,
+        );
+
+        let adapter = ClaudeSourceAdapter::new(&root);
+        let session = adapter
+            .find_session("sdk-child")
+            .expect("find")
+            .expect("session");
+        let timeline = adapter.load_timeline("sdk-child").expect("timeline");
+
+        assert_eq!(session.id, "sdk-child");
+        assert_eq!(session.title, "Implement M63");
+        assert_eq!(session.token_count, Some(17));
+        let health = session.health_reason.as_deref().expect("health");
+        assert!(health.contains("stream-json/SDK metadata parsed"));
+        assert!(health.contains("cost_usd=0.003210"));
+        assert!(health.contains("duration_ms=1234"));
+        assert!(health.contains("duration_api_ms=987"));
+        assert!(health.contains("turns=4"));
+        assert_eq!(timeline.events[0].kind, TimelineKind::Tool);
+        assert_eq!(timeline.events[0].title, "SDK init");
+        assert!(timeline.events[0].detail.contains("model: claude-sonnet"));
+        assert!(timeline.events[0].detail.contains("tools: 2"));
+        assert_eq!(timeline.events[3].title, "SDK result");
+        assert!(timeline.events[3].detail.contains("session_id: sdk-child"));
+        assert!(timeline.events[3].detail.contains("cost_usd: 0.003210"));
+    }
+
+    #[test]
+    fn hook_partial_and_remote_surface_records_are_observability_events() {
+        let root = test_root("stream-json-surfaces");
+        write_session(
+            &root,
+            "repo/claude-surfaces.jsonl",
+            r#"{"type":"hook","subtype":"PreToolUse","session_id":"claude-surfaces","timestamp":"2026-06-08T09:00:00.000Z","hook_event_name":"PreToolUse","message":{"content":"allow Read"}}
+{"type":"assistant","subtype":"partial","session_id":"claude-surfaces","timestamp":"2026-06-08T09:00:01.000Z","message":{"content":[{"type":"text_delta","text":"partial assistant text"}]}}
+{"type":"remote-control","subtype":"attach","session_id":"claude-surfaces","timestamp":"2026-06-08T09:00:02.000Z","message":{"content":"remote-control attach"}}
+{"type":"user","session_id":"claude-surfaces","timestamp":"2026-06-08T09:00:03.000Z","message":{"content":"Real rewind anchor"}}"#,
+        );
+
+        let adapter = ClaudeSourceAdapter::new(&root);
+        let session = adapter
+            .find_session("claude-surfaces")
+            .expect("find")
+            .expect("session");
+        let timeline = adapter.load_timeline("claude-surfaces").expect("timeline");
+
+        assert_eq!(session.title, "Real rewind anchor");
+        let health = session.health_reason.as_deref().expect("health");
+        assert!(health.contains("hook_events=1"));
+        assert!(health.contains("partial_events=1"));
+        assert!(health.contains("remote_surface_records=1"));
+        assert_eq!(timeline.events[0].kind, TimelineKind::Tool);
+        assert_eq!(timeline.events[0].title, "Hook event");
+        assert_eq!(timeline.events[1].kind, TimelineKind::Tool);
+        assert_eq!(timeline.events[1].title, "Partial stream event");
+        assert_eq!(timeline.events[2].kind, TimelineKind::Tool);
+        assert_eq!(timeline.events[2].title, "Remote surface");
+        assert_eq!(timeline.events[3].kind, TimelineKind::User);
+        assert_eq!(timeline.events[3].detail, "Real rewind anchor");
+    }
+
+    #[test]
+    fn result_errors_and_fork_metadata_are_preserved_without_changing_resume() {
+        let root = test_root("stream-json-fork-error");
+        write_session(
+            &root,
+            "repo/child-session.jsonl",
+            r#"{"type":"user","sessionId":"child-session","timestamp":"2026-06-08T09:00:00.000Z","cwd":"/repo","message":{"content":"Continue from fork"}}
+{"type":"result","subtype":"error","session_id":"child-session","parent_session_id":"parent-session","is_error":true,"duration_ms":222,"error":{"message":"permission denied"}}"#,
+        );
+
+        let adapter = ClaudeSourceAdapter::new(&root);
+        let session = adapter
+            .find_session("child-session")
+            .expect("find")
+            .expect("session");
+        let timeline = adapter.load_timeline("child-session").expect("timeline");
+
+        assert_eq!(session.status, SessionStatus::Failed);
+        assert_eq!(session.resume_command, "claude --resume child-session");
+        let health = session.health_reason.as_deref().expect("health");
+        assert!(health.contains("forked_from=parent-session"));
+        assert!(health.contains("duration_ms=222"));
+        assert_eq!(timeline.events[1].kind, TimelineKind::Error);
+        assert_eq!(timeline.events[1].title, "SDK result error");
+        assert!(
+            timeline.events[1]
+                .detail
+                .contains("forked_from: parent-session")
+        );
+        assert!(timeline.events[1].detail.contains("permission denied"));
+    }
+
+    #[test]
+    fn report_capabilities_describe_claude_m63_surface_boundaries() {
+        let root = test_root("m63-capabilities");
+        write_session(
+            &root,
+            "repo/session.jsonl",
+            r#"{"type":"user","sessionId":"session","timestamp":"2026-06-08T09:00:00.000Z","cwd":"/repo","message":{"content":"hello"}}"#,
+        );
+        let adapter = ClaudeSourceAdapter::new(&root);
+
+        let (_sessions, report) = adapter
+            .list_sessions_with_report("included_real_store", "test")
+            .expect("report");
+
+        assert_eq!(
+            report.capabilities.rich_local_rpc.status,
+            SourceCapabilityStatus::Available
+        );
+        assert!(
+            report
+                .capabilities
+                .rich_local_rpc
+                .detail
+                .contains("stream-json/SDK")
+        );
+        assert_eq!(
+            report.capabilities.remote_control.status,
+            SourceCapabilityStatus::Unavailable
+        );
+        assert!(
+            report
+                .capabilities
+                .remote_control
+                .detail
+                .contains("not launched")
+        );
+        assert!(
+            report
+                .capabilities
+                .fork_resume
+                .detail
+                .contains("fork parent metadata")
+        );
     }
 
     #[test]

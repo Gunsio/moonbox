@@ -165,6 +165,10 @@ and this project uses semantic versioning once tagged releases start.
 - Non-executing `moonbox open-app` / `moon open-app` plans that preview
   `codex://threads/<id>` deep links for Codex sessions without launching the
   desktop app.
+- Claude stream-json / SDK transcript metadata parsing for captured local JSONL
+  records, including `system` init, `result`, `session_id`, cost, duration, API
+  duration, turn count, hook events, partial stream events, fork parent metadata,
+  and remote / remote-control observability records without invoking Claude.
 
 ### Changed
 
@@ -186,6 +190,9 @@ and this project uses semantic versioning once tagged releases start.
 - Claude local-command XML-like records such as `<local-command-caveat>`,
   `<local-command-stdout>`, and `<command-name>` are now treated as internal
   tool events instead of user messages, rewind anchors, or resume-index titles.
+- Claude Doctor capabilities now report captured stream-json / SDK metadata
+  parsing as available while keeping remote / remote-control surfaces explicitly
+  unavailable for launch/probing and separate from local resume rows.
 - Compiler stdin, Capsule JSON export, verifier output, and target handoff
   prompts now use the shared redaction policy; target prompts include a
   dedicated Privacy / Redaction section while local execution routing remains
