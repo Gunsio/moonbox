@@ -4,7 +4,7 @@ use super::{
     capability,
     model::{
         CanonicalTimeline, CliTool, SessionSummary, SourceAdapterReport, SourceCapabilities,
-        SourceProvenance,
+        SourceFidelity, SourceFidelityStatus, SourceProvenance,
     },
 };
 
@@ -25,6 +25,7 @@ pub struct SourceReportMeta {
     pub store_path: Option<String>,
     pub filter_status: String,
     pub reason: String,
+    pub fidelity: Option<SourceFidelity>,
     pub capabilities: Option<SourceCapabilities>,
 }
 
@@ -120,6 +121,7 @@ pub fn report_from_sessions(
             store_path,
             filter_status: filter_status.into(),
             reason: reason.into(),
+            fidelity: None,
             capabilities: None,
         },
         sessions,
@@ -152,6 +154,9 @@ pub fn report_from_sessions_with_scan(
             .map(str::to_owned),
         filter_status: meta.filter_status,
         reason: meta.reason,
+        fidelity: meta
+            .fidelity
+            .unwrap_or_else(|| default_fidelity(meta.cli, meta.provenance, meta.active)),
         capabilities: meta
             .capabilities
             .unwrap_or_else(|| capability::source_capabilities(meta.cli, meta.provenance)),
@@ -160,6 +165,33 @@ pub fn report_from_sessions_with_scan(
         summary_line_limit: scan_stats.summary_line_limit,
         scan_entry_count: scan_stats.scan_entry_count,
         scan_truncated: scan_stats.scan_truncated,
+    }
+}
+
+fn default_fidelity(cli: CliTool, provenance: SourceProvenance, active: bool) -> SourceFidelity {
+    if !active || provenance == SourceProvenance::Missing {
+        return SourceFidelity {
+            status: SourceFidelityStatus::Missing,
+            primary_surface: "none".into(),
+            fallback_surface: None,
+            detail: format!("{cli} source surface is missing or inactive"),
+        };
+    }
+    match provenance {
+        SourceProvenance::Fixture => SourceFidelity {
+            status: SourceFidelityStatus::Fallback,
+            primary_surface: "embedded_fixture".into(),
+            fallback_surface: None,
+            detail: "fixture corpus is a non-executing fallback surface for tests and demos".into(),
+        },
+        SourceProvenance::Real => SourceFidelity {
+            status: SourceFidelityStatus::Fallback,
+            primary_surface: format!("{}_local_store", cli.id()),
+            fallback_surface: None,
+            detail: "read-only local source store fallback; richer provider API is not active"
+                .into(),
+        },
+        SourceProvenance::Missing => unreachable!(),
     }
 }
 

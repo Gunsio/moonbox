@@ -22,10 +22,10 @@ use super::{
     },
     model::{
         CanonicalTimeline, CliTool, SessionRuntimeStatus, SessionStatus, SessionSummary,
-        SourceCapabilities, SourceCapability, SourceCapabilityStatus, SourceProvenance,
-        TimelineApproval, TimelineEvent, TimelineEventMetadata, TimelineEventRawRef,
-        TimelineFileChange, TimelineKind, TimelineRuntimeMetadata, TimelineToolCall,
-        TokenBreakdown, unknown_runtime_reason,
+        SourceCapabilities, SourceCapability, SourceCapabilityStatus, SourceFidelity,
+        SourceFidelityStatus, SourceProvenance, TimelineApproval, TimelineEvent,
+        TimelineEventMetadata, TimelineEventRawRef, TimelineFileChange, TimelineKind,
+        TimelineRuntimeMetadata, TimelineToolCall, TokenBreakdown, unknown_runtime_reason,
     },
 };
 
@@ -516,6 +516,7 @@ impl CodexSourceAdapter {
                     store_path: self.local_store_path(),
                     filter_status: fallback_filter_status(filter_status, app_server_error),
                     reason: fallback_report_reason(reason, app_server_error),
+                    fidelity: Some(codex_fallback_fidelity(app_server_error)),
                     capabilities: app_server_error
                         .map(|error| app_server_unavailable_capabilities(true, error)),
                 },
@@ -542,6 +543,7 @@ impl CodexSourceAdapter {
                 store_path: self.local_store_path(),
                 filter_status: fallback_filter_status(filter_status, app_server_error),
                 reason: fallback_report_reason(reason, app_server_error),
+                fidelity: Some(codex_fallback_fidelity(app_server_error)),
                 capabilities: app_server_error
                     .map(|error| app_server_unavailable_capabilities(true, error)),
             },
@@ -602,6 +604,9 @@ impl SourceAdapter for CodexSourceAdapter {
                             reason:
                                 "Codex app-server thread/list source; SQLite/JSONL remains fallback"
                                     .into(),
+                            fidelity: Some(codex_app_server_fidelity(
+                                self.has_local_session_store(),
+                            )),
                             capabilities: Some(app_server_capabilities(
                                 self.has_local_session_store(),
                             )),
@@ -714,6 +719,32 @@ fn fallback_report_reason(reason: &str, app_server_error: Option<&AdapterError>)
     app_server_error
         .map(|error| format!("Codex app-server unavailable ({error}); {reason}"))
         .unwrap_or_else(|| reason.into())
+}
+
+fn codex_app_server_fidelity(local_store_available: bool) -> SourceFidelity {
+    SourceFidelity {
+        status: SourceFidelityStatus::FullFidelity,
+        primary_surface: "codex_app_server_thread_api".into(),
+        fallback_surface: local_store_available.then_some("codex_sqlite_jsonl_read_only".into()),
+        detail: "documented opt-in app-server thread APIs are active; local store remains read-only fallback".into(),
+    }
+}
+
+fn codex_fallback_fidelity(app_server_error: Option<&AdapterError>) -> SourceFidelity {
+    let detail = match app_server_error {
+        Some(error) => format!(
+            "Codex app-server was configured but unavailable; using read-only SQLite/JSONL fallback: {error}"
+        ),
+        None => "read-only Codex SQLite/JSONL fallback; app-server rich API is not active".into(),
+    };
+    SourceFidelity {
+        status: SourceFidelityStatus::Fallback,
+        primary_surface: "codex_sqlite_jsonl_read_only".into(),
+        fallback_surface: app_server_error
+            .is_some()
+            .then_some("codex_app_server_thread_api".into()),
+        detail,
+    }
 }
 
 fn app_server_capabilities(local_store_available: bool) -> SourceCapabilities {
@@ -1623,6 +1654,15 @@ not-json-after-limit"#,
             Some("codex-app-server://threads/codex-app-thread")
         );
         assert_eq!(report.filter_status, "included_codex_app_server");
+        assert_eq!(report.fidelity.status, SourceFidelityStatus::FullFidelity);
+        assert_eq!(
+            report.fidelity.primary_surface,
+            "codex_app_server_thread_api"
+        );
+        assert_eq!(
+            report.fidelity.fallback_surface.as_deref(),
+            Some("codex_sqlite_jsonl_read_only")
+        );
         assert_eq!(
             report.capabilities.rich_local_rpc.status,
             SourceCapabilityStatus::Available
@@ -1675,6 +1715,16 @@ not-json-after-limit"#,
         );
         assert!(report.reason.contains("Codex app-server unavailable"));
         assert!(report.reason.contains("real source store discovered"));
+        assert_eq!(report.fidelity.status, SourceFidelityStatus::Fallback);
+        assert_eq!(
+            report.fidelity.primary_surface,
+            "codex_sqlite_jsonl_read_only"
+        );
+        assert_eq!(
+            report.fidelity.fallback_surface.as_deref(),
+            Some("codex_app_server_thread_api")
+        );
+        assert!(report.fidelity.detail.contains("app-server"));
         assert_eq!(
             report.capabilities.rich_local_rpc.status,
             SourceCapabilityStatus::Unavailable

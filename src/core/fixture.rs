@@ -201,6 +201,11 @@ mod tests {
                 report.capabilities.native_handoff.status,
                 super::super::model::SourceCapabilityStatus::Unavailable
             );
+            assert_eq!(
+                report.fidelity.status,
+                super::super::model::SourceFidelityStatus::Fallback
+            );
+            assert_eq!(report.fidelity.primary_surface, "embedded_fixture");
             assert!(
                 report
                     .store_path

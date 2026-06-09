@@ -432,12 +432,17 @@ summary discovery, target binary availability, and compiler catalog readiness
 without loading timelines, resuming sessions, or spawning targets. Its JSON
 output includes `source_adapters` entries with provenance, active/missing state,
 store path, session count, skipped record count, last indexed timestamp, and
-adapter filter status. Each adapter report also includes a versioned
+adapter filter status. Each adapter report also includes a `fidelity` contract
+with `status`, `primary_surface`, optional `fallback_surface`, and detail text
+so users can tell whether inventory came from a documented rich API, a partial
+local surface, a read-only fallback, or a missing source. Each adapter report
+also includes a versioned
 `capabilities` matrix for local store, rich local RPC, cloud metadata, deep
 links, export/search, remote control, fork/resume, and native handoff support,
 with each capability marked `available`, `planned`, `unavailable`, or
 `unknown`. Doctor check details include a compact capability summary for quick
-terminal inspection. Doctor also reports list and scan guardrails through
+terminal inspection, and the TUI session metadata panel shows the same fidelity
+status for the selected source. Doctor also reports list and scan guardrails through
 `list_limit`, `scan_entry_limit`, `summary_line_limit`, `scan_entry_count`, and
 `scan_truncated`, so a large local store cannot silently degrade into an
 unbounded default scan or full-file summary parse. Target
@@ -930,12 +935,15 @@ Stable interfaces matter more than any single framework:
   JSONL, Hermes SQLite, and opt-in Codex app-server fixture/proxy sources fill
   proven fields without launching provider runtimes, and Capsule `raw_refs`
   preserve message/provider ids for audit.
+- M67: source fidelity contract and fallback visibility; `doctor --json`
+  adapter reports now include serde-default `fidelity` status/surface fields,
+  Doctor details and the TUI selected-session metadata show the same status,
+  and fixture/contract tests lock full-fidelity Codex app-server, Codex local
+  fallback, Claude partial JSONL, Hermes local fallback, fixture fallback, and
+  missing-source paths.
 
 ### Remaining Milestones
 
-- M67: source fallback and contract tests. Prefer documented rich APIs, keep
-  private local stores as read-only fallback, and make every degraded fidelity
-  path visible in Doctor and the TUI.
 - M68: handoff signature. Make `x -> Review -> enter` visibly feel like a
   Moonbox handoff by rendering an Action Path arrow and a short, optional
   handoff trail animation that stays under 800 ms.

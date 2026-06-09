@@ -15,8 +15,9 @@ use crate::{
     core::compiler,
     core::model::{
         CliTool, CompilerPresetInfo, CompilerPresetKind, CompilerPresetStatus,
-        LaunchValidationState, SessionRuntimeStatus, SessionStatus, SourceProvenance,
-        TimelineEvent, TimelineKind, VerificationReport, VerificationStatus, WorkCapsule,
+        LaunchValidationState, SessionRuntimeStatus, SessionStatus, SourceAdapterReport,
+        SourceFidelityStatus, SourceProvenance, TimelineEvent, TimelineKind, VerificationReport,
+        VerificationStatus, WorkCapsule,
     },
 };
 
@@ -1175,6 +1176,7 @@ fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
             &format!("{} · {}", session.cli, session.source_provenance),
             source_provenance_style(session.source_provenance),
         ),
+        source_fidelity_line(app, session.cli),
         metadata_line(
             "Updated",
             &session.updated,
@@ -1215,6 +1217,51 @@ fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
         ));
     }
     lines
+}
+
+fn source_fidelity_line(app: &App, cli: CliTool) -> Line<'static> {
+    let Some(report) = source_adapter_report(app, cli) else {
+        return metadata_line(
+            "Fidelity",
+            "missing · none",
+            source_fidelity_style(SourceFidelityStatus::Missing),
+        );
+    };
+    let value = source_fidelity_detail(report);
+    metadata_line(
+        "Fidelity",
+        &value,
+        source_fidelity_style(report.fidelity.status),
+    )
+}
+
+fn source_adapter_report(app: &App, cli: CliTool) -> Option<&SourceAdapterReport> {
+    app.data
+        .source_adapters
+        .iter()
+        .find(|report| report.cli == cli)
+}
+
+fn source_fidelity_detail(report: &SourceAdapterReport) -> String {
+    match report.fidelity.fallback_surface.as_deref() {
+        Some(fallback) => format!(
+            "{} · {} · fallback {}",
+            report.fidelity.status, report.fidelity.primary_surface, fallback
+        ),
+        None => format!(
+            "{} · {}",
+            report.fidelity.status, report.fidelity.primary_surface
+        ),
+    }
+}
+
+fn source_fidelity_style(status: SourceFidelityStatus) -> Style {
+    match status {
+        SourceFidelityStatus::FullFidelity => Style::default().fg(theme::GREEN),
+        SourceFidelityStatus::Partial => Style::default().fg(theme::GOLD),
+        SourceFidelityStatus::Fallback => Style::default().fg(theme::ORANGE),
+        SourceFidelityStatus::Missing => Style::default().fg(theme::RED),
+    }
 }
 
 fn metadata_line(label: &'static str, value: &str, style: Style) -> Line<'static> {
@@ -2796,6 +2843,8 @@ mod tests {
         let screen = render_text(&app, 140, 40);
 
         assert_screen_contains(&screen, "Real Session Metadata");
+        assert_screen_contains(&screen, "Fidelity");
+        assert_screen_contains(&screen, "fallback · embedded_fixture");
         assert_screen_contains(&screen, "Handoff Snapshot");
         assert_screen_contains(&screen, "draft_from_builtin_compiler");
         assert_screen_contains(&screen, "Press c to refresh and review");
@@ -2816,6 +2865,7 @@ mod tests {
         assert_screen_contains(&screen, "Doctor");
         assert_screen_contains(&screen, "Environment doctor");
         assert_screen_contains(&screen, "source_codex_adapter");
+        assert_screen_contains(&screen, "fidelity=fallback");
         assert_screen_contains(&screen, "fixtures/adapters/codex");
         assert_screen_contains(&screen, "Copy JSON");
     }

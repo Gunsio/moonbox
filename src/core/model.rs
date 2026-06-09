@@ -762,6 +762,8 @@ pub struct SourceAdapterReport {
     pub filter_status: String,
     pub reason: String,
     #[serde(default)]
+    pub fidelity: SourceFidelity,
+    #[serde(default)]
     pub capabilities: SourceCapabilities,
     #[serde(default)]
     pub list_limit: Option<usize>,
@@ -773,6 +775,47 @@ pub struct SourceAdapterReport {
     pub scan_entry_count: usize,
     #[serde(default)]
     pub scan_truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceFidelity {
+    pub status: SourceFidelityStatus,
+    pub primary_surface: String,
+    #[serde(default)]
+    pub fallback_surface: Option<String>,
+    pub detail: String,
+}
+
+impl Default for SourceFidelity {
+    fn default() -> Self {
+        Self {
+            status: SourceFidelityStatus::Missing,
+            primary_surface: "none".into(),
+            fallback_surface: None,
+            detail: "source surface is missing".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceFidelityStatus {
+    FullFidelity,
+    Partial,
+    Fallback,
+    #[default]
+    Missing,
+}
+
+impl Display for SourceFidelityStatus {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::FullFidelity => f.write_str("full-fidelity"),
+            Self::Partial => f.write_str("partial"),
+            Self::Fallback => f.write_str("fallback"),
+            Self::Missing => f.write_str("missing"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1038,5 +1081,29 @@ mod tests {
         let json = serde_json::to_value(capsule).expect("capsule json");
         assert_eq!(json["handoff_label"], "moonbox/hermes-rewind-evt-001");
         assert!(json.get("target_branch").is_none());
+    }
+
+    #[test]
+    fn source_adapter_report_accepts_legacy_json_without_fidelity() {
+        let report: SourceAdapterReport = serde_json::from_str(
+            r#"{
+                "cli": "codex",
+                "provenance": "real",
+                "active": true,
+                "store_path": "/tmp/moonbox/codex",
+                "session_count": 1,
+                "skipped_record_count": 0,
+                "last_indexed_at": "2026-06-09T10:00:00Z",
+                "filter_status": "included_real_store",
+                "reason": "legacy report"
+            }"#,
+        )
+        .expect("legacy source report");
+
+        assert_eq!(report.fidelity.status, SourceFidelityStatus::Missing);
+        assert_eq!(report.fidelity.primary_surface, "none");
+        assert_eq!(report.capabilities.version, 1);
+        assert_eq!(report.scan_entry_count, 0);
+        assert!(!report.scan_truncated);
     }
 }

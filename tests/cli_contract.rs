@@ -605,6 +605,9 @@ fn doctor_cli_contract_is_non_executing_and_fixture_safe() {
     );
     for adapter in adapters {
         let capabilities = &adapter["capabilities"];
+        assert_eq!(adapter["fidelity"]["status"], "fallback");
+        assert_eq!(adapter["fidelity"]["primary_surface"], "embedded_fixture");
+        assert!(adapter["fidelity"]["fallback_surface"].is_null());
         assert_eq!(capabilities["version"], 1);
         assert_eq!(capabilities["local_store"]["status"], "available");
         assert_eq!(capabilities["native_handoff"]["status"], "unavailable");
@@ -616,6 +619,8 @@ fn doctor_cli_contract_is_non_executing_and_fixture_safe() {
             .is_some_and(|name| name.starts_with("source_"))
     }) {
         let detail = check["detail"].as_str().expect("source check detail");
+        assert!(detail.contains("fidelity=fallback"));
+        assert!(detail.contains("surface=embedded_fixture"));
         assert!(detail.contains("capabilities=local_store:available"));
         assert!(detail.contains("native_handoff:unavailable"));
     }
@@ -814,6 +819,12 @@ fn hermes_real_store_lists_all_sources_and_filters_by_provider_source() {
         .clone();
 
     assert_eq!(hermes["session_count"], 2);
+    assert_eq!(hermes["fidelity"]["status"], "fallback");
+    assert_eq!(hermes["fidelity"]["primary_surface"], "hermes_local_sqlite");
+    assert_eq!(
+        hermes["fidelity"]["fallback_surface"],
+        "hermes_gateway_export_search"
+    );
     assert_eq!(
         hermes["capabilities"]["rich_local_rpc"]["status"],
         "available"
@@ -945,6 +956,12 @@ fn codex_app_server_fixture_is_preferred_source_and_open_app_preview() {
         .expect("codex adapter");
 
     assert_eq!(codex["filter_status"], "included_codex_app_server");
+    assert_eq!(codex["fidelity"]["status"], "full_fidelity");
+    assert_eq!(
+        codex["fidelity"]["primary_surface"],
+        "codex_app_server_thread_api"
+    );
+    assert!(codex["fidelity"]["fallback_surface"].is_null());
     assert_eq!(
         codex["capabilities"]["rich_local_rpc"]["status"],
         "available"
@@ -1044,6 +1061,11 @@ fn doctor_reports_real_and_missing_source_adapters_without_fixture_mixing() {
     assert_eq!(codex["scan_entry_limit"], 500);
     assert_eq!(codex["summary_line_limit"], 800);
     assert_eq!(codex["scan_truncated"], false);
+    assert_eq!(codex["fidelity"]["status"], "fallback");
+    assert_eq!(
+        codex["fidelity"]["primary_surface"],
+        "codex_sqlite_jsonl_read_only"
+    );
     assert_eq!(codex["capabilities"]["local_store"]["status"], "available");
     assert_eq!(codex["capabilities"]["fork_resume"]["status"], "available");
     assert_eq!(
@@ -1060,6 +1082,8 @@ fn doctor_reports_real_and_missing_source_adapters_without_fixture_mixing() {
         assert_eq!(adapter["active"], false);
         assert_eq!(adapter["session_count"], 0);
         assert_eq!(adapter["filter_status"], "excluded_missing_store");
+        assert_eq!(adapter["fidelity"]["status"], "missing");
+        assert_eq!(adapter["fidelity"]["primary_surface"], "none");
         assert_eq!(
             adapter["capabilities"]["local_store"]["status"],
             "unavailable"
@@ -1108,6 +1132,11 @@ fn doctor_and_sessions_report_claude_m63_surface_boundaries() {
     assert_eq!(claude["provenance"], "real");
     assert_eq!(claude["active"], true);
     assert_eq!(claude["session_count"], 1);
+    assert_eq!(claude["fidelity"]["status"], "partial");
+    assert_eq!(
+        claude["fidelity"]["primary_surface"],
+        "claude_project_jsonl"
+    );
     assert_eq!(
         claude["capabilities"]["rich_local_rpc"]["status"],
         "available"
@@ -1193,6 +1222,7 @@ fn doctor_reports_bounded_real_store_scan_cost() {
     assert_eq!(codex["summary_line_limit"], 800);
     assert_eq!(codex["scan_entry_count"], 2);
     assert_eq!(codex["scan_truncated"], true);
+    assert_eq!(codex["fidelity"]["status"], "fallback");
     assert_eq!(codex["capabilities"]["local_store"]["status"], "available");
 
     let checks = report["checks"].as_array().expect("checks");
@@ -1206,6 +1236,12 @@ fn doctor_reports_bounded_real_store_scan_cost() {
             .as_str()
             .expect("detail")
             .contains("scan_truncated=true")
+    );
+    assert!(
+        codex_check["detail"]
+            .as_str()
+            .expect("detail")
+            .contains("fidelity=fallback")
     );
     assert!(
         codex_check["detail"]

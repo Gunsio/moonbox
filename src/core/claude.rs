@@ -21,10 +21,10 @@ use super::{
     },
     model::{
         CanonicalTimeline, CliTool, SessionRuntimeStatus, SessionStatus, SessionSummary,
-        SourceProvenance, TimelineAttachment, TimelineCostMetadata, TimelineEvent,
-        TimelineEventMetadata, TimelineEventRawRef, TimelineFileChange, TimelineKind,
-        TimelineRuntimeMetadata, TimelineToolCall, TimelineToolResult, TokenBreakdown,
-        unknown_runtime_reason,
+        SourceFidelity, SourceFidelityStatus, SourceProvenance, TimelineAttachment,
+        TimelineCostMetadata, TimelineEvent, TimelineEventMetadata, TimelineEventRawRef,
+        TimelineFileChange, TimelineKind, TimelineRuntimeMetadata, TimelineToolCall,
+        TimelineToolResult, TokenBreakdown, unknown_runtime_reason,
     },
 };
 
@@ -514,6 +514,7 @@ impl SourceAdapter for ClaudeSourceAdapter {
                     store_path: self.store_path(),
                     filter_status: filter_status.into(),
                     reason: reason.into(),
+                    fidelity: Some(claude_local_fidelity(true)),
                     capabilities: None,
                 },
                 &sessions,
@@ -539,6 +540,7 @@ impl SourceAdapter for ClaudeSourceAdapter {
                 store_path: self.store_path(),
                 filter_status: filter_status.into(),
                 reason: reason.into(),
+                fidelity: Some(claude_local_fidelity(false)),
                 capabilities: None,
             },
             &sessions,
@@ -1467,6 +1469,19 @@ fn short_id(id: &str) -> String {
     id.chars().take(8).collect()
 }
 
+fn claude_local_fidelity(history_indexed: bool) -> SourceFidelity {
+    SourceFidelity {
+        status: SourceFidelityStatus::Partial,
+        primary_surface: if history_indexed {
+            "claude_history_jsonl_index".into()
+        } else {
+            "claude_project_jsonl".into()
+        },
+        fallback_surface: None,
+        detail: "local Claude transcript JSONL may include stream-json/SDK metadata; cloud and remote-control surfaces are not probed".into(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::model::SourceCapabilityStatus;
@@ -1782,6 +1797,10 @@ mod tests {
             report.capabilities.rich_local_rpc.status,
             SourceCapabilityStatus::Available
         );
+        assert_eq!(report.fidelity.status, SourceFidelityStatus::Partial);
+        assert_eq!(report.fidelity.primary_surface, "claude_project_jsonl");
+        assert!(report.fidelity.fallback_surface.is_none());
+        assert!(report.fidelity.detail.contains("remote-control"));
         assert!(
             report
                 .capabilities
