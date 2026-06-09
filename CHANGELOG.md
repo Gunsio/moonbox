@@ -280,11 +280,9 @@ and this project uses semantic versioning once tagged releases start.
 - Action Path now renders an explicit `source -> rewind -> target` route and a
   short 720 ms handoff trail when the target picker enters Handoff Review; Esc
   or `q` closes the Review and cancels the trail.
-- Session rows now include compact portraits: summary-only rows show indexed
-  event/token activity, while the selected hydrated session shows a real
-  `U/A/T/R` shape badge from the cached timeline. Handoff Review and Session
-  Details expose the same portrait and label whether it came from cached
-  timeline data or indexed summary data.
+- Session rows now include readable activity metrics: visible rows show
+  event/token activity, while Handoff Review and Session Details expose cached
+  timeline role counts as explicit user / assistant / tool / rewind labels.
 - TUI `+` / `=` now zooms the focused panel and `-` restores the default
   layout; zoom follows tab focus so Sessions, Timeline, Details, and Action
   Path can each be expanded without resetting selection or scroll state.
@@ -374,6 +372,10 @@ and this project uses semantic versioning once tagged releases start.
 - TUI visual roles now use stable semantic colors for confidence, source badges,
   rewind/target path nodes, and Action Path inventory counts; narrow headers
   collapse the brand to `MOONBOX`.
+- Capsule is now a first-class local object: `capsule save/list/show/launch`,
+  `export/import`, and `delete` are backed by an isolated SQLite store via
+  `MOONBOX_CAPSULE_STORE`, import validates Moonbox envelopes before saving,
+  and the TUI Command Palette can open a saved Capsule inventory overlay.
 - Replay-eval fixture invariants now return structured `CoreError` failures
   instead of panicking, and generated SVG docs snapshot code no longer relies on
   infallible string-write `expect` calls.

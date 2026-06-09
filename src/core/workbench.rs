@@ -1,6 +1,9 @@
-use std::fs;
+use std::{fs, path::Path};
 
 use super::{
+    capsule_store::{
+        self, CapsuleExportEnvelope, CapsuleImportResult, CapsuleRecord, CapsuleSummary,
+    },
     compiler, continuation, data, dataspace,
     error::CoreError,
     launcher,
@@ -183,6 +186,121 @@ pub fn compile_capsule(
     compiler: &str,
 ) -> Result<Option<WorkCapsule>, CoreError> {
     data::compile_capsule_for_session_id(session_id, target, rewind_event_id, compiler)
+}
+
+pub fn save_capsule_for_selection(
+    name: &str,
+    session_id: Option<&str>,
+    target: CliTool,
+    rewind_event_id: Option<&str>,
+    compiler: Option<&str>,
+) -> Result<Option<CapsuleRecord>, CoreError> {
+    let Some(capsule) = capsule_for_selection(session_id, target, rewind_event_id, compiler)?
+    else {
+        return Ok(None);
+    };
+    capsule_store::save_capsule(name, &capsule).map(Some)
+}
+
+pub fn list_saved_capsules() -> Result<Vec<CapsuleSummary>, CoreError> {
+    capsule_store::list_capsules()
+}
+
+pub fn show_saved_capsule(name: &str) -> Result<Option<CapsuleRecord>, CoreError> {
+    capsule_store::show_capsule(name)
+}
+
+pub fn delete_saved_capsule(name: &str) -> Result<bool, CoreError> {
+    capsule_store::delete_capsule(name)
+}
+
+pub fn export_saved_capsule(name: &str) -> Result<CapsuleExportEnvelope, CoreError> {
+    capsule_store::export_capsule(name)
+}
+
+pub fn write_saved_capsule_export(
+    name: &str,
+    path: &Path,
+) -> Result<CapsuleExportEnvelope, CoreError> {
+    let envelope = export_saved_capsule(name)?;
+    capsule_store::write_export_file(path, &envelope)?;
+    Ok(envelope)
+}
+
+pub fn import_saved_capsule(
+    path: &Path,
+    name_override: Option<&str>,
+) -> Result<CapsuleImportResult, CoreError> {
+    let envelope = capsule_store::read_export_file(path)?;
+    capsule_store::import_capsule(envelope, name_override)
+}
+
+pub fn saved_capsule_launch_plan(
+    name: &str,
+    target: Option<CliTool>,
+    continuation_options: ContinuationOptions,
+) -> Result<LaunchPlan, CoreError> {
+    let record = capsule_store::show_capsule(name)?.ok_or_else(|| CoreError::CapsuleStore {
+        reason: format!("capsule {name} was not found"),
+    })?;
+    let target = target.unwrap_or(record.capsule.target_cli);
+    let Some((source_session, timeline)) =
+        data::launch_context_for_session_id(&record.capsule.source_session)?
+    else {
+        return Err(CoreError::CapsuleStore {
+            reason: format!(
+                "source session {} for capsule {name} was not found",
+                record.capsule.source_session
+            ),
+        });
+    };
+    let capsule_path = Some(format!("store:{name}"));
+    let continuation = continuation::build_continuation_protocol(
+        &source_session,
+        target,
+        &record.capsule,
+        capsule_path.as_deref(),
+        continuation_options,
+    );
+    let target_command = launcher::target_command_with_continuation(
+        target,
+        &source_session,
+        &record.capsule,
+        &continuation,
+    )?;
+    let command = target_command.display.clone();
+    let verification = verifier::verify_capsule_with_continuation(
+        &record.capsule,
+        &source_session,
+        &timeline.events,
+        target,
+        &continuation,
+    );
+
+    Ok(LaunchPlan {
+        version: 1,
+        action: SessionAction::TargetHandoff,
+        dry_run: true,
+        source_session,
+        target_cli: target,
+        compiler: record.capsule.compiler,
+        handoff_label: record.capsule.handoff_label,
+        capsule_path,
+        command,
+        target_command,
+        verification,
+        continuation,
+    })
+}
+
+pub fn execute_saved_capsule_launch(
+    name: &str,
+    target: Option<CliTool>,
+    allow_draft: bool,
+    continuation_options: ContinuationOptions,
+) -> Result<LaunchExecution, CoreError> {
+    let plan = saved_capsule_launch_plan(name, target, continuation_options)?;
+    launcher::execute_plan(plan, allow_draft)
 }
 
 pub fn launch_plan(

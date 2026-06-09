@@ -27,8 +27,8 @@ pub enum Command {
     /// Preview a provider app deep link without launching it.
     #[command(name = "open-app")]
     OpenApp(OpenAppArgs),
-    /// Print the selected Work Capsule.
-    Capsule(CompileArgs),
+    /// Print, save, inspect, import, export, or launch Work Capsules.
+    Capsule(CapsuleArgs),
     /// Print the compiler request contract.
     CompileRequest(CompileArgs),
     /// Print the compiler output contract.
@@ -145,6 +145,108 @@ pub struct CompileArgs {
     /// Compiler id to use. Defaults to the configured external compiler or engineering-handoff.
     #[arg(long)]
     pub compiler: Option<String>,
+}
+
+#[derive(Debug, Args, Clone, Default)]
+pub struct CapsuleArgs {
+    #[command(subcommand)]
+    pub command: Option<CapsuleCommand>,
+    #[command(flatten)]
+    pub compile: CompileArgs,
+}
+
+#[derive(Debug, Subcommand, Clone)]
+pub enum CapsuleCommand {
+    /// Save the selected generated Capsule into the local Capsule store.
+    Save(CapsuleSaveArgs),
+    /// List saved local Capsules.
+    List(CapsuleListArgs),
+    /// Show a saved Capsule.
+    Show(CapsuleShowArgs),
+    /// Dry-run or execute a target handoff from a saved Capsule.
+    Launch(CapsuleLaunchArgs),
+    /// Export a saved Capsule as a portable Moonbox Capsule envelope.
+    Export(CapsuleExportArgs),
+    /// Import a portable Moonbox Capsule envelope into the local store.
+    Import(CapsuleImportArgs),
+    /// Delete a saved Capsule from the local store.
+    Delete(CapsuleDeleteArgs),
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct CapsuleSaveArgs {
+    /// Stable local Capsule name.
+    pub name: String,
+    #[command(flatten)]
+    pub compile: CompileArgs,
+}
+
+#[derive(Debug, Args, Clone, Default)]
+pub struct CapsuleListArgs {
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct CapsuleShowArgs {
+    /// Saved Capsule name.
+    pub name: String,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct CapsuleLaunchArgs {
+    /// Saved Capsule name.
+    pub name: String,
+    /// Requested target CLI. Defaults to the saved Capsule target.
+    #[arg(long, value_enum)]
+    pub target: Option<CliTool>,
+    /// Execute the verified target command instead of printing a dry-run plan.
+    #[arg(long)]
+    pub execute: bool,
+    /// Allow executing a real-session handoff produced by the built-in draft compiler.
+    #[arg(long)]
+    pub allow_draft: bool,
+    /// Requested continuation level. Defaults to prompt-only handoff.
+    #[arg(long, value_enum)]
+    pub continuation: Option<ContinuationLevel>,
+    /// Preview a reversible workspace restore path. Implies --continuation workspace-restore.
+    #[arg(long = "workspace-restore", value_enum)]
+    pub workspace_restore: Option<WorkspaceRestoreMode>,
+    /// Print JSON output.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct CapsuleExportArgs {
+    /// Saved Capsule name.
+    pub name: String,
+    /// Write the export envelope to a file. Defaults to stdout.
+    #[arg(long)]
+    pub output: Option<PathBuf>,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct CapsuleImportArgs {
+    /// Capsule export envelope path.
+    pub path: PathBuf,
+    /// Override the imported local Capsule name.
+    #[arg(long)]
+    pub name: Option<String>,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct CapsuleDeleteArgs {
+    /// Saved Capsule name.
+    pub name: String,
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args, Clone)]

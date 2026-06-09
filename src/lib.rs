@@ -241,16 +241,24 @@ fn print_open_app_plan(args: cli::OpenAppArgs) -> Result<()> {
     Ok(())
 }
 
-fn print_capsule(args: cli::CompileArgs) -> Result<()> {
-    let target = launch_target(args.target);
-    let capsule = core::workbench::capsule_for_selection(
-        args.session.as_deref(),
-        target,
-        args.rewind.as_deref(),
-        args.compiler.as_deref(),
-    )?;
+fn print_capsule(args: cli::CapsuleArgs) -> Result<()> {
+    match args.command {
+        Some(cli::CapsuleCommand::Save(args)) => print_capsule_save(args),
+        Some(cli::CapsuleCommand::List(args)) => print_capsule_list(args),
+        Some(cli::CapsuleCommand::Show(args)) => print_capsule_show(args),
+        Some(cli::CapsuleCommand::Launch(args)) => print_capsule_launch(args),
+        Some(cli::CapsuleCommand::Export(args)) => print_capsule_export(args),
+        Some(cli::CapsuleCommand::Import(args)) => print_capsule_import(args),
+        Some(cli::CapsuleCommand::Delete(args)) => print_capsule_delete(args),
+        None => print_generated_capsule(args.compile),
+    }
+}
+
+fn print_generated_capsule(args: cli::CompileArgs) -> Result<()> {
+    let json = args.json;
+    let capsule = generated_capsule(args)?;
     if let Some(capsule) = capsule {
-        if args.json {
+        if json {
             println!("{}", serde_json::to_string_pretty(&capsule)?);
         } else {
             println!("source: {}", capsule.source_cli);
@@ -265,6 +273,165 @@ fn print_capsule(args: cli::CompileArgs) -> Result<()> {
         }
     } else {
         println!("No session selected");
+    }
+    Ok(())
+}
+
+fn generated_capsule(args: cli::CompileArgs) -> Result<Option<core::model::WorkCapsule>> {
+    let target = launch_target(args.target);
+    Ok(core::workbench::capsule_for_selection(
+        args.session.as_deref(),
+        target,
+        args.rewind.as_deref(),
+        args.compiler.as_deref(),
+    )?)
+}
+
+fn print_capsule_save(args: cli::CapsuleSaveArgs) -> Result<()> {
+    let target = launch_target(args.compile.target);
+    let record = core::workbench::save_capsule_for_selection(
+        &args.name,
+        args.compile.session.as_deref(),
+        target,
+        args.compile.rewind.as_deref(),
+        args.compile.compiler.as_deref(),
+    )?;
+    if let Some(record) = record {
+        if args.compile.json {
+            println!("{}", serde_json::to_string_pretty(&record)?);
+        } else {
+            print_capsule_record_text("capsule saved", &record);
+        }
+    } else {
+        println!("No session selected");
+    }
+    Ok(())
+}
+
+fn print_capsule_list(args: cli::CapsuleListArgs) -> Result<()> {
+    let capsules = core::workbench::list_saved_capsules()?;
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&capsules)?);
+    } else {
+        println!("capsules: {}", capsules.len());
+        for capsule in capsules {
+            println!(
+                "{:<24} {:<7} {:<28} {:<18} {}",
+                capsule.name,
+                capsule.target_cli.id(),
+                capsule.source_session,
+                capsule.updated_at,
+                capsule.checksum
+            );
+        }
+    }
+    Ok(())
+}
+
+fn print_capsule_show(args: cli::CapsuleShowArgs) -> Result<()> {
+    let record = core::workbench::show_saved_capsule(&args.name)?;
+    if let Some(record) = record {
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&record)?);
+        } else {
+            print_capsule_record_text("capsule", &record);
+        }
+    } else {
+        println!("No capsule named {}", args.name);
+    }
+    Ok(())
+}
+
+fn print_capsule_launch(args: cli::CapsuleLaunchArgs) -> Result<()> {
+    let continuation_options =
+        core::model::ContinuationOptions::new(args.continuation, args.workspace_restore);
+    if args.execute {
+        let execution = core::workbench::execute_saved_capsule_launch(
+            &args.name,
+            args.target,
+            args.allow_draft,
+            continuation_options,
+        )?;
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&execution)?);
+        } else {
+            println!("capsule launch: execute");
+            println!("name: {}", args.name);
+            println!("status: {}", launch_status(execution.status));
+            println!(
+                "exit: {}",
+                execution
+                    .exit_code
+                    .map(|code| code.to_string())
+                    .unwrap_or_else(|| "signal".into())
+            );
+            println!("command: {}", execution.plan.command);
+        }
+        return Ok(());
+    }
+
+    let plan =
+        core::workbench::saved_capsule_launch_plan(&args.name, args.target, continuation_options)?;
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&plan)?);
+    } else {
+        println!("capsule launch: dry-run");
+        println!("name: {}", args.name);
+        print_launch_plan_text(&plan);
+    }
+    Ok(())
+}
+
+fn print_capsule_export(args: cli::CapsuleExportArgs) -> Result<()> {
+    let envelope = if let Some(path) = args.output.as_deref() {
+        let envelope = core::workbench::write_saved_capsule_export(&args.name, path)?;
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&envelope)?);
+        } else {
+            println!("capsule export: {}", args.name);
+            println!("output: {}", path.display());
+            println!("checksum: {}", envelope.checksum);
+        }
+        return Ok(());
+    } else {
+        core::workbench::export_saved_capsule(&args.name)?
+    };
+    println!("{}", serde_json::to_string_pretty(&envelope)?);
+    Ok(())
+}
+
+fn print_capsule_import(args: cli::CapsuleImportArgs) -> Result<()> {
+    let result = core::workbench::import_saved_capsule(&args.path, args.name.as_deref())?;
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+    } else {
+        println!(
+            "capsule import: {}",
+            if result.imported { "saved" } else { "rejected" }
+        );
+        println!("name: {}", result.name);
+        print_checks(&result.verification.checks);
+        if let Some(record) = &result.record {
+            println!("checksum: {}", record.summary.checksum);
+        }
+    }
+    Ok(())
+}
+
+fn print_capsule_delete(args: cli::CapsuleDeleteArgs) -> Result<()> {
+    let deleted = core::workbench::delete_saved_capsule(&args.name)?;
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "name": args.name,
+                "deleted": deleted
+            }))?
+        );
+    } else if deleted {
+        println!("capsule deleted: {}", args.name);
+    } else {
+        println!("No capsule named {}", args.name);
     }
     Ok(())
 }
@@ -552,22 +719,7 @@ fn print_launch_plan(args: cli::LaunchArgs) -> Result<()> {
         if args.json {
             println!("{}", serde_json::to_string_pretty(&plan)?);
         } else {
-            println!("launch: dry-run");
-            println!("action: target-handoff");
-            println!("session: {}", plan.source_session.id);
-            println!("target: {}", plan.target_cli);
-            println!("handoff_label: {}", plan.handoff_label);
-            println!(
-                "capsule: {}",
-                plan.capsule_path.as_deref().unwrap_or("generated")
-            );
-            println!("preflight_ready: {}", plan.verification.ready);
-            println!("scope: structural and semantic preflight; user review is still required");
-            println!("status: {}", plan.verification.status);
-            print_continuation_protocol(&plan.continuation);
-            println!("command: {}", plan.command);
-            println!("program: {}", plan.target_command.program);
-            print_checks(&plan.verification.checks);
+            print_launch_plan_text(&plan);
         }
     } else {
         println!("No session selected");
@@ -670,6 +822,38 @@ fn print_redaction_report(report: &core::model::RedactionReport) {
         "redaction: {} secrets={} paths={} events_removed={}",
         report.policy, report.secrets_redacted, report.paths_redacted, report.events_removed
     );
+}
+
+fn print_capsule_record_text(label: &str, record: &core::capsule_store::CapsuleRecord) {
+    println!("{label}: {}", record.summary.name);
+    println!("source: {}", record.summary.source_cli);
+    println!("session: {}", record.summary.source_session);
+    println!("target_cli: {}", record.summary.target_cli);
+    println!("compiler: {}", record.summary.compiler);
+    println!("rewind: {}", record.summary.rewind_point);
+    println!("handoff_label: {}", record.summary.handoff_label);
+    println!("checksum: {}", record.summary.checksum);
+    println!("updated_at: {}", record.summary.updated_at);
+    println!("size_bytes: {}", record.summary.size_bytes);
+}
+
+fn print_launch_plan_text(plan: &core::model::LaunchPlan) {
+    println!("launch: dry-run");
+    println!("action: target-handoff");
+    println!("session: {}", plan.source_session.id);
+    println!("target: {}", plan.target_cli);
+    println!("handoff_label: {}", plan.handoff_label);
+    println!(
+        "capsule: {}",
+        plan.capsule_path.as_deref().unwrap_or("generated")
+    );
+    println!("preflight_ready: {}", plan.verification.ready);
+    println!("scope: structural and semantic preflight; user review is still required");
+    println!("status: {}", plan.verification.status);
+    print_continuation_protocol(&plan.continuation);
+    println!("command: {}", plan.command);
+    println!("program: {}", plan.target_command.program);
+    print_checks(&plan.verification.checks);
 }
 
 fn print_docs_snapshot(args: cli::DocsSnapshotArgs) -> Result<()> {

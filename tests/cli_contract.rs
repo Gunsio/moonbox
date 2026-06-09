@@ -30,6 +30,7 @@ fn fixture_safe_command(binary: &str, test_name: &str) -> Command {
         .env("MOONBOX_CLAUDE_HOME", claude_home)
         .env("MOONBOX_HERMES_HOME", hermes_home)
         .env("MOONBOX_CONFIG", home.join("config.json"))
+        .env("MOONBOX_CAPSULE_STORE", home.join("capsules.sqlite"))
         .env("MOONBOX_SSH_CONFIG", home.join(".ssh").join("config"))
         .env("MOONBOX_SESSION_LIMIT", "50")
         .env("MOONBOX_SESSION_SCAN_LIMIT", "500")
@@ -1716,5 +1717,132 @@ fn capsule_and_compile_surfaces_accept_explicit_session_target_rewind_and_compil
             .as_str()
             .expect("rewind")
             .contains("evt-074")
+    );
+}
+
+#[test]
+fn capsule_store_cli_roundtrips_saved_capsules_without_launching_sessions() {
+    let test_name = "capsule-store-contract";
+    let home = fixture_home(test_name);
+    let export_path = home.join("exports").join("demo.moonbox-capsule.json");
+    let export_arg = export_path.to_str().expect("export path");
+
+    let saved = output_json(
+        moonbox_command(test_name)
+            .args([
+                "capsule",
+                "save",
+                "m73-demo",
+                "--session",
+                "codex-cxcp-design",
+                "--target",
+                "hermes",
+                "--rewind",
+                "evt-091",
+                "--json",
+            ])
+            .output()
+            .expect("capsule save"),
+    );
+    assert_eq!(saved["name"], "m73-demo");
+    assert_eq!(saved["source_session"], "codex-cxcp-design");
+    assert_eq!(saved["target_cli"], "hermes");
+    assert_eq!(saved["capsule"]["source_cli"], "codex");
+    let checksum = saved["checksum"].as_str().expect("checksum");
+    assert!(checksum.starts_with("fnv64:"));
+
+    let list = output_json(
+        moonbox_command(test_name)
+            .args(["capsule", "list", "--json"])
+            .output()
+            .expect("capsule list"),
+    );
+    assert!(
+        list.as_array()
+            .expect("capsule list")
+            .iter()
+            .any(|capsule| capsule["name"] == "m73-demo" && capsule["checksum"] == checksum)
+    );
+
+    let shown = output_json(
+        moonbox_command(test_name)
+            .args(["capsule", "show", "m73-demo", "--json"])
+            .output()
+            .expect("capsule show"),
+    );
+    assert_eq!(shown["checksum"], checksum);
+    assert_eq!(
+        shown["capsule"]["raw_source_map"]["rewind_event_id"],
+        "evt-091"
+    );
+
+    let launch = output_json(
+        moonbox_command(test_name)
+            .args([
+                "capsule", "launch", "m73-demo", "--target", "hermes", "--json",
+            ])
+            .output()
+            .expect("capsule launch"),
+    );
+    assert_eq!(launch["dry_run"], true);
+    assert_eq!(launch["capsule_path"], "store:m73-demo");
+    assert_eq!(launch["target_command"]["program"], "hermes");
+    assert_eq!(launch["verification"]["ready"], true);
+
+    let exported = output_json(
+        moonbox_command(test_name)
+            .args([
+                "capsule", "export", "m73-demo", "--output", export_arg, "--json",
+            ])
+            .output()
+            .expect("capsule export"),
+    );
+    assert_eq!(exported["kind"], "moonbox.capsule.export");
+    assert_eq!(exported["exported_by"], "moonbox");
+    assert_eq!(exported["checksum"], checksum);
+    assert!(export_path.exists());
+
+    let deleted = output_json(
+        moonbox_command(test_name)
+            .args(["capsule", "delete", "m73-demo", "--json"])
+            .output()
+            .expect("capsule delete"),
+    );
+    assert_eq!(deleted["deleted"], true);
+
+    let imported = output_json(
+        moonbox_command(test_name)
+            .args([
+                "capsule",
+                "import",
+                export_arg,
+                "--name",
+                "m73-imported",
+                "--json",
+            ])
+            .output()
+            .expect("capsule import"),
+    );
+    assert_eq!(imported["imported"], true);
+    assert_eq!(imported["name"], "m73-imported");
+    assert_eq!(imported["verification"]["ready"], true);
+    assert!(
+        imported["verification"]["checks"]
+            .as_array()
+            .expect("import checks")
+            .iter()
+            .any(|check| check["name"] == "checksum" && check["status"] == "pass")
+    );
+
+    let imported_show = output_json(
+        moonbox_command(test_name)
+            .args(["capsule", "show", "m73-imported", "--json"])
+            .output()
+            .expect("imported show"),
+    );
+    assert_eq!(imported_show["checksum"], checksum);
+    assert_eq!(
+        imported_show["capsule"]["handoff_label"],
+        saved["capsule"]["handoff_label"]
     );
 }
