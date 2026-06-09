@@ -735,6 +735,7 @@ commands, remains available through the dry-run JSON surfaces and
 | `-` | Restore panel layout |
 | `{` / `}` | Previous / next data space: Local or configured SSH/devbox |
 | `enter` | Open selected session with original CLI |
+| `e` | Open selected Timeline event detail |
 | `x` / `H` / `t` | Choose target for handoff |
 | `:` | Command Palette |
 | `?` | Help |
@@ -1025,11 +1026,14 @@ Stable interfaces matter more than any single framework:
 - M75: Timeline image attachment hygiene; Codex and Claude inline
   `<image ...>` markers are now parsed into `TimelineAttachment` metadata, and
   the TUI shows image attachment rows instead of raw markup in user turns.
+- M77: Timeline event detail overlay; pressing `e` with Timeline focused opens
+  a scrollable full-detail view for the selected user, assistant, or tool event
+  without changing `enter` original-resume or `space` rewind semantics.
 
 ### Remaining Milestones
 
 - Next high-priority continuation milestones are pending prioritization after
-  M75 acceptance.
+  M77 acceptance.
 - Low-priority backlog:
   - M76: terminal image preview protocol. Detect terminal raster capabilities
     such as Kitty, iTerm2, or Sixel; render timeline image attachments when the
