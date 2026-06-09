@@ -378,6 +378,13 @@ pub fn is_provider_context_text(text: &str) -> bool {
     trimmed.starts_with("<environment_context>")
         || trimmed.starts_with("<system_context>")
         || trimmed.starts_with("<developer_context>")
+        || trimmed.starts_with("# AGENTS.md instructions for")
+        || (trimmed.contains("<environment_context>")
+            && trimmed.contains("</environment_context>")
+            && (trimmed.contains("<INSTRUCTIONS>")
+                || trimmed.contains("</INSTRUCTIONS>")
+                || trimmed.contains("<permission_profile")
+                || trimmed.contains("<cwd>")))
 }
 
 pub fn title_case(value: &str) -> String {
