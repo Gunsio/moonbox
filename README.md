@@ -316,8 +316,9 @@ The first implementation focuses on the product shell:
   and do not become rewind anchors
 - Timeline auto-scroll, Capsule/modal scroll, and small-terminal modal polish
 - Copyable launch/original wrapper commands via `y` with OSC52 clipboard
-  support; main-list `enter` hands control directly to the selected session's
-  original CLI, while `x` opens the target handoff flow
+  support; main-list `enter` temporarily hands the full terminal to the selected
+  session's original CLI and then returns to Moonbox when that CLI exits, while
+  `x` opens the target handoff flow
 - Serializable core models for future adapters
 - `SourceAdapter` contract and fixture-backed adapter fallback layer
 - Fallible adapter discovery; bad source data returns structured errors instead of panics
@@ -668,12 +669,13 @@ be overridden with `--bin moonbox` or `--bin moon`.
 Moonbox has two separate actions for a selected session:
 
 - `enter`: hand the terminal directly to the selected session's original CLI.
-  Moonbox prints the exact command before handoff and, on Unix, replaces itself
-  with the source CLI instead of waiting as a parent process.
+  Moonbox prints the exact command before handoff, waits while the source CLI
+  owns the real terminal, restores the TUI when that process exits, and reloads
+  the selected session so new timeline events are visible. Set
+  `MOONBOX_RESUME_MODE=exec` to keep the older one-way process replacement
+  behavior.
 - `o`: preview an `original_resume` command for the selected session's
-  original CLI, then press `enter` to hand the terminal to that CLI. Moonbox
-  prints the exact command before handoff and, on Unix, replaces itself with
-  the source CLI instead of waiting as a parent process.
+  original CLI, then press `enter` to use the same suspend-and-return flow.
 - `x`: choose a target CLI, then review a `target_handoff` command before
   launching or copying it. `H` and `t` remain compatibility aliases.
 
@@ -744,7 +746,7 @@ commands, remains available through the dry-run JSON surfaces and
 | `+` / `=` | Zoom focused panel |
 | `-` | Restore panel layout |
 | `{` / `}` | Previous / next data space: Local or configured SSH/devbox |
-| `enter` | Open selected session with original CLI |
+| `enter` | Open selected session with original CLI, then return |
 | `e` | Open selected Timeline event detail |
 | `x` / `H` / `t` | Choose target for handoff |
 | `:` | Command Palette |
@@ -774,7 +776,7 @@ commands, remains available through the dry-run JSON surfaces and
 | Key | Action |
 | --- | --- |
 | `y` | Copy guarded `moonbox open --execute` command |
-| `enter` | Hand terminal directly to the original CLI |
+| `enter` | Hand terminal to the original CLI, then return |
 | `q` / `Esc` | Close preview |
 
 ## Architecture Direction
@@ -864,9 +866,11 @@ Stable interfaces matter more than any single framework:
   cleanup exposed by the tighter API boundary, Cargo package contents smoke
   validation, stable-width TUI panel titles, real-vs-draft capsule labeling,
   low-signal tool-row folding, and high-signal default rewind selection for
-  real sessions; original-session resume now prints the command and execs the
-  source CLI on Unix, with main-list `enter` opening original sessions and `x`
-  reserved for target handoff while `H` and `t` remain compatibility aliases.
+  real sessions; original-session resume prints the command before handing the
+  terminal to the source CLI, with main-list `enter` opening original sessions
+  and `x` reserved for target handoff while `H` and `t` remain compatibility
+  aliases. M82 later changed the default TUI behavior from one-way exec to
+  suspend-and-return while keeping `MOONBOX_RESUME_MODE=exec` for compatibility.
 - M45: readable target handoff prompt hardening; target CLIs now receive a
   structured Work Capsule Summary instead of a raw JSON blob, and public CLI
   contracts assert that dry-run launch plans keep this prompt readable.
@@ -1057,11 +1061,16 @@ Stable interfaces matter more than any single framework:
   Homebrew 5 trust step, and the published tap formula uses Apple Silicon
   bottles for Tahoe and Sequoia so users avoid Rust, LLVM, and Apple Command
   Line Tools on the common install path.
+- M82: original resume suspend-and-return; TUI `enter` now leaves alternate
+  screen, runs the selected source CLI as a child process on the real terminal,
+  restores Moonbox when it exits, reloads the selected session timeline, and
+  keeps `MOONBOX_RESUME_MODE=exec` as the compatibility path for the older
+  one-way process replacement behavior.
 
 ### Remaining Milestones
 
 - Next high-priority continuation milestones are pending prioritization after
-  M81 acceptance.
+  M82 acceptance.
 - Low-priority backlog:
   - M76: native terminal image protocol. Detect terminal raster capabilities
     such as Kitty, iTerm2, or Sixel and upgrade beyond the M79 text-cell

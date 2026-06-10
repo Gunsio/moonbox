@@ -1,5 +1,5 @@
 use std::{
-    fmt,
+    env, fmt,
     sync::mpsc::{self, TryRecvError},
     thread,
     time::{Duration, Instant},
@@ -162,6 +162,12 @@ impl SessionFilter {
 pub enum TuiExitAction {
     OriginalResume(Box<OriginalSessionPlan>),
     TargetHandoff(Box<LaunchPlan>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OriginalResumeMode {
+    Suspend,
+    Exec,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -482,6 +488,7 @@ pub struct App {
     pending_data_space_load: Option<PendingDataSpaceLoad>,
     handoff_trail: Option<HandoffTrail>,
     clipboard_text: Option<String>,
+    pending_resume: Option<Box<OriginalSessionPlan>>,
     exit_action: Option<TuiExitAction>,
     should_quit: bool,
 }
@@ -549,6 +556,7 @@ impl App {
             pending_data_space_load: None,
             handoff_trail: None,
             clipboard_text: None,
+            pending_resume: None,
             exit_action: None,
             should_quit: false,
             visible_session_indices: Vec::new(),
@@ -565,8 +573,91 @@ impl App {
         self.clipboard_text.take()
     }
 
+    pub fn take_pending_resume(&mut self) -> Option<Box<OriginalSessionPlan>> {
+        self.pending_resume.take()
+    }
+
     pub fn take_exit_action(&mut self) -> Option<TuiExitAction> {
         self.exit_action.take()
+    }
+
+    pub fn complete_original_resume(&mut self, plan: &OriginalSessionPlan, outcome: String) {
+        let selected_session_id = self
+            .current_session()
+            .map(|session| session.id.clone())
+            .unwrap_or_else(|| plan.source_session.id.clone());
+        let selected_event_id = self
+            .data
+            .timeline
+            .get(self.selected_event)
+            .map(|event| event.id.clone());
+        let selected_compiler = self.selected_compiler;
+        let rewind_event_id = self.rewind_event_id.clone();
+
+        if !self.current_data_space().is_local() {
+            self.set_status(format!("{outcome}; remote data space not reloaded"));
+            self.pending_g = false;
+            return;
+        }
+
+        match workbench::load_workbench_for_session(&plan.source_session.id, self.data.target) {
+            Ok(Some(data)) => {
+                self.data = data;
+                self.refresh_visible_sessions();
+                self.selected_session = self
+                    .data
+                    .sessions
+                    .iter()
+                    .position(|session| session.id == selected_session_id)
+                    .or_else(|| {
+                        self.data
+                            .sessions
+                            .iter()
+                            .position(|session| session.id == plan.source_session.id)
+                    })
+                    .unwrap_or(self.selected_session)
+                    .min(self.data.sessions.len().saturating_sub(1));
+                self.clamp_selected_session();
+                self.selected_event = selected_event_id
+                    .and_then(|id| self.data.timeline.iter().position(|event| event.id == id))
+                    .unwrap_or_else(|| {
+                        self.selected_event
+                            .min(self.data.timeline.len().saturating_sub(1))
+                    });
+                self.selected_compiler =
+                    selected_compiler.min(self.data.compilers.len().saturating_sub(1));
+                if let Some(compiler) = self.data.compilers.get(self.selected_compiler) {
+                    self.data.capsule.compiler = compiler.clone();
+                }
+                if let Some(title) = self.timeline_event_title(&rewind_event_id) {
+                    self.apply_rewind_event(rewind_event_id, title);
+                } else {
+                    self.rewind_event_id = initial_rewind_event_id(&self.data);
+                }
+                self.doctor_report = doctor::diagnose_with_inventory(
+                    &self.data.sessions,
+                    &self.data.source_adapters,
+                );
+                self.compile_status = "ACTIVE";
+                self.verify_passed = true;
+                self.set_status(format!(
+                    "{outcome}; session reloaded ({} events)",
+                    self.data.timeline.len()
+                ));
+            }
+            Ok(None) => {
+                self.set_status(format!(
+                    "{outcome}; session {} not found after resume",
+                    plan.source_session.id
+                ));
+            }
+            Err(error) => {
+                self.compile_status = "FAILED";
+                self.verify_passed = false;
+                self.set_status(format!("{outcome}; reload failed: {error}"));
+            }
+        }
+        self.pending_g = false;
     }
 
     pub fn is_session_load_pending(&self) -> bool {
@@ -1355,6 +1446,10 @@ impl App {
     }
 
     fn queue_original_resume(&mut self) {
+        self.queue_original_resume_with_mode(original_resume_mode_from_env());
+    }
+
+    fn queue_original_resume_with_mode(&mut self, mode: OriginalResumeMode) {
         if !self.ensure_session_details_ready("Original") {
             return;
         }
@@ -1363,17 +1458,29 @@ impl App {
             return;
         };
         let command = launcher::original_command(&session);
-        self.exit_action = Some(TuiExitAction::OriginalResume(Box::new(
-            OriginalSessionPlan {
-                version: 1,
-                action: SessionAction::OriginalResume,
-                dry_run: true,
-                source_session: session.clone(),
-                command,
-            },
-        )));
-        self.should_quit = true;
-        self.set_status(format!("Opening original: {} {}", session.cli, session.id));
+        let plan = OriginalSessionPlan {
+            version: 1,
+            action: SessionAction::OriginalResume,
+            dry_run: true,
+            source_session: session.clone(),
+            command,
+        };
+        self.show_open_original = false;
+        self.modal_scroll = 0;
+        match mode {
+            OriginalResumeMode::Suspend => {
+                self.pending_resume = Some(Box::new(plan));
+                self.set_status(format!(
+                    "Suspending to original: {} {}",
+                    session.cli, session.id
+                ));
+            }
+            OriginalResumeMode::Exec => {
+                self.exit_action = Some(TuiExitAction::OriginalResume(Box::new(plan)));
+                self.should_quit = true;
+                self.set_status(format!("Opening original: {} {}", session.cli, session.id));
+            }
+        }
     }
 
     pub fn current_session(&self) -> Option<&SessionSummary> {
@@ -2295,6 +2402,18 @@ fn session_matches_query(session: &SessionSummary, query: &str) -> bool {
             .is_some_and(|reason| reason.to_ascii_lowercase().contains(query))
 }
 
+fn original_resume_mode_from_env() -> OriginalResumeMode {
+    parse_original_resume_mode(env::var("MOONBOX_RESUME_MODE").ok().as_deref())
+}
+
+fn parse_original_resume_mode(value: Option<&str>) -> OriginalResumeMode {
+    if value.is_some_and(|value| value.trim().eq_ignore_ascii_case("exec")) {
+        OriginalResumeMode::Exec
+    } else {
+        OriginalResumeMode::Suspend
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2971,13 +3090,37 @@ mod tests {
 
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
-        assert!(app.should_quit());
+        assert!(!app.should_quit());
         assert!(!app.show_launch);
+        assert!(app.take_exit_action().is_none());
+        let Some(plan) = app.take_pending_resume() else {
+            panic!("expected pending original resume");
+        };
+        assert_eq!(plan.source_session.id, "codex-cxcp-design");
+        assert_eq!(plan.command.display, "codex resume codex-cxcp-design");
+        assert_eq!(
+            app.status_message,
+            "Suspending to original: Codex codex-cxcp-design"
+        );
+    }
+
+    #[test]
+    fn exec_resume_mode_preserves_single_ticket_original_resume() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+
+        app.queue_original_resume_with_mode(OriginalResumeMode::Exec);
+
+        assert!(app.should_quit());
+        assert!(app.take_pending_resume().is_none());
         let Some(TuiExitAction::OriginalResume(plan)) = app.take_exit_action() else {
             panic!("expected original resume action");
         };
         assert_eq!(plan.source_session.id, "codex-cxcp-design");
         assert_eq!(plan.command.display, "codex resume codex-cxcp-design");
+        assert_eq!(
+            app.status_message,
+            "Opening original: Codex codex-cxcp-design"
+        );
     }
 
     #[test]
@@ -3032,9 +3175,10 @@ mod tests {
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
         assert!(!app.show_timeline_detail);
-        assert!(app.should_quit());
-        let Some(TuiExitAction::OriginalResume(plan)) = app.take_exit_action() else {
-            panic!("expected original resume action");
+        assert!(!app.should_quit());
+        assert!(app.take_exit_action().is_none());
+        let Some(plan) = app.take_pending_resume() else {
+            panic!("expected pending original resume");
         };
         assert_eq!(plan.source_session.id, "codex-cxcp-design");
         assert_eq!(plan.command.display, "codex resume codex-cxcp-design");
@@ -3070,13 +3214,39 @@ mod tests {
         assert_eq!(app.status_message, "Copied original command");
 
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
-        assert!(app.should_quit());
-        let Some(TuiExitAction::OriginalResume(plan)) = app.take_exit_action() else {
-            panic!("expected original resume action");
+        assert!(!app.should_quit());
+        assert!(!app.show_open_original);
+        assert!(app.take_exit_action().is_none());
+        let Some(plan) = app.take_pending_resume() else {
+            panic!("expected pending original resume");
         };
         assert_eq!(plan.source_session.id, "codex-cxcp-design");
         assert_eq!(plan.command.display, "codex resume codex-cxcp-design");
         assert!(plan.dry_run);
+    }
+
+    #[test]
+    fn resume_mode_parser_defaults_to_suspend_unless_explicit_exec() {
+        assert_eq!(
+            parse_original_resume_mode(None),
+            OriginalResumeMode::Suspend
+        );
+        assert_eq!(
+            parse_original_resume_mode(Some("")),
+            OriginalResumeMode::Suspend
+        );
+        assert_eq!(
+            parse_original_resume_mode(Some("suspend")),
+            OriginalResumeMode::Suspend
+        );
+        assert_eq!(
+            parse_original_resume_mode(Some(" exec ")),
+            OriginalResumeMode::Exec
+        );
+        assert_eq!(
+            parse_original_resume_mode(Some("EXEC")),
+            OriginalResumeMode::Exec
+        );
     }
 
     #[test]

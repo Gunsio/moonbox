@@ -1969,8 +1969,8 @@ fn render_help(frame: &mut Frame, root: Rect, app: &App) {
         Line::raw("s               star / unstar selected session"),
         Line::raw("*               star / unstar selected session alias"),
         Line::raw("/text           filter sessions by text"),
-        Line::raw("o               open original session with original CLI"),
-        Line::raw("enter           open selected session with original CLI"),
+        Line::raw("o               preview original CLI resume"),
+        Line::raw("enter           open original CLI, then return"),
         Line::raw("e               open selected Timeline event detail"),
         Line::raw("x / H           choose target for handoff"),
         Line::raw("D               open pre-flight details"),
@@ -3489,11 +3489,11 @@ fn render_open_original(frame: &mut Frame, root: Rect, app: &App) {
             )),
             Line::raw(""),
             Line::from(Span::styled(
-                "Action: Moonbox hands this terminal to the original CLI.",
+                "Action: Moonbox hands this terminal to the original CLI, then returns.",
                 Style::default().fg(theme::MUTED),
             )),
             Line::from(Span::styled(
-                "enter hand off   y copy wrapper command   Esc close",
+                "enter resume   y copy wrapper command   Esc close",
                 Style::default().fg(theme::MUTED),
             )),
         ]

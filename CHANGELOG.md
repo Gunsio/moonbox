@@ -42,6 +42,11 @@ and this project uses semantic versioning once tagged releases start.
 - Homebrew install guidance now includes Homebrew 5 tap trust, and the tap
   formula uses Apple Silicon bottles for Tahoe and Sequoia so users do not need
   Rust, LLVM, or current Apple Command Line Tools for the common install path.
+- TUI original resume now uses a suspend-and-return flow by default: `enter`
+  leaves the alternate screen, runs the selected source CLI on the real
+  terminal, restores Moonbox after exit, reloads the selected session timeline,
+  and keeps `MOONBOX_RESUME_MODE=exec` for the older one-way process replacement
+  behavior.
 - Configurable compiler skill presets in `~/.config/moonbox/config.json`,
   including optional description, homepage, and GitHub stars metadata for the
   TUI Skill Picker.
@@ -267,11 +272,14 @@ and this project uses semantic versioning once tagged releases start.
   entrypoints; Hermes resume commands now use `hermes --resume <session>`.
 - TUI original-session copy now points at `moonbox open --execute`.
 - TUI original-session review `enter` now restores the terminal, prints the
-  exact original resume command, and on Unix replaces the Moonbox process with
-  the source CLI so the terminal is handed off without Moonbox waiting in the
-  foreground; `y` still copies the guarded Moonbox wrapper.
+  exact original resume command, and on Unix originally replaced the Moonbox
+  process with the source CLI so the terminal was handed off without Moonbox
+  waiting in the foreground. M82 changes the default TUI behavior to
+  suspend-and-return and keeps one-way exec behind `MOONBOX_RESUME_MODE=exec`;
+  `y` still copies the guarded Moonbox wrapper.
 - Main-list `enter` now directly opens the selected session with its original
-  CLI; target handoff moved to the explicit `x` shortcut.
+  CLI; target handoff moved to the explicit `x` shortcut. M82 makes the default
+  original open path return to Moonbox after the source CLI exits.
 - TUI timeline hides provider-injected context rows such as
   `<environment_context>`, right-aligns event times, and scrolls by actual
   wrapped row height so the selected event stays visible.

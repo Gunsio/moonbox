@@ -3,17 +3,25 @@ mod theme;
 mod view;
 
 use std::io::{self, Write};
+use std::process::ExitStatus;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
 use color_eyre::Result;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::{
+    execute,
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+};
 use ratatui::DefaultTerminal;
 
 use crate::{
     app::{App, SessionFilter, TuiExitAction},
-    core::model::CliTool,
+    core::{
+        launcher,
+        model::{CliTool, OriginalSessionPlan},
+    },
 };
 
 pub fn docs_screenshot_svg(width: u16, height: u16) -> Result<String> {
@@ -31,6 +39,9 @@ pub fn run(terminal: &mut DefaultTerminal, mut app: App) -> Result<Option<TuiExi
             app.poll_background();
             if let Some(text) = app.take_clipboard_text() {
                 copy_to_terminal_clipboard(&text)?;
+            }
+            if let Some(plan) = app.take_pending_resume() {
+                suspend_and_resume(terminal, &mut app, plan)?;
             }
         }
     }
@@ -77,6 +88,63 @@ fn copy_to_terminal_clipboard(text: &str) -> Result<()> {
     print!("\x1b]52;c;{encoded}\x07");
     io::stdout().flush()?;
     Ok(())
+}
+
+fn suspend_and_resume(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    plan: Box<OriginalSessionPlan>,
+) -> Result<()> {
+    suspend_terminal()?;
+    let result = run_original_resume(&plan);
+    restore_terminal(terminal)?;
+    let outcome = match result {
+        Ok(status) => original_exit_message(plan.source_session.cli.id(), status),
+        Err(error) => format!("{} failed to start: {error}", plan.source_session.cli.id()),
+    };
+    app.complete_original_resume(&plan, outcome);
+    Ok(())
+}
+
+fn suspend_terminal() -> Result<()> {
+    disable_raw_mode()?;
+    execute!(io::stdout(), LeaveAlternateScreen)?;
+    Ok(())
+}
+
+fn restore_terminal(terminal: &mut DefaultTerminal) -> Result<()> {
+    enable_raw_mode()?;
+    execute!(io::stdout(), EnterAlternateScreen)?;
+    terminal.clear()?;
+    Ok(())
+}
+
+fn run_original_resume(plan: &OriginalSessionPlan) -> Result<ExitStatus> {
+    print!("{}", launcher::original_handoff_notice(plan));
+    io::stdout().flush()?;
+    Ok(launcher::run_original_interactive(plan.clone())?)
+}
+
+fn original_exit_message(cli: &str, status: ExitStatus) -> String {
+    if let Some(code) = status.code() {
+        format!("{cli} exited (code {code})")
+    } else if let Some(signal) = exit_signal(status) {
+        format!("{cli} exited (signal {signal})")
+    } else {
+        format!("{cli} exited")
+    }
+}
+
+#[cfg(unix)]
+fn exit_signal(status: ExitStatus) -> Option<i32> {
+    use std::os::unix::process::ExitStatusExt;
+
+    status.signal()
+}
+
+#[cfg(not(unix))]
+fn exit_signal(_status: ExitStatus) -> Option<i32> {
+    None
 }
 
 fn base64_encode(bytes: &[u8]) -> String {
