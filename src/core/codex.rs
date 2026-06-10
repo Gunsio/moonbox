@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    env,
+    env, fs,
     io::BufRead,
     path::{Path, PathBuf},
 };
@@ -319,6 +319,9 @@ impl CodexSourceAdapter {
             resume_command: format!("codex resume {}", row.id),
             source_provenance: SourceProvenance::Real,
             source_path: rollout_exists.then(|| source_path.to_owned()),
+            source_size_bytes: rollout_exists
+                .then(|| source_size_bytes(Path::new(source_path)))
+                .flatten(),
             parse_skip_count: 0,
             provider_metadata: None,
         }
@@ -930,10 +933,15 @@ impl SummaryBuilder {
             resume_command: format!("codex resume {id}"),
             source_provenance: SourceProvenance::Real,
             source_path: Some(self.path.display().to_string()),
+            source_size_bytes: source_size_bytes(&self.path),
             parse_skip_count: self.malformed_lines,
             provider_metadata: None,
         }
     }
+}
+
+fn source_size_bytes(path: &Path) -> Option<u64> {
+    fs::metadata(path).ok().map(|metadata| metadata.len())
 }
 
 fn timeline_event(
@@ -1299,7 +1307,7 @@ mod tests {
     #[test]
     fn lists_codex_sessions_from_jsonl_store() {
         let root = test_root("list");
-        write_session(
+        let session_path = write_session(
             &root,
             "2026/06/06/rollout-2026-06-06T08-00-00-test.jsonl",
             r#"{"timestamp":"2026-06-06T08:00:00.000Z","type":"session_meta","payload":{"id":"codex-real-1","cwd":"/repo","git":{"branch":"main"}}}
@@ -1319,6 +1327,10 @@ mod tests {
         assert_eq!(sessions[0].branch.as_deref(), Some("main"));
         assert_eq!(sessions[0].token_count, Some(42));
         assert_eq!(sessions[0].resume_command, "codex resume codex-real-1");
+        assert_eq!(
+            sessions[0].source_size_bytes,
+            Some(fs::metadata(session_path).expect("session metadata").len())
+        );
     }
 
     #[test]
@@ -1352,6 +1364,10 @@ mod tests {
         assert_eq!(sessions[0].branch.as_deref(), Some("sqlite-branch"));
         assert_eq!(sessions[0].token_count, Some(42));
         assert_eq!(sessions[0].updated_at, "2026-06-06T09:00:00.000Z");
+        assert_eq!(
+            sessions[0].source_size_bytes,
+            Some(fs::metadata(rollout_path).expect("rollout metadata").len())
+        );
         assert_eq!(timeline.source_session, "codex-indexed");
     }
 

@@ -328,6 +328,7 @@ pub(crate) fn app_thread_summary(thread: CodexAppThread) -> SessionSummary {
         resume_command: format!("codex resume {}", thread.id),
         source_provenance: SourceProvenance::Real,
         source_path: Some(CodexAppServerSource::thread_source_path(&thread.id)),
+        source_size_bytes: None,
         parse_skip_count: 0,
         provider_metadata: None,
     }

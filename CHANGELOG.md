@@ -47,6 +47,12 @@ and this project uses semantic versioning once tagged releases start.
   terminal, restores Moonbox after exit, reloads the selected session timeline,
   and keeps `MOONBOX_RESUME_MODE=exec` for the older one-way process replacement
   behavior.
+- TUI session inventory now uses user-readable context size language. The list
+  prioritizes token count and raw source size instead of exposing internal
+  `events` terminology, while Session Details labels parsed counts as
+  `Timeline Items`. `SessionSummary` now carries a serde-default
+  `source_size_bytes` field populated for JSONL-backed Codex and Claude
+  sessions, including Codex SQLite rows that point at rollout JSONL.
 - Configurable compiler skill presets in `~/.config/moonbox/config.json`,
   including optional description, homepage, and GitHub stars metadata for the
   TUI Skill Picker.
