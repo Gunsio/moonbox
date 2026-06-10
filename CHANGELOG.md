@@ -212,6 +212,11 @@ and this project uses semantic versioning once tagged releases start.
 
 - Codex provider-injected AGENTS / environment context envelopes are no longer
   rendered as user timeline turns or used as user rewind anchors.
+- Hermes SQLite session discovery and timeline loading now tolerate stores
+  whose `messages` table does not include an `active` column, treating those
+  legacy rows as active instead of aborting TUI startup.
+- Version metadata and release/Homebrew templates now target the v0.1.2 hotfix
+  prerelease for the Hermes SQLite schema compatibility rollout.
 - Starred TUI sessions now keep their `*` marker visible even when the same row
   also needs a warning or failed health marker.
 - Timeline selected rows no longer shift body text or switch the body to bold
