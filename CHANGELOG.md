@@ -42,6 +42,8 @@ and this project uses semantic versioning once tagged releases start.
 - Homebrew install guidance now includes Homebrew 5 tap trust, and the tap
   formula uses Apple Silicon bottles for Tahoe and Sequoia so users do not need
   Rust, LLVM, or current Apple Command Line Tools for the common install path.
+- Version metadata and release/Homebrew templates now target the v0.1.1
+  prerelease for the M84/M85 TUI polish rollout.
 - TUI original resume now uses a suspend-and-return flow by default: `enter`
   leaves the alternate screen, runs the selected source CLI on the real
   terminal, restores Moonbox after exit, reloads the selected session timeline,
