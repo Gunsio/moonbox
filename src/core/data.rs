@@ -620,6 +620,7 @@ fn fallback_session(source: CliTool) -> SessionSummary {
         resume_command: fallback_resume_command(source),
         source_provenance: SourceProvenance::Fixture,
         source_path: None,
+        source_size_bytes: None,
         parse_skip_count: 0,
         provider_metadata: None,
     }

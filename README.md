@@ -315,6 +315,9 @@ The first implementation focuses on the product shell:
   tool events and ignored as resume-index titles, so they are folded by default
   and do not become rewind anchors
 - Timeline auto-scroll, Capsule/modal scroll, and small-terminal modal polish
+- Session inventory uses user-readable context size terms such as token count
+  and raw source size instead of exposing internal `events` terminology in the
+  list; parsed timeline counts remain in Session Details as `Timeline Items`
 - Copyable launch/original wrapper commands via `y` with OSC52 clipboard
   support; main-list `enter` temporarily hands the full terminal to the selected
   session's original CLI and then returns to Moonbox when that CLI exits, while
@@ -1066,11 +1069,15 @@ Stable interfaces matter more than any single framework:
   restores Moonbox when it exits, reloads the selected session timeline, and
   keeps `MOONBOX_RESUME_MODE=exec` as the compatibility path for the older
   one-way process replacement behavior.
+- M83: user-readable session size language; session list metrics now prioritize
+  token count and raw JSONL source size over internal event counts, Session
+  Details labels parsed counts as `Timeline Items`, and `SessionSummary`
+  includes serde-default `source_size_bytes` for compatible local inventory.
 
 ### Remaining Milestones
 
 - Next high-priority continuation milestones are pending prioritization after
-  M82 acceptance.
+  M83 acceptance.
 - Low-priority backlog:
   - M76: native terminal image protocol. Detect terminal raster capabilities
     such as Kitty, iTerm2, or Sixel and upgrade beyond the M79 text-cell

@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    env,
+    env, fs,
     io::BufRead,
     path::{Path, PathBuf},
 };
@@ -854,10 +854,15 @@ impl SummaryBuilder {
             resume_command: format!("claude --resume {id}"),
             source_provenance: SourceProvenance::Real,
             source_path: Some(self.path.display().to_string()),
+            source_size_bytes: source_size_bytes(&self.path),
             parse_skip_count: self.malformed_lines,
             provider_metadata: None,
         }
     }
+}
+
+fn source_size_bytes(path: &Path) -> Option<u64> {
+    fs::metadata(path).ok().map(|metadata| metadata.len())
 }
 
 fn timeline_event(
@@ -1517,6 +1522,14 @@ mod tests {
         assert_eq!(sessions[0].branch.as_deref(), Some("main"));
         assert_eq!(sessions[0].token_count, Some(35));
         assert_eq!(sessions[0].resume_command, "claude --resume claude-real-1");
+        assert_eq!(
+            sessions[0].source_size_bytes,
+            Some(
+                fs::metadata(root.join("projects/repo/claude-real-1.jsonl"))
+                    .expect("session metadata")
+                    .len()
+            )
+        );
     }
 
     #[test]

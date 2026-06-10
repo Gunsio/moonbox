@@ -616,20 +616,21 @@ fn session_shape_count_text(counts: SessionShapeCounts) -> String {
 }
 
 fn session_inventory_metric(session: &crate::core::model::SessionSummary) -> String {
-    let mut text = format_event_count(session.event_count);
+    let mut parts = Vec::new();
     if let Some(tokens) = session.token_count {
-        text.push_str(" · ");
-        text.push_str(&format_token_count(Some(tokens)));
+        parts.push(format!("{} tokens", format_token_count(Some(tokens))));
     }
-    text
-}
-
-fn format_event_count(event_count: usize) -> String {
-    if event_count == 1 {
-        "1 event".into()
-    } else {
-        format!("{event_count} events")
+    if let Some(bytes) = session.source_size_bytes {
+        parts.push(format!("{} source", format_source_size(bytes)));
     }
+    if parts.is_empty() {
+        parts.push(if session.event_count > 0 {
+            "timeline indexed".into()
+        } else {
+            "size unknown".into()
+        });
+    }
+    parts.join(" · ")
 }
 
 fn session_portrait_detail(app: &App, session: &crate::core::model::SessionSummary) -> String {
@@ -803,6 +804,26 @@ fn format_token_count(token_count: Option<usize>) -> String {
         Some(count) if count >= 1_000 => format!("{}K", count / 1_000),
         Some(count) => count.to_string(),
         None => "-".into(),
+    }
+}
+
+fn format_source_size_opt(bytes: Option<u64>) -> String {
+    bytes.map(format_source_size).unwrap_or_else(|| "-".into())
+}
+
+fn format_source_size(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = KIB * 1024.0;
+    const GIB: f64 = MIB * 1024.0;
+    let bytes_f64 = bytes as f64;
+    if bytes_f64 >= GIB {
+        format!("{:.1}GB", bytes_f64 / GIB)
+    } else if bytes_f64 >= MIB {
+        format!("{:.1}MB", bytes_f64 / MIB)
+    } else if bytes_f64 >= KIB {
+        format!("{:.1}KB", bytes_f64 / KIB)
+    } else {
+        format!("{bytes}B")
     }
 }
 
@@ -1457,7 +1478,7 @@ fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
             Style::default().fg(theme::CYAN),
         ),
         metadata_line(
-            "Events",
+            "Timeline Items",
             &session.event_count.to_string(),
             Style::default().fg(theme::MUTED),
         ),
@@ -1465,6 +1486,11 @@ fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
             "Tokens",
             &format_token_count(session.token_count),
             Style::default().fg(theme::GOLD),
+        ),
+        metadata_line(
+            "Raw Size",
+            &format_source_size_opt(session.source_size_bytes),
+            Style::default().fg(theme::MUTED),
         ),
         metadata_line(
             "Source Health",
@@ -3782,19 +3808,25 @@ mod tests {
 
         assert_eq!(
             session_list_secondary_at(&session, now),
-            "    0 events  ·  16s ago  ·  dev"
+            "    size unknown  ·  16s ago  ·  dev"
         );
     }
 
     #[test]
-    fn session_inventory_metric_omits_unknown_tokens() {
+    fn session_inventory_metric_uses_user_readable_size_terms() {
         let mut session = test_session("2026-06-07T13:33:44+08:00", Some("dev"));
         session.event_count = 24;
 
-        assert_eq!(session_inventory_metric(&session), "24 events");
+        assert_eq!(session_inventory_metric(&session), "timeline indexed");
 
         session.token_count = Some(42_000);
-        assert_eq!(session_inventory_metric(&session), "24 events · 42K");
+        assert_eq!(session_inventory_metric(&session), "42K tokens");
+
+        session.source_size_bytes = Some(1_572_864);
+        assert_eq!(
+            session_inventory_metric(&session),
+            "42K tokens · 1.5MB source"
+        );
     }
 
     #[test]
@@ -3813,7 +3845,8 @@ mod tests {
         let app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
         let screen = render_text(&app, 140, 40);
 
-        assert_screen_contains(&screen, "148 events");
+        assert_screen_contains(&screen, "42K tokens");
+        assert_screen_contains(&screen, "Timeline Items");
         assert_screen_contains(&screen, "Portrait");
         assert_screen_contains(&screen, "user 1 / assistant 1 / tool");
         assert_screen_contains(&screen, "4 / rewind 1");
@@ -3867,6 +3900,7 @@ mod tests {
             resume_command: "codex resume session-id".into(),
             source_provenance: SourceProvenance::Real,
             source_path: None,
+            source_size_bytes: None,
             parse_skip_count: 0,
             provider_metadata: None,
         }

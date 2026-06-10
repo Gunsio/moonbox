@@ -113,6 +113,8 @@ pub struct SessionSummary {
     #[serde(default)]
     pub source_path: Option<String>,
     #[serde(default)]
+    pub source_size_bytes: Option<u64>,
+    #[serde(default)]
     pub parse_skip_count: usize,
     #[serde(default)]
     pub provider_metadata: Option<ProviderSessionMetadata>,

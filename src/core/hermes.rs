@@ -403,6 +403,7 @@ impl HermesSourceAdapter {
             resume_command: format!("hermes --resume {}", row.id),
             source_provenance: SourceProvenance::Real,
             source_path: Some(self.state_db_path().display().to_string()),
+            source_size_bytes: None,
             parse_skip_count: 0,
             provider_metadata: Some(provider_metadata),
         }

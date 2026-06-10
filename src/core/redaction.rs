@@ -1006,6 +1006,7 @@ mod tests {
                 resume_command: "codex resume session".into(),
                 source_provenance: SourceProvenance::Fixture,
                 source_path: Some("/Users/alice/.codex/session.jsonl".into()),
+                source_size_bytes: None,
                 parse_skip_count: 0,
                 provider_metadata: Some(ProviderSessionMetadata {
                     user_id: Some("user=/Users/alice".into()),

@@ -304,6 +304,7 @@ mod tests {
                 resume_command: "codex resume s1".into(),
                 source_provenance: Default::default(),
                 source_path: None,
+                source_size_bytes: None,
                 parse_skip_count: 0,
                 provider_metadata: None,
             }],
