@@ -141,6 +141,13 @@ pub(crate) fn handoff_original_plan(mut plan: OriginalSessionPlan) -> Result<(),
     exec_interactive_command(&plan.command)
 }
 
+pub(crate) fn run_original_interactive(
+    mut plan: OriginalSessionPlan,
+) -> Result<ExitStatus, CoreError> {
+    plan.dry_run = false;
+    run_target_command(&plan.command)
+}
+
 pub(crate) fn original_handoff_notice(plan: &OriginalSessionPlan) -> String {
     format!(
         "Opening original session: {} {}\nCommand: {}\n",
@@ -595,6 +602,61 @@ mod tests {
 
         assert!(notice.contains("Opening original session: Codex codex-cxcp-design"));
         assert!(notice.contains("Command: codex resume codex-cxcp-design"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_original_interactive_waits_for_fake_binary_without_execing_test() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "moonbox-original-interactive-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("temp root");
+        let marker = root.join("args.txt");
+        let script = root.join("fake-original");
+        fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nexit 7\n",
+                marker.display()
+            ),
+        )
+        .expect("fake script");
+        let mut permissions = fs::metadata(&script)
+            .expect("script metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script, permissions).expect("script permissions");
+
+        let data = data::workbench_data(CliTool::Codex, CliTool::Hermes).expect("data");
+        let session = data
+            .sessions
+            .iter()
+            .find(|session| session.cli == CliTool::Codex)
+            .expect("codex")
+            .clone();
+        let mut command = original_command(&session);
+        command.program = script.display().to_string();
+        command.display = format!("{} {}", command.program, command.args.join(" "));
+        let plan = OriginalSessionPlan {
+            version: 1,
+            action: crate::core::model::SessionAction::OriginalResume,
+            dry_run: true,
+            source_session: session,
+            command,
+        };
+
+        let status = run_original_interactive(plan).expect("interactive status");
+
+        assert_eq!(status.code(), Some(7));
+        assert_eq!(
+            fs::read_to_string(marker).expect("marker"),
+            "resume\ncodex-cxcp-design\n"
+        );
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
