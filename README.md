@@ -1076,11 +1076,14 @@ Stable interfaces matter more than any single framework:
 - M84: starred-session marker visibility; the left session list now renders the
   `*` favorite marker independently from warning/failed health markers, so a
   starred unhealthy session keeps both signals visible.
+- M85: Timeline selected-row stability; Timeline body prefixes now occupy a
+  fixed gutter and selected rows keep the same body font weight, so moving focus
+  between events no longer makes message content shift or pulse.
 
 ### Remaining Milestones
 
 - Next high-priority continuation milestones are pending prioritization after
-  M84 acceptance.
+  M85 acceptance.
 - Low-priority backlog:
   - M76: native terminal image protocol. Detect terminal raster capabilities
     such as Kitty, iTerm2, or Sixel and upgrade beyond the M79 text-cell
