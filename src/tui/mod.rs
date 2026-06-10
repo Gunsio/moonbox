@@ -20,7 +20,8 @@ use crate::{
     app::{App, SessionFilter, TuiExitAction},
     core::{
         launcher,
-        model::{CliTool, OriginalSessionPlan},
+        model::{CliTool, LaunchExecution, LaunchPlan, OriginalSessionPlan},
+        workbench,
     },
 };
 
@@ -42,6 +43,9 @@ pub fn run(terminal: &mut DefaultTerminal, mut app: App) -> Result<Option<TuiExi
             }
             if let Some(plan) = app.take_pending_resume() {
                 suspend_and_resume(terminal, &mut app, plan)?;
+            }
+            if let Some(plan) = app.take_pending_launch() {
+                suspend_and_launch(terminal, &mut app, plan)?;
             }
         }
     }
@@ -106,6 +110,18 @@ fn suspend_and_resume(
     Ok(())
 }
 
+fn suspend_and_launch(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    plan: Box<LaunchPlan>,
+) -> Result<()> {
+    suspend_terminal()?;
+    let result = run_target_handoff(&plan);
+    restore_terminal(terminal)?;
+    app.complete_target_handoff(plan, result);
+    Ok(())
+}
+
 fn suspend_terminal() -> Result<()> {
     disable_raw_mode()?;
     execute!(io::stdout(), LeaveAlternateScreen)?;
@@ -123,6 +139,17 @@ fn run_original_resume(plan: &OriginalSessionPlan) -> Result<ExitStatus> {
     print!("{}", launcher::original_handoff_notice(plan));
     io::stdout().flush()?;
     Ok(launcher::run_original_interactive(plan.clone())?)
+}
+
+fn run_target_handoff(plan: &LaunchPlan) -> Result<LaunchExecution, crate::core::error::CoreError> {
+    print!("{}", launcher::target_handoff_notice(plan));
+    io::stdout()
+        .flush()
+        .map_err(|error| crate::core::error::CoreError::LaunchStart {
+            command: plan.target_command.display.clone(),
+            reason: error.to_string(),
+        })?;
+    workbench::execute_tui_launch_plan(plan.clone())
 }
 
 fn original_exit_message(cli: &str, status: ExitStatus) -> String {

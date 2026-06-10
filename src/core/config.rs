@@ -105,6 +105,42 @@ pub fn load_ssh_host_configs() -> Vec<SshHostConfig> {
         .collect()
 }
 
+pub fn add_ssh_host_config(host: SshHostConfig) -> Result<(), Box<dyn std::error::Error>> {
+    let path = config_path().ok_or("missing home directory")?;
+    add_ssh_host_config_to_path(&path, host)
+}
+
+fn add_ssh_host_config_to_path(
+    path: &Path,
+    host: SshHostConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut config = load_user_config_from_path(path).unwrap_or_default();
+    if config.ssh_hosts.iter().any(|entry| entry.name == host.name) {
+        return Err(format!("ssh host {} already exists", host.name).into());
+    }
+    config.ssh_hosts.push(host);
+    save_user_config_to_path(path, &config)
+}
+
+pub fn remove_ssh_host_config(name: &str) -> Result<bool, Box<dyn std::error::Error>> {
+    let path = config_path().ok_or("missing home directory")?;
+    remove_ssh_host_config_from_path(&path, name)
+}
+
+fn remove_ssh_host_config_from_path(
+    path: &Path,
+    name: &str,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let mut config = load_user_config_from_path(path).unwrap_or_default();
+    let before = config.ssh_hosts.len();
+    config.ssh_hosts.retain(|entry| entry.name != name);
+    if config.ssh_hosts.len() == before {
+        return Ok(false);
+    }
+    save_user_config_to_path(path, &config)?;
+    Ok(true)
+}
+
 pub fn load_starred_sessions() -> Vec<String> {
     load_user_config()
         .map(|config| config.starred_sessions)
@@ -300,6 +336,91 @@ mod tests {
         assert_eq!(saved.compiler_presets.len(), 1);
         assert_eq!(saved.ssh_hosts.len(), 1);
         assert_eq!(saved.starred_sessions, ["codex:abc", "claude:def"]);
+    }
+
+    #[test]
+    fn add_ssh_host_config_preserves_other_config_and_rejects_duplicates() {
+        let path = env::temp_dir().join(format!(
+            "moonbox-config-add-ssh-{}.json",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        fs::write(
+            &path,
+            r#"{
+  "last_target": "claude",
+  "compiler_presets": [
+    {"id": "handoff", "command": "/bin/moonbox-handoff"}
+  ],
+  "ssh_hosts": []
+}"#,
+        )
+        .expect("write config");
+
+        add_ssh_host_config_to_path(
+            &path,
+            SshHostConfig {
+                name: "devbox".into(),
+                host: "10.37.218.31".into(),
+                user: Some("yangyang.1205".into()),
+                port: Some(22),
+                identity_file: Some("~/.ssh/id_ed25519".into()),
+                tags: vec!["dev".into()],
+            },
+        )
+        .expect("add host");
+        let duplicate = add_ssh_host_config_to_path(
+            &path,
+            SshHostConfig {
+                name: "devbox".into(),
+                host: "10.37.218.31".into(),
+                user: None,
+                port: None,
+                identity_file: None,
+                tags: Vec::new(),
+            },
+        )
+        .expect_err("duplicate rejected");
+
+        let saved = load_user_config_from_path(&path).expect("saved config");
+        assert_eq!(saved.last_target, Some(CliTool::Claude));
+        assert_eq!(saved.compiler_presets[0].id, "handoff");
+        assert_eq!(saved.ssh_hosts[0].name, "devbox");
+        assert!(duplicate.to_string().contains("already exists"));
+    }
+
+    #[test]
+    fn remove_ssh_host_config_preserves_other_config() {
+        let path = env::temp_dir().join(format!(
+            "moonbox-config-remove-ssh-{}.json",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        fs::write(
+            &path,
+            r#"{
+  "last_target": "hermes",
+  "compiler_presets": [
+    {"id": "handoff", "command": "/bin/moonbox-handoff"}
+  ],
+  "ssh_hosts": [
+    {"name": "keep", "host": "keep.example.com"},
+    {"name": "delete-me", "host": "10.37.218.31"}
+  ],
+  "starred_sessions": ["codex:abc"]
+}"#,
+        )
+        .expect("write config");
+
+        assert!(remove_ssh_host_config_from_path(&path, "delete-me").expect("remove host"));
+        assert!(!remove_ssh_host_config_from_path(&path, "missing").expect("missing host"));
+
+        let saved = load_user_config_from_path(&path).expect("saved config");
+        assert_eq!(saved.last_target, Some(CliTool::Hermes));
+        assert_eq!(saved.compiler_presets[0].id, "handoff");
+        assert_eq!(saved.starred_sessions, vec!["codex:abc"]);
+        assert_eq!(saved.ssh_hosts.len(), 1);
+        assert_eq!(saved.ssh_hosts[0].name, "keep");
     }
 
     #[test]

@@ -78,9 +78,6 @@ fn execute_tui_exit_action(action: Option<app::TuiExitAction>) -> Result<()> {
             io::stdout().flush()?;
             core::launcher::handoff_original_plan(*plan)?;
         }
-        Some(app::TuiExitAction::TargetHandoff(plan)) => {
-            core::workbench::execute_tui_launch_plan(*plan)?;
-        }
         None => {}
     }
     Ok(())

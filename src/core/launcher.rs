@@ -155,6 +155,41 @@ pub(crate) fn original_handoff_notice(plan: &OriginalSessionPlan) -> String {
     )
 }
 
+pub(crate) fn target_handoff_notice(plan: &LaunchPlan) -> String {
+    format!(
+        "Starting local target: {}\nSource: {} {}\nRewind: {}\nCommand: {}\nExit the target CLI to return to Moonbox.\n",
+        plan.target_cli,
+        plan.source_session.cli,
+        plan.source_session.id,
+        plan.rewind_point,
+        concise_command_display(&plan.target_command)
+    )
+}
+
+pub(crate) fn concise_command_display(command: &TargetLaunchCommand) -> String {
+    let mut parts = Vec::with_capacity(command.args.len() + 1);
+    parts.push(command.program.clone());
+    for (index, arg) in command.args.iter().enumerate() {
+        if index + 1 == command.args.len() && arg.len() > 160 {
+            parts.push("<handoff-prompt>".into());
+        } else {
+            parts.push(shellish_quote(arg));
+        }
+    }
+    parts.join(" ")
+}
+
+fn shellish_quote(value: &str) -> String {
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '/' | ':' | '='))
+    {
+        value.into()
+    } else {
+        format!("{value:?}")
+    }
+}
+
 fn run_target_command(command: &TargetLaunchCommand) -> Result<ExitStatus, CoreError> {
     command_process(command)
         .status()

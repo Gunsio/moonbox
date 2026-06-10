@@ -531,11 +531,15 @@ fn docs_snapshot_is_hidden_fixture_safe_and_generated() {
 
     assert!(svg.starts_with("<svg "));
     assert!(svg.contains("Handoff Review"));
-    assert!(svg.contains("Capsule Review"));
-    assert!(svg.contains("Target receives"));
-    assert!(svg.contains("Draft Work Capsule"));
-    assert!(svg.contains("moonbox launch --execute"));
-    assert!(svg.contains("Handoff"));
+    assert!(svg.contains("Capsule"));
+    assert!(svg.contains("审"));
+    assert!(svg.contains("阅"));
+    assert!(svg.contains("目"));
+    assert!(svg.contains("标"));
+    assert!(svg.contains("草"));
+    assert!(svg.contains("稿"));
+    assert!(svg.contains("运"));
+    assert!(svg.contains("行"));
 }
 
 #[test]

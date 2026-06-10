@@ -28,23 +28,31 @@ pub struct SshHostEntry {
 }
 
 pub fn list_ssh_hosts() -> Result<Vec<SshHostEntry>, CoreError> {
-    let mut hosts = Vec::new();
-    for host in config::load_ssh_host_configs() {
-        hosts.push(SshHostEntry {
-            name: host.name,
-            host: host.host,
-            user: host.user,
-            port: host.port,
-            identity_file: host.identity_file,
-            tags: host.tags,
-            source: SshHostSource::MoonboxConfig,
-            source_path: config::config_path().map(|path| path.display().to_string()),
-        });
-    }
+    let mut hosts = list_managed_ssh_hosts();
     if let Some(path) = openssh_config_path() {
         hosts.extend(load_openssh_hosts(&path)?);
     }
     Ok(deduplicate_hosts(hosts))
+}
+
+pub fn list_managed_ssh_hosts() -> Vec<SshHostEntry> {
+    config::load_ssh_host_configs()
+        .into_iter()
+        .map(managed_host_entry)
+        .collect()
+}
+
+fn managed_host_entry(host: config::SshHostConfig) -> SshHostEntry {
+    SshHostEntry {
+        name: host.name,
+        host: host.host,
+        user: host.user,
+        port: host.port,
+        identity_file: host.identity_file,
+        tags: host.tags,
+        source: SshHostSource::MoonboxConfig,
+        source_path: config::config_path().map(|path| path.display().to_string()),
+    }
 }
 
 fn openssh_config_path() -> Option<PathBuf> {
