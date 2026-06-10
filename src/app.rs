@@ -11,6 +11,7 @@ use crate::core::{
     capsule_store::CapsuleSummary,
     compiler, config, continuation, dataspace, doctor,
     error::CoreError,
+    image_preview::{TimelineImagePreview, build_timeline_image_previews},
     launcher,
     model::{
         CliTool, ContinuationOptions, DoctorReport, LaunchPlan, LaunchValidation,
@@ -456,6 +457,7 @@ pub struct App {
     pub show_skill_picker: bool,
     pub show_capsules: bool,
     pub show_timeline_detail: bool,
+    pub timeline_image_previews: Vec<TimelineImagePreview>,
     pub saved_capsules: Vec<CapsuleSummary>,
     pub saved_capsule_error: Option<String>,
     pub session_filter: SessionFilter,
@@ -523,6 +525,7 @@ impl App {
             show_skill_picker: false,
             show_capsules: false,
             show_timeline_detail: false,
+            timeline_image_previews: Vec::new(),
             saved_capsules: Vec::new(),
             saved_capsule_error: None,
             session_filter: SessionFilter::All,
@@ -1013,6 +1016,7 @@ impl App {
             self.set_status("Capsule inventory closed");
         } else if self.show_timeline_detail {
             self.show_timeline_detail = false;
+            self.timeline_image_previews.clear();
             self.modal_scroll = 0;
             self.set_status("Timeline detail closed");
         } else if self.show_open_original {
@@ -1593,6 +1597,8 @@ impl App {
         }
         self.selected_event =
             nearest_visible_timeline_event(&self.data, &self.rewind_event_id, self.selected_event);
+        self.timeline_image_previews =
+            build_timeline_image_previews(&self.data, self.selected_event);
         self.show_timeline_detail = true;
         self.modal_scroll = 0;
         if let Some(event) = self.data.timeline.get(self.selected_event) {
@@ -2292,6 +2298,7 @@ fn session_matches_query(session: &SessionSummary, query: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::image_preview::ImagePreviewStatus;
 
     fn key(ch: char) -> KeyEvent {
         KeyEvent::new(KeyCode::Char(ch), KeyModifiers::empty())
@@ -2988,6 +2995,33 @@ mod tests {
         assert_eq!(app.selected_event, 2);
         assert_eq!(app.modal_scroll, 0);
         assert_eq!(app.status_message, format!("Timeline detail: {event_id}"));
+    }
+
+    #[test]
+    fn timeline_detail_builds_and_clears_image_preview_cache() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.focus = Focus::Timeline;
+        app.selected_event = 0;
+        app.data.timeline[0].metadata.attachments = vec![crate::core::model::TimelineAttachment {
+            id: Some("img-1".into()),
+            name: Some("Image #1".into()),
+            mime_type: Some("image/png".into()),
+            ..Default::default()
+        }];
+
+        app.handle_key(key('e'));
+
+        assert!(app.show_timeline_detail);
+        assert_eq!(app.timeline_image_previews.len(), 1);
+        assert_eq!(
+            app.timeline_image_previews[0].status,
+            ImagePreviewStatus::MissingPath
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+        assert!(!app.show_timeline_detail);
+        assert!(app.timeline_image_previews.is_empty());
     }
 
     #[test]
