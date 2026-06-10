@@ -37,6 +37,8 @@ and this project uses semantic versioning once tagged releases start.
   `launch --json` output, using `original_resume`, `app_deep_link`, and
   `target_handoff`.
 - First-class `moon` binary alias installed alongside `moonbox`.
+- Homebrew tap prerelease distribution workflow for `Gunsio/tap`, including
+  tagged release artifact checksums and formula verification guidance.
 - Configurable compiler skill presets in `~/.config/moonbox/config.json`,
   including optional description, homepage, and GitHub stars metadata for the
   TUI Skill Picker.

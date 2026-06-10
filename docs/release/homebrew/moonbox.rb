@@ -1,5 +1,6 @@
-# Draft formula for Gunsio/homebrew-tap.
-# Replace the version and sha256 after an accepted tagged release.
+# Template for Gunsio/homebrew-tap Formula/moonbox.rb.
+# The published tap formula replaces the placeholder sha256 with the
+# release-manifest.json homebrew.sha256 value for the tagged source archive.
 class Moonbox < Formula
   desc "Cross-CLI session rewind workbench"
   homepage "https://github.com/Gunsio/moonbox"

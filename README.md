@@ -104,24 +104,25 @@ API is explicitly designed and documented.
 
 ### Homebrew
 
-Homebrew distribution is planned, but not published yet. After the accepted
-release is tagged, the intended install path is:
+Moonbox prereleases are distributed through the dedicated Homebrew tap:
 
 ```bash
 brew tap Gunsio/tap
 brew install moonbox
 ```
 
-See [docs/release/homebrew.md](docs/release/homebrew.md) for the release
-checklist and formula shape. The draft formula lives at
-[docs/release/homebrew/moonbox.rb](docs/release/homebrew/moonbox.rb), and its
-syntax plus completion-generation behavior are covered by:
+The tap formula is published from tagged GitHub release artifacts, not from an
+unversioned branch archive. See
+[docs/release/homebrew.md](docs/release/homebrew.md) for the release and tap
+maintenance workflow. This repository keeps a formula template at
+[docs/release/homebrew/moonbox.rb](docs/release/homebrew/moonbox.rb); its syntax
+plus completion-generation behavior are covered by:
 
 ```bash
 scripts/ci/homebrew-docs-smoke.sh
 ```
 
-Release artifact staging is also automated but not published yet:
+Release artifact staging is automated:
 
 ```bash
 scripts/ci/release-artifacts-smoke.sh
@@ -130,6 +131,8 @@ scripts/release/stage-artifacts.sh --version 0.1.0
 
 The staging script writes source, Cargo crate, and host binary archives plus
 `SHA256SUMS` and `release-manifest.json` under `target/release-artifacts/`.
+The tap formula checksum must come from `release-manifest.json`'s
+`homebrew.sha256` field for the tagged source archive.
 
 ## Project Standards
 
@@ -359,7 +362,7 @@ The first implementation focuses on the product shell:
 - Minimal documented Rust library API with CLI internals kept crate-private
 - README screenshot and install-command smoke coverage through `scripts/ci/docs-assets-smoke.sh`
 - Cargo package hygiene smoke coverage through `scripts/ci/package-hygiene.sh`
-- Draft Homebrew formula template plus fixture-safe Homebrew docs smoke coverage
+- Homebrew tap release workflow plus fixture-safe Homebrew formula smoke coverage
 - Release artifact staging with source, Cargo crate, host binary archive,
   `SHA256SUMS`, and `release-manifest.json`, covered by fixture-safe smoke
 - Fixture-safe installed-binary smoke coverage through
@@ -1039,11 +1042,15 @@ Stable interfaces matter more than any single framework:
   show an explicit non-previewable reason. Expanded assistant groups also use a
   compact per-event layout so repeated `Title` / `Body` labels do not dominate
   long grouped turns.
+- M80: Homebrew prerelease distribution; the release path now publishes tagged
+  GitHub prerelease artifacts, uses the generated `homebrew.sha256` for
+  `Gunsio/homebrew-tap`, and documents `brew tap Gunsio/tap` plus
+  `brew install moonbox` as the supported prerelease install path.
 
 ### Remaining Milestones
 
 - Next high-priority continuation milestones are pending prioritization after
-  M79 acceptance.
+  M80 acceptance.
 - Low-priority backlog:
   - M76: native terminal image protocol. Detect terminal raster capabilities
     such as Kitty, iTerm2, or Sixel and upgrade beyond the M79 text-cell
