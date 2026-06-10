@@ -415,9 +415,8 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
                 } else {
                     Span::raw(" ")
                 };
-                let marker = session_row_marker(session, app.is_session_starred(session));
                 let mut title_spans = vec![selector, Span::raw(" ")];
-                if let Some(marker) = marker {
+                for marker in session_row_markers(session, app.is_session_starred(session)) {
                     title_spans.push(marker);
                     title_spans.push(Span::raw(" "));
                 }
@@ -487,24 +486,28 @@ fn session_title_style(selected: bool) -> Style {
     }
 }
 
-fn session_row_marker(
+fn session_row_markers(
     session: &crate::core::model::SessionSummary,
     starred: bool,
-) -> Option<Span<'static>> {
-    match session.status {
-        SessionStatus::Warning => Some(Span::styled("▲", Style::default().fg(theme::GOLD))),
-        SessionStatus::Failed => Some(Span::styled(
-            "!",
-            Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
-        )),
-        SessionStatus::Healthy if starred => Some(Span::styled(
+) -> Vec<Span<'static>> {
+    let mut markers = Vec::with_capacity(2);
+    if starred {
+        markers.push(Span::styled(
             "*",
             Style::default()
                 .fg(theme::GOLD)
                 .add_modifier(Modifier::BOLD),
-        )),
-        SessionStatus::Healthy => None,
+        ));
     }
+    match session.status {
+        SessionStatus::Warning => markers.push(Span::styled("▲", Style::default().fg(theme::GOLD))),
+        SessionStatus::Failed => markers.push(Span::styled(
+            "!",
+            Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+        )),
+        SessionStatus::Healthy => {}
+    }
+    markers
 }
 
 fn session_list_window(total: usize, selected: usize, area_height: u16) -> (usize, usize) {
@@ -3827,6 +3830,47 @@ mod tests {
             session_inventory_metric(&session),
             "42K tokens · 1.5MB source"
         );
+    }
+
+    #[test]
+    fn session_row_markers_keep_star_visible_with_health_status() {
+        let mut session = test_session("2026-06-07T13:33:44+08:00", None);
+
+        session.status = SessionStatus::Failed;
+        let failed_markers: Vec<String> = session_row_markers(&session, true)
+            .into_iter()
+            .map(|span| span.content.into_owned())
+            .collect();
+        assert_eq!(failed_markers, ["*", "!"]);
+
+        session.status = SessionStatus::Warning;
+        let warning_markers: Vec<String> = session_row_markers(&session, true)
+            .into_iter()
+            .map(|span| span.content.into_owned())
+            .collect();
+        assert_eq!(warning_markers, ["*", "▲"]);
+
+        session.status = SessionStatus::Healthy;
+        assert!(session_row_markers(&session, false).is_empty());
+    }
+
+    #[test]
+    fn session_list_renders_star_and_failed_marker_together() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        let star_key = {
+            let session = app
+                .data
+                .sessions
+                .get_mut(app.selected_session)
+                .expect("session");
+            session.status = SessionStatus::Failed;
+            format!("{}:{}", session.cli.id(), session.id)
+        };
+        app.starred_sessions = vec![star_key];
+
+        let screen = render_text(&app, 140, 40);
+
+        assert_screen_contains(&screen, "* !");
     }
 
     #[test]
