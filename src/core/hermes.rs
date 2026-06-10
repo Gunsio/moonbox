@@ -190,7 +190,8 @@ impl HermesSourceAdapter {
     ) -> Result<Vec<HermesSessionRow>, AdapterError> {
         let db = self.open_connection()?;
         let columns = session_columns(&db, &self.state_db_path())?;
-        let select = session_select_sql(&columns);
+        let message_columns = message_columns(&db, &self.state_db_path())?;
+        let select = session_select_sql(&columns, &message_columns);
         let unarchived = unarchived_clause(&columns);
         let query = format!(
             "{select} where {unarchived} order by s.started_at desc{}",
@@ -218,7 +219,8 @@ impl HermesSourceAdapter {
     fn find_session_row(&self, session_id: &str) -> Result<Option<HermesSessionRow>, AdapterError> {
         let db = self.open_connection()?;
         let columns = session_columns(&db, &self.state_db_path())?;
-        let select = session_select_sql(&columns);
+        let message_columns = message_columns(&db, &self.state_db_path())?;
+        let select = session_select_sql(&columns, &message_columns);
         let mut statement = db
             .prepare(&format!("{select} where s.id = ?1"))
             .map_err(|error| read_error(HERMES_TOOL, &self.state_db_path(), error))?;
@@ -236,6 +238,17 @@ impl HermesSourceAdapter {
         let db = self.open_connection()?;
         let columns = message_columns(&db, &self.state_db_path())?;
         let platform_message_id = message_column(&columns, "platform_message_id", "NULL");
+        let role = message_column(&columns, "role", "''");
+        let content = message_column(&columns, "content", "NULL");
+        let tool_calls = message_column(&columns, "tool_calls", "NULL");
+        let tool_name = message_column(&columns, "tool_name", "NULL");
+        let timestamp = message_column(&columns, "timestamp", "0");
+        let token_count = message_column(&columns, "token_count", "NULL");
+        let finish_reason = message_column(&columns, "finish_reason", "NULL");
+        let reasoning = message_column(&columns, "reasoning", "NULL");
+        let reasoning_content = message_column(&columns, "reasoning_content", "NULL");
+        let reasoning_details = message_column(&columns, "reasoning_details", "NULL");
+        let active = active_message_clause(&columns, "m");
         let limit_clause = if event_limit.is_some() {
             "limit ?2"
         } else {
@@ -247,18 +260,18 @@ impl HermesSourceAdapter {
                 select
                     id,
                     {platform_message_id},
-                    role,
-                    content,
-                    tool_calls,
-                    tool_name,
-                    strftime('%Y-%m-%dT%H:%M:%SZ', timestamp, 'unixepoch') as timestamp,
-                    token_count,
-                    finish_reason,
-                    reasoning,
-                    reasoning_content,
-                    reasoning_details
+                    {role},
+                    {content},
+                    {tool_calls},
+                    {tool_name},
+                    strftime('%Y-%m-%dT%H:%M:%SZ', {timestamp}, 'unixepoch') as timestamp,
+                    {token_count},
+                    {finish_reason},
+                    {reasoning},
+                    {reasoning_content},
+                    {reasoning_details}
                 from messages m
-                where m.session_id = ?1 and active = 1
+                where m.session_id = ?1 and {active}
                 order by timestamp asc, id asc
                 {limit_clause}
                 "#,
@@ -286,7 +299,7 @@ impl HermesSourceAdapter {
         let db = self.open_connection()?;
         let session_columns = session_columns(&db, &self.state_db_path())?;
         let message_columns = message_columns(&db, &self.state_db_path())?;
-        let select = session_select_sql(&session_columns);
+        let select = session_select_sql(&session_columns, &message_columns);
         let unarchived = unarchived_clause(&session_columns);
         let active = active_message_clause(&message_columns, "m");
         let search_text = message_search_text_sql(&message_columns, "m");
@@ -595,33 +608,40 @@ fn message_columns(db: &Connection, path: &Path) -> Result<HashSet<String>, Adap
     collect_rows(rows, path).map(|columns| columns.into_iter().collect())
 }
 
-fn session_select_sql(columns: &HashSet<String>) -> String {
-    let user_id = session_column(columns, "user_id", "NULL");
-    let model = session_column(columns, "model", "NULL");
-    let model_config = session_column(columns, "model_config", "NULL");
-    let system_prompt = session_column(columns, "system_prompt", "NULL");
-    let parent_session_id = session_column(columns, "parent_session_id", "NULL");
-    let started_at = session_column(columns, "started_at", "0");
-    let ended_at = session_column(columns, "ended_at", "NULL");
-    let end_reason = session_column(columns, "end_reason", "NULL");
-    let message_count = session_integer_column(columns, "message_count");
-    let tool_call_count = session_integer_column(columns, "tool_call_count");
-    let input_tokens = session_integer_column(columns, "input_tokens");
-    let output_tokens = session_integer_column(columns, "output_tokens");
-    let cache_read_tokens = session_integer_column(columns, "cache_read_tokens");
-    let cache_write_tokens = session_integer_column(columns, "cache_write_tokens");
-    let reasoning_tokens = session_integer_column(columns, "reasoning_tokens");
-    let cwd = session_column(columns, "cwd", "NULL");
-    let title = session_column(columns, "title", "NULL");
-    let handoff_state = session_column(columns, "handoff_state", "NULL");
-    let handoff_platform = session_column(columns, "handoff_platform", "NULL");
-    let handoff_error = session_column(columns, "handoff_error", "NULL");
-    let rewind_count = session_integer_column(columns, "rewind_count");
-    let archived = if columns.contains("archived") {
+fn session_select_sql(
+    session_columns: &HashSet<String>,
+    message_columns: &HashSet<String>,
+) -> String {
+    let user_id = session_column(session_columns, "user_id", "NULL");
+    let model = session_column(session_columns, "model", "NULL");
+    let model_config = session_column(session_columns, "model_config", "NULL");
+    let system_prompt = session_column(session_columns, "system_prompt", "NULL");
+    let parent_session_id = session_column(session_columns, "parent_session_id", "NULL");
+    let started_at = session_column(session_columns, "started_at", "0");
+    let ended_at = session_column(session_columns, "ended_at", "NULL");
+    let end_reason = session_column(session_columns, "end_reason", "NULL");
+    let message_count = session_integer_column(session_columns, "message_count");
+    let tool_call_count = session_integer_column(session_columns, "tool_call_count");
+    let input_tokens = session_integer_column(session_columns, "input_tokens");
+    let output_tokens = session_integer_column(session_columns, "output_tokens");
+    let cache_read_tokens = session_integer_column(session_columns, "cache_read_tokens");
+    let cache_write_tokens = session_integer_column(session_columns, "cache_write_tokens");
+    let reasoning_tokens = session_integer_column(session_columns, "reasoning_tokens");
+    let cwd = session_column(session_columns, "cwd", "NULL");
+    let title = session_column(session_columns, "title", "NULL");
+    let handoff_state = session_column(session_columns, "handoff_state", "NULL");
+    let handoff_platform = session_column(session_columns, "handoff_platform", "NULL");
+    let handoff_error = session_column(session_columns, "handoff_error", "NULL");
+    let rewind_count = session_integer_column(session_columns, "rewind_count");
+    let archived = if session_columns.contains("archived") {
         "s.archived != 0"
     } else {
         "0"
     };
+    let message_active = active_message_clause(message_columns, "m");
+    let message_timestamp = message_column(message_columns, "timestamp", "0");
+    let message_role = message_column(message_columns, "role", "''");
+    let message_content = message_column(message_columns, "content", "NULL");
 
     format!(
         r#"
@@ -635,7 +655,11 @@ fn session_select_sql(columns: &HashSet<String>) -> String {
         {parent_session_id},
         strftime(
             '%Y-%m-%dT%H:%M:%SZ',
-            coalesce((select max(timestamp) from messages where session_id = s.id), {ended_at}, {started_at}),
+            coalesce(
+                (select max({message_timestamp}) from messages m where m.session_id = s.id and {message_active}),
+                {ended_at},
+                {started_at}
+            ),
             'unixepoch'
         ) as updated_at,
         {end_reason},
@@ -653,13 +677,13 @@ fn session_select_sql(columns: &HashSet<String>) -> String {
         {handoff_error},
         {rewind_count} as rewind_count,
         {archived} as archived,
-        coalesce((select count(*) from messages where session_id = s.id and active = 1), 0) as active_message_count,
+        coalesce((select count(*) from messages m where m.session_id = s.id and {message_active}), 0) as active_message_count,
         coalesce(
             (
-                select substr(replace(replace(m.content, char(10), ' '), char(13), ' '), 1, 63)
+                select substr(replace(replace({message_content}, char(10), ' '), char(13), ' '), 1, 63)
                 from messages m
-                where m.session_id = s.id and m.role = 'user' and m.content is not null
-                order by m.timestamp asc, m.id asc
+                where m.session_id = s.id and {message_active} and {message_role} = 'user' and {message_content} is not null
+                order by {message_timestamp} asc, m.id asc
                 limit 1
             ),
             ''
@@ -1461,14 +1485,14 @@ mod tests {
     fn lists_legacy_hermes_schema_without_provider_columns() {
         let root = test_root("legacy-schema");
         write_legacy_state_db(&root);
+        let adapter = HermesSourceAdapter::new(&root);
 
-        let sessions = HermesSourceAdapter::new(&root)
-            .list_sessions()
-            .expect("sessions");
+        let sessions = adapter.list_sessions().expect("sessions");
 
         assert_eq!(sessions.len(), 2);
         assert_eq!(sessions[0].id, "legacy-feishu");
         assert_eq!(sessions[0].token_count, Some(5));
+        assert_eq!(sessions[0].event_count, 1);
         let metadata = sessions[0].provider_metadata.as_ref().expect("metadata");
         assert_eq!(metadata.source.as_deref(), Some("feishu"));
         assert_eq!(metadata.platform.as_deref(), Some("feishu"));
@@ -1477,6 +1501,16 @@ mod tests {
         assert_eq!(metadata.system_prompt_snapshot, None);
         assert_eq!(metadata.archived, Some(false));
         assert_eq!(sessions[1].id, "legacy-cli");
+
+        let timeline = adapter.load_timeline("legacy-feishu").expect("timeline");
+        assert_eq!(timeline.events.len(), 1);
+        assert_eq!(timeline.events[0].detail, "Fix legacy Feishu");
+
+        let matches = adapter
+            .search_sessions("legacy Feishu", 1)
+            .expect("search sessions");
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].id, "legacy-feishu");
     }
 
     #[test]
@@ -1734,16 +1768,16 @@ mod tests {
                 reasoning text,
                 reasoning_content text,
                 reasoning_details text,
-                active integer not null default 1
+                platform_message_id text
             );
             insert into sessions (
                 id, source, model, started_at, message_count, input_tokens, output_tokens, title
             ) values
                 ('legacy-cli', 'cli', 'gpt-5', 1780640474, 1, 1, 2, 'Legacy CLI'),
                 ('legacy-feishu', 'feishu', 'claude-sonnet', 1780641494, 1, 2, 3, 'Legacy Feishu');
-            insert into messages (session_id, role, content, timestamp, active) values
-                ('legacy-cli', 'user', 'Fix legacy CLI', 1780640475, 1),
-                ('legacy-feishu', 'user', 'Fix legacy Feishu', 1780641495, 1);
+            insert into messages (session_id, role, content, timestamp) values
+                ('legacy-cli', 'user', 'Fix legacy CLI', 1780640475),
+                ('legacy-feishu', 'user', 'Fix legacy Feishu', 1780641495);
             "#,
         )
         .expect("legacy schema");

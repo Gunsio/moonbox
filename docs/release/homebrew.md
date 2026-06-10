@@ -29,11 +29,11 @@ usage, and a lower-risk dependency/release profile.
 ## Release Checklist
 
 1. Merge the accepted release milestone PR.
-2. Tag the accepted commit, for example `v0.1.1`.
+2. Tag the accepted commit, for example `v0.1.2`.
 3. Stage local release artifacts:
 
 ```bash
-scripts/release/stage-artifacts.sh --version 0.1.1 --ref v0.1.1
+scripts/release/stage-artifacts.sh --version 0.1.2 --ref v0.1.2
 ```
 
 4. Create a GitHub prerelease and upload the staged source archive, Cargo crate
@@ -104,7 +104,7 @@ class Moonbox < Formula
   license "MIT"
 
   bottle do
-    root_url "https://github.com/Gunsio/moonbox/releases/download/v0.1.1"
+    root_url "https://github.com/Gunsio/moonbox/releases/download/v0.1.2"
     rebuild 1
     sha256 cellar: :any_skip_relocation, arm64_tahoe: "<release-bottle-sha256>"
     sha256 cellar: :any_skip_relocation, arm64_sequoia: "<release-bottle-sha256>"
@@ -112,12 +112,12 @@ class Moonbox < Formula
 
   on_macos do
     on_arm do
-      url "https://github.com/Gunsio/moonbox/releases/download/v0.1.1/moonbox-0.1.1-aarch64-apple-darwin.tar.gz"
+      url "https://github.com/Gunsio/moonbox/releases/download/v0.1.2/moonbox-0.1.2-aarch64-apple-darwin.tar.gz"
       sha256 "<release-binary-sha256>"
     end
 
     on_intel do
-      url "https://github.com/Gunsio/moonbox/releases/download/v0.1.1/moonbox-0.1.1-source.tar.gz"
+      url "https://github.com/Gunsio/moonbox/releases/download/v0.1.2/moonbox-0.1.2-source.tar.gz"
       sha256 "<release-source-sha256>"
 
       depends_on "rust" => :build
@@ -127,8 +127,8 @@ class Moonbox < Formula
   def install
     binary_root = if (buildpath/"bin/moonbox").exist?
       buildpath
-    elsif (buildpath/"moonbox-0.1.1-aarch64-apple-darwin/bin/moonbox").exist?
-      buildpath/"moonbox-0.1.1-aarch64-apple-darwin"
+    elsif (buildpath/"moonbox-0.1.2-aarch64-apple-darwin/bin/moonbox").exist?
+      buildpath/"moonbox-0.1.2-aarch64-apple-darwin"
     end
 
     if binary_root

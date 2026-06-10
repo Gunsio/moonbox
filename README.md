@@ -132,7 +132,7 @@ Release artifact staging is automated:
 
 ```bash
 scripts/ci/release-artifacts-smoke.sh
-scripts/release/stage-artifacts.sh --version 0.1.1
+scripts/release/stage-artifacts.sh --version 0.1.2
 ```
 
 The staging script writes source, Cargo crate, and host binary archives plus
@@ -1082,11 +1082,15 @@ Stable interfaces matter more than any single framework:
 - M86: v0.1.1 prerelease; package metadata and release/Homebrew templates now
   target `0.1.1` so the M84/M85 TUI polish can ship through the tagged GitHub
   prerelease and Homebrew tap path.
+- M87: v0.1.2 Hermes SQLite schema compatibility hotfix; Moonbox now treats
+  Hermes stores without `messages.active` as legacy-all-active rows instead of
+  aborting TUI startup, and the legacy fixture covers session listing, timeline
+  loading, and local message search on that schema.
 
 ### Remaining Milestones
 
 - Next high-priority continuation milestones are pending prioritization after
-  M86 acceptance.
+  M87 acceptance.
 - Low-priority backlog:
   - M76: native terminal image protocol. Detect terminal raster capabilities
     such as Kitty, iTerm2, or Sixel and upgrade beyond the M79 text-cell
