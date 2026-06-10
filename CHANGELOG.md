@@ -212,6 +212,8 @@ and this project uses semantic versioning once tagged releases start.
   rendered as user timeline turns or used as user rewind anchors.
 - Starred TUI sessions now keep their `*` marker visible even when the same row
   also needs a warning or failed health marker.
+- Timeline selected rows no longer shift body text or switch the body to bold
+  when focus moves across events.
 
 ### Changed
 

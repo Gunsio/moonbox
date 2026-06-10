@@ -919,15 +919,7 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
             area.width,
         ));
 
-        let detail_style = if active {
-            Style::default()
-                .fg(theme::TEXT)
-                .add_modifier(Modifier::BOLD)
-        } else if is_rewind || group.kind() == TimelineKind::RewindPoint {
-            Style::default().fg(theme::TEXT)
-        } else {
-            Style::default().fg(theme::MUTED)
-        };
+        let detail_style = timeline_detail_style(active, is_rewind, group.kind());
         for (event_offset, (_, event)) in group.events().enumerate() {
             for (line_index, detail) in timeline_event_detail_lines(event, area.width)
                 .into_iter()
@@ -1056,6 +1048,14 @@ fn timeline_marker_style(active: bool, selected: bool, is_rewind: bool) -> Style
     }
 }
 
+fn timeline_detail_style(active: bool, is_rewind: bool, kind: TimelineKind) -> Style {
+    if active || is_rewind || kind == TimelineKind::RewindPoint {
+        Style::default().fg(theme::TEXT)
+    } else {
+        Style::default().fg(theme::MUTED)
+    }
+}
+
 fn timeline_group_line_count(group: &TimelineGroup<'_>, area_width: u16) -> usize {
     1 + group
         .events()
@@ -1071,16 +1071,16 @@ fn timeline_detail_prefix(
     line_index: usize,
 ) -> &'static str {
     if active && event_offset == 0 && line_index == 0 {
-        return "  └ ";
+        return "   └ ";
     }
     if active && ai_group && line_index == 0 {
-        return "  • ";
+        return "   • ";
     }
     if active {
-        return "    ";
+        return "     ";
     }
     if ai_group && event_offset > 0 && line_index == 0 {
-        return "  · ";
+        return "   · ";
     }
     "     "
 }
@@ -3638,6 +3638,13 @@ mod tests {
         format!("{}", terminal.backend())
     }
 
+    fn screen_column(screen: &str, needle: &str) -> usize {
+        screen
+            .lines()
+            .find_map(|line| line.find(needle).map(|index| line[..index].chars().count()))
+            .unwrap_or_else(|| panic!("missing {needle:?} in screen:\n{screen}"))
+    }
+
     fn render_loading_text(tick: usize, width: u16, height: u16) -> String {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).expect("terminal");
@@ -3719,10 +3726,55 @@ mod tests {
         let active_ai_group = timeline_detail_prefix(true, true, 1, 0);
         let inactive_ai_group = timeline_detail_prefix(false, true, 1, 0);
 
-        assert_eq!(display_width(active), 5);
-        assert_eq!(display_width(inactive), 5);
-        assert_eq!(display_width(active_ai_group), 5);
-        assert_eq!(display_width(inactive_ai_group), 5);
+        assert_eq!(active.chars().count(), 5);
+        assert_eq!(inactive.chars().count(), 5);
+        assert_eq!(active_ai_group.chars().count(), 5);
+        assert_eq!(inactive_ai_group.chars().count(), 5);
+    }
+
+    #[test]
+    fn timeline_detail_body_column_does_not_shift_when_selected() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.data.timeline = vec![
+            TimelineEvent {
+                id: "evt-001".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::User,
+                title: "User".into(),
+                detail: "active aligned body".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-002".into(),
+                time: "10:01".into(),
+                kind: TimelineKind::User,
+                title: "User".into(),
+                detail: "inactive aligned body".into(),
+                metadata: Default::default(),
+            },
+        ];
+        app.selected_event = 0;
+        app.rewind_event_id = "evt-001".into();
+
+        let screen = render_text(&app, 100, 18);
+        let active_column = screen_column(&screen, "active aligned body");
+        let inactive_column = screen_column(&screen, "inactive aligned body");
+
+        assert_eq!(active_column, inactive_column, "{screen}");
+    }
+
+    #[test]
+    fn selected_timeline_body_keeps_stable_font_weight() {
+        let active = timeline_detail_style(true, false, TimelineKind::User);
+        let inactive_rewind = timeline_detail_style(false, true, TimelineKind::User);
+        let inactive = timeline_detail_style(false, false, TimelineKind::User);
+
+        assert!(!active.add_modifier.contains(Modifier::BOLD));
+        assert_eq!(active.fg, Some(theme::TEXT));
+        assert!(!inactive_rewind.add_modifier.contains(Modifier::BOLD));
+        assert_eq!(inactive_rewind.fg, Some(theme::TEXT));
+        assert_eq!(inactive.fg, Some(theme::MUTED));
     }
 
     #[test]
