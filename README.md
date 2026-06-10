@@ -1073,11 +1073,14 @@ Stable interfaces matter more than any single framework:
   token count and raw JSONL source size over internal event counts, Session
   Details labels parsed counts as `Timeline Items`, and `SessionSummary`
   includes serde-default `source_size_bytes` for compatible local inventory.
+- M84: starred-session marker visibility; the left session list now renders the
+  `*` favorite marker independently from warning/failed health markers, so a
+  starred unhealthy session keeps both signals visible.
 
 ### Remaining Milestones
 
 - Next high-priority continuation milestones are pending prioritization after
-  M83 acceptance.
+  M84 acceptance.
 - Low-priority backlog:
   - M76: native terminal image protocol. Detect terminal raster capabilities
     such as Kitty, iTerm2, or Sixel and upgrade beyond the M79 text-cell
