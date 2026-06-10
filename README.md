@@ -132,7 +132,7 @@ Release artifact staging is automated:
 
 ```bash
 scripts/ci/release-artifacts-smoke.sh
-scripts/release/stage-artifacts.sh --version 0.1.0
+scripts/release/stage-artifacts.sh --version 0.1.1
 ```
 
 The staging script writes source, Cargo crate, and host binary archives plus
@@ -1079,11 +1079,14 @@ Stable interfaces matter more than any single framework:
 - M85: Timeline selected-row stability; Timeline body prefixes now occupy a
   fixed gutter and selected rows keep the same body font weight, so moving focus
   between events no longer makes message content shift or pulse.
+- M86: v0.1.1 prerelease; package metadata and release/Homebrew templates now
+  target `0.1.1` so the M84/M85 TUI polish can ship through the tagged GitHub
+  prerelease and Homebrew tap path.
 
 ### Remaining Milestones
 
 - Next high-priority continuation milestones are pending prioritization after
-  M85 acceptance.
+  M86 acceptance.
 - Low-priority backlog:
   - M76: native terminal image protocol. Detect terminal raster capabilities
     such as Kitty, iTerm2, or Sixel and upgrade beyond the M79 text-cell
