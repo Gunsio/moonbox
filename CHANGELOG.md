@@ -39,6 +39,9 @@ and this project uses semantic versioning once tagged releases start.
 - First-class `moon` binary alias installed alongside `moonbox`.
 - Homebrew tap prerelease distribution workflow for `Gunsio/tap`, including
   tagged release artifact checksums and formula verification guidance.
+- Homebrew install guidance now includes Homebrew 5 tap trust, and the tap
+  formula uses Apple Silicon bottles for Tahoe and Sequoia so users do not need
+  Rust, LLVM, or current Apple Command Line Tools for the common install path.
 - Configurable compiler skill presets in `~/.config/moonbox/config.json`,
   including optional description, homepage, and GitHub stars metadata for the
   TUI Skill Picker.
