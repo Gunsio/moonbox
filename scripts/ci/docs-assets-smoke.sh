@@ -35,7 +35,11 @@ grep -Fq 'MOONBOX_SESSION_MODE=fixture moon sessions --json --filter codex' READ
 grep -Fq 'MOONBOX_SESSION_MODE=fixture moon doctor --json' README.md
 grep -Fq 'moon completions zsh > /tmp/_moon' README.md
 grep -Fq 'brew tap Gunsio/tap' README.md
+grep -Fq 'brew trust --formula gunsio/tap/moonbox' README.md
 grep -Fq 'Moonbox prereleases are distributed through the dedicated Homebrew tap:' README.md
+grep -Fq 'tap pours the published bottle by default' README.md
+grep -Fq 'Rust, LLVM, and' README.md
+grep -Fq 'Apple Command Line Tools are not required' README.md
 
 grep -Fq 'Handoff Review' "$svg"
 grep -Fq 'Capsule Review' "$svg"

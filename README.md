@@ -108,8 +108,14 @@ Moonbox prereleases are distributed through the dedicated Homebrew tap:
 
 ```bash
 brew tap Gunsio/tap
+brew trust --formula gunsio/tap/moonbox
 brew install moonbox
 ```
+
+Homebrew 5 requires explicit trust for third-party taps. Trusting only the
+`gunsio/tap/moonbox` formula is narrower than trusting the full tap. On Apple
+Silicon macOS, the tap pours the published bottle by default; Rust, LLVM, and
+Apple Command Line Tools are not required for the default install path.
 
 The tap formula is published from tagged GitHub release artifacts, not from an
 unversioned branch archive. See
@@ -131,8 +137,9 @@ scripts/release/stage-artifacts.sh --version 0.1.0
 
 The staging script writes source, Cargo crate, and host binary archives plus
 `SHA256SUMS` and `release-manifest.json` under `target/release-artifacts/`.
-The tap formula checksum must come from `release-manifest.json`'s
-`homebrew.sha256` field for the tagged source archive.
+The tap formula source fallback checksum must come from
+`release-manifest.json`'s `homebrew.sha256` field for the tagged source archive.
+Apple Silicon bottle checksums come from the uploaded bottle artifacts.
 
 ## Project Standards
 
@@ -1046,11 +1053,15 @@ Stable interfaces matter more than any single framework:
   GitHub prerelease artifacts, uses the generated `homebrew.sha256` for
   `Gunsio/homebrew-tap`, and documents `brew tap Gunsio/tap` plus
   `brew install moonbox` as the supported prerelease install path.
+- M81: Homebrew install polish; README and release docs now include the
+  Homebrew 5 trust step, and the published tap formula uses Apple Silicon
+  bottles for Tahoe and Sequoia so users avoid Rust, LLVM, and Apple Command
+  Line Tools on the common install path.
 
 ### Remaining Milestones
 
 - Next high-priority continuation milestones are pending prioritization after
-  M80 acceptance.
+  M81 acceptance.
 - Low-priority backlog:
   - M76: native terminal image protocol. Detect terminal raster capabilities
     such as Kitty, iTerm2, or Sixel and upgrade beyond the M79 text-cell
