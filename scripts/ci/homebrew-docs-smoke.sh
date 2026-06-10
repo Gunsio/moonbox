@@ -25,6 +25,7 @@ run ruby -c "$formula"
 
 grep -Fq 'url "https://github.com/Gunsio/moonbox/releases/download/v0.1.0/moonbox-0.1.0-source.tar.gz"' "$formula"
 grep -Fq 'sha256 "<release-source-sha256>"' "$formula"
+grep -Fq 'release-manifest.json homebrew.sha256' "$formula"
 grep -Fq 'system "cargo", "install", *std_cargo_args' "$formula"
 grep -Fq 'generate_completions_from_executable(bin/"moonbox", "completions", shells: [:bash, :zsh, :fish, :pwsh])' "$formula"
 grep -Fq 'generate_completions_from_executable(bin/"moon", "completions", shells: [:bash, :zsh, :fish, :pwsh])' "$formula"
