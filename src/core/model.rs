@@ -118,10 +118,106 @@ pub struct SessionSummary {
     pub parse_skip_count: usize,
     #[serde(default)]
     pub provider_metadata: Option<ProviderSessionMetadata>,
+    #[serde(default)]
+    pub anatomy: Option<SessionAnatomy>,
 }
 
 pub fn unknown_runtime_reason(tool: CliTool) -> String {
     format!("{tool} source adapter does not expose live runtime activity yet")
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionAnatomyStatus {
+    #[default]
+    Missing,
+    Ready,
+    Partial,
+    Failed,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionAnatomy {
+    #[serde(default)]
+    pub status: SessionAnatomyStatus,
+    #[serde(default)]
+    pub scan_scope: String,
+    #[serde(default)]
+    pub source_size_bytes: Option<u64>,
+    #[serde(default)]
+    pub analyzed_bytes: u64,
+    #[serde(default)]
+    pub sampled: bool,
+    #[serde(default)]
+    pub total_lines: Option<usize>,
+    #[serde(default)]
+    pub malformed_lines: usize,
+    #[serde(default)]
+    pub value_signals: Vec<AnatomySignal>,
+    #[serde(default)]
+    pub size_profile: Vec<AnatomyMetric>,
+    #[serde(default)]
+    pub event_profile: Vec<AnatomyMetric>,
+    #[serde(default)]
+    pub content_profile: Vec<AnatomyMetric>,
+    #[serde(default)]
+    pub compact: Option<CompactFrontier>,
+    #[serde(default)]
+    pub token_profile: Option<TokenBreakdown>,
+    #[serde(default)]
+    pub sidecars: Vec<SessionSidecarSummary>,
+    #[serde(default)]
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnatomySignal {
+    #[serde(default)]
+    pub rank: u8,
+    #[serde(default)]
+    pub group: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub value: String,
+    #[serde(default)]
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnatomyMetric {
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub count: usize,
+    #[serde(default)]
+    pub bytes: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompactFrontier {
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub line_number: Option<usize>,
+    #[serde(default)]
+    pub tail_lines: usize,
+    #[serde(default)]
+    pub tail_bytes: u64,
+    #[serde(default)]
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionSidecarSummary {
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub file_count: usize,
+    #[serde(default)]
+    pub bytes: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

@@ -857,6 +857,7 @@ impl SummaryBuilder {
             source_size_bytes: source_size_bytes(&self.path),
             parse_skip_count: self.malformed_lines,
             provider_metadata: None,
+            anatomy: None,
         }
     }
 }

@@ -324,6 +324,7 @@ impl CodexSourceAdapter {
                 .flatten(),
             parse_skip_count: 0,
             provider_metadata: None,
+            anatomy: None,
         }
     }
 
@@ -936,6 +937,7 @@ impl SummaryBuilder {
             source_size_bytes: source_size_bytes(&self.path),
             parse_skip_count: self.malformed_lines,
             provider_metadata: None,
+            anatomy: None,
         }
     }
 }

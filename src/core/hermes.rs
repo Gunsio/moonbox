@@ -419,6 +419,7 @@ impl HermesSourceAdapter {
             source_size_bytes: None,
             parse_skip_count: 0,
             provider_metadata: Some(provider_metadata),
+            anatomy: None,
         }
     }
 
