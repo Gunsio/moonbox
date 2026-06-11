@@ -55,6 +55,12 @@ and this project uses semantic versioning once tagged releases start.
   `Timeline Items`. `SessionSummary` now carries a serde-default
   `source_size_bytes` field populated for JSONL-backed Codex and Claude
   sessions, including Codex SQLite rows that point at rollout JSONL.
+- TUI Session Details now exposes value-ranked Session Anatomy for selected
+  local Codex and Claude JSONL sessions. Normal Details show the highest-value
+  continuation/trust/debug/trace signals, while zoomed Details expands bounded
+  size, event, content, compact-frontier, token, sidecar, and analyzer-note
+  sections. Large sources are tail-sampled and labeled explicitly instead of
+  blocking the UI on full-file scans.
 - Configurable compiler skill presets in `~/.config/moonbox/config.json`,
   including optional description, homepage, and GitHub stars metadata for the
   TUI Skill Picker.

@@ -1,4 +1,5 @@
 pub mod adapter;
+pub mod anatomy;
 pub mod capability;
 pub mod capsule_store;
 pub mod claude;

@@ -218,6 +218,13 @@ The first implementation focuses on the product shell:
 - Set `MOONBOX_SESSION_SUMMARY_LINE_LIMIT=0` for full summary parsing, or a positive integer to tune index latency
 - TUI timeline preview defaults to the first 300 events per selected session, with a visible truncation marker for large sessions
 - Set `MOONBOX_TIMELINE_EVENT_LIMIT=0` for full TUI timeline previews, or a positive integer to tune switching latency
+- Selected-session hydration computes bounded Session Anatomy for local Codex
+  and Claude JSONL sources. The right Session Details panel ranks high-value
+  continuation, trust, debug, and trace signals first; zoomed Details expands
+  size profile, event profile, content profile, compact frontier, token
+  profile, sidecar inventory, and analyzer notes. Large files are tail-sampled
+  instead of synchronously scanned end-to-end, and the UI labels sampled stats
+  explicitly.
 - Timeline event bodies default to a bounded 4000-character review budget, so
   zoomed Timeline panels can show long-form context without reverting to
   unbounded raw transcript rendering
@@ -1086,11 +1093,18 @@ Stable interfaces matter more than any single framework:
   Hermes stores without `messages.active` as legacy-all-active rows instead of
   aborting TUI startup, and the legacy fixture covers session listing, timeline
   loading, and local message search on that schema.
+- M89: Session Anatomy Details; selected local Codex and Claude sessions now
+  carry serde-default anatomy metadata for value-ranked Details surfaces,
+  including bounded size/event/content profiles, compact frontier, token
+  profile, and Claude sidecar inventory without reading real source stores in
+  tests.
 
 ### Remaining Milestones
 
-- Next high-priority continuation milestones are pending prioritization after
-  M87 acceptance.
+- M90: Handoff Context Builder Refactor. Moonbox should build a deterministic
+  evidence/context pack while Codex, Claude, Hermes, or a configured external
+  provider generates the formal handoff. The built-in deterministic draft
+  remains a preview/debug fallback, not the production-quality handoff brain.
 - Low-priority backlog:
   - M76: native terminal image protocol. Detect terminal raster capabilities
     such as Kitty, iTerm2, or Sixel and upgrade beyond the M79 text-cell

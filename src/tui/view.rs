@@ -15,10 +15,10 @@ use crate::{
     core::compiler,
     core::image_preview::{ImagePreviewStatus, PreviewCell, PreviewRgb, TimelineImagePreview},
     core::model::{
-        CliTool, CompilerPresetInfo, CompilerPresetKind, CompilerPresetStatus,
-        LaunchValidationState, SessionRuntimeStatus, SessionStatus, SourceAdapterReport,
-        SourceFidelityStatus, SourceProvenance, TimelineAttachment, TimelineEvent, TimelineKind,
-        VerificationReport, VerificationStatus, WorkCapsule,
+        AnatomyMetric, CliTool, CompilerPresetInfo, CompilerPresetKind, CompilerPresetStatus,
+        LaunchValidationState, SessionAnatomyStatus, SessionRuntimeStatus, SessionStatus,
+        SourceAdapterReport, SourceFidelityStatus, SourceProvenance, TimelineAttachment,
+        TimelineEvent, TimelineKind, VerificationReport, VerificationStatus, WorkCapsule,
     },
 };
 
@@ -1441,6 +1441,7 @@ fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
         ];
     };
 
+    let zoomed = app.zoomed_focus == Some(Focus::Capsule);
     let mut lines = vec![
         Line::from(Span::styled(
             "Real Session Metadata",
@@ -1464,6 +1465,11 @@ fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
             &session_portrait_summary(app, session),
             Style::default().fg(theme::CYAN),
         ),
+    ];
+
+    lines.extend(session_anatomy_summary_lines(session));
+
+    lines.extend([
         metadata_line(
             "Updated",
             &session.updated,
@@ -1500,7 +1506,7 @@ fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
             &session_health_detail(session),
             session_health_style(session.status),
         ),
-    ];
+    ]);
     if let Some(path) = &session.source_path {
         lines.push(metadata_line(
             "Path",
@@ -1508,7 +1514,278 @@ fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
             Style::default().fg(theme::MUTED),
         ));
     }
+    if zoomed {
+        lines.extend(session_anatomy_zoom_lines(session));
+    }
     lines
+}
+
+fn session_anatomy_summary_lines(
+    session: &crate::core::model::SessionSummary,
+) -> Vec<Line<'static>> {
+    let Some(anatomy) = session.anatomy.as_ref() else {
+        return Vec::new();
+    };
+
+    let mut lines = vec![metadata_line(
+        "Anatomy",
+        &anatomy_status_text(anatomy.status, anatomy.sampled),
+        anatomy_status_style(anatomy.status),
+    )];
+    if let Some(compact) = &anatomy.compact {
+        lines.push(metadata_line(
+            "Context Window",
+            &format!(
+                "{} · {} after compact",
+                format_source_size(compact.tail_bytes),
+                compact.tail_lines
+            ),
+            Style::default().fg(theme::GOLD),
+        ));
+    } else if anatomy.status != SessionAnatomyStatus::Missing {
+        lines.push(metadata_line(
+            "Context Window",
+            "no compact boundary in analyzed scope",
+            Style::default().fg(theme::MUTED),
+        ));
+    }
+    if let Some(signal) = anatomy
+        .value_signals
+        .iter()
+        .find(|signal| signal.group == "Trust")
+    {
+        lines.push(metadata_line(
+            "Trust",
+            &format!("{} · {}", signal.value, review_snippet(&signal.detail, 72)),
+            anatomy_status_style(anatomy.status),
+        ));
+    }
+    lines
+}
+
+fn session_anatomy_zoom_lines(session: &crate::core::model::SessionSummary) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::raw("")];
+    let Some(anatomy) = session.anatomy.as_ref() else {
+        lines.push(Line::from(Span::styled(
+            "Session Anatomy",
+            Style::default()
+                .fg(theme::BLUE)
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(Span::styled(
+            "No anatomy has been loaded for this session yet.",
+            Style::default().fg(theme::MUTED),
+        )));
+        return lines;
+    };
+
+    lines.push(Line::from(Span::styled(
+        "Session Anatomy",
+        Style::default()
+            .fg(theme::BLUE)
+            .add_modifier(Modifier::BOLD),
+    )));
+    lines.push(review_label_line(
+        "Scope",
+        format!(
+            "{} · {} analyzed{}",
+            anatomy.scan_scope,
+            format_source_size(anatomy.analyzed_bytes),
+            if anatomy.sampled { " · sampled" } else { "" }
+        ),
+        theme::CYAN,
+    ));
+    if let Some(lines_count) = anatomy.total_lines {
+        lines.push(review_label_line(
+            "Rows",
+            format!(
+                "{lines_count} parsed · {} malformed",
+                anatomy.malformed_lines
+            ),
+            theme::MUTED,
+        ));
+    } else {
+        lines.push(review_label_line(
+            "Rows",
+            format!("sample parsed · {} malformed", anatomy.malformed_lines),
+            theme::MUTED,
+        ));
+    }
+
+    lines.push(Line::raw(""));
+    lines.push(section_header("Value Signals"));
+    for signal in &anatomy.value_signals {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{}. {} / {}: ", signal.rank, signal.group, signal.label),
+                Style::default()
+                    .fg(value_signal_color(signal.rank))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(signal.value.clone(), Style::default().fg(theme::TEXT)),
+        ]));
+        if !signal.detail.is_empty() {
+            lines.push(Line::from(Span::styled(
+                format!("   {}", review_snippet(&signal.detail, 128)),
+                Style::default().fg(theme::MUTED),
+            )));
+        }
+    }
+
+    if let Some(compact) = &anatomy.compact {
+        lines.push(Line::raw(""));
+        lines.push(section_header("Compact Frontier"));
+        lines.push(review_label_line(
+            "Boundary",
+            match compact.line_number {
+                Some(line) => format!("{} at line {line}", compact.label),
+                None => format!("{} in analyzed sample", compact.label),
+            },
+            theme::GOLD,
+        ));
+        lines.push(review_label_line(
+            "Active Tail",
+            format!(
+                "{} · {}",
+                format_source_size(compact.tail_bytes),
+                plural_rows(compact.tail_lines)
+            ),
+            theme::GOLD,
+        ));
+    }
+
+    append_metric_section(&mut lines, "Size Profile", &anatomy.size_profile);
+    append_metric_section(&mut lines, "Event Profile", &anatomy.event_profile);
+    append_metric_section(&mut lines, "Content Profile", &anatomy.content_profile);
+
+    if !anatomy.sidecars.is_empty() {
+        lines.push(Line::raw(""));
+        lines.push(section_header("Sidecars"));
+        for sidecar in &anatomy.sidecars {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{}: ", sidecar.kind),
+                    Style::default()
+                        .fg(theme::PURPLE)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!(
+                        "{} · {}",
+                        format_source_size(sidecar.bytes),
+                        plural_files(sidecar.file_count)
+                    ),
+                    Style::default().fg(theme::TEXT),
+                ),
+            ]));
+        }
+    }
+
+    if !anatomy.notes.is_empty() {
+        lines.push(Line::raw(""));
+        lines.push(section_header("Notes"));
+        for note in &anatomy.notes {
+            lines.push(Line::from(Span::styled(
+                format!("- {}", review_snippet(note, 128)),
+                Style::default().fg(theme::MUTED),
+            )));
+        }
+    }
+
+    lines
+}
+
+fn append_metric_section(
+    lines: &mut Vec<Line<'static>>,
+    title: &'static str,
+    metrics: &[AnatomyMetric],
+) {
+    lines.push(Line::raw(""));
+    lines.push(section_header(title));
+    if metrics.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No rows in analyzed scope.",
+            Style::default().fg(theme::MUTED),
+        )));
+        return;
+    }
+    for metric in metrics {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{}: ", metric.label),
+                Style::default()
+                    .fg(theme::CYAN)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(
+                    "{} · {}",
+                    format_source_size(metric.bytes),
+                    plural_rows(metric.count)
+                ),
+                Style::default().fg(theme::TEXT),
+            ),
+        ]));
+    }
+}
+
+fn section_header(title: &'static str) -> Line<'static> {
+    Line::from(Span::styled(
+        title,
+        Style::default()
+            .fg(theme::BLUE)
+            .add_modifier(Modifier::BOLD),
+    ))
+}
+
+fn anatomy_status_text(status: SessionAnatomyStatus, sampled: bool) -> String {
+    let label = match status {
+        SessionAnatomyStatus::Missing => "missing",
+        SessionAnatomyStatus::Ready => "ready",
+        SessionAnatomyStatus::Partial => "partial",
+        SessionAnatomyStatus::Failed => "failed",
+    };
+    if sampled {
+        format!("{label} · tail sampled")
+    } else {
+        label.into()
+    }
+}
+
+fn anatomy_status_style(status: SessionAnatomyStatus) -> Style {
+    match status {
+        SessionAnatomyStatus::Ready => Style::default().fg(theme::GREEN),
+        SessionAnatomyStatus::Partial => Style::default().fg(theme::GOLD),
+        SessionAnatomyStatus::Missing => Style::default().fg(theme::MUTED),
+        SessionAnatomyStatus::Failed => {
+            Style::default().fg(theme::RED).add_modifier(Modifier::BOLD)
+        }
+    }
+}
+
+fn value_signal_color(rank: u8) -> Color {
+    match rank {
+        1 => theme::GOLD,
+        2 => theme::GREEN,
+        3 => theme::CYAN,
+        _ => theme::MUTED,
+    }
+}
+
+fn plural_rows(count: usize) -> String {
+    if count == 1 {
+        "1 row".into()
+    } else {
+        format!("{count} rows")
+    }
+}
+
+fn plural_files(count: usize) -> String {
+    if count == 1 {
+        "1 file".into()
+    } else {
+        format!("{count} files")
+    }
 }
 
 fn source_fidelity_line(app: &App, cli: CliTool) -> Line<'static> {
@@ -3801,7 +4078,7 @@ mod tests {
     #[test]
     fn header_tokens_do_not_show_fake_budget() {
         let app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
-        let screen = render_text(&app, 140, 40);
+        let screen = render_text(&app, 140, 64);
 
         assert!(!screen.contains("/ 100K"), "{screen}");
     }
@@ -3920,7 +4197,7 @@ mod tests {
         };
         app.starred_sessions = vec![star_key];
 
-        let screen = render_text(&app, 140, 40);
+        let screen = render_text(&app, 140, 64);
 
         assert_screen_contains(&screen, "* !");
     }
@@ -3939,7 +4216,7 @@ mod tests {
     #[test]
     fn session_list_renders_readable_activity_metric() {
         let app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
-        let screen = render_text(&app, 140, 40);
+        let screen = render_text(&app, 140, 64);
 
         assert_screen_contains(&screen, "42K tokens");
         assert_screen_contains(&screen, "Timeline Items");
@@ -3947,6 +4224,72 @@ mod tests {
         assert_screen_contains(&screen, "user 1 / assistant 1 / tool");
         assert_screen_contains(&screen, "4 / rewind 1");
         assert!(!screen.contains("shape U"), "{screen}");
+    }
+
+    #[test]
+    fn zoomed_session_details_surface_value_ranked_anatomy() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Capsule;
+        app.zoomed_focus = Some(Focus::Capsule);
+        app.data.sessions[app.selected_session].anatomy =
+            Some(crate::core::model::SessionAnatomy {
+                status: SessionAnatomyStatus::Ready,
+                scan_scope: "full".into(),
+                source_size_bytes: Some(2_048),
+                analyzed_bytes: 2_048,
+                sampled: false,
+                total_lines: Some(5),
+                malformed_lines: 0,
+                value_signals: vec![crate::core::model::AnatomySignal {
+                    rank: 1,
+                    group: "Continuation".into(),
+                    label: "Active tail".into(),
+                    value: "512B / 2 rows".into(),
+                    detail: "newest content after compact".into(),
+                }],
+                size_profile: vec![AnatomyMetric {
+                    label: "compacted".into(),
+                    count: 1,
+                    bytes: 1_024,
+                }],
+                event_profile: vec![AnatomyMetric {
+                    label: "token_count".into(),
+                    count: 1,
+                    bytes: 256,
+                }],
+                content_profile: vec![AnatomyMetric {
+                    label: "content:image".into(),
+                    count: 1,
+                    bytes: 128,
+                }],
+                compact: Some(crate::core::model::CompactFrontier {
+                    label: "context_compacted".into(),
+                    line_number: Some(3),
+                    tail_lines: 2,
+                    tail_bytes: 512,
+                    detail: "active tail".into(),
+                }),
+                token_profile: None,
+                sidecars: vec![crate::core::model::SessionSidecarSummary {
+                    kind: "subagents".into(),
+                    path: "/tmp/session".into(),
+                    file_count: 2,
+                    bytes: 512,
+                }],
+                notes: vec!["fixture note".into()],
+            });
+
+        let screen = render_text(&app, 140, 64);
+
+        assert_screen_contains(&screen, "Session Anatomy");
+        assert_screen_contains(&screen, "Value Signals");
+        assert_screen_contains(&screen, "Compact Frontier");
+        assert_screen_contains(&screen, "Size Profile");
+        assert_screen_contains(&screen, "compacted");
+        assert_screen_contains(&screen, "Content Profile");
+        assert_screen_contains(&screen, "content:image");
+        assert_screen_contains(&screen, "Sidecars");
+        assert_screen_contains(&screen, "subagents");
     }
 
     #[test]
@@ -3999,6 +4342,7 @@ mod tests {
             source_size_bytes: None,
             parse_skip_count: 0,
             provider_metadata: None,
+            anatomy: None,
         }
     }
 

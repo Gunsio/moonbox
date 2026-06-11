@@ -307,6 +307,7 @@ mod tests {
                 source_size_bytes: None,
                 parse_skip_count: 0,
                 provider_metadata: None,
+                anatomy: None,
             }],
             timeline: vec![TimelineEvent {
                 id: "evt-001".into(),

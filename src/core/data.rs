@@ -1,5 +1,6 @@
 use super::{
     adapter::{SourceAdapter, collect_sessions, report_from_sessions},
+    anatomy,
     compiler::{
         CapsuleCompiler, DEFAULT_COMPILER_ID, FixtureCapsuleCompiler,
         compile_with_configured_runner, compiler_catalog, default_compiler_id,
@@ -25,6 +26,7 @@ pub fn workbench_data(source: CliTool, target: CliTool) -> Result<WorkbenchData,
         .find(|session| session.cli == source)
         .cloned()
         .unwrap_or_else(|| fallback_session(source));
+    let source_session = anatomy::enrich_session_summary(source_session);
     let source_session_id = source_session.id.clone();
     let timeline = preview_timeline_for_workbench(&source_session)?;
 
@@ -77,6 +79,7 @@ pub fn workbench_data_from_session_snapshot(
     source_adapters: Vec<SourceAdapterReport>,
     target: CliTool,
 ) -> Result<WorkbenchData, CoreError> {
+    let source_session = anatomy::enrich_session_summary(source_session);
     let sessions = include_source_session(sessions, &source_session);
     let source_session_id = source_session.id.clone();
     let timeline = preview_timeline_for_workbench(&source_session)?;
@@ -210,10 +213,12 @@ fn include_source_session(
     mut sessions: Vec<SessionSummary>,
     source_session: &SessionSummary,
 ) -> Vec<SessionSummary> {
-    if !sessions
-        .iter()
-        .any(|session| session.id == source_session.id)
+    if let Some(existing) = sessions
+        .iter_mut()
+        .find(|session| session.id == source_session.id && session.cli == source_session.cli)
     {
+        *existing = source_session.clone();
+    } else {
         sessions.insert(0, source_session.clone());
     }
     sessions
@@ -623,6 +628,7 @@ fn fallback_session(source: CliTool) -> SessionSummary {
         source_size_bytes: None,
         parse_skip_count: 0,
         provider_metadata: None,
+        anatomy: None,
     }
 }
 

@@ -1042,6 +1042,7 @@ mod tests {
                     }],
                     ..ProviderSessionMetadata::default()
                 }),
+                anatomy: None,
             },
             rewind_event_id: "evt-001".into(),
             token_budget: 100,
