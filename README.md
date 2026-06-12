@@ -620,9 +620,25 @@ moonbox compilers
 moonbox compilers --json
 ```
 
-Catalog entries include their source (`Environment`, `Config`, or `Builtin`),
-status (`Ready`, `Warning`, or `Disabled`), score, command, arguments, timeout,
-and the reason behind the quality signal.
+Catalog entries include their source (`Environment`, `Config`, `Agent`, or
+`Builtin`), status (`Ready`, `Warning`, or `Disabled`), score, command,
+arguments, timeout, and the reason behind the quality signal.
+
+Agent-backed handoff skills appear in the same catalog with source `Agent`.
+Moonbox discovers generic `handoff` skills from `MOONBOX_SKILLS_DIRS`,
+`CODEX_HOME` / `MOONBOX_CODEX_HOME` `skills`, and the user's local Codex /
+agent skill homes. The Skill Picker shows Codex and Claude runner entries for
+each discovered handoff skill, plus install-hint placeholders when no handoff
+skill is installed. Agent runners are never selected implicitly as the default
+compiler; choose one in the TUI Skill Picker, pass its `--compiler
+agent:<runner>:<skill>` id, or set it as `default_compiler` after reviewing the
+preflight state. Codex handoff generation uses the Codex app-server thread
+surface with read-only sandboxing and `approvalPolicy=never`. Claude handoff
+generation uses the Claude Agent SDK through a temporary local plugin bridge and
+requires SDK/provider credentials such as `ANTHROPIC_API_KEY`, Bedrock, or
+Vertex configuration. In both cases Moonbox builds a bounded read-only context
+pack; the runner does not get permission to scan or mutate source session
+stores.
 
 Environment variables remain the highest-priority one-off override:
 
@@ -641,8 +657,8 @@ accepts comma-separated file/path prefixes to preserve while masking other paths
 Moonbox keeps local execution routing fields exact for verifiable dry-run and
 `--execute` previews, while cross-agent content payloads are redacted.
 
-Without configured presets or `MOONBOX_COMPILER`, Moonbox uses the built-in
-fixture compiler.
+Without configured presets, an explicit agent compiler choice, or
+`MOONBOX_COMPILER`, Moonbox uses the built-in fixture compiler.
 
 List configured SSH hosts without opening a connection:
 
@@ -716,14 +732,18 @@ chosen only in the launch picker. In the target picker, `j/k` moves the pending
 selection, `enter` confirms and persists it, and `Esc` / `q` cancels without
 changing the saved target. Confirming a ready or warning target prepares the
 Handoff Review in the background, shows a cancellable loading panel, and opens
-the review at the bottom where the executable actions live. `G` jumps back to
-the bottom and `gg` jumps to the top. Pressing `r` in that review restores the
-terminal first, launches the local target CLI, then returns to Moonbox with a
+the review at the bottom where the executable actions live. The loading panel
+shows the selected compiler, current job stage, elapsed time, and last progress
+message; closing the panel keeps the in-process handoff job running, and opening
+the target picker again restores the pending or ready review unless Moonbox has
+exited. `G` jumps back to the bottom and `gg` jumps to the top. Pressing `r`
+in that review restores the terminal first, launches the local target CLI, then
+returns to Moonbox with a
 three-action result panel: run again, copy command, or return. For real sessions
 using the built-in draft compiler, `r` is disabled before spawn; copy the
-command with `y` or configure an external compiler first. Pressing `enter` in
-the review is review-only and does not launch. Pressing `y` copies the actual
-target command.
+command with `y`, choose an AI handoff skill, or configure an external compiler
+first. Pressing `enter` in the review is review-only and does not launch.
+Pressing `y` copies the actual target command.
 Pressing `y` in the target picker does not copy anything. The picker keeps
 every target visible and annotates each option with `READY`, `WARN`, or
 `BLOCKED`; blocked targets keep launch review disabled until validation passes.
@@ -1155,15 +1175,85 @@ Stable interfaces matter more than any single framework:
 
 ### Remaining Milestones
 
-- M90: Handoff Context Builder Refactor. Moonbox should build a deterministic
-  evidence/context pack while Codex, Claude, Hermes, or a configured external
-  provider generates the formal handoff. The built-in deterministic draft
-  remains a preview/debug fallback, not the production-quality handoff brain.
+- M90: Agent-backed Handoff Runtime + Review UX. This merges the former SDK /
+  skill handoff milestone into the Handoff Review work and makes the
+  skill-backed AI path the production path. Users choose a source session, target
+  executor, handoff skill, and runner; Moonbox builds a bounded context pack and
+  validates the output, while Codex / Claude P0 SDK runners generate the actual
+  handoff artifact. `Capsule` remains only a legacy/internal envelope name.
+  - TODO: build the read-only `HandoffContextPack`; discover installed generic
+    handoff skills, with `handoff` preferred when present; support Codex
+    app-server / SDK and Claude Agent SDK runners; preflight install, auth,
+    provider, model, sandbox, and admin restrictions; persist background job
+    states; show loading/progress/failure/ready states in Review; keep
+    deterministic Rust output fixture/debug-only.
+  - Acceptance: fixture and isolated-home tests cover skill discovery, Codex and
+    Claude ready/auth/missing/blocked/timeout paths, invalid output, retry, copy,
+    run-disabled, long content, background restoration, and TUI resize; no test
+    opens, resumes, or launches recent real sessions.
+- M93: Opt-in Hook Event Channel Foundation. Add the hooks substrate without
+  changing user files or TUI behavior by default. Only explicit CLI or Settings
+  install writes Moonbox-marked Claude / Codex hook entries after a preview.
+  - TODO: add `hooks.enabled=false`, per-CLI install state, spool path, and GC
+    policy; implement `moonbox hooks status/install/uninstall` and
+    `moonbox hook-event`; append events fail-open to Moonbox spool with tmux/cwd
+    metadata; preserve existing user hooks and uninstall only Moonbox entries;
+    recheck official Claude and Codex hooks docs before implementation.
+  - Acceptance: fresh install leaves Claude/Codex configs untouched; install,
+    status, uninstall, idempotency, existing-hook preservation, spool rotation,
+    missing fields, write failure, and exit-0 behavior are covered with isolated
+    homes. Enabling M93 adds only Settings/status/spool-health surfaces; no live
+    row badges, waiting queue, or Enter change yet.
+- M94: Hook-gated Live Status + Waiting Queue. Use the M93 spool only when hooks
+  are enabled to show live session state and a restrained `WAITING ON YOU` queue.
+  Disabled hooks keep the current Dashboard, Timeline, status bar, and Enter
+  behavior unchanged.
+  - TODO: replay and tail spool behind the config gate; maintain
+    running/waiting/idle/dead/unknown state; show small row badges, recent action
+    summaries, Live on/stale/error status, and a non-empty-only waiting panel;
+    explain local-only or unavailable states for SSH data spaces.
+  - Acceptance: disabled baseline snapshots match current behavior; fixture
+    spool tests cover replay, tailing, state transitions, stale/error handling,
+    queue sorting, enqueue/dequeue, SSH unavailable reasons, and no source-store
+    mutation.
+- M95: Opt-in Tmux Jump + Enter Routing. Add jump-first Enter behavior only when
+  hooks are enabled and the user separately enables Smart Enter / tmux jump.
+  Default Enter behavior remains unchanged.
+  - TODO: add Smart Enter settings and behavior preview; persist `$TMUX`,
+    `$TMUX_PANE`, cwd, and session id from hook events; validate pane liveness
+    with tmux before jumping; route to Jump, Resume, Unavailable, or Disabled
+    with explicit row and command-bar hints; never create panes, send input, or
+    resume source sessions implicitly.
+  - Acceptance: default-off and hooks-on-but-Smart-Enter-off keep existing Enter;
+    fake or isolated tmux tests cover jump, resume, pane missing, socket missing,
+    non-tmux, SSH data space, and fallback reasons; manual TUI review confirms
+    prompts match behavior.
+- M96: UI Preferences: Language + Theme. Add a small configurable preference
+  system: English default, Simplified Chinese optional, and Moonbox / Tokyo Night
+  / Gruvbox themes. Dashboard only shows a Settings key; Settings owns preview
+  and persistence.
+  - TODO: introduce an i18n key catalog for Moonbox UI chrome only; keep session
+    transcript, prompts, agent output, tool output, code, paths, cwd, and branch
+    text unmodified; add a theme registry with semantic tokens; implement
+    Settings preview, apply, reset, and config persistence; keep themes
+    pluggable without scattering raw colors through views.
+  - Acceptance: TUI snapshots cover English / Simplified Chinese and all three
+    themes; narrow-window Settings does not overlap; live preview and persisted
+    config work; source session content remains byte-for-byte unchanged.
+- M92: Remote / SSH Session Detail Parity. Low-priority follow-up after the
+  handoff and hooks foundation: make SSH data-space details match local anatomy
+  quality with clear fallback when the remote Moonbox is missing or too old.
+  - TODO: return remote anatomy summaries, negotiate remote capabilities, align
+    Local / SSH detail ordering, show version/stderr/field-missing fallback
+    reasons, and handle empty or oversized fields gracefully.
+  - Acceptance: fixture / isolated SSH command tests cover compatible,
+    incompatible, missing, and failing remotes; local TUI comparison shows
+    parity without reading or mutating source stores.
 - Low-priority backlog:
   - M76: native terminal image protocol. Detect terminal raster capabilities
     such as Kitty, iTerm2, or Sixel and upgrade beyond the M79 text-cell
     preview when the terminal and local artifact path are safe. This is not a
-    blocker for Capsule, verification, redaction, or launch-ledger continuation
+    blocker for Handoff, verification, redaction, or launch-ledger continuation
     work.
 
 ### Can Build Now

@@ -25,6 +25,7 @@ use crate::core::{
 type SessionLoadResult = Result<WorkbenchData, CoreError>;
 type DataSpaceLoadResult = Result<WorkbenchData, CoreError>;
 type LaunchReviewResult = Result<WorkbenchData, CoreError>;
+type LaunchReviewReceiver = mpsc::Receiver<LaunchReviewMessage>;
 
 pub const HANDOFF_TRAIL_DURATION_MS: u64 = 720;
 const HANDOFF_TRAIL_FRAME_COUNT: usize = 6;
@@ -77,12 +78,56 @@ struct PendingLaunchReview {
     session_id: String,
     target: CliTool,
     selected_compiler: usize,
+    compiler_id: String,
     rewind_event_id: String,
     started_at: Instant,
-    receiver: mpsc::Receiver<LaunchReviewResult>,
+    stage: LaunchReviewStage,
+    stage_detail: String,
+    receiver: LaunchReviewReceiver,
 }
 
 pub const DATA_SPACE_CONFIG_FIELD_COUNT: usize = 6;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaunchReviewStage {
+    Queued,
+    PreparingContext,
+    StartingRunner,
+    RunningSkill,
+    Verifying,
+}
+
+impl LaunchReviewStage {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::PreparingContext => "preparing_context",
+            Self::StartingRunner => "starting_runner",
+            Self::RunningSkill => "running_skill",
+            Self::Verifying => "verifying",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LaunchReviewJobStatus {
+    pub stage: LaunchReviewStage,
+    pub stage_label: &'static str,
+    pub detail: String,
+    pub compiler_id: String,
+    pub elapsed_ms: u128,
+}
+
+#[derive(Debug, Clone)]
+struct LaunchReviewProgress {
+    stage: LaunchReviewStage,
+    detail: String,
+}
+
+enum LaunchReviewMessage {
+    Progress(LaunchReviewProgress),
+    Finished(Box<LaunchReviewResult>),
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DataSpaceConfigForm {
@@ -449,7 +494,10 @@ impl fmt::Debug for PendingLaunchReview {
             .field("session_id", &self.session_id)
             .field("target", &self.target)
             .field("selected_compiler", &self.selected_compiler)
+            .field("compiler_id", &self.compiler_id)
             .field("rewind_event_id", &self.rewind_event_id)
+            .field("stage", &self.stage)
+            .field("stage_detail", &self.stage_detail)
             .finish_non_exhaustive()
     }
 }
@@ -906,6 +954,7 @@ impl App {
             .position(|session| session.id == data.capsule.source_session)
             .unwrap_or(0);
         let selected_event = rewind_event_index(&data, &rewind_event_id);
+        let selected_compiler = compiler_index_for_id(&data, &data.capsule.compiler, 0);
         let doctor_report = doctor::diagnose_with_inventory(&data.sessions, &data.source_adapters);
         let mut app = Self {
             data,
@@ -913,7 +962,7 @@ impl App {
             zoomed_focus: None,
             selected_session,
             selected_event,
-            selected_compiler: 0,
+            selected_compiler,
             command_mode: false,
             command_input: String::new(),
             command_selection: 0,
@@ -943,7 +992,7 @@ impl App {
             data_space_config_field: 0,
             data_space_delete_confirmation: None,
             pending_target: target,
-            pending_compiler: 0,
+            pending_compiler: selected_compiler,
             status_message: "Ready".into(),
             rewind_event_id,
             capsule_scroll: 0,
@@ -1050,6 +1099,12 @@ impl App {
             .get(self.selected_event)
             .map(|event| event.id.clone());
         let selected_compiler = self.selected_compiler;
+        let selected_compiler_id = self
+            .data
+            .compilers
+            .get(selected_compiler)
+            .cloned()
+            .unwrap_or_else(|| self.data.capsule.compiler.clone());
         let rewind_event_id = self.rewind_event_id.clone();
 
         if !self.current_data_space().is_local() {
@@ -1083,7 +1138,7 @@ impl App {
                             .min(self.data.timeline.len().saturating_sub(1))
                     });
                 self.selected_compiler =
-                    selected_compiler.min(self.data.compilers.len().saturating_sub(1));
+                    compiler_index_for_id(&self.data, &selected_compiler_id, selected_compiler);
                 if let Some(compiler) = self.data.compilers.get(self.selected_compiler) {
                     self.data.capsule.compiler = compiler.clone();
                 }
@@ -1124,6 +1179,18 @@ impl App {
 
     pub fn is_launch_review_pending(&self) -> bool {
         self.pending_launch_review.is_some()
+    }
+
+    pub fn launch_review_job_status(&self) -> Option<LaunchReviewJobStatus> {
+        self.pending_launch_review
+            .as_ref()
+            .map(|pending| LaunchReviewJobStatus {
+                stage: pending.stage,
+                stage_label: pending.stage.label(),
+                detail: pending.stage_detail.clone(),
+                compiler_id: pending.compiler_id.clone(),
+                elapsed_ms: pending.started_at.elapsed().as_millis(),
+            })
     }
 
     pub fn current_data_space(&self) -> &dataspace::DataSpaceEntry {
@@ -1233,25 +1300,38 @@ impl App {
     }
 
     fn poll_launch_review_background(&mut self) -> bool {
-        let Some(pending) = self.pending_launch_review.take() else {
+        let Some(mut pending) = self.pending_launch_review.take() else {
             return false;
         };
 
-        match pending.receiver.try_recv() {
-            Ok(result) => {
-                self.apply_launch_review_result(pending, result);
-                true
-            }
-            Err(TryRecvError::Empty) => {
-                self.pending_launch_review = Some(pending);
-                false
-            }
-            Err(TryRecvError::Disconnected) => {
-                self.compile_status = "FAILED";
-                self.launch_review = false;
-                self.clear_handoff_trail();
-                self.set_status("Handoff review failed: worker disconnected");
-                true
+        let mut changed = false;
+        loop {
+            match pending.receiver.try_recv() {
+                Ok(LaunchReviewMessage::Progress(progress)) => {
+                    pending.stage = progress.stage;
+                    pending.stage_detail = progress.detail;
+                    self.set_status(format!(
+                        "Handoff job {}: {}",
+                        pending.stage.label(),
+                        pending.stage_detail
+                    ));
+                    changed = true;
+                }
+                Ok(LaunchReviewMessage::Finished(result)) => {
+                    self.apply_launch_review_result(pending, *result);
+                    return true;
+                }
+                Err(TryRecvError::Empty) => {
+                    self.pending_launch_review = Some(pending);
+                    return changed;
+                }
+                Err(TryRecvError::Disconnected) => {
+                    self.compile_status = "FAILED";
+                    self.launch_review = false;
+                    self.clear_handoff_trail();
+                    self.set_status("Handoff review failed: worker disconnected");
+                    return true;
+                }
             }
         }
     }
@@ -1504,15 +1584,23 @@ impl App {
         if self.is_launch_review_pending() {
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => {
-                    self.pending_launch_review = None;
                     self.show_launch = false;
                     self.launch_review = false;
                     self.modal_scroll = 0;
-                    self.clear_handoff_trail();
-                    self.set_status("Handoff review cancelled");
+                    self.set_status("Handoff job continues in background");
                 }
                 KeyCode::Enter => {
-                    self.set_status(format!("Preparing handoff review: {}", self.pending_target));
+                    if let Some(status) = self.launch_review_job_status() {
+                        self.set_status(format!(
+                            "Handoff job {}: {}",
+                            status.stage_label, status.detail
+                        ));
+                    } else {
+                        self.set_status(format!(
+                            "Preparing handoff review: {}",
+                            self.pending_target
+                        ));
+                    }
                 }
                 _ => {}
             }
@@ -2488,6 +2576,25 @@ impl App {
         if !self.ensure_session_details_ready("Launch") {
             return;
         }
+        if self.is_launch_review_pending() {
+            self.show_launch = true;
+            self.launch_review = false;
+            self.target_launch_result = None;
+            self.set_status(format!(
+                "Handoff job still running: {}",
+                self.pending_target
+            ));
+            self.pending_g = false;
+            return;
+        }
+        if self.launch_review {
+            self.show_launch = true;
+            self.target_launch_result = None;
+            self.modal_scroll = u16::MAX;
+            self.set_status(format!("Handoff review ready: {}", self.pending_target));
+            self.pending_g = false;
+            return;
+        }
         if self.current_session().is_none() {
             self.show_launch = false;
             self.set_status("No session selected");
@@ -2557,13 +2664,30 @@ impl App {
             return;
         };
         let selected_compiler = self.selected_compiler;
+        let compiler_id = self
+            .data
+            .compilers
+            .get(selected_compiler)
+            .cloned()
+            .unwrap_or_else(compiler::default_compiler_id);
         let rewind_event_id = self.rewind_event_id.clone();
         let space = self.current_data_space().clone();
         let sessions = self.data.sessions.clone();
         let source_adapters = self.data.source_adapters.clone();
         let session_id = session.id.clone();
+        let worker_session_id = session_id.clone();
+        let worker_compiler_id = compiler_id.clone();
+        let worker_rewind_event_id = rewind_event_id.clone();
         let (sender, receiver) = mpsc::channel();
         thread::spawn(move || {
+            let _ = sender.send(LaunchReviewMessage::Progress(LaunchReviewProgress {
+                stage: LaunchReviewStage::PreparingContext,
+                detail: if space.is_local() {
+                    "reading local timeline snapshot".into()
+                } else {
+                    "reading SSH timeline snapshot in read-only mode".into()
+                },
+            }));
             let result = if space.is_local() {
                 workbench::load_workbench_from_session_snapshot(
                     session,
@@ -2575,8 +2699,39 @@ impl App {
                 workbench::load_remote_workbench_from_session_snapshot(
                     &space, session, sessions, target,
                 )
-            };
-            let _ = sender.send(result);
+            }
+            .and_then(|mut data| {
+                let _ = sender.send(LaunchReviewMessage::Progress(LaunchReviewProgress {
+                    stage: LaunchReviewStage::StartingRunner,
+                    detail: format!("selected compiler {worker_compiler_id}"),
+                }));
+                let _ = sender.send(LaunchReviewMessage::Progress(LaunchReviewProgress {
+                    stage: LaunchReviewStage::RunningSkill,
+                    detail: "generating handoff artifact".into(),
+                }));
+                let Some(capsule) = workbench::compile_capsule_from_workbench_snapshot(
+                    &data,
+                    &worker_session_id,
+                    target,
+                    &worker_rewind_event_id,
+                    &worker_compiler_id,
+                )?
+                else {
+                    return Err(CoreError::Compiler(
+                        compiler::CompilerError::InvalidConfig {
+                            name: worker_compiler_id,
+                            reason: "session not found in loaded handoff context".into(),
+                        },
+                    ));
+                };
+                let _ = sender.send(LaunchReviewMessage::Progress(LaunchReviewProgress {
+                    stage: LaunchReviewStage::Verifying,
+                    detail: "normalizing and verifying review data".into(),
+                }));
+                data.capsule = capsule;
+                Ok(data)
+            });
+            let _ = sender.send(LaunchReviewMessage::Finished(Box::new(result)));
         });
 
         self.launch_review_request_id = self.launch_review_request_id.wrapping_add(1);
@@ -2585,8 +2740,11 @@ impl App {
             session_id,
             target,
             selected_compiler,
+            compiler_id,
             rewind_event_id,
             started_at: Instant::now(),
+            stage: LaunchReviewStage::Queued,
+            stage_detail: "waiting for background handoff worker".into(),
             receiver,
         });
         let _ = config::save_last_target(target);
@@ -2760,6 +2918,12 @@ impl App {
         match result {
             Ok(data) => {
                 let selected_compiler = self.selected_compiler;
+                let selected_compiler_id = self
+                    .data
+                    .compilers
+                    .get(selected_compiler)
+                    .cloned()
+                    .unwrap_or_else(|| self.data.capsule.compiler.clone());
                 self.data = data;
                 self.selected_data_space = pending.index;
                 self.data_space_selection = pending.index;
@@ -2770,7 +2934,7 @@ impl App {
                     rewind_event_index(&self.data, &initial_rewind_event_id(&self.data));
                 self.rewind_event_id = initial_rewind_event_id(&self.data);
                 self.selected_compiler =
-                    selected_compiler.min(self.data.compilers.len().saturating_sub(1));
+                    compiler_index_for_id(&self.data, &selected_compiler_id, selected_compiler);
                 self.data.capsule.compiler = self.data.compilers[self.selected_compiler].clone();
                 self.capsule_scroll = 0;
                 self.compile_status = "ACTIVE";
@@ -2818,6 +2982,12 @@ impl App {
 
         let elapsed = pending.started_at.elapsed();
         let selected_compiler = self.selected_compiler;
+        let selected_compiler_id = self
+            .data
+            .compilers
+            .get(selected_compiler)
+            .cloned()
+            .unwrap_or_else(|| self.data.capsule.compiler.clone());
         match result {
             Ok(data) => {
                 let rewind_event_id = initial_rewind_event_id(&data);
@@ -2833,7 +3003,7 @@ impl App {
                     .min(self.data.sessions.len().saturating_sub(1));
                 self.selected_event = selected_event;
                 self.selected_compiler =
-                    selected_compiler.min(self.data.compilers.len().saturating_sub(1));
+                    compiler_index_for_id(&self.data, &selected_compiler_id, selected_compiler);
                 self.data.capsule.compiler = self.data.compilers[self.selected_compiler].clone();
                 self.rewind_event_id = rewind_event_id;
                 self.capsule_scroll = 0;
@@ -2871,6 +3041,7 @@ impl App {
         }
 
         let elapsed = pending.started_at.elapsed();
+        let review_was_visible = self.show_launch;
         match result {
             Ok(data) => {
                 self.data = data;
@@ -2885,8 +3056,12 @@ impl App {
                 self.selected_event = self
                     .selected_event
                     .min(self.data.timeline.len().saturating_sub(1));
-                self.selected_compiler = pending
-                    .selected_compiler
+                self.selected_compiler = self
+                    .data
+                    .compilers
+                    .iter()
+                    .position(|compiler| compiler == &pending.compiler_id)
+                    .unwrap_or(pending.selected_compiler)
                     .min(self.data.compilers.len().saturating_sub(1));
                 if let Some(compiler) = self.data.compilers.get(self.selected_compiler).cloned() {
                     self.data.capsule.compiler = compiler;
@@ -2900,18 +3075,26 @@ impl App {
                     self.selected_event = rewind_event_index(&self.data, &self.rewind_event_id);
                 }
                 self.pending_target = pending.target;
-                self.show_launch = true;
+                self.show_launch = review_was_visible;
                 self.launch_review = true;
                 self.target_launch_result = None;
                 self.compile_status = "ACTIVE";
                 self.verify_passed = true;
                 self.modal_scroll = u16::MAX;
                 self.pending_g = false;
-                self.set_status(format!(
-                    "Handoff review ready: {} ({} ms)",
-                    pending.target,
-                    elapsed.as_millis()
-                ));
+                if review_was_visible {
+                    self.set_status(format!(
+                        "Handoff review ready: {} ({} ms)",
+                        pending.target,
+                        elapsed.as_millis()
+                    ));
+                } else {
+                    self.set_status(format!(
+                        "Handoff ready in background: {} ({} ms)",
+                        pending.target,
+                        elapsed.as_millis()
+                    ));
+                }
             }
             Err(error) => {
                 self.compile_status = "FAILED";
@@ -3028,7 +3211,7 @@ impl App {
         if compiler::compiler_is_builtin(&capsule.compiler)
             && session.source_provenance != SourceProvenance::Fixture
         {
-            self.set_status("Draft capsule cannot run; press y to copy or configure a compiler");
+            self.set_status("Draft handoff cannot run; press y to copy or choose an AI skill");
             return;
         }
         let continuation = continuation::build_continuation_protocol(
@@ -3259,6 +3442,14 @@ fn rewind_event_index(data: &WorkbenchData, rewind_event_id: &str) -> usize {
         .unwrap_or_else(|| data.timeline.len().saturating_sub(1))
 }
 
+fn compiler_index_for_id(data: &WorkbenchData, compiler_id: &str, fallback: usize) -> usize {
+    data.compilers
+        .iter()
+        .position(|candidate| candidate == compiler_id)
+        .unwrap_or(fallback)
+        .min(data.compilers.len().saturating_sub(1))
+}
+
 fn timeline_event_is_visible(data: &WorkbenchData, rewind_event_id: &str, index: usize) -> bool {
     data.timeline
         .get(index)
@@ -3426,30 +3617,36 @@ mod tests {
         app
     }
 
-    fn settle_session_load(app: &mut App) {
-        for _ in 0..100 {
+    fn wait_for_background(app: &mut App, mut done: impl FnMut(&App) -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
             app.poll_background();
-            if !app.is_session_load_pending() {
+            if done(app) {
                 return;
             }
-            std::thread::sleep(std::time::Duration::from_millis(2));
+            std::thread::sleep(Duration::from_millis(5));
         }
         app.poll_background();
+    }
+
+    fn settle_session_load(app: &mut App) {
+        wait_for_background(app, |app| !app.is_session_load_pending());
         assert!(
             !app.is_session_load_pending(),
             "session load did not finish"
         );
     }
 
+    fn settle_data_space_load(app: &mut App) {
+        wait_for_background(app, |app| app.pending_data_space_load.is_none());
+        assert!(
+            app.pending_data_space_load.is_none(),
+            "data space load did not finish"
+        );
+    }
+
     fn settle_launch_review(app: &mut App) {
-        for _ in 0..100 {
-            app.poll_background();
-            if !app.is_launch_review_pending() {
-                return;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(2));
-        }
-        app.poll_background();
+        wait_for_background(app, |app| !app.is_launch_review_pending());
         assert!(
             !app.is_launch_review_pending(),
             "launch review did not finish"
@@ -3602,12 +3799,7 @@ mod tests {
         ];
 
         app.handle_key(key('}'));
-        for _ in 0..20 {
-            if app.poll_background() {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
+        settle_data_space_load(&mut app);
 
         assert_eq!(app.selected_data_space, 1);
         assert!(app.status_message.contains("Data space: Devbox"));
@@ -3642,12 +3834,7 @@ mod tests {
 
         app.handle_key(KeyEvent::from(KeyCode::Enter));
         assert!(!app.show_data_spaces);
-        for _ in 0..20 {
-            if app.poll_background() {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
+        settle_data_space_load(&mut app);
 
         assert_eq!(app.selected_data_space, 1);
         assert!(app.status_message.contains("Data space: Review"));
@@ -4097,6 +4284,37 @@ Host devbox
     }
 
     #[test]
+    fn launch_review_worker_compiles_selected_compiler() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        let compiler_index = app
+            .data
+            .compilers
+            .iter()
+            .position(|compiler| compiler == "design-review")
+            .expect("design-review compiler");
+        app.selected_compiler = compiler_index;
+
+        app.handle_key(key('H'));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        settle_launch_review(&mut app);
+
+        assert!(app.launch_review);
+        assert_eq!(app.data.capsule.compiler, "design-review");
+        assert_eq!(app.data.capsule.state, "draft_from_builtin_compiler");
+        assert!(
+            app.data
+                .capsule
+                .decisions
+                .iter()
+                .any(|decision| { decision.contains("built-in deterministic draft compiler") })
+        );
+        assert!(
+            app.status_message
+                .starts_with("Handoff review ready: Hermes")
+        );
+    }
+
+    #[test]
     fn handoff_trail_starts_for_review_and_expires_under_800ms() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
 
@@ -4122,12 +4340,43 @@ Host devbox
         app.handle_key(key('x'));
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
         assert!(app.handoff_trail_frame().is_some());
+        settle_launch_review(&mut app);
 
         app.handle_key(key('q'));
 
         assert!(!app.show_launch);
         assert!(!app.launch_review);
         assert!(app.handoff_trail_frame().is_none());
+    }
+
+    #[test]
+    fn hiding_pending_launch_review_keeps_background_job() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+
+        app.handle_key(key('x'));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        assert!(app.is_launch_review_pending());
+
+        app.handle_key(key('q'));
+
+        assert!(!app.show_launch);
+        assert!(app.is_launch_review_pending());
+        assert_eq!(app.status_message, "Handoff job continues in background");
+
+        settle_launch_review(&mut app);
+
+        assert!(!app.show_launch);
+        assert!(app.launch_review);
+        assert!(
+            app.status_message
+                .starts_with("Handoff ready in background: Hermes")
+        );
+
+        app.handle_key(key('x'));
+
+        assert!(app.show_launch);
+        assert!(app.launch_review);
+        assert_eq!(app.status_message, "Handoff review ready: Hermes");
     }
 
     #[test]
@@ -4319,7 +4568,7 @@ Host devbox
         assert!(app.take_pending_launch().is_none());
         assert_eq!(
             app.status_message,
-            "Draft capsule cannot run; press y to copy or configure a compiler"
+            "Draft handoff cannot run; press y to copy or choose an AI skill"
         );
     }
 

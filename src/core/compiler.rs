@@ -13,6 +13,7 @@ use std::{
 
 use super::{
     config::{self, CompilerPresetConfig},
+    handoff::{self, AgentRunner},
     model::{
         CapsuleCompileOutput, CapsuleCompileRequest, CapsuleCoverage, ChecklistItem,
         CompilerPresetInfo, CompilerPresetKind, CompilerPresetStatus, RawSourceMap, RawSourceRef,
@@ -350,6 +351,9 @@ impl CapsuleCompiler for FixtureCapsuleCompiler {
                     format!("source health: {source_health}"),
                 ],
                 risks,
+                handoff_artifact: None,
+                handoff_runner: None,
+                handoff_skill: None,
                 raw_source_map: None,
                 raw_refs: Vec::new(),
                 coverage: CapsuleCoverage::default(),
@@ -466,6 +470,9 @@ fn capsule_summary_text(capsule: &WorkCapsule) -> String {
             .iter()
             .map(|value| normalize_for_coverage(value)),
     );
+    if let Some(artifact) = &capsule.handoff_artifact {
+        parts.push(normalize_for_coverage(artifact));
+    }
     parts.join("\n")
 }
 
@@ -553,10 +560,82 @@ pub fn compiler_catalog_entries() -> Vec<CompilerPresetInfo> {
     for preset in config::load_compiler_presets() {
         push_unique_compiler(&mut compilers, preset_info(&preset));
     }
+    let handoff_skills = handoff::discover_handoff_skills();
+    if handoff_skills.is_empty() {
+        for runner in [AgentRunner::Codex, AgentRunner::Claude] {
+            push_unique_compiler(&mut compilers, missing_handoff_skill_info(runner));
+        }
+    } else {
+        for skill in handoff_skills {
+            for runner in [AgentRunner::Codex, AgentRunner::Claude] {
+                let preflight = handoff::runner_preflight(runner);
+                push_unique_compiler(
+                    &mut compilers,
+                    CompilerPresetInfo {
+                        id: handoff::compiler_id(runner, &skill.id),
+                        kind: CompilerPresetKind::Agent,
+                        status: preflight.status,
+                        score: if preflight.status == CompilerPresetStatus::Ready {
+                            95
+                        } else {
+                            30
+                        },
+                        command: preflight.command,
+                        args: vec![format!("skill={}", skill.path.display())],
+                        timeout_ms: env::var("MOONBOX_AGENT_HANDOFF_TIMEOUT_MS")
+                            .ok()
+                            .and_then(|value| value.parse::<u64>().ok()),
+                        reason: preflight.reason,
+                        description: Some(format!(
+                            "{} runner using community handoff skill: {}",
+                            runner.label(),
+                            if skill.description.trim().is_empty() {
+                                skill.name.as_str()
+                            } else {
+                                skill.description.as_str()
+                            }
+                        )),
+                        homepage: None,
+                        github_stars: None,
+                    },
+                );
+            }
+        }
+    }
     for id in FIXTURE_COMPILER_IDS {
         push_unique_compiler(&mut compilers, builtin_info(id));
     }
     compilers
+}
+
+fn missing_handoff_skill_info(runner: AgentRunner) -> CompilerPresetInfo {
+    let preflight = handoff::runner_preflight(runner);
+    CompilerPresetInfo {
+        id: handoff::compiler_id(runner, "handoff"),
+        kind: CompilerPresetKind::Agent,
+        status: CompilerPresetStatus::Warning,
+        score: 20,
+        command: preflight.command,
+        args: vec![
+            "skill=not-installed".into(),
+            "install=community handoff skill".into(),
+        ],
+        timeout_ms: env::var("MOONBOX_AGENT_HANDOFF_TIMEOUT_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok()),
+        reason: format!(
+            "skill_not_installed: install a generic handoff skill into CODEX_HOME/skills or set MOONBOX_SKILLS_DIRS; runner preflight: {}",
+            preflight.reason
+        ),
+        description: Some(format!(
+            "{} runner placeholder for the community `handoff` skill.",
+            runner.label()
+        )),
+        homepage: Some(
+            "https://github.com/mattpocock/skills/tree/main/skills/productivity/handoff".into(),
+        ),
+        github_stars: None,
+    }
 }
 
 pub fn compiler_is_builtin(id: &str) -> bool {
@@ -566,6 +645,9 @@ pub fn compiler_is_builtin(id: &str) -> bool {
 pub fn compile_with_configured_runner(
     request: &CapsuleCompileRequest,
 ) -> Result<CapsuleCompileOutput, CompilerError> {
+    if let Some(spec) = handoff::parse_compiler_id(&request.compiler) {
+        return handoff::compile_with_agent_runner(request, spec);
+    }
     if let Some(compiler_id) = configured_process_compiler_id()
         && request.compiler == compiler_id
     {
@@ -811,6 +893,7 @@ fn select_default_compiler(
         .iter()
         .find(|compiler| {
             compiler.kind != CompilerPresetKind::Builtin
+                && compiler.kind != CompilerPresetKind::Agent
                 && compiler.status == CompilerPresetStatus::Ready
         })
         .map(|compiler| compiler.id.clone())
@@ -1114,6 +1197,22 @@ sleep 1
     }
 
     #[test]
+    fn missing_handoff_skill_placeholder_points_to_install_source() {
+        let info = missing_handoff_skill_info(AgentRunner::Codex);
+
+        assert_eq!(info.id, "agent:codex:handoff");
+        assert_eq!(info.kind, CompilerPresetKind::Agent);
+        assert_eq!(info.status, CompilerPresetStatus::Warning);
+        assert!(info.score < builtin_info(DEFAULT_COMPILER_ID).score);
+        assert!(info.reason.contains("skill_not_installed"));
+        assert!(info.reason.contains("MOONBOX_SKILLS_DIRS"));
+        assert_eq!(
+            info.homepage.as_deref(),
+            Some("https://github.com/mattpocock/skills/tree/main/skills/productivity/handoff")
+        );
+    }
+
+    #[test]
     fn default_compiler_prefers_ready_external_preset_over_builtin_draft() {
         let external = CompilerPresetInfo {
             id: "production-skill".into(),
@@ -1131,6 +1230,30 @@ sleep 1
         let catalog = vec![builtin_info(DEFAULT_COMPILER_ID), external];
 
         assert_eq!(select_default_compiler(None, &catalog), "production-skill");
+    }
+
+    #[test]
+    fn default_compiler_does_not_auto_select_agent_runner() {
+        let agent = CompilerPresetInfo {
+            id: "agent:codex:handoff".into(),
+            kind: CompilerPresetKind::Agent,
+            status: CompilerPresetStatus::Ready,
+            score: 95,
+            command: Some("codex".into()),
+            args: vec!["skill=/skills/handoff/SKILL.md".into()],
+            timeout_ms: Some(180_000),
+            reason: "ready".into(),
+            description: None,
+            homepage: None,
+            github_stars: None,
+        };
+        let catalog = vec![agent, builtin_info(DEFAULT_COMPILER_ID)];
+
+        assert_eq!(select_default_compiler(None, &catalog), DEFAULT_COMPILER_ID);
+        assert_eq!(
+            select_default_compiler(Some("agent:codex:handoff".into()), &catalog),
+            "agent:codex:handoff"
+        );
     }
 
     #[test]

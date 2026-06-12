@@ -356,6 +356,23 @@ pub fn compile_capsule_for_session_id(
     .map(Some)
 }
 
+pub fn compile_capsule_from_timeline_snapshot(
+    source_session: SessionSummary,
+    target: CliTool,
+    timeline: CanonicalTimeline,
+    rewind_event_id: &str,
+    compiler: &str,
+) -> Result<WorkCapsule, CoreError> {
+    let source_session = anatomy::enrich_session_summary(source_session);
+    compile_capsule_for_session(
+        &source_session,
+        target,
+        &timeline,
+        rewind_event_id,
+        compiler,
+    )
+}
+
 pub fn launch_artifacts_for_session_id(
     session_id: &str,
     target: CliTool,
@@ -485,6 +502,9 @@ fn pending_work_capsule(
         risks: vec![
             "Launch and verify remain blocked until a real rewind event is selected.".into(),
         ],
+        handoff_artifact: None,
+        handoff_runner: None,
+        handoff_skill: None,
         raw_source_map: None,
         raw_refs: Vec::new(),
         coverage: CapsuleCoverage::default(),
