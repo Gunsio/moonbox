@@ -707,7 +707,12 @@ Moonbox writes and removes only its own config and does not modify
 `Data: SSH: <host>` instead of only showing the host alias. Remote spaces are
 read-only inventory sources: Moonbox runs `ssh <target> <inventory command>`,
 imports the returned session summaries, and then hydrates the selected session
-timeline with a remote `compile-request --json` dry run.
+timeline and Session Details with a remote `compile-request --json` dry run.
+When the remote Moonbox is current, the selected session carries the same
+bounded anatomy summary as local details: raw size, timeline composition,
+compact frontier, token/profile signals, sidecars, and analyzer notes. Older
+remote binaries that omit anatomy degrade explicitly with a `remote-unavailable`
+note instead of attempting to read remote source paths from the local machine.
 Switching never opens or resumes a remote session. The remote command searches
 `moonbox` and `moon` on `PATH` after adding common user install directories
 such as `~/.local/bin` and `~/.cargo/bin`; override it with
@@ -1318,19 +1323,15 @@ Stable interfaces matter more than any single framework:
   covers Moonbox chrome and Handoff Review labels while preserving source
   session transcripts, prompts, agent output, tool output, code, paths, cwd,
   branch names, metadata, and handoff content byte-for-byte.
+- M92: Remote / SSH Session Detail Parity; SSH data spaces now hydrate selected
+  session details from the remote `compile-request --json` response, preserving
+  remote-computed bounded anatomy in the same Details / Zoom Details rendering
+  path used by local sessions. Remote inventories stay lightweight and read-only;
+  older remote Moonbox binaries that do not return anatomy show a clear
+  `remote-unavailable` note instead of misleading local path errors.
 
 ### Remaining Milestones
 
-- M92: Remote / SSH Session Detail Parity. Deferred low-priority follow-up
-  after handoff, hooks, Smart Enter, and preferences: make SSH data-space
-  details match local anatomy quality with clear fallback when the remote
-  Moonbox is missing, failing, or too old.
-  - TODO: return remote anatomy summaries, negotiate remote capabilities, align
-    Local / SSH detail ordering, show version, exit status, stderr, and missing
-    field fallback reasons, and handle empty or oversized fields gracefully.
-  - Acceptance: fixture / isolated SSH command tests cover compatible,
-    incompatible, missing, and failing remotes; local TUI comparison shows
-    parity without reading, resuming, or mutating source stores.
 - Low-priority backlog:
   - M76: native terminal image protocol. Detect terminal raster capabilities
     such as Kitty, iTerm2, or Sixel and upgrade beyond the M79 text-cell

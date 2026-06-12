@@ -142,6 +142,11 @@ and this project uses semantic versioning once tagged releases start.
   saving, supports reset and unsaved row indicators, persists only to Moonbox
   config, and keeps session transcripts, prompts, agent output, tool output,
   code, paths, cwd, branch names, metadata, and handoff content unmodified.
+- SSH data-space selected-session details now use the remote
+  `compile-request --json` response as the detail source, preserving bounded
+  anatomy computed on the remote host instead of trying to read remote paths on
+  the local machine. Older remote Moonbox binaries that omit anatomy now show a
+  clear `remote-unavailable` fallback note in Zoom Details.
 - Configurable compiler skill presets in `~/.config/moonbox/config.json`,
   including optional description, homepage, and GitHub stars metadata for the
   TUI Skill Picker.
