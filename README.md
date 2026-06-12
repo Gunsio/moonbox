@@ -233,6 +233,10 @@ The first implementation focuses on the product shell:
 - TUI session filtering is cached and the session list renders only the visible window, so large real indexes do not require formatting every row on every frame
 - Set `MOONBOX_SESSION_MODE=fixture` to disable real source stores and force embedded fixture sessions
 - Auto discovery only falls back to fixture sessions when no real source stores are present; real and fixture sources are not mixed
+- Opt-in Claude/Codex hook event capture through `moonbox hooks`. Fresh runs do
+  not modify provider config or tail hook spools; `hooks install` previews the
+  exact edits and `hooks install --apply` is required before Moonbox writes its
+  own config plus provider hook entries.
 - Source filter defaults to `All`; `Source` is a session-list filter, not a global handoff mode
 - `moonbox sessions --filter <source>` lists one source while keeping default output as the time-sorted global session index
 - `moonbox sessions --json` keeps the stable session array shape and annotates each session with `source_provenance`, `source_path`, and `parse_skip_count`
@@ -702,6 +706,34 @@ such as `~/.local/bin` and `~/.cargo/bin`; override it with
 `MOONBOX_REMOTE_BIN=/path/to/moonbox` when needed. For local tests, set
 `MOONBOX_SSH_CONFIG=/path/to/ssh_config` to point at a fixture config.
 
+Inspect and configure opt-in Claude/Codex hook event capture:
+
+```bash
+moonbox hooks status
+moonbox hooks status --json
+moonbox hooks install
+moonbox hooks install --apply
+moonbox hooks uninstall --apply
+```
+
+Hooks are disabled by default. `install` without `--apply` is a dry-run
+preview; `--apply` writes `hooks.enabled=true` to Moonbox config and appends
+only Moonbox-owned command hooks to Claude `settings.json` and Codex
+`hooks.json`. Moonbox preserves existing user hooks, does not write Codex trust
+state, and uninstall removes only entries whose command calls `hook-event
+--cli claude|codex`. Codex may still require review in `/hooks` before it runs
+the new command hooks, and provider hooks affect only sessions started after the
+config change.
+
+`moonbox hook-event --cli claude|codex` is the silent handler invoked by those
+provider hooks. It reads the provider JSON event from stdin, adds timestamp,
+cwd, `$TMUX`, and `$TMUX_PANE`, then appends one JSONL row to
+`$MOONBOX_HOME/spool/events.jsonl` or `$MOONBOX_HOOK_SPOOL`. The handler is
+fail-open and exits 0 even when the spool cannot be written. Spool rotation is
+size-bounded through `hooks.spool_max_bytes` and `hooks.spool_max_files` in
+Moonbox config. M93 exposes status and spool health only; live row badges,
+waiting queues, and tmux jump routing are later opt-in milestones.
+
 Generate shell completions with:
 
 ```bash
@@ -760,12 +792,12 @@ readiness detail rows from the verifier report, with blocking failures and
 warnings prioritized over pass checks. The top bar collapses compiler state,
 environment diagnostics, and verifier readiness into one `Pre-flight:
 PASS/WARN/BLOCKED` signal with Strong, Medium, or Weak confidence language.
-Press `D` or run `:doctor` to open the Pre-flight panel; `v` refreshes verifier
-evidence, `r` refreshes diagnostics, and `y` copies the JSON report. The panel
-shows compiler, Doctor, and verifier evidence before adapter provenance, store
-path, session count, skipped record count, and last indexed timestamp. It is
-read-only and does not load timelines, resume sessions, launch targets, or
-spawn target binaries.
+Press `D` or run `:doctor` / `:hooks` to open the Pre-flight panel; `v`
+refreshes verifier evidence, `r` refreshes diagnostics, and `y` copies the JSON
+report. The panel shows compiler, Doctor, and verifier evidence before adapter
+provenance, store path, session count, skipped record count, and last indexed
+timestamp. It is read-only and does not load timelines, resume sessions, launch
+targets, or spawn target binaries.
 
 Press `:` to open the floating Command Palette. It filters commands with fuzzy
 matching, shows command descriptions, parameters, aliases, and dry-run / review
@@ -1198,30 +1230,19 @@ Stable interfaces matter more than any single framework:
   they can enter the runnable Review path. The user-facing path stays
   skill-first: source session, target executor, handoff skill, runner SDK,
   review, then explicit launch.
+- M93: Opt-in Hook Event Channel Foundation; `moonbox hooks
+  status/install/uninstall` reports Moonbox enablement, provider injection
+  state, Codex feature gating, and spool health. Install and uninstall are
+  preview-first unless `--apply` is passed, preserve existing Claude/Codex
+  hooks, and remove only Moonbox-owned `hook-event --cli <provider>` entries.
+  `moonbox hook-event` appends provider hook JSON to a Moonbox-owned JSONL spool
+  with cwd/tmux metadata, size-bounded rotation, and fail-open exit-0 behavior.
+  The TUI exposes hook status through `:hooks` / Doctor only; live status,
+  waiting queues, and tmux jump behavior remain off until later opt-in
+  milestones.
 
 ### Remaining Milestones
 
-- M93: Opt-in Hook Event Channel Foundation. Add the hooks substrate without
-  changing user files or TUI behavior by default. Hooks are a configurable
-  integration, not part of first-run behavior: install is off until a user
-  opens Settings or runs an explicit CLI command, reviews the exact file edits,
-  and confirms apply.
-  - TODO: add `hooks.enabled=false`, per-CLI install state, spool path, and GC
-    policy; implement `moonbox hooks status/install/uninstall` and
-    `moonbox hook-event`; add a Settings preview that lists every planned edit
-    to Claude / Codex config, the restart/new-session requirement, spool path,
-    retention policy, and uninstall effect; append hook events fail-open to a
-    Moonbox-owned spool with tmux/cwd metadata; preserve existing user hooks,
-    never import all OpenSSH or CLI config entries implicitly, and uninstall
-    only Moonbox-owned entries; recheck official Claude and Codex hooks docs
-    before implementation.
-  - Acceptance: fresh install leaves Claude/Codex configs untouched and the
-    Dashboard only exposes a Settings entry. Dry-run preview is available in CLI
-    and TUI before writes. Apply, status, uninstall, idempotency, existing-hook
-    preservation, invalid config, spool rotation, missing fields, write failure,
-    and exit-0 behavior are covered with isolated homes. Enabling M93 changes
-    only hook status/spool health surfaces; no live row badges, waiting queue,
-    or Enter behavior changes yet.
 - M94: Hook-gated Live Status + Waiting Queue. Use the M93 spool only when hooks
   are enabled to show live session state and a restrained `WAITING ON YOU`
   queue. Disabled hooks keep the current Dashboard, Timeline, status bar, and

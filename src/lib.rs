@@ -48,6 +48,11 @@ pub fn run() -> Result<()> {
         Command::CompileOutput(args) => print_compile_output(args),
         Command::Compilers(args) => print_compilers(args),
         Command::Ssh(args) => print_ssh_hosts(args),
+        Command::Hooks(args) => print_hooks(args),
+        Command::HookEvent(args) => {
+            core::hooks::capture_event(hook_provider_arg(args.cli));
+            Ok(())
+        }
         Command::Doctor(args) => print_doctor(args),
         Command::Snapshot(args) => print_workspace_snapshot(args),
         Command::Completions(args) => print_completions(args),
@@ -589,6 +594,143 @@ fn print_ssh_hosts(args: cli::JsonArgs) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn print_hooks(args: cli::HooksArgs) -> Result<()> {
+    match args
+        .command
+        .unwrap_or(cli::HooksCommand::Status(cli::HooksStatusArgs {
+            json: false,
+        })) {
+        cli::HooksCommand::Status(args) => print_hooks_status(args),
+        cli::HooksCommand::Install(args) => {
+            print_hooks_apply(core::hooks::HookAction::Install, args)
+        }
+        cli::HooksCommand::Uninstall(args) => {
+            print_hooks_apply(core::hooks::HookAction::Uninstall, args)
+        }
+    }
+}
+
+fn print_hooks_status(args: cli::HooksStatusArgs) -> Result<()> {
+    let report = core::hooks::status_report();
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "hooks: {}",
+            if report.moonbox_enabled {
+                "enabled"
+            } else {
+                "disabled"
+            }
+        );
+        if let Some(path) = &report.moonbox_config_path {
+            println!("moonbox_config: {path}");
+        }
+        print_hook_spool(&report.spool);
+        for provider in &report.providers {
+            print_hook_provider_status(provider);
+        }
+        print_hook_notes(&report.notes);
+    }
+    Ok(())
+}
+
+fn print_hooks_apply(action: core::hooks::HookAction, args: cli::HooksApplyArgs) -> Result<()> {
+    let providers = hook_targets(args.cli);
+    let report = core::hooks::apply(action, &providers, args.apply)?;
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        let action_label = match action {
+            core::hooks::HookAction::Install => "install",
+            core::hooks::HookAction::Uninstall => "uninstall",
+        };
+        println!(
+            "hooks {action_label}: {}",
+            if report.dry_run { "dry-run" } else { "applied" }
+        );
+        if let Some(path) = &report.moonbox_config_path {
+            println!(
+                "moonbox_config: {path}  enabled {} -> {}",
+                report.moonbox_enabled_before, report.moonbox_enabled_after
+            );
+        }
+        print_hook_spool(&report.spool);
+        for change in &report.providers {
+            print_hook_provider_change(change);
+        }
+        print_hook_notes(&report.notes);
+    }
+    Ok(())
+}
+
+fn print_hook_spool(spool: &core::hooks::HookSpoolReport) {
+    println!(
+        "spool: {}  exists={} bytes={} max_bytes={} max_files={}",
+        spool.path, spool.exists, spool.bytes, spool.max_bytes, spool.max_files
+    );
+}
+
+fn print_hook_provider_status(provider: &core::hooks::HookProviderReport) {
+    let path = provider.config_path.as_deref().unwrap_or("-");
+    let feature = provider
+        .feature_enabled
+        .map(|enabled| format!(" feature_enabled={enabled}"))
+        .unwrap_or_default();
+    println!(
+        "{}: installed={} entries={} config_exists={} config_valid={}{} path={}",
+        provider.provider.display().to_ascii_lowercase(),
+        provider.installed,
+        provider.moonbox_entry_count,
+        provider.config_exists,
+        provider.config_valid,
+        feature,
+        path
+    );
+    println!("  reason: {}", provider.reason);
+}
+
+fn print_hook_provider_change(change: &core::hooks::HookProviderChange) {
+    let path = change.config_path.as_deref().unwrap_or("-");
+    println!(
+        "{}: action={:?} changed={} entries {} -> {} path={}",
+        change.provider.display().to_ascii_lowercase(),
+        change.action,
+        change.changed,
+        change.before_entries,
+        change.after_entries,
+        path
+    );
+    if let Some(error) = &change.error {
+        println!("  error: {error}");
+    }
+}
+
+fn print_hook_notes(notes: &[String]) {
+    if notes.is_empty() {
+        return;
+    }
+    println!("notes:");
+    for note in notes {
+        println!("- {note}");
+    }
+}
+
+fn hook_targets(target: Option<cli::HookTarget>) -> Vec<core::hooks::HookProvider> {
+    match target.unwrap_or(cli::HookTarget::All) {
+        cli::HookTarget::All => core::hooks::default_providers(),
+        cli::HookTarget::Claude => vec![core::hooks::HookProvider::Claude],
+        cli::HookTarget::Codex => vec![core::hooks::HookProvider::Codex],
+    }
+}
+
+fn hook_provider_arg(provider: cli::HookProviderArg) -> core::hooks::HookProvider {
+    match provider {
+        cli::HookProviderArg::Claude => core::hooks::HookProvider::Claude,
+        cli::HookProviderArg::Codex => core::hooks::HookProvider::Codex,
+    }
 }
 
 fn ssh_target_display(host: &core::ssh::SshHostEntry) -> String {

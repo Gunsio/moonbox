@@ -15,6 +15,7 @@ pub mod error;
 pub mod fixture;
 pub mod handoff;
 pub mod hermes;
+pub mod hooks;
 pub mod image_preview;
 pub mod launch_ledger;
 pub mod launcher;

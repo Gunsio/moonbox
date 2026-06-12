@@ -116,6 +116,12 @@ and this project uses semantic versioning once tagged releases start.
   with install guidance instead of silently falling back to hidden assumptions;
   ready agent runners must be selected explicitly or configured as the default
   compiler before they run.
+- Opt-in hook event channel foundation through `moonbox hooks
+  status/install/uninstall` and the silent `moonbox hook-event` handler.
+  Provider config writes are preview-first, require `--apply`, preserve existing
+  Claude/Codex hooks, remove only Moonbox-owned entries, report Codex feature
+  gating and trust-review limits, and append fail-open JSONL events with
+  cwd/tmux metadata to a size-bounded Moonbox spool.
 - Configurable compiler skill presets in `~/.config/moonbox/config.json`,
   including optional description, homepage, and GitHub stars metadata for the
   TUI Skill Picker.
