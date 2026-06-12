@@ -80,9 +80,26 @@ pub fn workbench_data_from_session_snapshot(
     target: CliTool,
 ) -> Result<WorkbenchData, CoreError> {
     let source_session = anatomy::enrich_session_summary(source_session);
+    let timeline = preview_timeline_for_workbench(&source_session)?;
+    workbench_data_from_timeline_snapshot(
+        source_session,
+        sessions,
+        source_adapters,
+        target,
+        timeline,
+    )
+}
+
+pub fn workbench_data_from_timeline_snapshot(
+    source_session: SessionSummary,
+    sessions: Vec<SessionSummary>,
+    source_adapters: Vec<SourceAdapterReport>,
+    target: CliTool,
+    timeline: CanonicalTimeline,
+) -> Result<WorkbenchData, CoreError> {
+    let source_session = anatomy::enrich_session_summary(source_session);
     let sessions = include_source_session(sessions, &source_session);
     let source_session_id = source_session.id.clone();
-    let timeline = preview_timeline_for_workbench(&source_session)?;
     let rewind_event_id = rewind_event_id_for_timeline(&source_session_id, &timeline);
     let compiler = default_compiler_id();
     let capsule = workbench_capsule_for_session(

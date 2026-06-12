@@ -52,7 +52,8 @@
   <text x="100" y="168" class="mono" font-size="14" font-weight="800" fill="#b284ff">Clu</text>
   <text x="145" y="168" class="mono" font-size="14" font-weight="500" fill="#8b949e">QC platf</text>
   <text x="217" y="168" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="168" class="mono" font-size="14" font-weight="800" fill="#e6be53">Capsule Review</text>
+  <text x="235" y="168" class="mono" font-size="14" font-weight="800" fill="#e6be53">Capsule 审</text>
+  <text x="325" y="168" class="mono" font-size="14" font-weight="800" fill="#e6be53">阅</text>
   <text x="1270" y="168" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1441" y="168" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="186" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
@@ -63,114 +64,208 @@
   <text x="1279" y="186" class="mono" font-size="14" font-weight="500" fill="#f59756">ded_fixture</text>
   <text x="1441" y="186" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="217" y="204" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="204" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Action:</text>
-  <text x="307" y="204" class="mono" font-size="14" font-weight="800" fill="#47c9da">handoff</text>
+  <text x="235" y="204" class="mono" font-size="14" font-weight="500" fill="#5c91f5">动</text>
+  <text x="253" y="204" class="mono" font-size="14" font-weight="500" fill="#5c91f5">作</text>
+  <text x="271" y="204" class="mono" font-size="14" font-weight="500" fill="#5c91f5">:</text>
+  <text x="289" y="204" class="mono" font-size="14" font-weight="800" fill="#47c9da">handoff</text>
   <text x="1270" y="204" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="222" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="222" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Path:</text>
-  <text x="289" y="222" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">source Codex codex-cxcp-des...</text>
-  <text x="568" y="222" class="mono" font-size="14" font-weight="500" fill="#374452">-&gt;</text>
-  <text x="595" y="222" class="mono" font-size="14" font-weight="800" fill="#e6be53">rewind evt-091</text>
-  <text x="730" y="222" class="mono" font-size="14" font-weight="500" fill="#374452">-&gt;</text>
-  <text x="757" y="222" class="mono" font-size="14" font-weight="800" fill="#47c9da">target Hermes</text>
+  <text x="235" y="222" class="mono" font-size="14" font-weight="800" fill="#e6be53">下</text>
+  <text x="253" y="222" class="mono" font-size="14" font-weight="800" fill="#e6be53">一</text>
+  <text x="271" y="222" class="mono" font-size="14" font-weight="800" fill="#e6be53">步</text>
+  <text x="289" y="222" class="mono" font-size="14" font-weight="800" fill="#e6be53">: 按</text>
+  <text x="334" y="222" class="mono" font-size="14" font-weight="800" fill="#e6be53">r 启</text>
+  <text x="370" y="222" class="mono" font-size="14" font-weight="800" fill="#e6be53">动</text>
+  <text x="388" y="222" class="mono" font-size="14" font-weight="800" fill="#e6be53">本</text>
+  <text x="406" y="222" class="mono" font-size="14" font-weight="800" fill="#e6be53">地</text>
+  <text x="433" y="222" class="mono" font-size="14" font-weight="800" fill="#e6be53">Hermes；</text>
+  <text x="505" y="222" class="mono" font-size="14" font-weight="800" fill="#e6be53">按</text>
+  <text x="532" y="222" class="mono" font-size="14" font-weight="800" fill="#e6be53">y 复</text>
+  <text x="568" y="222" class="mono" font-size="14" font-weight="800" fill="#e6be53">制</text>
+  <text x="586" y="222" class="mono" font-size="14" font-weight="800" fill="#e6be53">命</text>
+  <text x="604" y="222" class="mono" font-size="14" font-weight="800" fill="#e6be53">令</text>
+  <text x="622" y="222" class="mono" font-size="14" font-weight="800" fill="#e6be53">；</text>
+  <text x="640" y="222" class="mono" font-size="14" font-weight="800" fill="#e6be53">Esc 返</text>
+  <text x="694" y="222" class="mono" font-size="14" font-weight="800" fill="#e6be53">回</text>
   <text x="1270" y="222" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="240" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="240" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Portrait:</text>
-  <text x="325" y="240" class="mono" font-size="14" font-weight="800" fill="#47c9da">user 1 / assistant 1 / tool 4 / rewind 1 · cached timeline</text>
+  <text x="235" y="240" class="mono" font-size="14" font-weight="500" fill="#8b949e">本</text>
+  <text x="253" y="240" class="mono" font-size="14" font-weight="500" fill="#8b949e">地</text>
+  <text x="280" y="240" class="mono" font-size="14" font-weight="500" fill="#8b949e">source：</text>
+  <text x="352" y="240" class="mono" font-size="14" font-weight="500" fill="#8b949e">原</text>
+  <text x="370" y="240" class="mono" font-size="14" font-weight="500" fill="#8b949e">生</text>
+  <text x="397" y="240" class="mono" font-size="14" font-weight="500" fill="#8b949e">resume 仍</text>
+  <text x="478" y="240" class="mono" font-size="14" font-weight="500" fill="#8b949e">可</text>
+  <text x="496" y="240" class="mono" font-size="14" font-weight="500" fill="#8b949e">用</text>
+  <text x="523" y="240" class="mono" font-size="14" font-weight="500" fill="#8b949e">o 单</text>
+  <text x="559" y="240" class="mono" font-size="14" font-weight="500" fill="#8b949e">独</text>
+  <text x="577" y="240" class="mono" font-size="14" font-weight="500" fill="#8b949e">打</text>
+  <text x="595" y="240" class="mono" font-size="14" font-weight="500" fill="#8b949e">开</text>
+  <text x="613" y="240" class="mono" font-size="14" font-weight="500" fill="#8b949e">。</text>
   <text x="1270" y="240" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="258" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="258" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Session:</text>
-  <text x="316" y="258" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Codex / codex-cxcp-design</text>
+  <text x="235" y="258" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Path:</text>
+  <text x="289" y="258" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">source Codex codex-cxcp-des...</text>
+  <text x="568" y="258" class="mono" font-size="14" font-weight="500" fill="#374452">-&gt;</text>
+  <text x="595" y="258" class="mono" font-size="14" font-weight="800" fill="#e6be53">rewind evt-091</text>
+  <text x="730" y="258" class="mono" font-size="14" font-weight="500" fill="#374452">-&gt;</text>
+  <text x="757" y="258" class="mono" font-size="14" font-weight="800" fill="#47c9da">target Hermes</text>
   <text x="1270" y="258" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="276" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="276" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Target:</text>
-  <text x="307" y="276" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Hermes</text>
+  <text x="235" y="276" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Portrait:</text>
+  <text x="325" y="276" class="mono" font-size="14" font-weight="800" fill="#47c9da">user 1 / assistant 1 / tool 4 / rewind 1 · cached timeline</text>
   <text x="1270" y="276" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="294" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="294" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Handoff label:</text>
-  <text x="370" y="294" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">moonbox/hermes-rewind-evt-091</text>
+  <text x="235" y="294" class="mono" font-size="14" font-weight="500" fill="#5c91f5">会</text>
+  <text x="253" y="294" class="mono" font-size="14" font-weight="500" fill="#5c91f5">话</text>
+  <text x="271" y="294" class="mono" font-size="14" font-weight="500" fill="#5c91f5">:</text>
+  <text x="289" y="294" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Codex / codex-cxcp-design</text>
   <text x="1270" y="294" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="312" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="312" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Rewind:</text>
-  <text x="307" y="312" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">evt-091 / Before raw resume. Compile new Work Capsule for Hermes.</text>
+  <text x="235" y="312" class="mono" font-size="14" font-weight="500" fill="#5c91f5">目</text>
+  <text x="253" y="312" class="mono" font-size="14" font-weight="500" fill="#5c91f5">标</text>
+  <text x="271" y="312" class="mono" font-size="14" font-weight="500" fill="#5c91f5">:</text>
+  <text x="289" y="312" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Hermes</text>
   <text x="1270" y="312" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="330" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="330" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Validation:</text>
-  <text x="343" y="330" class="mono" font-size="14" font-weight="800" fill="#e6be53">WARN</text>
-  <text x="397" y="330" class="mono" font-size="14" font-weight="500" fill="#8b949e">compiler coverage has uncovered critical source refs; diff evidence is not patch-applicable</text>
+  <text x="235" y="330" class="mono" font-size="14" font-weight="500" fill="#5c91f5">标</text>
+  <text x="253" y="330" class="mono" font-size="14" font-weight="500" fill="#5c91f5">签</text>
+  <text x="271" y="330" class="mono" font-size="14" font-weight="500" fill="#5c91f5">:</text>
+  <text x="289" y="330" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">moonbox/hermes-rewind-evt-091</text>
   <text x="1270" y="330" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="348" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="348" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Command:</text>
-  <text x="316" y="348" class="mono" font-size="14" font-weight="500" fill="#47c9da">moonbox launch --execute --target hermes --session codex-cxcp-design</text>
+  <text x="235" y="348" class="mono" font-size="14" font-weight="500" fill="#5c91f5">回</text>
+  <text x="253" y="348" class="mono" font-size="14" font-weight="500" fill="#5c91f5">退</text>
+  <text x="271" y="348" class="mono" font-size="14" font-weight="500" fill="#5c91f5">点</text>
+  <text x="289" y="348" class="mono" font-size="14" font-weight="500" fill="#5c91f5">:</text>
+  <text x="307" y="348" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">evt-091 / Before raw resume. Compile new Work Capsule for Hermes.</text>
   <text x="1270" y="348" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="366" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="235" y="366" class="mono" font-size="14" font-weight="500" fill="#5c91f5">校</text>
+  <text x="253" y="366" class="mono" font-size="14" font-weight="500" fill="#5c91f5">验</text>
+  <text x="271" y="366" class="mono" font-size="14" font-weight="500" fill="#5c91f5">:</text>
+  <text x="289" y="366" class="mono" font-size="14" font-weight="800" fill="#e6be53">WARN</text>
+  <text x="343" y="366" class="mono" font-size="14" font-weight="500" fill="#8b949e">compiler coverage has uncovered critical source refs; diff evidence is not patch-applicable</text>
   <text x="1270" y="366" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="384" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="384" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Target receives</text>
+  <text x="235" y="384" class="mono" font-size="14" font-weight="500" fill="#5c91f5">目</text>
+  <text x="253" y="384" class="mono" font-size="14" font-weight="500" fill="#5c91f5">标</text>
+  <text x="271" y="384" class="mono" font-size="14" font-weight="500" fill="#5c91f5">命</text>
+  <text x="289" y="384" class="mono" font-size="14" font-weight="500" fill="#5c91f5">令</text>
+  <text x="307" y="384" class="mono" font-size="14" font-weight="500" fill="#5c91f5">:</text>
+  <text x="325" y="384" class="mono" font-size="14" font-weight="500" fill="#47c9da">hermes chat --source moonbox --query &lt;handoff-prompt&gt;</text>
   <text x="1270" y="384" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="402" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="402" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Program:</text>
-  <text x="316" y="402" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">hermes</text>
   <text x="1270" y="402" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="420" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="420" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Cwd:</text>
-  <text x="280" y="420" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">terminal default</text>
+  <text x="235" y="420" class="mono" font-size="14" font-weight="800" fill="#5c91f5">目</text>
+  <text x="253" y="420" class="mono" font-size="14" font-weight="800" fill="#5c91f5">标</text>
+  <text x="271" y="420" class="mono" font-size="14" font-weight="800" fill="#5c91f5">会</text>
+  <text x="289" y="420" class="mono" font-size="14" font-weight="800" fill="#5c91f5">收</text>
+  <text x="307" y="420" class="mono" font-size="14" font-weight="800" fill="#5c91f5">到</text>
   <text x="1270" y="420" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="438" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="438" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Args:</text>
-  <text x="289" y="438" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">5 arg(s), final arg is the handoff prompt</text>
+  <text x="235" y="438" class="mono" font-size="14" font-weight="800" fill="#5c91f5">程</text>
+  <text x="253" y="438" class="mono" font-size="14" font-weight="800" fill="#5c91f5">序</text>
+  <text x="271" y="438" class="mono" font-size="14" font-weight="800" fill="#5c91f5">:</text>
+  <text x="289" y="438" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">hermes</text>
   <text x="1270" y="438" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="456" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="456" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Prompt:</text>
-  <text x="307" y="456" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">shown below, passed as the final argument</text>
+  <text x="235" y="456" class="mono" font-size="14" font-weight="800" fill="#5c91f5">目</text>
+  <text x="253" y="456" class="mono" font-size="14" font-weight="800" fill="#5c91f5">录</text>
+  <text x="271" y="456" class="mono" font-size="14" font-weight="800" fill="#5c91f5">:</text>
+  <text x="289" y="456" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">terminal default</text>
   <text x="1270" y="456" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="474" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="235" y="474" class="mono" font-size="14" font-weight="800" fill="#5c91f5">参</text>
+  <text x="253" y="474" class="mono" font-size="14" font-weight="800" fill="#5c91f5">数</text>
+  <text x="271" y="474" class="mono" font-size="14" font-weight="800" fill="#5c91f5">:</text>
+  <text x="289" y="474" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">5 个</text>
+  <text x="325" y="474" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">参</text>
+  <text x="343" y="474" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">数</text>
+  <text x="361" y="474" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">，</text>
+  <text x="379" y="474" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">最</text>
+  <text x="397" y="474" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">后</text>
+  <text x="415" y="474" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">一</text>
+  <text x="433" y="474" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">个</text>
+  <text x="451" y="474" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">是</text>
+  <text x="478" y="474" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">handoff prompt</text>
   <text x="1270" y="474" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="492" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="492" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Draft Work Capsule</text>
+  <text x="235" y="492" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Prompt:</text>
+  <text x="307" y="492" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">下</text>
+  <text x="325" y="492" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">面</text>
+  <text x="343" y="492" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">完</text>
+  <text x="361" y="492" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">整</text>
+  <text x="379" y="492" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">展</text>
+  <text x="397" y="492" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">示</text>
+  <text x="415" y="492" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">，</text>
+  <text x="433" y="492" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">会</text>
+  <text x="451" y="492" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">作</text>
+  <text x="469" y="492" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">为</text>
+  <text x="487" y="492" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">最</text>
+  <text x="505" y="492" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">后</text>
+  <text x="523" y="492" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">一</text>
+  <text x="541" y="492" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">个</text>
+  <text x="559" y="492" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">参</text>
+  <text x="577" y="492" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">数</text>
+  <text x="595" y="492" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">传</text>
+  <text x="613" y="492" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">入</text>
   <text x="1270" y="492" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="510" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="510" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Goal:</text>
-  <text x="289" y="510" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Continue Moonbox session rewind design from selected rewind point.</text>
   <text x="1270" y="510" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="528" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="528" class="mono" font-size="14" font-weight="800" fill="#e6be53">State:</text>
-  <text x="298" y="528" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">draft_from_builtin_compiler</text>
+  <text x="235" y="528" class="mono" font-size="14" font-weight="800" fill="#5c91f5">草</text>
+  <text x="253" y="528" class="mono" font-size="14" font-weight="800" fill="#5c91f5">稿</text>
+  <text x="280" y="528" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Capsule</text>
   <text x="1270" y="528" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="546" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="546" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Decision:</text>
-  <text x="325" y="546" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Source session is read-only; Moonbox only builds a handoff plan.</text>
+  <text x="235" y="546" class="mono" font-size="14" font-weight="800" fill="#5c91f5">目</text>
+  <text x="253" y="546" class="mono" font-size="14" font-weight="800" fill="#5c91f5">标</text>
+  <text x="271" y="546" class="mono" font-size="14" font-weight="800" fill="#5c91f5">:</text>
+  <text x="289" y="546" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Continue Moonbox session rewind design from selected rewind point.</text>
   <text x="1270" y="546" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="564" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="564" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Todo:</text>
-  <text x="289" y="564" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">[x] Selected rewind point evt-091</text>
+  <text x="235" y="564" class="mono" font-size="14" font-weight="800" fill="#e6be53">状</text>
+  <text x="253" y="564" class="mono" font-size="14" font-weight="800" fill="#e6be53">态</text>
+  <text x="271" y="564" class="mono" font-size="14" font-weight="800" fill="#e6be53">:</text>
+  <text x="289" y="564" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">draft_from_builtin_compiler</text>
   <text x="1270" y="564" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="582" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="582" class="mono" font-size="14" font-weight="800" fill="#f16565">Risk:</text>
-  <text x="289" y="582" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Built-in draft compiler may omit tool outputs, attachments, and hidden provider state.</text>
+  <text x="235" y="582" class="mono" font-size="14" font-weight="800" fill="#5c91f5">决</text>
+  <text x="253" y="582" class="mono" font-size="14" font-weight="800" fill="#5c91f5">策</text>
+  <text x="271" y="582" class="mono" font-size="14" font-weight="800" fill="#5c91f5">:</text>
+  <text x="289" y="582" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Source session is read-only; Moonbox only builds a handoff plan.</text>
   <text x="1270" y="582" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="600" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
+  <text x="235" y="600" class="mono" font-size="14" font-weight="800" fill="#5c91f5">待</text>
+  <text x="253" y="600" class="mono" font-size="14" font-weight="800" fill="#5c91f5">办</text>
+  <text x="271" y="600" class="mono" font-size="14" font-weight="800" fill="#5c91f5">:</text>
+  <text x="289" y="600" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">[x] Selected rewind point evt-091</text>
   <text x="1270" y="600" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="618" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="618" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Readiness</text>
+  <text x="235" y="618" class="mono" font-size="14" font-weight="800" fill="#f16565">风</text>
+  <text x="253" y="618" class="mono" font-size="14" font-weight="800" fill="#f16565">险</text>
+  <text x="271" y="618" class="mono" font-size="14" font-weight="800" fill="#f16565">:</text>
+  <text x="289" y="618" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Built-in draft compiler may omit tool outputs, attachments, and hidden provider state.</text>
   <text x="1270" y="618" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="636" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="636" class="mono" font-size="14" font-weight="800" fill="#5cd689">Target Readiness</text>
   <text x="1270" y="636" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="654" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="654" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
-  <text x="280" y="654" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">target_support</text>
-  <text x="424" y="654" class="mono" font-size="14" font-weight="500" fill="#8b949e">Hermes handoff dry-run supported</text>
+  <text x="235" y="654" class="mono" font-size="14" font-weight="800" fill="#5c91f5">就</text>
+  <text x="253" y="654" class="mono" font-size="14" font-weight="800" fill="#5c91f5">绪</text>
+  <text x="271" y="654" class="mono" font-size="14" font-weight="800" fill="#5c91f5">检</text>
+  <text x="289" y="654" class="mono" font-size="14" font-weight="800" fill="#5c91f5">查</text>
   <text x="1270" y="654" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="46" y="672" class="mono" font-size="14" font-weight="500" fill="#e6be53">╰──────────────────│</text>
-  <text x="235" y="672" class="mono" font-size="14" font-weight="800" fill="#b284ff">Workspace Restore</text>
+  <text x="235" y="672" class="mono" font-size="14" font-weight="800" fill="#5cd689">Target Readiness</text>
   <text x="1270" y="672" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1279" y="672" class="mono" font-size="14" font-weight="500" fill="#374452">──────────────────╯</text>
   <text x="46" y="690" class="mono" font-size="14" font-weight="500" fill="#374452">╭ Action Path ─────</text>
   <text x="217" y="690" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="235" y="690" class="mono" font-size="14" font-weight="800" fill="#5cd689">PASS</text>
-  <text x="280" y="690" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">continuation_level</text>
-  <text x="460" y="690" class="mono" font-size="14" font-weight="500" fill="#8b949e">target input level is prompt-only</text>
+  <text x="280" y="690" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">target_support</text>
+  <text x="424" y="690" class="mono" font-size="14" font-weight="500" fill="#8b949e">Hermes handoff dry-run supported</text>
   <text x="1270" y="690" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="1279" y="690" class="mono" font-size="14" font-weight="500" fill="#374452">──────────────────╮</text>
   <text x="46" y="708" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
@@ -189,12 +284,21 @@
   <text x="46" y="744" class="mono" font-size="14" font-weight="500" fill="#374452">╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
   <text x="46" y="762" class="mono" font-size="14" font-weight="500" fill="#374452">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
   <text x="46" y="780" class="mono" font-size="14" font-weight="500" fill="#8b949e">Status Ready</text>
-  <text x="55" y="798" class="mono" font-size="14" font-weight="800" fill="#5c91f5">y</text>
-  <text x="73" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">Copy</text>
-  <text x="136" y="798" class="mono" font-size="14" font-weight="800" fill="#5c91f5">enter</text>
-  <text x="190" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">Handoff</text>
-  <text x="280" y="798" class="mono" font-size="14" font-weight="800" fill="#5c91f5">PgUp/Dn</text>
-  <text x="352" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">Scroll</text>
-  <text x="433" y="798" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Esc/q</text>
-  <text x="487" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">Close</text>
+  <text x="55" y="798" class="mono" font-size="14" font-weight="800" fill="#5c91f5">r</text>
+  <text x="73" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">运</text>
+  <text x="91" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">行</text>
+  <text x="136" y="798" class="mono" font-size="14" font-weight="800" fill="#5c91f5">y</text>
+  <text x="154" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">复</text>
+  <text x="172" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">制</text>
+  <text x="190" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">命</text>
+  <text x="208" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">令</text>
+  <text x="253" y="798" class="mono" font-size="14" font-weight="800" fill="#5c91f5">gg/G</text>
+  <text x="298" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">跳</text>
+  <text x="316" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">转</text>
+  <text x="361" y="798" class="mono" font-size="14" font-weight="800" fill="#5c91f5">PgUp/Dn</text>
+  <text x="433" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">滚</text>
+  <text x="451" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">动</text>
+  <text x="496" y="798" class="mono" font-size="14" font-weight="800" fill="#5c91f5">Esc/q</text>
+  <text x="550" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">关</text>
+  <text x="568" y="798" class="mono" font-size="14" font-weight="500" fill="#8b949e">闭</text>
 </svg>

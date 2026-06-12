@@ -50,13 +50,13 @@ pub fn load_workbench_for_data_space(
     dataspace::load_workbench_for_space(space, source, target)
 }
 
-pub fn load_readonly_workbench_from_session_snapshot(
+pub fn load_remote_workbench_from_session_snapshot(
     space: &dataspace::DataSpaceEntry,
     source_session: SessionSummary,
     sessions: Vec<SessionSummary>,
     target: super::model::CliTool,
-) -> WorkbenchData {
-    dataspace::workbench_from_remote_sessions(space, source_session, sessions, target)
+) -> Result<WorkbenchData, CoreError> {
+    dataspace::load_remote_workbench_for_session(space, source_session, sessions, target)
 }
 
 pub fn list_sessions() -> Result<Vec<SessionSummary>, CoreError> {

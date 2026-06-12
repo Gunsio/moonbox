@@ -120,7 +120,7 @@ struct SummaryBuilder {
     event_count: usize,
     malformed_lines: usize,
     summary_truncated: bool,
-    has_error: bool,
+    latest_ai_outcome_error: bool,
     metadata: ClaudeMetadataSummary,
 }
 
@@ -761,7 +761,7 @@ impl SummaryBuilder {
             event_count: 0,
             malformed_lines: 0,
             summary_truncated: false,
-            has_error: false,
+            latest_ai_outcome_error: false,
             metadata: ClaudeMetadataSummary::default(),
         }
     }
@@ -785,7 +785,9 @@ impl SummaryBuilder {
         }
 
         let record_type = record.record_type();
-        self.has_error |= record_is_error(&record);
+        if is_ai_outcome_record(&record) {
+            self.latest_ai_outcome_error = record_is_error(&record);
+        }
         if self.title.is_none()
             && record_type == "user"
             && !has_tool_result(&record)
@@ -808,7 +810,7 @@ impl SummaryBuilder {
         let updated_at = self
             .updated_at
             .unwrap_or_else(|| "1970-01-01T00:00:00+00:00".into());
-        let status = if self.has_error {
+        let status = if self.latest_ai_outcome_error {
             SessionStatus::Failed
         } else if self.malformed_lines > 0 {
             SessionStatus::Warning
@@ -1249,6 +1251,10 @@ fn record_is_error(record: &ClaudeRecord) -> bool {
         || record.record_type().contains("error")
         || record.subtype().contains("error")
         || !record.error.is_null()
+}
+
+fn is_ai_outcome_record(record: &ClaudeRecord) -> bool {
+    record.record_type() == "assistant" || is_result_record(record)
 }
 
 fn is_result_record(record: &ClaudeRecord) -> bool {
@@ -1825,6 +1831,31 @@ mod tests {
                 .contains("forked_from: parent-session")
         );
         assert!(timeline.events[1].detail.contains("permission denied"));
+    }
+
+    #[test]
+    fn historical_result_error_does_not_fail_session_after_later_ai_success() {
+        let root = test_root("stream-json-recovered-error");
+        write_session(
+            &root,
+            "repo/recovered-session.jsonl",
+            r#"{"type":"user","session_id":"recovered-session","timestamp":"2026-06-08T09:00:00.000Z","cwd":"/repo","message":{"content":"retry this"}}
+{"type":"result","subtype":"error","session_id":"recovered-session","timestamp":"2026-06-08T09:01:00.000Z","is_error":true,"error":{"message":"timeout"}}
+{"type":"assistant","session_id":"recovered-session","timestamp":"2026-06-08T09:02:00.000Z","message":{"content":[{"type":"text","text":"Recovered after retry"}],"usage":{"input_tokens":10,"output_tokens":4}}}"#,
+        );
+
+        let adapter = ClaudeSourceAdapter::new(&root);
+        let session = adapter
+            .find_session("recovered-session")
+            .expect("find")
+            .expect("session");
+        let timeline = adapter
+            .load_timeline("recovered-session")
+            .expect("timeline");
+
+        assert_eq!(session.status, SessionStatus::Healthy);
+        assert_eq!(timeline.events[1].kind, TimelineKind::Error);
+        assert_eq!(timeline.events[2].kind, TimelineKind::Assistant);
     }
 
     #[test]

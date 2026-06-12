@@ -61,6 +61,42 @@ and this project uses semantic versioning once tagged releases start.
   size, event, content, compact-frontier, token, sidecar, and analyzer-note
   sections. Large sources are tail-sampled and labeled explicitly instead of
   blocking the UI on full-file scans.
+- TUI Data Space Picker opened with `d`, showing Local and SSH spaces explicitly
+  saved in Moonbox config with current/selected state, target address,
+  configuration source, and the read-only inventory command before loading.
+- TUI Data Space Picker `n` / `a` add-flow for SSH hosts now accepts pasted
+  `ssh user@host`, `ssh://user@host:22`, and OpenSSH `Host` blocks, writing
+  Moonbox `ssh_hosts` config without modifying a user's OpenSSH config.
+- TUI Data Space Picker `x` deletes saved SSH spaces from Moonbox config after a
+  second confirmation keypress; OpenSSH aliases discovered by `moonbox ssh` are
+  no longer auto-loaded into the picker.
+- SSH data-space execution now uses the host, user, port, and identity file
+  saved in Moonbox config instead of assuming the saved name is an OpenSSH alias.
+- SSH data-space inventory now searches common user install paths and falls back
+  from `moonbox` to `moon` before reporting that the remote inventory command is
+  missing.
+- SSH data-space session selection now hydrates the selected remote timeline via
+  a read-only remote `compile-request --json` dry run, so SSH inventories do not
+  render as empty summary-only timelines.
+- Data-space load failures now reopen the picker with a red error block and
+  matching red status styling instead of relying on a muted footer message.
+- TUI header now marks remote inventory explicitly as `Data: SSH: <host>` so SSH
+  data spaces are not confused with local session stores.
+- SSH data-space sessions are read-only in the TUI: `enter` opens the target
+  handoff flow instead of trying local original resume, and `o` is blocked with
+  an explicit status message.
+- TUI Handoff Review now uses `r` as the explicit local target launch action;
+  `enter` is review-only, `y` copies the actual target command, and target
+  completion returns to Moonbox with visible run-again/copy/back actions.
+- TUI Handoff Review preparation now runs in the background with a cancellable
+  loading panel, opens at the bottom action area, and supports `gg` / `G` jumps
+  for long reviews.
+- Real-session target handoff reviews now disable `r` before spawning when the
+  built-in draft compiler is still in use; users can copy the command or
+  configure an external compiler instead of hitting a late launcher error.
+- Handoff Review and target launch notices now show concise target command
+  summaries, keeping the full prompt available for copy/execution without
+  flooding the modal.
 - Configurable compiler skill presets in `~/.config/moonbox/config.json`,
   including optional description, homepage, and GitHub stars metadata for the
   TUI Skill Picker.
@@ -158,9 +194,9 @@ and this project uses semantic versioning once tagged releases start.
 - Read-only SSH inventory through `moonbox ssh` / `moon ssh`, combining
   Moonbox `ssh_hosts` config entries with concrete OpenSSH `Host` aliases from
   `~/.ssh/config` or `MOONBOX_SSH_CONFIG` without opening remote connections.
-- TUI data spaces backed by local session stores plus configured SSH/devbox
-  inventories, switchable with `{` / `}` without opening, resuming, or
-  launching any remote session.
+- TUI data spaces backed by local session stores plus SSH spaces explicitly
+  saved in Moonbox config, switchable with `{` / `}` without opening, resuming,
+  or launching any remote session.
 - Handoff Review target-input preview, including target program, cwd, argument
   count, and the exact prompt argument that will be passed to the target CLI.
 - Verifier `compiler_mode` checks that mark built-in draft compilers as a
@@ -225,6 +261,9 @@ and this project uses semantic versioning once tagged releases start.
   prerelease for the Hermes SQLite schema compatibility rollout.
 - Starred TUI sessions now keep their `*` marker visible even when the same row
   also needs a warning or failed health marker.
+- Claude source health now treats `failed` as the latest AI outcome state, so
+  recovered historical result errors remain visible in the timeline without
+  marking the whole session failed.
 - Timeline selected rows no longer shift body text or switch the body to bold
   when focus moves across events.
 
@@ -284,13 +323,13 @@ and this project uses semantic versioning once tagged releases start.
   verification fails.
 - TUI target handoff now uses a dedicated `x` shortcut, with `H` and `t` kept
   as compatibility aliases, and a two-stage flow: choose a target, review the
-  guarded execute command, then copy with `y`.
+  target command, then explicitly run with `r` or copy with `y`.
 - TUI launch key hints now distinguish target selection from Handoff Review, so
   `y` is shown as unavailable until review.
-- TUI launch copy now points at `moonbox launch --execute`, keeping long
-  handoff prompts out of the modal while preserving guarded execution.
-- TUI Handoff Review `enter` now restores the terminal and then launches the
-  verified target CLI, while `y` still copies the guarded wrapper command.
+- TUI launch copy now points at the actual target command; the modal shows a
+  concise command summary so long handoff prompts do not flood the review.
+- TUI Handoff Review `r` now restores the terminal and then launches the
+  verified target CLI, while `enter` is review-only.
 - Original-session execution is opt-in and uses source-specific resume
   entrypoints; Hermes resume commands now use `hermes --resume <session>`.
 - TUI original-session copy now points at `moonbox open --execute`.
@@ -375,11 +414,10 @@ and this project uses semantic versioning once tagged releases start.
   transparent SVG canvas, generated from the real TUI render path.
 - Draft Homebrew formula now points at a staged GitHub release source archive
   instead of a GitHub auto-generated tag archive.
-- TUI `{` / `}` now cycles the main session inventory between Local and
-  configured SSH/devbox data spaces. Remote spaces run
-  `ssh <host> moonbox sessions --json`, load the returned sessions as a
-  read-only inventory, and keep failures visible in the status line while
-  preserving the previous local list.
+- TUI `{` / `}` now cycles the main session inventory between Local and saved
+  Moonbox SSH data spaces. Remote spaces run `ssh <target> moonbox sessions
+  --json`, load the returned sessions as a read-only inventory, and keep
+  failures visible in the status line while preserving the previous local list.
 - Codex session titles now prefer `session_index.jsonl` `thread_name` values
   over stale `state_5.sqlite` titles, so renamed Codex threads are searchable
   and displayed the same way as the Codex resume picker.

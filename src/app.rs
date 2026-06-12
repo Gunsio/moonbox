@@ -14,15 +14,17 @@ use crate::core::{
     image_preview::{TimelineImagePreview, build_timeline_image_previews},
     launcher,
     model::{
-        CliTool, ContinuationOptions, DoctorReport, LaunchPlan, LaunchValidation,
-        LaunchValidationState, OriginalSessionPlan, SessionAction, SessionSummary, TimelineKind,
-        VerificationReport, WorkCapsule, WorkbenchData,
+        CliTool, ContinuationOptions, DoctorReport, LaunchExecution, LaunchExecutionStatus,
+        LaunchPlan, LaunchValidation, LaunchValidationState, OriginalSessionPlan, SessionAction,
+        SessionSummary, SourceProvenance, TimelineKind, VerificationReport, WorkCapsule,
+        WorkbenchData,
     },
     verifier, workbench,
 };
 
 type SessionLoadResult = Result<WorkbenchData, CoreError>;
 type DataSpaceLoadResult = Result<WorkbenchData, CoreError>;
+type LaunchReviewResult = Result<WorkbenchData, CoreError>;
 
 pub const HANDOFF_TRAIL_DURATION_MS: u64 = 720;
 const HANDOFF_TRAIL_FRAME_COUNT: usize = 6;
@@ -70,6 +72,356 @@ struct PendingDataSpaceLoad {
     receiver: mpsc::Receiver<DataSpaceLoadResult>,
 }
 
+struct PendingLaunchReview {
+    request_id: u64,
+    session_id: String,
+    target: CliTool,
+    selected_compiler: usize,
+    rewind_event_id: String,
+    started_at: Instant,
+    receiver: mpsc::Receiver<LaunchReviewResult>,
+}
+
+pub const DATA_SPACE_CONFIG_FIELD_COUNT: usize = 6;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DataSpaceConfigForm {
+    pub quick: String,
+    pub name: String,
+    pub host: String,
+    pub user: String,
+    pub port: String,
+    pub identity_file: String,
+}
+
+impl DataSpaceConfigForm {
+    fn field_mut(&mut self, index: usize) -> &mut String {
+        match index.min(DATA_SPACE_CONFIG_FIELD_COUNT - 1) {
+            0 => &mut self.quick,
+            1 => &mut self.name,
+            2 => &mut self.host,
+            3 => &mut self.user,
+            4 => &mut self.port,
+            _ => &mut self.identity_file,
+        }
+    }
+
+    fn parse_quick_into_fields(&mut self) -> Result<bool, String> {
+        let input = self.quick.trim();
+        if input.is_empty() {
+            return Ok(false);
+        }
+        let parsed = parse_ssh_target(input)?;
+        if self.name.trim().is_empty() {
+            self.name = parsed.name;
+        }
+        self.host = parsed.host;
+        if let Some(user) = parsed.user {
+            self.user = user;
+        }
+        if let Some(port) = parsed.port {
+            self.port = port.to_string();
+        }
+        if let Some(identity_file) = parsed.identity_file {
+            self.identity_file = identity_file;
+        }
+        Ok(true)
+    }
+
+    fn to_config(&self) -> Result<config::SshHostConfig, String> {
+        let name = self.name.trim();
+        let host = self.host.trim();
+        if name.is_empty() {
+            return Err("name is required".into());
+        }
+        if host.is_empty() {
+            return Err("host is required".into());
+        }
+        let port = if self.port.trim().is_empty() {
+            None
+        } else {
+            Some(
+                self.port
+                    .trim()
+                    .parse::<u16>()
+                    .map_err(|_| "port must be 1-65535".to_string())?,
+            )
+        };
+        Ok(config::SshHostConfig {
+            name: name.into(),
+            host: host.into(),
+            user: non_empty_optional(&self.user),
+            port,
+            identity_file: non_empty_optional(&self.identity_file),
+            tags: vec!["ssh".into()],
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedSshTarget {
+    name: String,
+    host: String,
+    user: Option<String>,
+    port: Option<u16>,
+    identity_file: Option<String>,
+}
+
+fn parse_ssh_target(input: &str) -> Result<ParsedSshTarget, String> {
+    let input = input.trim();
+    if input.is_empty() {
+        return Err("paste an ssh target or fill host manually".into());
+    }
+    if let Some(parsed) = parse_openssh_host_block(input)? {
+        return Ok(parsed);
+    }
+
+    let words = split_ssh_words(input)?;
+    let mut words = words.as_slice();
+    if words
+        .first()
+        .is_some_and(|word| word.eq_ignore_ascii_case("ssh"))
+    {
+        words = &words[1..];
+    }
+
+    let mut user = None;
+    let mut port = None;
+    let mut identity_file = None;
+    let mut target = None;
+    let mut index = 0;
+    while index < words.len() {
+        let word = &words[index];
+        match word.as_str() {
+            "-p" => {
+                index += 1;
+                let value = words
+                    .get(index)
+                    .ok_or_else(|| "-p requires a port".to_string())?;
+                port = Some(parse_ssh_port(value)?);
+            }
+            "-i" => {
+                index += 1;
+                identity_file = Some(
+                    words
+                        .get(index)
+                        .ok_or_else(|| "-i requires an identity file".to_string())?
+                        .clone(),
+                );
+            }
+            "-l" => {
+                index += 1;
+                user = Some(
+                    words
+                        .get(index)
+                        .ok_or_else(|| "-l requires a user".to_string())?
+                        .clone(),
+                );
+            }
+            "-o" | "-F" | "-J" => {
+                index += 1;
+                if words.get(index).is_none() {
+                    return Err(format!("{word} requires a value"));
+                }
+            }
+            "--" => {
+                target = words.get(index + 1).cloned();
+                break;
+            }
+            _ if word.starts_with("-p") && word.len() > 2 => {
+                port = Some(parse_ssh_port(&word[2..])?);
+            }
+            _ if word.starts_with("-i") && word.len() > 2 => {
+                identity_file = Some(word[2..].into());
+            }
+            _ if word.starts_with("-l") && word.len() > 2 => {
+                user = Some(word[2..].into());
+            }
+            _ if word.starts_with('-') => {}
+            _ => target = Some(word.clone()),
+        }
+        index += 1;
+    }
+
+    let target = target.ok_or_else(|| "ssh target is required".to_string())?;
+    parse_ssh_target_literal(&target, user, port, identity_file)
+}
+
+fn parse_openssh_host_block(input: &str) -> Result<Option<ParsedSshTarget>, String> {
+    if !input
+        .lines()
+        .any(|line| line.trim_start().to_ascii_lowercase().starts_with("host "))
+    {
+        return Ok(None);
+    }
+
+    let mut name = None;
+    let mut host = None;
+    let mut user = None;
+    let mut port = None;
+    let mut identity_file = None;
+    for line in input.lines() {
+        let line = line.split_once('#').map(|(left, _)| left).unwrap_or(line);
+        let mut parts = line.split_whitespace();
+        let Some(keyword) = parts.next() else {
+            continue;
+        };
+        match keyword.to_ascii_lowercase().as_str() {
+            "host" => {
+                name = parts
+                    .find(|alias| {
+                        !alias.starts_with('!') && !alias.contains('*') && !alias.contains('?')
+                    })
+                    .map(str::to_string);
+            }
+            "hostname" => host = parts.next().map(str::to_string),
+            "user" => user = parts.next().map(str::to_string),
+            "port" => {
+                if let Some(value) = parts.next() {
+                    port = Some(parse_ssh_port(value)?);
+                }
+            }
+            "identityfile" => identity_file = parts.next().map(str::to_string),
+            _ => {}
+        }
+    }
+
+    let name = name.ok_or_else(|| "OpenSSH Host alias is required".to_string())?;
+    let host = host.unwrap_or_else(|| name.clone());
+    Ok(Some(ParsedSshTarget {
+        name,
+        host,
+        user,
+        port,
+        identity_file,
+    }))
+}
+
+fn parse_ssh_target_literal(
+    target: &str,
+    user: Option<String>,
+    port: Option<u16>,
+    identity_file: Option<String>,
+) -> Result<ParsedSshTarget, String> {
+    let mut value = target.trim().trim_matches('"').trim_matches('\'');
+    if let Some(rest) = value.strip_prefix("ssh://") {
+        value = rest.split('/').next().unwrap_or(rest);
+    }
+    let (user_from_target, host_port) = value
+        .split_once('@')
+        .map(|(left, right)| (Some(left.to_string()), right))
+        .unwrap_or((None, value));
+    let (host, port_from_target) = split_host_port(host_port)?;
+    if host.trim().is_empty() {
+        return Err("host is required".into());
+    }
+    let user = user.or(user_from_target);
+    let port = port.or(port_from_target);
+    Ok(ParsedSshTarget {
+        name: sanitize_ssh_space_name(host),
+        host: host.into(),
+        user,
+        port,
+        identity_file,
+    })
+}
+
+fn split_host_port(value: &str) -> Result<(&str, Option<u16>), String> {
+    if let Some(stripped) = value.strip_prefix('[')
+        && let Some((host, rest)) = stripped.split_once(']')
+    {
+        let port = rest.strip_prefix(':').map(parse_ssh_port).transpose()?;
+        return Ok((host, port));
+    }
+    if let Some((host, port)) = value.rsplit_once(':')
+        && !host.contains(':')
+        && port.chars().all(|ch| ch.is_ascii_digit())
+    {
+        return Ok((host, Some(parse_ssh_port(port)?)));
+    }
+    Ok((value, None))
+}
+
+fn parse_ssh_port(value: &str) -> Result<u16, String> {
+    value
+        .trim()
+        .parse::<u16>()
+        .map_err(|_| "port must be 1-65535".to_string())
+        .and_then(|port| {
+            if port == 0 {
+                Err("port must be 1-65535".into())
+            } else {
+                Ok(port)
+            }
+        })
+}
+
+fn sanitize_ssh_space_name(host: &str) -> String {
+    host.trim()
+        .trim_matches(|ch| ch == '[' || ch == ']')
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string()
+}
+
+fn split_ssh_words(input: &str) -> Result<Vec<String>, String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+    for ch in input.chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if let Some(open_quote) = quote {
+            if ch == open_quote {
+                quote = None;
+            } else {
+                current.push(ch);
+            }
+            continue;
+        }
+        match ch {
+            '\'' | '"' => quote = Some(ch),
+            ch if ch.is_whitespace() => {
+                if !current.is_empty() {
+                    words.push(std::mem::take(&mut current));
+                }
+            }
+            _ => current.push(ch),
+        }
+    }
+    if escaped {
+        current.push('\\');
+    }
+    if quote.is_some() {
+        return Err("unterminated quote in ssh target".into());
+    }
+    if !current.is_empty() {
+        words.push(current);
+    }
+    Ok(words)
+}
+
+fn non_empty_optional(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.into())
+}
+
 impl fmt::Debug for PendingDataSpaceLoad {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PendingDataSpaceLoad")
@@ -86,6 +438,18 @@ impl fmt::Debug for PendingSessionLoad {
             .field("request_id", &self.request_id)
             .field("session_id", &self.session_id)
             .field("target", &self.target)
+            .finish_non_exhaustive()
+    }
+}
+
+impl fmt::Debug for PendingLaunchReview {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PendingLaunchReview")
+            .field("request_id", &self.request_id)
+            .field("session_id", &self.session_id)
+            .field("target", &self.target)
+            .field("selected_compiler", &self.selected_compiler)
+            .field("rewind_event_id", &self.rewind_event_id)
             .finish_non_exhaustive()
     }
 }
@@ -161,7 +525,18 @@ impl SessionFilter {
 #[derive(Debug, Clone)]
 pub enum TuiExitAction {
     OriginalResume(Box<OriginalSessionPlan>),
-    TargetHandoff(Box<LaunchPlan>),
+}
+
+#[derive(Debug, Clone)]
+pub struct TargetLaunchResult {
+    pub target: CliTool,
+    pub source: CliTool,
+    pub session_id: String,
+    pub command: String,
+    pub command_summary: String,
+    pub outcome: String,
+    pub success: bool,
+    pub plan: Box<LaunchPlan>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -286,10 +661,18 @@ const COMMAND_PALETTE_ENTRIES: &[CommandPaletteEntry] = &[
         dangerous: false,
     },
     CommandPaletteEntry {
+        command: "data",
+        aliases: &["spaces", "dataspace"],
+        description: "Open the Local / SSH data space picker",
+        params: "Local or saved SSH spaces",
+        badge: "PICKER",
+        dangerous: false,
+    },
+    CommandPaletteEntry {
         command: "data next",
-        aliases: &["data", "space next", "dataspace next"],
+        aliases: &["space next", "dataspace next"],
         description: "Switch to the next configured data space",
-        params: "Local or configured SSH/devbox",
+        params: "Local or saved SSH spaces",
         badge: "SWITCH",
         dangerous: false,
     },
@@ -297,7 +680,7 @@ const COMMAND_PALETTE_ENTRIES: &[CommandPaletteEntry] = &[
         command: "data prev",
         aliases: &["data previous", "space prev", "dataspace prev"],
         description: "Switch to the previous configured data space",
-        params: "Local or configured SSH/devbox",
+        params: "Local or saved SSH spaces",
         badge: "SWITCH",
         dangerous: false,
     },
@@ -462,7 +845,10 @@ pub struct App {
     pub show_doctor: bool,
     pub show_skill_picker: bool,
     pub show_capsules: bool,
+    pub show_data_spaces: bool,
+    pub show_data_space_config: bool,
     pub show_timeline_detail: bool,
+    pub target_launch_result: Option<TargetLaunchResult>,
     pub timeline_image_previews: Vec<TimelineImagePreview>,
     pub saved_capsules: Vec<CapsuleSummary>,
     pub saved_capsule_error: Option<String>,
@@ -472,6 +858,11 @@ pub struct App {
     visible_session_indices: Vec<usize>,
     pub data_spaces: Vec<dataspace::DataSpaceEntry>,
     pub selected_data_space: usize,
+    pub data_space_selection: usize,
+    pub data_space_error: Option<String>,
+    pub data_space_config_form: DataSpaceConfigForm,
+    pub data_space_config_field: usize,
+    pub data_space_delete_confirmation: Option<String>,
     pub pending_target: CliTool,
     pub pending_compiler: usize,
     pub status_message: String,
@@ -486,9 +877,12 @@ pub struct App {
     pending_session_load: Option<PendingSessionLoad>,
     data_space_load_request_id: u64,
     pending_data_space_load: Option<PendingDataSpaceLoad>,
+    launch_review_request_id: u64,
+    pending_launch_review: Option<PendingLaunchReview>,
     handoff_trail: Option<HandoffTrail>,
     clipboard_text: Option<String>,
     pending_resume: Option<Box<OriginalSessionPlan>>,
+    pending_launch: Option<Box<LaunchPlan>>,
     exit_action: Option<TuiExitAction>,
     should_quit: bool,
 }
@@ -531,7 +925,10 @@ impl App {
             show_doctor: false,
             show_skill_picker: false,
             show_capsules: false,
+            show_data_spaces: false,
+            show_data_space_config: false,
             show_timeline_detail: false,
+            target_launch_result: None,
             timeline_image_previews: Vec::new(),
             saved_capsules: Vec::new(),
             saved_capsule_error: None,
@@ -540,6 +937,11 @@ impl App {
             search_query: String::new(),
             data_spaces: dataspace::list_data_spaces(),
             selected_data_space: 0,
+            data_space_selection: 0,
+            data_space_error: None,
+            data_space_config_form: DataSpaceConfigForm::default(),
+            data_space_config_field: 0,
+            data_space_delete_confirmation: None,
             pending_target: target,
             pending_compiler: 0,
             status_message: "Ready".into(),
@@ -554,9 +956,12 @@ impl App {
             pending_session_load: None,
             data_space_load_request_id: 0,
             pending_data_space_load: None,
+            launch_review_request_id: 0,
+            pending_launch_review: None,
             handoff_trail: None,
             clipboard_text: None,
             pending_resume: None,
+            pending_launch: None,
             exit_action: None,
             should_quit: false,
             visible_session_indices: Vec::new(),
@@ -577,8 +982,61 @@ impl App {
         self.pending_resume.take()
     }
 
+    pub fn take_pending_launch(&mut self) -> Option<Box<LaunchPlan>> {
+        self.pending_launch.take()
+    }
+
     pub fn take_exit_action(&mut self) -> Option<TuiExitAction> {
         self.exit_action.take()
+    }
+
+    pub fn complete_target_handoff(
+        &mut self,
+        plan: Box<LaunchPlan>,
+        result: Result<LaunchExecution, CoreError>,
+    ) {
+        let (outcome, success) = match result {
+            Ok(execution) => match execution.status {
+                LaunchExecutionStatus::Success => (
+                    execution
+                        .exit_code
+                        .map(|code| {
+                            format!("{} exited successfully (code {code})", plan.target_cli)
+                        })
+                        .unwrap_or_else(|| format!("{} exited successfully", plan.target_cli)),
+                    true,
+                ),
+                LaunchExecutionStatus::Failed => (
+                    execution
+                        .exit_code
+                        .map(|code| format!("{} exited with code {code}", plan.target_cli))
+                        .unwrap_or_else(|| {
+                            format!("{} exited without a success code", plan.target_cli)
+                        }),
+                    false,
+                ),
+            },
+            Err(error) => (
+                format!("{} failed to start: {error}", plan.target_cli),
+                false,
+            ),
+        };
+        self.target_launch_result = Some(TargetLaunchResult {
+            target: plan.target_cli,
+            source: plan.source_session.cli,
+            session_id: plan.source_session.id.clone(),
+            command: plan.target_command.display.clone(),
+            command_summary: launcher::concise_command_display(&plan.target_command),
+            outcome: outcome.clone(),
+            success,
+            plan,
+        });
+        self.show_launch = true;
+        self.launch_review = false;
+        self.modal_scroll = 0;
+        self.clear_handoff_trail();
+        self.set_status(outcome);
+        self.pending_g = false;
     }
 
     pub fn complete_original_resume(&mut self, plan: &OriginalSessionPlan, outcome: String) {
@@ -664,6 +1122,10 @@ impl App {
         self.pending_session_load.is_some()
     }
 
+    pub fn is_launch_review_pending(&self) -> bool {
+        self.pending_launch_review.is_some()
+    }
+
     pub fn current_data_space(&self) -> &dataspace::DataSpaceEntry {
         self.data_spaces
             .get(self.selected_data_space)
@@ -690,7 +1152,13 @@ impl App {
             }
         }
 
-        self.poll_data_space_background() || changed
+        if self.poll_data_space_background() {
+            changed = true;
+        }
+        if self.poll_launch_review_background() {
+            changed = true;
+        }
+        changed
     }
 
     fn prune_handoff_trail(&mut self) -> bool {
@@ -764,6 +1232,30 @@ impl App {
         }
     }
 
+    fn poll_launch_review_background(&mut self) -> bool {
+        let Some(pending) = self.pending_launch_review.take() else {
+            return false;
+        };
+
+        match pending.receiver.try_recv() {
+            Ok(result) => {
+                self.apply_launch_review_result(pending, result);
+                true
+            }
+            Err(TryRecvError::Empty) => {
+                self.pending_launch_review = Some(pending);
+                false
+            }
+            Err(TryRecvError::Disconnected) => {
+                self.compile_status = "FAILED";
+                self.launch_review = false;
+                self.clear_handoff_trail();
+                self.set_status("Handoff review failed: worker disconnected");
+                true
+            }
+        }
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent) {
         if self.command_mode {
             self.handle_command_key(key);
@@ -792,6 +1284,7 @@ impl App {
             KeyCode::Char(']') => self.cycle_session_filter(true),
             KeyCode::Char('{') => self.cycle_data_space(false),
             KeyCode::Char('}') => self.cycle_data_space(true),
+            KeyCode::Char('d') => self.open_data_space_picker(),
             KeyCode::Char('f') => self.cycle_session_filter(true),
             KeyCode::Char('a') => self.clear_session_filters(),
             KeyCode::Char('s') | KeyCode::Char('*') => self.toggle_starred_session(),
@@ -823,7 +1316,8 @@ impl App {
             KeyCode::Char('+') | KeyCode::Char('=') => self.zoom_current_panel(),
             KeyCode::Char('-') => self.restore_zoom(),
             KeyCode::Char('y') => self.copy_focused_command(),
-            KeyCode::Enter => self.queue_original_resume(),
+            KeyCode::Enter if self.current_data_space().is_local() => self.queue_original_resume(),
+            KeyCode::Enter => self.open_launch_picker_for_remote_session(),
             _ => self.pending_g = false,
         }
     }
@@ -997,6 +1491,7 @@ impl App {
             "source codex" => self.apply_session_filter(SessionFilter::Tool(CliTool::Codex)),
             "source claude" => self.apply_session_filter(SessionFilter::Tool(CliTool::Claude)),
             "source hermes" => self.apply_session_filter(SessionFilter::Tool(CliTool::Hermes)),
+            "data" => self.open_data_space_picker(),
             "data next" => self.cycle_data_space(true),
             "data prev" => self.cycle_data_space(false),
             "skill" => self.open_skill_picker(),
@@ -1006,6 +1501,41 @@ impl App {
     }
 
     fn handle_launch_key(&mut self, key: KeyEvent) {
+        if self.is_launch_review_pending() {
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    self.pending_launch_review = None;
+                    self.show_launch = false;
+                    self.launch_review = false;
+                    self.modal_scroll = 0;
+                    self.clear_handoff_trail();
+                    self.set_status("Handoff review cancelled");
+                }
+                KeyCode::Enter => {
+                    self.set_status(format!("Preparing handoff review: {}", self.pending_target));
+                }
+                _ => {}
+            }
+            self.pending_g = false;
+            return;
+        }
+
+        if self.target_launch_result.is_some() {
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    self.show_launch = false;
+                    self.target_launch_result = None;
+                    self.modal_scroll = 0;
+                    self.set_status("Launch result closed");
+                }
+                KeyCode::Char('r') => self.rerun_target_handoff(),
+                KeyCode::Char('y') => self.copy_target_launch_result_command(),
+                KeyCode::Enter => self.set_status("Launch finished - press r, y, or Esc"),
+                _ => {}
+            }
+            return;
+        }
+
         if self.launch_review {
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => {
@@ -1016,7 +1546,17 @@ impl App {
                     self.set_status("Launch review closed");
                 }
                 KeyCode::Char('y') => self.copy_launch_command(),
-                KeyCode::Enter => self.queue_target_handoff(),
+                KeyCode::Char('r') => self.queue_target_handoff(),
+                KeyCode::Enter => self.set_status(format!(
+                    "Review only - press r to run local {}",
+                    self.pending_target
+                )),
+                KeyCode::Char('G') => {
+                    self.modal_scroll = u16::MAX;
+                    self.pending_g = false;
+                    self.set_status("Review bottom");
+                }
+                KeyCode::Char('g') => self.handle_modal_g(),
                 KeyCode::PageDown => self.scroll_modal(true, 6),
                 KeyCode::PageUp => self.scroll_modal(false, 6),
                 KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -1025,9 +1565,15 @@ impl App {
                 KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     self.scroll_modal(false, 6)
                 }
-                KeyCode::Char('j') | KeyCode::Down => self.scroll_modal(true, 1),
-                KeyCode::Char('k') | KeyCode::Up => self.scroll_modal(false, 1),
-                _ => {}
+                KeyCode::Char('j') | KeyCode::Down => {
+                    self.scroll_modal(true, 1);
+                    self.pending_g = false;
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    self.scroll_modal(false, 1);
+                    self.pending_g = false;
+                }
+                _ => self.pending_g = false,
             }
             return;
         }
@@ -1069,6 +1615,14 @@ impl App {
             self.handle_skill_picker_key(key);
             return;
         }
+        if self.show_data_space_config {
+            self.handle_data_space_config_key(key);
+            return;
+        }
+        if self.show_data_spaces {
+            self.handle_data_space_picker_key(key);
+            return;
+        }
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => self.back_or_quit(),
             KeyCode::Char('r') if self.show_doctor => self.refresh_doctor(),
@@ -1105,6 +1659,17 @@ impl App {
             self.show_capsules = false;
             self.modal_scroll = 0;
             self.set_status("Capsule inventory closed");
+        } else if self.show_data_space_config {
+            self.show_data_space_config = false;
+            self.data_space_config_form = DataSpaceConfigForm::default();
+            self.data_space_config_field = 0;
+            self.set_status("SSH data space config cancelled");
+        } else if self.show_data_spaces {
+            self.show_data_spaces = false;
+            self.modal_scroll = 0;
+            self.data_space_selection = self.selected_data_space;
+            self.data_space_delete_confirmation = None;
+            self.set_status("Data spaces closed");
         } else if self.show_timeline_detail {
             self.show_timeline_detail = false;
             self.timeline_image_previews.clear();
@@ -1392,6 +1957,235 @@ impl App {
         self.pending_g = false;
     }
 
+    fn open_data_space_picker(&mut self) {
+        self.data_space_selection = self
+            .selected_data_space
+            .min(self.data_spaces.len().saturating_sub(1));
+        self.show_data_spaces = true;
+        self.modal_scroll = 0;
+        self.data_space_delete_confirmation = None;
+        self.set_status("Data spaces opened");
+        self.pending_g = false;
+    }
+
+    fn handle_data_space_picker_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') if self.data_space_delete_confirmation.is_some() => {
+                self.data_space_delete_confirmation = None;
+                self.set_status("Data space delete cancelled");
+            }
+            KeyCode::Esc | KeyCode::Char('q') => self.back_or_quit(),
+            KeyCode::Char('n') | KeyCode::Char('a') => self.open_data_space_config(),
+            KeyCode::Char('r') => self.refresh_data_spaces(),
+            KeyCode::Char('x') | KeyCode::Delete => self.delete_selected_data_space(),
+            KeyCode::Enter => self.confirm_data_space_selection(),
+            KeyCode::Char('j') | KeyCode::Down | KeyCode::Char('}') => {
+                self.move_data_space_selection(true)
+            }
+            KeyCode::Char('k') | KeyCode::Up | KeyCode::Char('{') => {
+                self.move_data_space_selection(false)
+            }
+            _ => {}
+        }
+    }
+
+    fn open_data_space_config(&mut self) {
+        self.show_data_space_config = true;
+        self.data_space_config_form = DataSpaceConfigForm::default();
+        self.data_space_config_field = 0;
+        self.data_space_error = None;
+        self.data_space_delete_confirmation = None;
+        self.set_status("Add SSH data space");
+        self.pending_g = false;
+    }
+
+    fn handle_data_space_config_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => self.back_or_quit(),
+            KeyCode::Tab | KeyCode::Down => self.move_data_space_config_field(true),
+            KeyCode::BackTab | KeyCode::Up => self.move_data_space_config_field(false),
+            KeyCode::Enter => {
+                let quick_save = self.data_space_config_field == 0
+                    && !self.data_space_config_form.quick.trim().is_empty();
+                let last_field = self.data_space_config_field + 1 >= DATA_SPACE_CONFIG_FIELD_COUNT;
+                if quick_save || last_field {
+                    self.save_data_space_config();
+                } else {
+                    self.move_data_space_config_field(true);
+                }
+            }
+            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.save_data_space_config()
+            }
+            KeyCode::Backspace => {
+                self.data_space_config_form
+                    .field_mut(self.data_space_config_field)
+                    .pop();
+            }
+            KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.data_space_config_form
+                    .field_mut(self.data_space_config_field)
+                    .push(ch);
+            }
+            _ => {}
+        }
+    }
+
+    fn move_data_space_config_field(&mut self, forward: bool) {
+        self.data_space_config_field = if forward {
+            (self.data_space_config_field + 1) % DATA_SPACE_CONFIG_FIELD_COUNT
+        } else if self.data_space_config_field == 0 {
+            DATA_SPACE_CONFIG_FIELD_COUNT - 1
+        } else {
+            self.data_space_config_field - 1
+        };
+    }
+
+    fn save_data_space_config(&mut self) {
+        if let Err(error) = self.data_space_config_form.parse_quick_into_fields() {
+            self.data_space_error = Some(error.clone());
+            self.set_status(format!("SSH target parse failed: {error}"));
+            return;
+        }
+        let host = match self.data_space_config_form.to_config() {
+            Ok(host) => host,
+            Err(error) => {
+                self.data_space_error = Some(error.clone());
+                self.set_status(format!("SSH config invalid: {error}"));
+                return;
+            }
+        };
+        let host_name = host.name.clone();
+        match config::add_ssh_host_config(host) {
+            Ok(()) => {
+                self.show_data_space_config = false;
+                self.data_space_config_form = DataSpaceConfigForm::default();
+                self.data_space_config_field = 0;
+                self.refresh_data_spaces();
+                if let Some(index) = self
+                    .data_spaces
+                    .iter()
+                    .position(|space| space.id == format!("ssh:{host_name}"))
+                {
+                    self.data_space_selection = index;
+                }
+                self.data_space_error = None;
+                self.data_space_delete_confirmation = None;
+                self.set_status(format!("SSH data space saved: {host_name}"));
+            }
+            Err(error) => {
+                self.data_space_error = Some(error.to_string());
+                self.set_status(format!("SSH config save failed: {error}"));
+            }
+        }
+    }
+
+    fn move_data_space_selection(&mut self, forward: bool) {
+        if self.data_spaces.is_empty() {
+            self.data_space_selection = 0;
+            self.set_status("No data spaces configured");
+            return;
+        }
+        let len = self.data_spaces.len();
+        self.data_space_selection = if forward {
+            (self.data_space_selection + 1) % len
+        } else if self.data_space_selection == 0 {
+            len - 1
+        } else {
+            self.data_space_selection - 1
+        };
+        if let Some(space) = self.data_spaces.get(self.data_space_selection) {
+            self.set_status(format!("Data candidate: {}", space.label));
+        }
+        self.data_space_delete_confirmation = None;
+    }
+
+    fn delete_selected_data_space(&mut self) {
+        let Some(space) = self.data_spaces.get(self.data_space_selection) else {
+            self.set_status("No data space selected");
+            return;
+        };
+        if space.is_local() {
+            self.data_space_delete_confirmation = None;
+            self.set_status("Local data space cannot be deleted");
+            return;
+        }
+        if space.config_source.as_deref() != Some("Moonbox config") {
+            self.data_space_delete_confirmation = None;
+            self.set_status("Only Moonbox data spaces can be deleted here");
+            return;
+        }
+        let name = space.label.clone();
+        if self.data_space_delete_confirmation.as_deref() != Some(name.as_str()) {
+            self.data_space_delete_confirmation = Some(name.clone());
+            self.set_status(format!("Press x again to delete SSH data space: {name}"));
+            return;
+        }
+
+        match config::remove_ssh_host_config(&name) {
+            Ok(true) => {
+                self.data_space_delete_confirmation = None;
+                let deleted_active = self
+                    .data_spaces
+                    .get(self.selected_data_space)
+                    .is_some_and(|space| space.label == name);
+                self.refresh_data_spaces();
+                if deleted_active {
+                    self.selected_data_space = 0;
+                    self.data_space_selection = 0;
+                    self.load_data_space(0);
+                }
+                self.set_status(format!("SSH data space deleted: {name}"));
+            }
+            Ok(false) => {
+                self.data_space_delete_confirmation = None;
+                self.refresh_data_spaces();
+                self.set_status(format!("SSH data space was already gone: {name}"));
+            }
+            Err(error) => {
+                self.data_space_error = Some(error.to_string());
+                self.set_status(format!("SSH data space delete failed: {error}"));
+            }
+        }
+    }
+
+    fn confirm_data_space_selection(&mut self) {
+        self.data_space_delete_confirmation = None;
+        if self.data_space_selection == self.selected_data_space {
+            if let Some(space) = self.data_spaces.get(self.selected_data_space) {
+                self.set_status(format!("Data space already active: {}", space.label));
+            }
+            self.show_data_spaces = false;
+            self.modal_scroll = 0;
+            self.pending_g = false;
+            return;
+        }
+        let index = self.data_space_selection;
+        self.show_data_spaces = false;
+        self.modal_scroll = 0;
+        self.load_data_space(index);
+    }
+
+    fn refresh_data_spaces(&mut self) {
+        let current_id = self.current_data_space().id.clone();
+        let selected_id = self
+            .data_spaces
+            .get(self.data_space_selection)
+            .map(|space| space.id.clone());
+        self.data_spaces = dataspace::list_data_spaces();
+        self.selected_data_space = self
+            .data_spaces
+            .iter()
+            .position(|space| space.id == current_id)
+            .unwrap_or(0);
+        self.data_space_selection = selected_id
+            .and_then(|id| self.data_spaces.iter().position(|space| space.id == id))
+            .unwrap_or(self.selected_data_space);
+        self.data_space_delete_confirmation = None;
+        self.set_status(format!("Data spaces refreshed: {}", self.data_spaces.len()));
+        self.pending_g = false;
+    }
+
     fn open_capsules(&mut self) {
         self.show_capsules = true;
         self.modal_scroll = 0;
@@ -1432,6 +2226,12 @@ impl App {
     }
 
     fn open_original(&mut self) {
+        if !self.current_data_space().is_local() {
+            self.show_open_original = false;
+            self.set_status("SSH sessions cannot be opened locally; use handoff");
+            self.pending_g = false;
+            return;
+        }
         if !self.ensure_session_details_ready("Original") {
             return;
         }
@@ -1450,6 +2250,12 @@ impl App {
     }
 
     fn queue_original_resume_with_mode(&mut self, mode: OriginalResumeMode) {
+        if !self.current_data_space().is_local() {
+            self.show_open_original = false;
+            self.set_status("SSH sessions cannot be resumed locally; use handoff");
+            self.pending_g = false;
+            return;
+        }
         if !self.ensure_session_details_ready("Original") {
             return;
         }
@@ -1610,6 +2416,8 @@ impl App {
             started_at: Instant::now(),
             receiver,
         });
+        self.data_space_selection = index;
+        self.data_space_error = None;
         self.compile_status = "LOADING";
         self.verify_passed = false;
         self.set_status(format!("Loading data space: {}", space.label));
@@ -1662,6 +2470,8 @@ impl App {
             || self.show_doctor
             || self.show_skill_picker
             || self.show_capsules
+            || self.show_data_spaces
+            || self.show_data_space_config
             || self.show_timeline_detail
     }
 
@@ -1687,10 +2497,18 @@ impl App {
         self.pending_target = self.data.target;
         self.show_launch = true;
         self.launch_review = false;
+        self.target_launch_result = None;
         self.clear_handoff_trail();
         self.modal_scroll = 0;
         self.set_status("Choose target CLI");
         self.pending_g = false;
+    }
+
+    fn open_launch_picker_for_remote_session(&mut self) {
+        self.open_launch_picker();
+        if self.show_launch {
+            self.set_status("SSH source is read-only; choose a local target for handoff");
+        }
     }
 
     fn open_timeline_detail(&mut self) {
@@ -1733,23 +2551,57 @@ impl App {
             self.pending_g = false;
             return;
         }
-        if let Err(error) = self.replace_data_for_target(target) {
-            self.set_status(format!("Target failed: {error}"));
+        let Some(session) = self.current_session().cloned() else {
+            self.set_status("No session selected");
             self.pending_g = false;
             return;
-        }
+        };
+        let selected_compiler = self.selected_compiler;
+        let rewind_event_id = self.rewind_event_id.clone();
+        let space = self.current_data_space().clone();
+        let sessions = self.data.sessions.clone();
+        let source_adapters = self.data.source_adapters.clone();
+        let session_id = session.id.clone();
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let result = if space.is_local() {
+                workbench::load_workbench_from_session_snapshot(
+                    session,
+                    sessions,
+                    source_adapters,
+                    target,
+                )
+            } else {
+                workbench::load_remote_workbench_from_session_snapshot(
+                    &space, session, sessions, target,
+                )
+            };
+            let _ = sender.send(result);
+        });
+
+        self.launch_review_request_id = self.launch_review_request_id.wrapping_add(1);
+        self.pending_launch_review = Some(PendingLaunchReview {
+            request_id: self.launch_review_request_id,
+            session_id,
+            target,
+            selected_compiler,
+            rewind_event_id,
+            started_at: Instant::now(),
+            receiver,
+        });
         let _ = config::save_last_target(target);
         self.show_launch = true;
-        self.launch_review = true;
+        self.launch_review = false;
+        self.target_launch_result = None;
         self.start_handoff_trail_for_review();
         self.modal_scroll = 0;
         if validation.state == LaunchValidationState::Warning {
             self.set_status(format!(
-                "Review launch: {target} ({})",
+                "Preparing handoff review: {target} ({})",
                 validation.summary()
             ));
         } else {
-            self.set_status(format!("Review launch: {target}"));
+            self.set_status(format!("Preparing handoff review: {target}"));
         }
         self.pending_g = false;
     }
@@ -1799,46 +2651,13 @@ impl App {
         }
     }
 
-    fn replace_data_for_target(&mut self, target: CliTool) -> Result<(), CoreError> {
-        let selected_compiler = self.selected_compiler;
-        let rewind_event_id = self.rewind_event_id.clone();
-        let session_id = self.current_session().map(|session| session.id.clone());
-        if let Some(session_id) = session_id {
-            if let Some(data) = workbench::load_workbench_for_session(&session_id, target)? {
-                self.data = data;
-                self.refresh_visible_sessions();
-            }
-        } else {
-            self.data = workbench::load_workbench(self.data.source, target)?;
-            self.refresh_visible_sessions();
-        }
-        self.selected_session = self
-            .selected_session
-            .min(self.data.sessions.len().saturating_sub(1));
-        self.clamp_selected_session();
-        self.selected_event = self
-            .selected_event
-            .min(self.data.timeline.len().saturating_sub(1));
-        self.selected_compiler = selected_compiler.min(self.data.compilers.len().saturating_sub(1));
-        self.data.capsule.compiler = self.data.compilers[self.selected_compiler].clone();
-        if let Some(title) = self.timeline_event_title(&rewind_event_id) {
-            self.apply_rewind_event(rewind_event_id, title);
-        } else {
-            self.rewind_event_id = initial_rewind_event_id(&self.data);
-        }
-        self.compile_status = "ACTIVE";
-        self.verify_passed = true;
-        self.pending_g = false;
-        Ok(())
-    }
-
     fn request_selected_session_details(&mut self) {
         let Some(session) = self.data.sessions.get(self.selected_session).cloned() else {
             self.pending_session_load = None;
             return;
         };
         if !self.current_data_space().is_local() {
-            self.apply_readonly_remote_session_snapshot(session);
+            self.request_remote_session_details(session);
             return;
         }
         let target = self.data.target;
@@ -1885,29 +2704,46 @@ impl App {
         ));
     }
 
-    fn apply_readonly_remote_session_snapshot(&mut self, session: SessionSummary) {
+    fn request_remote_session_details(&mut self, session: SessionSummary) {
+        if self.data.capsule.source_session == session.id
+            && !self.data.timeline.is_empty()
+            && self.pending_session_load.is_none()
+        {
+            return;
+        }
+        let target = self.data.target;
+        self.session_load_request_id = self.session_load_request_id.wrapping_add(1);
+        let request_id = self.session_load_request_id;
         let selected_compiler = self.selected_compiler;
         let selected_session = self.selected_session;
         let space = self.current_data_space().clone();
         let sessions = self.data.sessions.clone();
-        self.data = workbench::load_readonly_workbench_from_session_snapshot(
-            &space,
-            session.clone(),
-            sessions,
-            self.data.target,
-        );
-        self.refresh_visible_sessions();
+        let worker_session = session.clone();
+        let worker_session_id = session.id.clone();
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let result = workbench::load_remote_workbench_from_session_snapshot(
+                &space,
+                worker_session,
+                sessions,
+                target,
+            );
+            let _ = sender.send(result);
+        });
+
+        self.pending_session_load = Some(PendingSessionLoad {
+            request_id,
+            session_id: worker_session_id,
+            target,
+            started_at: Instant::now(),
+            receiver,
+        });
         self.selected_session = selected_session.min(self.data.sessions.len().saturating_sub(1));
-        self.clamp_selected_session();
-        self.selected_event = 0;
         self.selected_compiler = selected_compiler.min(self.data.compilers.len().saturating_sub(1));
-        self.data.capsule.compiler = self.data.compilers[self.selected_compiler].clone();
-        self.rewind_event_id = initial_rewind_event_id(&self.data);
-        self.capsule_scroll = 0;
-        self.compile_status = "ACTIVE";
+        self.compile_status = "LOADING";
         self.verify_passed = false;
         self.set_status(format!(
-            "Remote session summary: {} {}",
+            "Loading remote session: {} {}",
             session.cli, session.title
         ));
     }
@@ -1926,6 +2762,8 @@ impl App {
                 let selected_compiler = self.selected_compiler;
                 self.data = data;
                 self.selected_data_space = pending.index;
+                self.data_space_selection = pending.index;
+                self.data_space_error = None;
                 self.refresh_visible_sessions();
                 self.clamp_selected_session();
                 self.selected_event =
@@ -1943,10 +2781,16 @@ impl App {
                     self.data.sessions.len(),
                     elapsed.as_millis()
                 ));
+                if !pending.space.is_local() {
+                    self.request_selected_session_details();
+                }
             }
             Err(error) => {
                 self.compile_status = "FAILED";
                 self.verify_passed = false;
+                self.show_data_spaces = true;
+                self.data_space_selection = pending.index;
+                self.data_space_error = Some(error.to_string());
                 self.set_status(format!(
                     "Data space failed: {} ({} ms)",
                     error,
@@ -2017,6 +2861,71 @@ impl App {
         }
     }
 
+    fn apply_launch_review_result(
+        &mut self,
+        pending: PendingLaunchReview,
+        result: LaunchReviewResult,
+    ) {
+        if self.launch_review_request_id != pending.request_id {
+            return;
+        }
+
+        let elapsed = pending.started_at.elapsed();
+        match result {
+            Ok(data) => {
+                self.data = data;
+                self.refresh_visible_sessions();
+                self.selected_session = self
+                    .data
+                    .sessions
+                    .iter()
+                    .position(|session| session.id == pending.session_id)
+                    .unwrap_or(self.selected_session)
+                    .min(self.data.sessions.len().saturating_sub(1));
+                self.selected_event = self
+                    .selected_event
+                    .min(self.data.timeline.len().saturating_sub(1));
+                self.selected_compiler = pending
+                    .selected_compiler
+                    .min(self.data.compilers.len().saturating_sub(1));
+                if let Some(compiler) = self.data.compilers.get(self.selected_compiler).cloned() {
+                    self.data.capsule.compiler = compiler;
+                }
+                if let Some(title) = self.timeline_event_title(&pending.rewind_event_id) {
+                    let rewind_event_id = pending.rewind_event_id;
+                    self.apply_rewind_event(rewind_event_id.clone(), title);
+                    self.selected_event = rewind_event_index(&self.data, &rewind_event_id);
+                } else {
+                    self.rewind_event_id = initial_rewind_event_id(&self.data);
+                    self.selected_event = rewind_event_index(&self.data, &self.rewind_event_id);
+                }
+                self.pending_target = pending.target;
+                self.show_launch = true;
+                self.launch_review = true;
+                self.target_launch_result = None;
+                self.compile_status = "ACTIVE";
+                self.verify_passed = true;
+                self.modal_scroll = u16::MAX;
+                self.pending_g = false;
+                self.set_status(format!(
+                    "Handoff review ready: {} ({} ms)",
+                    pending.target,
+                    elapsed.as_millis()
+                ));
+            }
+            Err(error) => {
+                self.compile_status = "FAILED";
+                self.verify_passed = false;
+                self.launch_review = false;
+                self.clear_handoff_trail();
+                self.set_status(format!(
+                    "Handoff review failed: {error} ({} ms)",
+                    elapsed.as_millis()
+                ));
+            }
+        }
+    }
+
     fn set_status(&mut self, message: impl Into<String>) {
         self.status_message = message.into();
     }
@@ -2035,6 +2944,16 @@ impl App {
         } else {
             self.modal_scroll.saturating_sub(amount)
         };
+    }
+
+    fn handle_modal_g(&mut self) {
+        if self.pending_g {
+            self.modal_scroll = 0;
+            self.pending_g = false;
+            self.set_status("Review top");
+        } else {
+            self.pending_g = true;
+        }
     }
 
     fn copy_text(&mut self, label: &str, text: String) {
@@ -2063,10 +2982,31 @@ impl App {
             self.set_status("Confirm target first with enter");
             return;
         }
-        self.copy_text("launch", self.launch_command());
+        self.copy_text("launch", self.launch_copy_command());
+    }
+
+    fn copy_target_launch_result_command(&mut self) {
+        let Some(result) = &self.target_launch_result else {
+            self.set_status("No launch result");
+            return;
+        };
+        self.copy_text("launch", result.command.clone());
+    }
+
+    fn rerun_target_handoff(&mut self) {
+        let Some(result) = &self.target_launch_result else {
+            self.set_status("No launch result");
+            return;
+        };
+        self.pending_launch = Some(result.plan.clone());
+        self.set_status(format!("Launching target: {}", result.target));
     }
 
     fn copy_original_command(&mut self) {
+        if !self.current_data_space().is_local() {
+            self.set_status("SSH sessions cannot be opened locally; use handoff");
+            return;
+        }
         if let Some(command) = self.original_open_command() {
             self.copy_text("original", command);
         } else {
@@ -2085,6 +3025,12 @@ impl App {
             return;
         };
         let capsule = self.launch_capsule_for_target(self.pending_target);
+        if compiler::compiler_is_builtin(&capsule.compiler)
+            && session.source_provenance != SourceProvenance::Fixture
+        {
+            self.set_status("Draft capsule cannot run; press y to copy or configure a compiler");
+            return;
+        }
         let continuation = continuation::build_continuation_protocol(
             &session,
             self.pending_target,
@@ -2115,7 +3061,7 @@ impl App {
         let compiler = capsule.compiler.clone();
         let handoff_label = capsule.handoff_label.clone();
         let rewind_point = capsule.rewind_point.clone();
-        self.exit_action = Some(TuiExitAction::TargetHandoff(Box::new(LaunchPlan {
+        self.pending_launch = Some(Box::new(LaunchPlan {
             version: 1,
             action: SessionAction::TargetHandoff,
             dry_run: true,
@@ -2129,8 +3075,7 @@ impl App {
             target_command,
             verification,
             continuation,
-        })));
-        self.should_quit = true;
+        }));
         self.set_status(format!("Launching target: {}", self.pending_target));
     }
 
@@ -2152,6 +3097,11 @@ impl App {
         workbench::moonbox_execute_command(self.pending_target, session, None)
     }
 
+    pub fn launch_copy_command(&self) -> String {
+        self.target_launch_command_display()
+            .unwrap_or_else(|| self.launch_command())
+    }
+
     pub fn launch_handoff_label(&self) -> String {
         format!(
             "moonbox/{}-rewind-{}",
@@ -2161,13 +3111,59 @@ impl App {
     }
 
     pub fn original_open_command(&self) -> Option<String> {
+        if !self.current_data_space().is_local() {
+            return None;
+        }
         self.current_session()
             .map(|session| workbench::moonbox_open_execute_command(&session.id))
     }
 
     pub fn original_resume_display_command(&self) -> Option<String> {
+        if !self.current_data_space().is_local() {
+            return None;
+        }
         self.current_session()
             .map(|session| launcher::original_command(session).display)
+    }
+
+    pub fn target_launch_command_display(&self) -> Option<String> {
+        let session = self.current_session()?;
+        let capsule = self.launch_capsule_for_target(self.pending_target);
+        let continuation = continuation::build_continuation_protocol(
+            session,
+            self.pending_target,
+            &capsule,
+            None,
+            ContinuationOptions::default(),
+        );
+        launcher::target_command_with_continuation(
+            self.pending_target,
+            session,
+            &capsule,
+            &continuation,
+        )
+        .ok()
+        .map(|command| command.display)
+    }
+
+    pub fn target_launch_command_summary(&self) -> Option<String> {
+        let session = self.current_session()?;
+        let capsule = self.launch_capsule_for_target(self.pending_target);
+        let continuation = continuation::build_continuation_protocol(
+            session,
+            self.pending_target,
+            &capsule,
+            None,
+            ContinuationOptions::default(),
+        );
+        launcher::target_command_with_continuation(
+            self.pending_target,
+            session,
+            &capsule,
+            &continuation,
+        )
+        .ok()
+        .map(|command| launcher::concise_command_display(&command))
     }
 
     pub fn target_command_preview(&self) -> Option<launcher::TargetInputPreview> {
@@ -2445,6 +3441,21 @@ mod tests {
         );
     }
 
+    fn settle_launch_review(app: &mut App) {
+        for _ in 0..100 {
+            app.poll_background();
+            if !app.is_launch_review_pending() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        app.poll_background();
+        assert!(
+            !app.is_launch_review_pending(),
+            "launch review did not finish"
+        );
+    }
+
     #[test]
     fn space_updates_rewind_point_from_selected_event() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
@@ -2581,6 +3592,12 @@ mod tests {
                 label: "Devbox".into(),
                 kind: dataspace::DataSpaceKind::Local,
                 detail: "fixture local data space".into(),
+                ssh_host: None,
+                ssh_user: None,
+                ssh_port: None,
+                ssh_identity_file: None,
+                config_source: Some("test".into()),
+                config_path: None,
             },
         ];
 
@@ -2595,6 +3612,172 @@ mod tests {
         assert_eq!(app.selected_data_space, 1);
         assert!(app.status_message.contains("Data space: Devbox"));
         assert!(!app.should_quit());
+    }
+
+    #[test]
+    fn data_space_picker_opens_and_switches_selected_inventory() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.data_spaces = vec![
+            dataspace::DataSpaceEntry::local(),
+            dataspace::DataSpaceEntry {
+                id: "local-review".into(),
+                label: "Review".into(),
+                kind: dataspace::DataSpaceKind::Local,
+                detail: "fixture local review space".into(),
+                ssh_host: None,
+                ssh_user: None,
+                ssh_port: None,
+                ssh_identity_file: None,
+                config_source: Some("test".into()),
+                config_path: None,
+            },
+        ];
+
+        app.handle_key(key('d'));
+        assert!(app.show_data_spaces);
+        assert_eq!(app.data_space_selection, 0);
+
+        app.handle_key(key('j'));
+        assert_eq!(app.data_space_selection, 1);
+
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert!(!app.show_data_spaces);
+        for _ in 0..20 {
+            if app.poll_background() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+
+        assert_eq!(app.selected_data_space, 1);
+        assert!(app.status_message.contains("Data space: Review"));
+    }
+
+    #[test]
+    fn data_space_picker_opens_add_ssh_config_form() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+
+        app.handle_key(key('d'));
+        app.handle_key(key('n'));
+
+        assert!(app.show_data_spaces);
+        assert!(app.show_data_space_config);
+        assert_eq!(app.status_message, "Add SSH data space");
+    }
+
+    #[test]
+    fn data_space_config_form_validates_and_builds_host() {
+        let mut form = DataSpaceConfigForm {
+            quick: String::new(),
+            name: "devbox".into(),
+            host: "10.37.218.31".into(),
+            user: "yangyang.1205".into(),
+            port: "22".into(),
+            identity_file: "~/.ssh/id_ed25519".into(),
+        };
+
+        let host = form.to_config().expect("host config");
+        assert_eq!(host.name, "devbox");
+        assert_eq!(host.host, "10.37.218.31");
+        assert_eq!(host.user.as_deref(), Some("yangyang.1205"));
+        assert_eq!(host.port, Some(22));
+        assert_eq!(host.identity_file.as_deref(), Some("~/.ssh/id_ed25519"));
+
+        form.port = "nope".into();
+        assert_eq!(
+            form.to_config().expect_err("bad port"),
+            "port must be 1-65535"
+        );
+    }
+
+    #[test]
+    fn data_space_config_quick_input_parses_ssh_command() {
+        let mut form = DataSpaceConfigForm {
+            quick: "ssh -i ~/.ssh/id_ed25519 -p 2222 yangyang.1205@10.37.218.31".into(),
+            ..DataSpaceConfigForm::default()
+        };
+
+        assert!(form.parse_quick_into_fields().expect("parse quick ssh"));
+        let host = form.to_config().expect("host config");
+
+        assert_eq!(host.name, "10.37.218.31");
+        assert_eq!(host.host, "10.37.218.31");
+        assert_eq!(host.user.as_deref(), Some("yangyang.1205"));
+        assert_eq!(host.port, Some(2222));
+        assert_eq!(host.identity_file.as_deref(), Some("~/.ssh/id_ed25519"));
+    }
+
+    #[test]
+    fn data_space_config_quick_input_parses_openssh_host_block() {
+        let mut form = DataSpaceConfigForm {
+            quick: r#"
+Host devbox
+  HostName 10.37.218.31
+  User yangyang.1205
+  Port 22
+  IdentityFile ~/.ssh/id_ed25519
+"#
+            .into(),
+            ..DataSpaceConfigForm::default()
+        };
+
+        assert!(form.parse_quick_into_fields().expect("parse openssh"));
+        let host = form.to_config().expect("host config");
+
+        assert_eq!(host.name, "devbox");
+        assert_eq!(host.host, "10.37.218.31");
+        assert_eq!(host.user.as_deref(), Some("yangyang.1205"));
+        assert_eq!(host.port, Some(22));
+        assert_eq!(host.identity_file.as_deref(), Some("~/.ssh/id_ed25519"));
+    }
+
+    #[test]
+    fn data_space_picker_delete_requires_second_keypress() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.data_spaces = vec![
+            dataspace::DataSpaceEntry::local(),
+            dataspace::DataSpaceEntry {
+                id: "ssh:devbox".into(),
+                label: "devbox".into(),
+                kind: dataspace::DataSpaceKind::Ssh,
+                detail: "yangyang.1205@10.37.218.31".into(),
+                ssh_host: Some("10.37.218.31".into()),
+                ssh_user: Some("yangyang.1205".into()),
+                ssh_port: None,
+                ssh_identity_file: None,
+                config_source: Some("Moonbox config".into()),
+                config_path: None,
+            },
+        ];
+        app.show_data_spaces = true;
+        app.data_space_selection = 1;
+
+        app.handle_key(key('x'));
+
+        assert_eq!(
+            app.data_space_delete_confirmation.as_deref(),
+            Some("devbox")
+        );
+        assert!(app.status_message.contains("Press x again"));
+
+        app.handle_key(KeyEvent::from(KeyCode::Esc));
+
+        assert_eq!(app.data_space_delete_confirmation, None);
+        assert_eq!(app.status_message, "Data space delete cancelled");
+    }
+
+    #[test]
+    fn command_palette_data_opens_visual_picker() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+
+        app.handle_key(key(':'));
+        for ch in "data".chars() {
+            app.handle_key(key(ch));
+        }
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+
+        assert!(app.show_data_spaces);
+        assert_eq!(app.status_message, "Data spaces opened");
     }
 
     #[test]
@@ -2891,10 +4074,21 @@ mod tests {
 
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
         assert!(app.show_launch);
+        assert!(app.is_launch_review_pending());
+        assert!(!app.launch_review);
+        assert_eq!(app.data.target, CliTool::Hermes);
+        assert!(
+            app.status_message
+                .starts_with("Preparing handoff review: Codex")
+        );
+        settle_launch_review(&mut app);
         assert!(app.launch_review);
         assert_eq!(app.data.target, CliTool::Codex);
         assert!(app.handoff_trail_frame().is_some());
-        assert!(app.status_message.starts_with("Review launch: Codex"));
+        assert!(
+            app.status_message
+                .starts_with("Handoff review ready: Codex")
+        );
         assert_eq!(app.data.source, CliTool::Codex);
         assert_eq!(app.data.capsule.source_cli, CliTool::Codex);
         assert_eq!(app.data.capsule.source_session, "codex-cxcp-design");
@@ -2953,6 +4147,7 @@ mod tests {
         app.handle_key(key(' '));
         app.handle_key(key('H'));
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        settle_launch_review(&mut app);
 
         assert_eq!(app.rewind_event_id, "evt-001");
         assert!(app.data.capsule.rewind_point.contains("evt-001"));
@@ -3047,30 +4242,122 @@ mod tests {
         assert_eq!(app.status_message, "Confirm target first with enter");
 
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        assert!(app.is_launch_review_pending());
+        settle_launch_review(&mut app);
         assert!(app.launch_review);
         app.handle_key(key('y'));
 
         let copied = app.take_clipboard_text().expect("clipboard text");
-        assert!(copied.starts_with("moonbox launch --execute --target"));
-        assert!(copied.contains("--session codex-cxcp-design"));
-        assert!(!copied.contains("--capsule"));
+        assert!(copied.starts_with("hermes chat "));
+        assert!(copied.contains("Moonbox cross-CLI handoff"));
         assert_eq!(app.status_message, "Copied launch command");
     }
 
     #[test]
-    fn launch_review_enter_queues_target_handoff_without_executing_in_tests() {
+    fn launch_review_enter_is_review_only() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.handle_key(key('H'));
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        settle_launch_review(&mut app);
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
-        assert!(app.should_quit());
-        let Some(TuiExitAction::TargetHandoff(plan)) = app.take_exit_action() else {
-            panic!("expected target handoff action");
+        assert!(!app.should_quit());
+        assert!(app.take_exit_action().is_none());
+        assert!(app.take_pending_launch().is_none());
+        assert!(app.launch_review);
+        assert_eq!(
+            app.status_message,
+            "Review only - press r to run local Hermes"
+        );
+    }
+
+    #[test]
+    fn launch_review_r_queues_target_handoff_without_executing_in_tests() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.handle_key(key('H'));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        settle_launch_review(&mut app);
+        app.handle_key(key('r'));
+
+        assert!(!app.should_quit());
+        assert!(app.take_exit_action().is_none());
+        let Some(plan) = app.take_pending_launch() else {
+            panic!("expected pending target handoff");
         };
         assert_eq!(plan.source_session.id, "codex-cxcp-design");
         assert_eq!(plan.target_cli, CliTool::Hermes);
         assert!(plan.dry_run);
+    }
+
+    #[test]
+    fn launch_review_supports_vim_jump_keys() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.handle_key(key('H'));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        settle_launch_review(&mut app);
+
+        app.handle_key(key('G'));
+        assert_eq!(app.modal_scroll, u16::MAX);
+
+        app.handle_key(key('g'));
+        assert!(app.pending_g);
+        app.handle_key(key('g'));
+        assert_eq!(app.modal_scroll, 0);
+        assert_eq!(app.status_message, "Review top");
+    }
+
+    #[test]
+    fn launch_review_blocks_real_draft_run_before_spawn() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.handle_key(key('H'));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        settle_launch_review(&mut app);
+        app.data.sessions[app.selected_session].source_provenance = SourceProvenance::Real;
+
+        app.handle_key(key('r'));
+
+        assert!(app.take_pending_launch().is_none());
+        assert_eq!(
+            app.status_message,
+            "Draft capsule cannot run; press y to copy or configure a compiler"
+        );
+    }
+
+    #[test]
+    fn completed_target_handoff_returns_to_visible_result_actions() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.handle_key(key('H'));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        settle_launch_review(&mut app);
+        app.handle_key(key('r'));
+        let plan = app.take_pending_launch().expect("pending target handoff");
+
+        app.complete_target_handoff(
+            plan,
+            Err(CoreError::LaunchStart {
+                command: "hermes chat".into(),
+                reason: "fixture target missing".into(),
+            }),
+        );
+
+        let result = app
+            .target_launch_result
+            .as_ref()
+            .expect("launch result panel");
+        assert!(app.show_launch);
+        assert!(!app.launch_review);
+        assert!(!result.success);
+        assert!(result.outcome.contains("failed to start"));
+
+        app.handle_key(key('y'));
+        assert!(
+            app.take_clipboard_text()
+                .expect("copied target command")
+                .contains("Moonbox cross-CLI handoff")
+        );
+
+        app.handle_key(key('r'));
+        assert!(app.take_pending_launch().is_some());
     }
 
     #[test]
@@ -3101,6 +4388,66 @@ mod tests {
         assert_eq!(
             app.status_message,
             "Suspending to original: Codex codex-cxcp-design"
+        );
+    }
+
+    #[test]
+    fn remote_enter_opens_handoff_picker_instead_of_local_original_resume() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.data_spaces = vec![
+            dataspace::DataSpaceEntry::local(),
+            dataspace::DataSpaceEntry {
+                id: "ssh:devbox".into(),
+                label: "devbox".into(),
+                kind: dataspace::DataSpaceKind::Ssh,
+                detail: "yangyang.1205@10.37.218.31".into(),
+                ssh_host: Some("10.37.218.31".into()),
+                ssh_user: Some("yangyang.1205".into()),
+                ssh_port: None,
+                ssh_identity_file: None,
+                config_source: Some("Moonbox config".into()),
+                config_path: None,
+            },
+        ];
+        app.selected_data_space = 1;
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(app.show_launch);
+        assert!(!app.launch_review);
+        assert!(app.take_pending_resume().is_none());
+        assert_eq!(
+            app.status_message,
+            "SSH source is read-only; choose a local target for handoff"
+        );
+    }
+
+    #[test]
+    fn remote_original_open_is_blocked() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.data_spaces = vec![
+            dataspace::DataSpaceEntry::local(),
+            dataspace::DataSpaceEntry {
+                id: "ssh:devbox".into(),
+                label: "devbox".into(),
+                kind: dataspace::DataSpaceKind::Ssh,
+                detail: "yangyang.1205@10.37.218.31".into(),
+                ssh_host: Some("10.37.218.31".into()),
+                ssh_user: Some("yangyang.1205".into()),
+                ssh_port: None,
+                ssh_identity_file: None,
+                config_source: Some("Moonbox config".into()),
+                config_path: None,
+            },
+        ];
+        app.selected_data_space = 1;
+
+        app.handle_key(key('o'));
+
+        assert!(!app.show_open_original);
+        assert_eq!(
+            app.status_message,
+            "SSH sessions cannot be opened locally; use handoff"
         );
     }
 

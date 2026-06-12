@@ -285,6 +285,9 @@ The first implementation focuses on the product shell:
 - Configured SSH hosts can be listed through `moonbox ssh` / `moon ssh`,
   combining Moonbox `ssh_hosts` entries with concrete `Host` aliases from
   `~/.ssh/config` without connecting to remote machines
+- TUI data spaces only use Local plus SSH spaces explicitly saved in Moonbox
+  config; OpenSSH hosts are discoverable through `moonbox ssh` but are not
+  auto-loaded into the picker
 - Real Codex, Claude, and Hermes resume-surface listing plus timeline parsing
 - Original-session open command, Work Capsule, and branch tree previews
 - Live `/` session search, combined filter display, and one-key clear with `a`
@@ -527,10 +530,12 @@ selection instead of rebuilding every row on every frame. The left session list
 stays compact for scanning with source-colored `Cdx` / `Clu` / `Hms` badges,
 the original source title, and a single secondary line for time and branch.
 Healthy source status is not shown in the left rail; only warning or failed
-source-index states get a marker. The right Session Details panel keeps the raw
-title, cwd, event count, token count, source health, and source path. Session
-movement, source filtering, and `/` search move the selected row immediately
-and keep the UI responsive while the selected timeline/capsule preview hydrates
+source-index states get a marker. For Claude, a failed source state reflects the
+latest AI outcome, not a recovered historical error preserved in the timeline.
+The right Session Details panel keeps the raw title, cwd, event count, token
+count, source health, and source path. Session movement, source filtering, and
+`/` search move the selected row immediately and keep the UI responsive while
+the selected timeline/capsule preview hydrates
 in the background from the current session index snapshot.
 
 Session switching uses a bounded timeline preview by default, so very large
@@ -647,16 +652,30 @@ moonbox ssh --json
 MOONBOX_SSH_CONFIG=/path/to/ssh_config moon ssh --json
 ```
 
-The SSH inventory reads Moonbox `ssh_hosts` first, then concrete OpenSSH
-`Host` aliases from `~/.ssh/config`. It skips wildcard patterns such as
+The SSH inventory command reads Moonbox `ssh_hosts` first, then concrete
+OpenSSH `Host` aliases from `~/.ssh/config`. It skips wildcard patterns such as
 `Host *` and `Host *.internal`, supports simple `Include` files/globs, and
-deduplicates by alias with Moonbox config taking precedence.
+deduplicates by alias with Moonbox config taking precedence. The TUI Data Space
+Picker is stricter: it shows only Local plus SSH spaces explicitly saved in
+Moonbox config, so opening Moonbox never turns every OpenSSH alias into a
+remote inventory source.
 
-In the TUI, `{` and `}` switch the main data space between Local and the
-configured SSH/devbox entries. Remote spaces are read-only inventory sources:
-Moonbox runs `ssh <host> moonbox sessions --json`, imports the returned session
-summaries, and never opens or resumes a remote session during switching. The
-remote host must have `moonbox` on `PATH`; override it with
+In the TUI, `d` opens the Data Space Picker and `{` / `}` quickly switch the
+main data space between Local and saved SSH entries. The picker shows each
+entry's kind, target, configuration source, and the read-only inventory command.
+Press `n` or `a` in the picker to add an SSH data space through a focused form;
+the first field accepts pasted targets such as `ssh user@host -p 22 -i key`,
+`ssh://user@host:22`, or an OpenSSH `Host` block. Press `x` on a saved SSH
+space to delete it from Moonbox config after a second confirmation keypress.
+Moonbox writes and removes only its own config and does not modify
+`~/.ssh/config`. When an SSH space is active, the header labels it explicitly as
+`Data: SSH: <host>` instead of only showing the host alias. Remote spaces are
+read-only inventory sources: Moonbox runs `ssh <target> <inventory command>`,
+imports the returned session summaries, and then hydrates the selected session
+timeline with a remote `compile-request --json` dry run.
+Switching never opens or resumes a remote session. The remote command searches
+`moonbox` and `moon` on `PATH` after adding common user install directories
+such as `~/.local/bin` and `~/.cargo/bin`; override it with
 `MOONBOX_REMOTE_BIN=/path/to/moonbox` when needed. For local tests, set
 `MOONBOX_SSH_CONFIG=/path/to/ssh_config` to point at a fixture config.
 
@@ -683,7 +702,8 @@ Moonbox has two separate actions for a selected session:
   owns the real terminal, restores the TUI when that process exits, and reloads
   the selected session so new timeline events are visible. Set
   `MOONBOX_RESUME_MODE=exec` to keep the older one-way process replacement
-  behavior.
+  behavior. When an SSH data space is active, `enter` opens the handoff picker
+  instead; remote sessions are read-only and cannot be resumed locally.
 - `o`: preview an `original_resume` command for the selected session's
   original CLI, then press `enter` to use the same suspend-and-return flow.
 - `x`: choose a target CLI, then review a `target_handoff` command before
@@ -694,9 +714,16 @@ tagged by source CLI. Source filtering is controlled by `f` or `[` / `]` and
 starts at `All`. Target is not shown as a global mode on the main screen; it is
 chosen only in the launch picker. In the target picker, `j/k` moves the pending
 selection, `enter` confirms and persists it, and `Esc` / `q` cancels without
-changing the saved target. Confirming a ready or warning target opens a launch
-review panel. Pressing `enter` in that review restores the terminal first and
-then launches the target CLI; pressing `y` copies the guarded wrapper command.
+changing the saved target. Confirming a ready or warning target prepares the
+Handoff Review in the background, shows a cancellable loading panel, and opens
+the review at the bottom where the executable actions live. `G` jumps back to
+the bottom and `gg` jumps to the top. Pressing `r` in that review restores the
+terminal first, launches the local target CLI, then returns to Moonbox with a
+three-action result panel: run again, copy command, or return. For real sessions
+using the built-in draft compiler, `r` is disabled before spawn; copy the
+command with `y` or configure an external compiler first. Pressing `enter` in
+the review is review-only and does not launch. Pressing `y` copies the actual
+target command.
 Pressing `y` in the target picker does not copy anything. The picker keeps
 every target visible and annotates each option with `READY`, `WARN`, or
 `BLOCKED`; blocked targets keep launch review disabled until validation passes.
@@ -755,7 +782,10 @@ commands, remains available through the dry-run JSON surfaces and
 | `S` | Open Skill Picker |
 | `+` / `=` | Zoom focused panel |
 | `-` | Restore panel layout |
-| `{` / `}` | Previous / next data space: Local or configured SSH/devbox |
+| `d` | Open Local / SSH data space picker |
+| `n` / `a` | Add SSH space while Data Space Picker is open |
+| `x` | Delete saved SSH space after confirmation |
+| `{` / `}` | Previous / next data space: Local or saved SSH spaces |
 | `enter` | Open selected session with original CLI, then return |
 | `e` | Open selected Timeline event detail |
 | `x` / `H` / `t` | Choose target for handoff |
@@ -777,9 +807,19 @@ commands, remains available through the dry-run JSON surfaces and
 
 | Key | Action |
 | --- | --- |
-| `y` | Copy guarded `moonbox launch --execute` command |
-| `enter` | Restore terminal and launch target CLI |
+| `r` | Restore terminal, launch local target CLI, then return to Moonbox |
+| `y` | Copy actual target command |
+| `enter` | Review-only; does not launch |
+| `gg` / `G` | Jump to top / bottom of the review |
 | `q` / `Esc` | Close review |
+
+### Target Result Keys
+
+| Key | Action |
+| --- | --- |
+| `r` | Run the same local target command again |
+| `y` | Copy actual target command |
+| `q` / `Esc` | Return to the workbench |
 
 ### Original Preview Keys
 
@@ -927,10 +967,9 @@ Stable interfaces matter more than any single framework:
   tab navigation keeps zoom attached to the active panel without resetting
   selection or scroll state.
 - M51: local/devbox data-space switching; `{` / `}` cycles the main TUI between
-  Local and configured SSH/devbox data spaces, remote spaces load read-only
-  session inventory through `ssh <host> moonbox sessions --json`, and failures
-  surface as explicit status messages without opening, resuming, or launching
-  sessions.
+  Local and saved SSH data spaces, remote spaces load read-only session
+  inventory through `ssh <target> moonbox sessions --json`, and failures surface
+  as explicit status messages without opening, resuming, or launching sessions.
 - M52: production compiler and verifier chain hardening; compiler selection now
   prefers explicit environment override, configured default, then ready external
   presets before built-in draft fallback, built-in compilers warn for real
@@ -1098,6 +1137,21 @@ Stable interfaces matter more than any single framework:
   including bounded size/event/content profiles, compact frontier, token
   profile, and Claude sidecar inventory without reading real source stores in
   tests.
+- M88: Data Space visual picker; `d` opens a Local / SSH picker with current
+  and selected states, target address, config source/path, and read-only
+  inventory command details. `n` / `a` opens a focused add form that parses
+  pasted SSH targets or OpenSSH `Host` blocks into Moonbox config, `x` deletes
+  saved SSH spaces after confirmation, and OpenSSH aliases are no longer
+  auto-loaded into the picker. SSH spaces are labeled explicitly in the header
+  as `SSH: <host>`, use their saved user/host/port/key for remote inventory, and
+  search common user install paths before reporting that the remote `moonbox`
+  command is missing. SSH sessions are read-only in the TUI: `enter` opens
+  target handoff instead of local original resume, `o` is blocked, Handoff
+  Review uses `r` for explicit local target launch, and Moonbox returns with a
+  run/copy/back result panel after the target exits. Handoff Review generation
+  now runs in the background with a cancellable loading panel, opens at the
+  bottom action area, supports `gg` / `G` review jumps, and blocks real-session
+  draft compiler runs before spawning a target process.
 
 ### Remaining Milestones
 

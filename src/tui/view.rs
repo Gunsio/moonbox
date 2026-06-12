@@ -11,7 +11,7 @@ use ratatui::{
 };
 
 use crate::{
-    app::{App, CommandPaletteEntry, Focus, HandoffTrailFrame},
+    app::{App, CommandPaletteEntry, DATA_SPACE_CONFIG_FIELD_COUNT, Focus, HandoffTrailFrame},
     core::compiler,
     core::image_preview::{ImagePreviewStatus, PreviewCell, PreviewRgb, TimelineImagePreview},
     core::model::{
@@ -80,6 +80,11 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
     if app.show_capsules {
         render_capsules(frame, root, app);
+    }
+    if app.show_data_space_config {
+        render_data_space_config(frame, root, app);
+    } else if app.show_data_spaces {
+        render_data_spaces(frame, root, app);
     }
     if app.show_timeline_detail {
         render_timeline_detail(frame, root, app);
@@ -150,12 +155,7 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw("   Data: "),
-        Span::styled(
-            app.current_data_space().label.clone(),
-            Style::default()
-                .fg(theme::CYAN)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(data_space_header_label(app), data_space_header_style(app)),
         Span::raw("   Skill: "),
         Span::styled(&app.data.capsule.compiler, Style::default().fg(theme::CYAN)),
     ]);
@@ -208,6 +208,24 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
             .alignment(Alignment::Left),
         area,
     );
+}
+
+fn data_space_header_label(app: &App) -> String {
+    let space = app.current_data_space();
+    if space.is_local() {
+        space.label.clone()
+    } else {
+        format!("SSH: {}", space.label)
+    }
+}
+
+fn data_space_header_style(app: &App) -> Style {
+    let color = if app.current_data_space().is_local() {
+        theme::CYAN
+    } else {
+        theme::ORANGE
+    };
+    Style::default().fg(color).add_modifier(Modifier::BOLD)
 }
 
 fn header_title_spans(width: u16) -> Vec<Span<'static>> {
@@ -2077,20 +2095,34 @@ type KeyHint = (&'static str, &'static str);
 
 fn active_key_hints(app: &App) -> Vec<KeyHint> {
     if app.show_launch {
+        if app.is_launch_review_pending() {
+            return vec![("Esc/q", "取消"), ("wait", "生成 Review")];
+        }
+        if app.target_launch_result.is_some() {
+            return vec![("r", "再运行"), ("y", "复制命令"), ("Esc/q", "返回")];
+        }
         if app.launch_review {
-            let enter_hint = if app
+            let capsule = app.launch_capsule_for_target(app.pending_target);
+            let run_hint = if app
                 .validate_launch_for_target(app.pending_target)
                 .is_blocked()
             {
-                "Blocked"
+                "不可运行"
+            } else if compiler::compiler_is_builtin(&capsule.compiler)
+                && app
+                    .current_session()
+                    .is_some_and(|session| session.source_provenance != SourceProvenance::Fixture)
+            {
+                "草稿禁用"
             } else {
-                "Handoff"
+                "运行"
             };
             return vec![
-                ("y", "Copy"),
-                ("enter", enter_hint),
-                ("PgUp/Dn", "Scroll"),
-                ("Esc/q", "Close"),
+                ("r", run_hint),
+                ("y", "复制命令"),
+                ("gg/G", "跳转"),
+                ("PgUp/Dn", "滚动"),
+                ("Esc/q", "关闭"),
             ];
         }
         if app.validate_launch_for_target(app.pending_target).state
@@ -2144,6 +2176,24 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("Esc", "Close"),
         ];
     }
+    if app.show_data_space_config {
+        return vec![
+            ("enter", "Parse/Save"),
+            ("tab", "Next"),
+            ("ctrl-s", "Save"),
+            ("Esc", "Back"),
+        ];
+    }
+    if app.show_data_spaces {
+        return vec![
+            ("n/a", "Add SSH"),
+            ("x", "Delete"),
+            ("j/k", "Choose"),
+            ("enter", "Load"),
+            ("r", "Reload"),
+            ("Esc", "Close"),
+        ];
+    }
     if app.show_timeline_detail {
         return vec![
             ("j/k", "Scroll"),
@@ -2168,6 +2218,7 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("/", "Search"),
             ("[ ]", "Source"),
             ("{ }", "Data"),
+            ("d", "Data Picker"),
             ("a", "Clear"),
             ("s", "Star"),
             ("S", "Skill"),
@@ -2229,7 +2280,17 @@ fn hint_line(hints: &[KeyHint]) -> Line<'static> {
 }
 
 fn status_line(app: &App) -> Line<'_> {
-    let (color, bold) = if app.status_message.contains("cancelled")
+    let status_lower = app.status_message.to_ascii_lowercase();
+    let (color, bold) = if app.data_space_error.is_some()
+        || status_lower.contains("failed")
+        || status_lower.contains("fail")
+        || status_lower.contains("blocked")
+        || status_lower.contains("not found")
+        || status_lower.contains("cannot ")
+        || status_lower.contains("invalid")
+    {
+        (theme::RED, true)
+    } else if app.status_message.contains("cancelled")
         || app.status_message.contains("No session")
         || app.status_message.contains("Unknown")
         || app.status_message.contains("NEEDS REVIEW")
@@ -2257,6 +2318,309 @@ fn status_line(app: &App) -> Line<'_> {
     ])
 }
 
+fn render_data_spaces(frame: &mut Frame, root: Rect, app: &App) {
+    let area = modal_area(root, 70, 62);
+    frame.render_widget(Clear, area);
+
+    let selected_index = app
+        .data_space_selection
+        .min(app.data_spaces.len().saturating_sub(1));
+    let selected = app.data_spaces.get(selected_index);
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "Data Spaces",
+            Style::default()
+                .fg(theme::GOLD)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "Local plus SSH spaces saved in Moonbox. OpenSSH hosts are not auto-loaded.",
+            Style::default().fg(theme::MUTED),
+        )),
+        Line::raw(""),
+    ];
+
+    if let Some(error) = &app.data_space_error {
+        lines.push(Line::from(Span::styled(
+            "Load Failed",
+            Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(Span::styled(
+            review_snippet(error, 118),
+            Style::default().fg(theme::RED),
+        )));
+        lines.push(Line::from(Span::styled(
+            "Install moonbox on the remote host, or set MOONBOX_REMOTE_BIN to an absolute remote path.",
+            Style::default().fg(theme::MUTED),
+        )));
+        lines.push(Line::raw(""));
+    }
+
+    if app.data_spaces.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No data spaces configured",
+            Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+        )));
+    } else {
+        for (index, space) in app.data_spaces.iter().enumerate() {
+            lines.push(data_space_row(
+                space,
+                index == selected_index,
+                index == app.selected_data_space,
+            ));
+        }
+    }
+
+    lines.push(Line::raw(""));
+    lines.push(Line::from(Span::styled(
+        "Selected Configuration",
+        Style::default()
+            .fg(theme::BLUE)
+            .add_modifier(Modifier::BOLD),
+    )));
+    if let Some(space) = selected {
+        lines.extend(data_space_detail_lines(space));
+    } else {
+        lines.push(Line::from(Span::styled(
+            "No selected data space",
+            Style::default().fg(theme::MUTED),
+        )));
+    }
+    if let Some(name) = &app.data_space_delete_confirmation {
+        lines.push(Line::raw(""));
+        lines.push(Line::from(Span::styled(
+            format!("Press x again to delete {name} from Moonbox config."),
+            Style::default()
+                .fg(theme::ORANGE)
+                .add_modifier(Modifier::BOLD),
+        )));
+    }
+
+    lines.push(Line::raw(""));
+    lines.push(Line::from(Span::styled(
+        "n/a add SSH   x delete   j/k choose   Enter load   r reload   Esc close",
+        Style::default().fg(theme::MUTED),
+    )));
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(panel_block(" Data Space Picker ", true))
+            .wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
+fn render_data_space_config(frame: &mut Frame, root: Rect, app: &App) {
+    let area = modal_area(root, 68, 54);
+    frame.render_widget(Clear, area);
+
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "Add SSH Space",
+            Style::default()
+                .fg(theme::GOLD)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "Paste ssh user@host, ssh://user@host:22, or an OpenSSH Host block.",
+            Style::default().fg(theme::MUTED),
+        )),
+        Line::raw(""),
+    ];
+
+    for index in 0..DATA_SPACE_CONFIG_FIELD_COUNT {
+        lines.push(data_space_config_field_line(app, index));
+    }
+
+    if let Some(error) = &app.data_space_error {
+        lines.push(Line::raw(""));
+        lines.push(Line::from(Span::styled(
+            review_snippet(error, 96),
+            Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+        )));
+    }
+
+    lines.push(Line::raw(""));
+    lines.push(Line::from(Span::styled(
+        "Enter parse/save quick target   Tab next   Ctrl-S save   Esc back",
+        Style::default().fg(theme::MUTED),
+    )));
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(panel_block(" Add SSH Data Space ", true))
+            .wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
+fn data_space_config_field_line(app: &App, index: usize) -> Line<'static> {
+    let selected = app.data_space_config_field == index;
+    let marker = if selected { "›" } else { " " };
+    let cursor = if selected { "▏" } else { "" };
+    let (label, value, hint, required) = match index {
+        0 => (
+            "Paste",
+            app.data_space_config_form.quick.as_str(),
+            "ssh user@host -p 22 -i key",
+            false,
+        ),
+        1 => (
+            "Name",
+            app.data_space_config_form.name.as_str(),
+            "shown in Moonbox",
+            true,
+        ),
+        2 => (
+            "Host",
+            app.data_space_config_form.host.as_str(),
+            "hostname or IP",
+            true,
+        ),
+        3 => (
+            "User",
+            app.data_space_config_form.user.as_str(),
+            "optional",
+            false,
+        ),
+        4 => (
+            "Port",
+            app.data_space_config_form.port.as_str(),
+            "optional",
+            false,
+        ),
+        _ => (
+            "Key",
+            app.data_space_config_form.identity_file.as_str(),
+            "optional",
+            false,
+        ),
+    };
+    let value = if value.is_empty() {
+        if required { "<required>" } else { "<optional>" }
+    } else {
+        value
+    };
+    let value_style = if selected {
+        Style::default()
+            .fg(theme::TEXT)
+            .add_modifier(Modifier::BOLD)
+    } else if required && value == "<required>" {
+        Style::default().fg(theme::ORANGE)
+    } else {
+        Style::default().fg(theme::TEXT)
+    };
+
+    Line::from(vec![
+        Span::styled(marker, Style::default().fg(theme::CYAN)),
+        Span::raw(" "),
+        Span::styled(format!("{label:<7}"), Style::default().fg(theme::BLUE)),
+        Span::styled(format!("{value}{cursor:<1}"), value_style),
+        Span::raw("  "),
+        Span::styled(hint, Style::default().fg(theme::MUTED)),
+    ])
+}
+
+fn data_space_row(
+    space: &crate::core::dataspace::DataSpaceEntry,
+    selected: bool,
+    active: bool,
+) -> Line<'static> {
+    let marker = if selected { "›" } else { " " };
+    let state = if active { "ACTIVE" } else { "      " };
+    let kind = if space.is_local() { "LOCAL" } else { "SSH" };
+    let kind_color = if space.is_local() {
+        theme::CYAN
+    } else {
+        theme::ORANGE
+    };
+    let label_style = if selected {
+        Style::default()
+            .fg(theme::TEXT)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::TEXT)
+    };
+
+    Line::from(vec![
+        Span::styled(format!("{marker:<2}"), Style::default().fg(theme::CYAN)),
+        Span::styled(format!("{state:<7}"), data_space_state_style(active)),
+        Span::styled(format!("{kind:<6}"), Style::default().fg(kind_color)),
+        Span::styled(
+            format!("{:<20}", review_snippet(&space.label, 20)),
+            label_style,
+        ),
+        Span::styled(
+            review_snippet(&space.detail, 42),
+            Style::default().fg(theme::MUTED),
+        ),
+    ])
+}
+
+fn data_space_state_style(active: bool) -> Style {
+    if active {
+        Style::default()
+            .fg(theme::GREEN)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::MUTED)
+    }
+}
+
+fn data_space_detail_lines(space: &crate::core::dataspace::DataSpaceEntry) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        detail_line("Name", &space.label, theme::TEXT),
+        detail_line(
+            "Kind",
+            if space.is_local() {
+                "Local source stores"
+            } else {
+                "SSH read-only inventory"
+            },
+            if space.is_local() {
+                theme::CYAN
+            } else {
+                theme::ORANGE
+            },
+        ),
+        detail_line("Target", &space.detail, theme::TEXT),
+        detail_line(
+            "Config",
+            space.config_source.as_deref().unwrap_or("unknown"),
+            theme::MUTED,
+        ),
+    ];
+    if let Some(path) = &space.config_path {
+        lines.push(detail_line("Path", path, theme::MUTED));
+    }
+    if space.is_local() {
+        lines.push(detail_line(
+            "Inventory",
+            "reads local Codex / Claude / Hermes stores",
+            theme::MUTED,
+        ));
+    } else {
+        lines.push(detail_line(
+            "Inventory",
+            &format!("ssh {} [moonbox|moon] sessions --json", space.detail),
+            theme::MUTED,
+        ));
+        lines.push(detail_line(
+            "Safety",
+            "read-only summary import; no remote resume or launch",
+            theme::MUTED,
+        ));
+    }
+    lines
+}
+
+fn detail_line(label: &'static str, value: &str, color: Color) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!("{label:<10}"), Style::default().fg(theme::MUTED)),
+        Span::styled(value.to_owned(), Style::default().fg(color)),
+    ])
+}
+
 fn render_help(frame: &mut Frame, root: Rect, app: &App) {
     let area = modal_area(root, 52, 48);
     frame.render_widget(Clear, area);
@@ -2272,6 +2636,8 @@ fn render_help(frame: &mut Frame, root: Rect, app: &App) {
         Line::raw("tab, shift-tab  switch panel"),
         Line::raw("f               cycle session source filter"),
         Line::raw("a               clear source and text filters"),
+        Line::raw("d               open Local / SSH data space picker"),
+        Line::raw("{ / }           previous / next data space"),
         Line::raw("s               star / unstar selected session"),
         Line::raw("*               star / unstar selected session alias"),
         Line::raw("/text           filter sessions by text"),
@@ -3155,6 +3521,40 @@ fn compiler_reference(info: &CompilerPresetInfo) -> String {
         .unwrap_or_else(|| "built-in".into())
 }
 
+fn action_button<'a>(key: &'a str, label: &'a str) -> Span<'a> {
+    Span::styled(
+        format!(" {key} {label} "),
+        Style::default()
+            .fg(ratatui::style::Color::Black)
+            .bg(theme::GOLD)
+            .add_modifier(Modifier::BOLD),
+    )
+}
+
+fn disabled_action_button<'a>(key: &'a str, label: &'a str) -> Span<'a> {
+    Span::styled(
+        format!(" {key} {label} "),
+        Style::default()
+            .fg(theme::MUTED)
+            .bg(theme::BORDER)
+            .add_modifier(Modifier::BOLD),
+    )
+}
+
+fn modal_scroll_offset(requested: u16, lines: &[Line<'_>], area: Rect) -> u16 {
+    if requested != u16::MAX {
+        return requested;
+    }
+
+    let width = usize::from(area.width.saturating_sub(2).max(1));
+    let height = usize::from(area.height.saturating_sub(2).max(1));
+    let rows = lines
+        .iter()
+        .map(|line| line.width().max(1).div_ceil(width))
+        .sum::<usize>();
+    rows.saturating_sub(height).min(usize::from(u16::MAX - 1)) as u16
+}
+
 fn format_star_count(info: &CompilerPresetInfo) -> String {
     let Some(stars) = info.github_stars else {
         return match info.kind {
@@ -3178,21 +3578,145 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         .map(|session| format!("{} / {}", session.cli, session.id))
         .unwrap_or_else(|| "No session selected".into());
     let handoff_label = app.launch_handoff_label();
-    let pending_validation = app.validate_launch_for_target(app.pending_target);
-    let pending_report = app.launch_verification_for_target(app.pending_target);
-    if app.launch_review {
-        let capsule = app.launch_capsule_for_target(app.pending_target);
-        let launch_blocked = pending_validation.state == LaunchValidationState::Blocked;
+    if app.is_launch_review_pending() {
         let mut lines = vec![
             Line::from(Span::styled(
-                "Capsule Review",
+                "正在生成 Handoff Review",
                 Style::default()
                     .fg(theme::GOLD)
                     .add_modifier(Modifier::BOLD),
             )),
             Line::raw(""),
             Line::from(vec![
-                Span::styled("Action: ", Style::default().fg(theme::BLUE)),
+                Span::styled("会话: ", Style::default().fg(theme::BLUE)),
+                Span::raw(session),
+            ]),
+            Line::from(vec![
+                Span::styled("目标: ", Style::default().fg(theme::BLUE)),
+                Span::styled(
+                    app.pending_target.to_string(),
+                    Style::default()
+                        .fg(theme::CYAN)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(Span::styled(
+                if app.current_data_space().is_local() {
+                    "正在读取本地 source timeline 并编译 Capsule..."
+                } else {
+                    "正在通过 SSH 只读拉取 timeline 并编译本地目标 Capsule..."
+                },
+                Style::default().fg(theme::TEXT),
+            )),
+            Line::raw(""),
+        ];
+        if let Some(trail) = app.handoff_trail_frame() {
+            lines.push(handoff_trail_line(trail));
+        } else {
+            lines.push(Line::from(Span::styled(
+                "   source --> rewind --> target   Review",
+                Style::default().fg(theme::MUTED),
+            )));
+        }
+        lines.extend([
+            Line::raw(""),
+            Line::from(Span::styled(
+                "Esc 取消；完成后会自动滚到 Review 底部显示可执行动作。",
+                Style::default().fg(theme::MUTED),
+            )),
+        ]);
+        frame.render_widget(
+            Paragraph::new(lines)
+                .block(panel_block(" Launch ", true))
+                .wrap(Wrap { trim: true }),
+            area,
+        );
+        return;
+    }
+    let pending_validation = app.validate_launch_for_target(app.pending_target);
+    let pending_report = app.launch_verification_for_target(app.pending_target);
+    if let Some(result) = &app.target_launch_result {
+        let outcome_color = if result.success {
+            theme::GREEN
+        } else {
+            theme::RED
+        };
+        let lines = vec![
+            Line::from(Span::styled(
+                if result.success {
+                    "Launch Complete"
+                } else {
+                    "Launch Finished With Error"
+                },
+                Style::default()
+                    .fg(outcome_color)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::raw(""),
+            Line::from(vec![
+                Span::styled("结果: ", Style::default().fg(theme::BLUE)),
+                Span::styled(
+                    result.outcome.clone(),
+                    Style::default()
+                        .fg(outcome_color)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("来源: ", Style::default().fg(theme::BLUE)),
+                Span::raw(format!("{} {}", result.source, result.session_id)),
+            ]),
+            Line::from(vec![
+                Span::styled("目标: ", Style::default().fg(theme::BLUE)),
+                Span::raw(result.target.to_string()),
+            ]),
+            Line::from(vec![
+                Span::styled("命令: ", Style::default().fg(theme::BLUE)),
+                Span::styled(
+                    result.command_summary.clone(),
+                    Style::default().fg(theme::CYAN),
+                ),
+            ]),
+            Line::raw(""),
+            Line::from(vec![
+                action_button("r", "再运行"),
+                Span::raw("  "),
+                action_button("y", "复制命令"),
+                Span::raw("  "),
+                action_button("Esc", "返回"),
+            ]),
+            Line::raw(""),
+            Line::from(Span::styled(
+                "下一步不会自动打开或恢复 session；需要你明确选择。",
+                Style::default().fg(theme::MUTED),
+            )),
+        ];
+        frame.render_widget(
+            Paragraph::new(lines)
+                .block(panel_block(" Target Launch Result ", true))
+                .wrap(Wrap { trim: true }),
+            area,
+        );
+        return;
+    }
+    if app.launch_review {
+        let capsule = app.launch_capsule_for_target(app.pending_target);
+        let launch_blocked = pending_validation.state == LaunchValidationState::Blocked;
+        let draft_run_blocked = compiler::compiler_is_builtin(&capsule.compiler)
+            && app
+                .current_session()
+                .is_some_and(|session| session.source_provenance != SourceProvenance::Fixture);
+        let run_blocked = launch_blocked || draft_run_blocked;
+        let mut lines = vec![
+            Line::from(Span::styled(
+                "Capsule 审阅",
+                Style::default()
+                    .fg(theme::GOLD)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::raw(""),
+            Line::from(vec![
+                Span::styled("动作: ", Style::default().fg(theme::BLUE)),
                 Span::styled(
                     "handoff",
                     Style::default()
@@ -3200,26 +3724,47 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                         .add_modifier(Modifier::BOLD),
                 ),
             ]),
+            Line::from(Span::styled(
+                if run_blocked {
+                    "下一步: 当前只能按 y 复制命令；Esc 返回".to_string()
+                } else {
+                    format!(
+                        "下一步: 按 r 启动本地 {}；按 y 复制命令；Esc 返回",
+                        app.pending_target
+                    )
+                },
+                Style::default()
+                    .fg(theme::GOLD)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(
+                if app.current_data_space().is_local() {
+                    "本地 source：原生 resume 仍可用 o 单独打开。"
+                } else {
+                    "SSH source 只读：Moonbox 只构建本地目标 handoff，不远程 resume。"
+                },
+                Style::default().fg(theme::MUTED),
+            )),
             handoff_review_path_line(app),
             handoff_review_portrait_line(app),
             Line::from(vec![
-                Span::styled("Session: ", Style::default().fg(theme::BLUE)),
+                Span::styled("会话: ", Style::default().fg(theme::BLUE)),
                 Span::raw(session),
             ]),
             Line::from(vec![
-                Span::styled("Target: ", Style::default().fg(theme::BLUE)),
+                Span::styled("目标: ", Style::default().fg(theme::BLUE)),
                 Span::raw(app.pending_target.to_string()),
             ]),
             Line::from(vec![
-                Span::styled("Handoff label: ", Style::default().fg(theme::BLUE)),
+                Span::styled("标签: ", Style::default().fg(theme::BLUE)),
                 Span::raw(handoff_label),
             ]),
             Line::from(vec![
-                Span::styled("Rewind: ", Style::default().fg(theme::BLUE)),
+                Span::styled("回退点: ", Style::default().fg(theme::BLUE)),
                 Span::raw(capsule.rewind_point.clone()),
             ]),
             Line::from(vec![
-                Span::styled("Validation: ", Style::default().fg(theme::BLUE)),
+                Span::styled("校验: ", Style::default().fg(theme::BLUE)),
                 Span::styled(
                     validation_label(pending_validation.state),
                     Style::default()
@@ -3233,12 +3778,16 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                 ),
             ]),
             Line::from(vec![
-                Span::styled("Command: ", Style::default().fg(theme::BLUE)),
-                Span::styled(app.launch_command(), Style::default().fg(theme::CYAN)),
+                Span::styled("目标命令: ", Style::default().fg(theme::BLUE)),
+                Span::styled(
+                    app.target_launch_command_summary()
+                        .unwrap_or_else(|| app.launch_command()),
+                    Style::default().fg(theme::CYAN),
+                ),
             ]),
             Line::raw(""),
             Line::from(Span::styled(
-                "Target receives",
+                "目标会收到",
                 Style::default()
                     .fg(theme::BLUE)
                     .add_modifier(Modifier::BOLD),
@@ -3249,9 +3798,9 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             Line::raw(""),
             Line::from(Span::styled(
                 if compiler::compiler_is_builtin(&capsule.compiler) {
-                    "Draft Work Capsule"
+                    "草稿 Capsule"
                 } else {
-                    "Work Capsule"
+                    "Capsule"
                 },
                 Style::default()
                     .fg(theme::BLUE)
@@ -3262,7 +3811,7 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         lines.extend([
             Line::raw(""),
             Line::from(Span::styled(
-                "Readiness",
+                "就绪检查",
                 Style::default()
                     .fg(theme::BLUE)
                     .add_modifier(Modifier::BOLD),
@@ -3272,7 +3821,7 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         lines.extend([
             Line::raw(""),
             Line::from(Span::styled(
-                "Prompt argument",
+                "传给目标的内容",
                 Style::default()
                     .fg(theme::GOLD)
                     .add_modifier(Modifier::BOLD),
@@ -3281,19 +3830,50 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         lines.extend(target_prompt_lines(app));
         lines.extend([
             Line::raw(""),
+            if launch_blocked {
+                Line::from(vec![
+                    disabled_action_button("r", "不可运行"),
+                    Span::raw("  "),
+                    disabled_action_button("y", "不可复制"),
+                    Span::raw("  "),
+                    action_button("Esc", "返回"),
+                    Span::styled("  校验未通过", Style::default().fg(theme::RED)),
+                ])
+            } else if draft_run_blocked {
+                Line::from(vec![
+                    disabled_action_button("r", "草稿不可运行"),
+                    Span::raw("  "),
+                    action_button("y", "复制命令"),
+                    Span::raw("  "),
+                    action_button("Esc", "返回"),
+                    Span::styled(
+                        "  配置外部 compiler 后可运行",
+                        Style::default().fg(theme::MUTED),
+                    ),
+                ])
+            } else {
+                Line::from(vec![
+                    action_button("r", "运行本地目标"),
+                    Span::raw("  "),
+                    action_button("y", "复制命令"),
+                    Span::raw("  "),
+                    action_button("Esc", "返回"),
+                ])
+            },
             Line::from(Span::styled(
-                if launch_blocked {
-                    "enter disabled   y copy blocked   Esc/q close"
+                if run_blocked {
+                    "gg 顶部   G 底部   j/k 滚动"
                 } else {
-                    "enter handoff   y copy command   Esc/q close"
+                    "gg 顶部   G 底部   j/k 滚动   r/y/Esc 操作"
                 },
                 Style::default().fg(theme::MUTED),
             )),
         ]);
+        let scroll = modal_scroll_offset(app.modal_scroll, &lines, area);
         frame.render_widget(
             Paragraph::new(lines)
                 .block(panel_block(" Handoff Review ", true))
-                .scroll((app.modal_scroll, 0))
+                .scroll((scroll, 0))
                 .wrap(Wrap { trim: true }),
             area,
         );
@@ -3483,11 +4063,11 @@ fn capsule_review_lines(capsule: &WorkCapsule, _max_rows: usize) -> Vec<Line<'st
         .map(|value| review_snippet(value, 88))
         .unwrap_or_else(|| "none".into());
     vec![
-        review_label_line("Goal", review_snippet(&capsule.goal, 88), theme::BLUE),
-        review_label_line("State", capsule.state.clone(), theme::GOLD),
-        review_label_line("Decision", decision, theme::BLUE),
-        review_label_line("Todo", todo, theme::BLUE),
-        review_label_line("Risk", risk, theme::RED),
+        review_label_line("目标", review_snippet(&capsule.goal, 88), theme::BLUE),
+        review_label_line("状态", capsule.state.clone(), theme::GOLD),
+        review_label_line("决策", decision, theme::BLUE),
+        review_label_line("待办", todo, theme::BLUE),
+        review_label_line("风险", risk, theme::RED),
     ]
 }
 
@@ -3500,19 +4080,16 @@ fn target_input_lines(app: &App) -> Vec<Line<'static>> {
     };
     let cwd = preview.cwd.unwrap_or_else(|| "terminal default".into());
     vec![
-        review_label_line("Program", preview.program, theme::BLUE),
-        review_label_line("Cwd", cwd, theme::BLUE),
+        review_label_line("程序", preview.program, theme::BLUE),
+        review_label_line("目录", cwd, theme::BLUE),
         review_label_line(
-            "Args",
-            format!(
-                "{} arg(s), final arg is the handoff prompt",
-                preview.args.len()
-            ),
+            "参数",
+            format!("{} 个参数，最后一个是 handoff prompt", preview.args.len()),
             theme::BLUE,
         ),
         review_label_line(
             "Prompt",
-            "shown below, passed as the final argument".into(),
+            "下面完整展示，会作为最后一个参数传入".into(),
             theme::BLUE,
         ),
     ]
@@ -3897,14 +4474,18 @@ fn centered(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
 
 #[cfg(test)]
 mod tests {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::{Terminal, backend::TestBackend};
 
     use super::*;
     use crate::{
         app::App,
-        core::model::{
-            CliTool, SessionStatus, SourceProvenance, TimelineAttachment, TimelineEvent,
-            TimelineKind, VerificationStatus,
+        core::{
+            dataspace,
+            model::{
+                CliTool, SessionStatus, SourceProvenance, TimelineAttachment, TimelineEvent,
+                TimelineKind, VerificationStatus,
+            },
         },
     };
 
@@ -3936,6 +4517,10 @@ mod tests {
             screen.contains(expected),
             "screen did not contain {expected:?}\n{screen}"
         );
+    }
+
+    fn key(ch: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(ch), KeyModifiers::empty())
     }
 
     #[test]
@@ -4093,6 +4678,100 @@ mod tests {
     }
 
     #[test]
+    fn header_marks_ssh_data_space_explicitly() {
+        let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.data_spaces = vec![
+            dataspace::DataSpaceEntry::local(),
+            dataspace::DataSpaceEntry {
+                id: "ssh:devbox".into(),
+                label: "devbox".into(),
+                kind: dataspace::DataSpaceKind::Ssh,
+                detail: "yangyang.1205@10.37.218.31".into(),
+                ssh_host: Some("10.37.218.31".into()),
+                ssh_user: Some("yangyang.1205".into()),
+                ssh_port: None,
+                ssh_identity_file: None,
+                config_source: Some("Moonbox config".into()),
+                config_path: Some("~/.config/moonbox/config.json".into()),
+            },
+        ];
+        app.selected_data_space = 1;
+
+        let screen = render_text(&app, 160, 40);
+
+        assert_screen_contains(&screen, "Data:");
+        assert_screen_contains(&screen, "SSH: devbox");
+    }
+
+    #[test]
+    fn data_space_picker_shows_visual_config_and_switch_hint() {
+        let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.data_spaces = vec![
+            dataspace::DataSpaceEntry::local(),
+            dataspace::DataSpaceEntry {
+                id: "ssh:devbox".into(),
+                label: "devbox".into(),
+                kind: dataspace::DataSpaceKind::Ssh,
+                detail: "yangyang.1205@10.37.218.31".into(),
+                ssh_host: Some("10.37.218.31".into()),
+                ssh_user: Some("yangyang.1205".into()),
+                ssh_port: None,
+                ssh_identity_file: None,
+                config_source: Some("Moonbox config".into()),
+                config_path: Some("~/.config/moonbox/config.json".into()),
+            },
+        ];
+        app.show_data_spaces = true;
+        app.data_space_selection = 1;
+
+        let screen = render_text(&app, 160, 44);
+
+        assert_screen_contains(&screen, "Data Space Picker");
+        assert_screen_contains(&screen, "SSH read-only inventory");
+        assert_screen_contains(&screen, "Moonbox config");
+        assert_screen_contains(
+            &screen,
+            "ssh yangyang.1205@10.37.218.31 [moonbox|moon] sessions --json",
+        );
+        assert_screen_contains(&screen, "no remote resume or launch");
+        assert_screen_contains(&screen, "Enter load");
+    }
+
+    #[test]
+    fn data_space_picker_renders_load_failure_prominently() {
+        let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.show_data_spaces = true;
+        app.data_space_error = Some(
+            "cannot load data space devbox: ssh inventory exited with exit status: 127".into(),
+        );
+
+        let screen = render_text(&app, 160, 44);
+
+        assert_screen_contains(&screen, "Load Failed");
+        assert_screen_contains(&screen, "Install moonbox");
+        let line = status_line(&app);
+        assert_eq!(line.spans[1].style.fg, Some(theme::RED));
+        assert!(line.spans[1].style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn data_space_config_overlay_renders_required_fields() {
+        let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.show_data_spaces = true;
+        app.show_data_space_config = true;
+        app.data_space_config_form.name = "devbox".into();
+        app.data_space_config_form.host = "10.37.218.31".into();
+
+        let screen = render_text(&app, 160, 44);
+
+        assert_screen_contains(&screen, "Add SSH Data Space");
+        assert_screen_contains(&screen, "Add SSH Space");
+        assert_screen_contains(&screen, "devbox");
+        assert_screen_contains(&screen, "10.37.218.31");
+        assert_screen_contains(&screen, "Ctrl-S save");
+    }
+
+    #[test]
     fn header_brand_degrades_on_narrow_width() {
         let narrow = header_title_spans(80)
             .into_iter()
@@ -4109,7 +4788,11 @@ mod tests {
 
     #[test]
     fn header_collapses_preflight_signals() {
-        let app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.doctor_report.status = VerificationStatus::Warn;
+        app.doctor_report.ready = true;
+        app.compile_status = "ACTIVE";
+        app.verify_passed = true;
         let screen = render_text(&app, 160, 40);
 
         assert_screen_contains(&screen, "Pre-flight:");
@@ -4909,22 +5592,37 @@ mod tests {
         let screen = render_text(&app, 120, 48);
 
         assert_screen_contains(&screen, "Handoff Review");
-        assert_screen_contains(&screen, "Capsule Review");
+        assert_screen_contains(&screen, "Capsule 审阅");
         assert_screen_contains(&screen, "handoff");
+        assert_screen_contains(&screen, "下一步:");
         assert_screen_contains(&screen, "Path:");
         assert_screen_contains(&screen, "source Codex codex-cxcp-des...");
         assert_screen_contains(&screen, "-> rewind evt-091 -> target Hermes");
         assert_screen_contains(&screen, "Portrait:");
         assert_screen_contains(&screen, "user 1 / assistant 1 / tool 4 / rewind 1");
-        assert_screen_contains(&screen, "Target receives");
+        assert_screen_contains(&screen, "目标会收到");
         assert_screen_contains(&screen, "Prompt");
-        assert_screen_contains(&screen, "Draft Work Capsule");
-        assert_screen_contains(&screen, "Goal");
-        assert_screen_contains(&screen, "Readiness");
+        assert_screen_contains(&screen, "草稿 Capsule");
+        assert_screen_contains(&screen, "目标");
+        assert_screen_contains(&screen, "就绪检查");
         assert_screen_contains(&screen, "PASS");
         assert_screen_contains(&screen, "target_support");
-        assert_screen_contains(&screen, "moonbox launch --execute");
-        assert_screen_contains(&screen, "enter Handoff");
+        assert_screen_contains(&screen, "目标命令:");
+        assert_screen_contains(&screen, "r 运行");
+        assert_screen_contains(&screen, "y 复制命令");
+    }
+
+    #[test]
+    fn launch_review_pending_renders_loading_state() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+
+        app.handle_key(key('H'));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        let screen = render_text(&app, 120, 36);
+
+        assert_screen_contains(&screen, "正在生成 Handoff Review");
+        assert_screen_contains(&screen, "Esc 取消");
+        assert_screen_contains(&screen, "wait 生成 Review");
     }
 
     #[test]
@@ -4936,7 +5634,7 @@ mod tests {
         app.modal_scroll = 38;
         let screen = render_text(&app, 120, 36);
 
-        assert_screen_contains(&screen, "Prompt argument");
+        assert_screen_contains(&screen, "传给目标的内容");
         assert_screen_contains(&screen, "You are receiving a Moonbox cross-CLI handoff");
         assert_screen_contains(&screen, "- CLI: Hermes");
     }
