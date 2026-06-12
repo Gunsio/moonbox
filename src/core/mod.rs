@@ -26,5 +26,6 @@ pub mod replay_eval;
 pub mod snapshot;
 pub mod sources;
 pub mod ssh;
+pub mod tmux;
 pub mod verifier;
 pub mod workbench;

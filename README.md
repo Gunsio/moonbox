@@ -741,8 +741,14 @@ to local data spaces: the status bar adds `Live on`, `Live stale`, `Live error`,
 or `Live unavailable: SSH data`; session rows may show `RUN`, `WAIT`, `IDLE`, or
 `END` badges plus a short recent-action summary; and waiting sessions appear in
 a compact `WAITING ON YOU` panel sorted by longest wait. Hooks disabled keeps
-the current Dashboard, Timeline, status bar, and Enter behavior unchanged. Tmux
-jump routing remains a separate M95 opt-in.
+the current Dashboard, Timeline, status bar, and Enter behavior unchanged.
+Smart Enter / tmux jump is a second opt-in under Settings (`,`). It stays off
+even after hooks are installed. When enabled, `enter` first validates the
+selected session's hook-captured `$TMUX` / `$TMUX_PANE` with `tmux list-panes`,
+jumps with `select-window` + `select-pane` only when that pane is still live,
+and falls back to the existing resume or handoff route otherwise. The Settings
+panel previews the current route as Jump, Resume, Handoff, Disabled, or
+Unavailable before saving; Moonbox never creates panes or sends input.
 
 Generate shell completions with:
 
@@ -762,17 +768,22 @@ be overridden with `--bin moonbox` or `--bin moon`.
 
 Moonbox has two separate actions for a selected session:
 
-- `enter`: hand the terminal directly to the selected session's original CLI.
-  Moonbox prints the exact command before handoff, waits while the source CLI
-  owns the real terminal, restores the TUI when that process exits, and reloads
-  the selected session so new timeline events are visible. Set
+- `enter`: by default, hand the terminal directly to the selected session's
+  original CLI. Moonbox prints the exact command before handoff, waits while the
+  source CLI owns the real terminal, restores the TUI when that process exits,
+  and reloads the selected session so new timeline events are visible. Set
   `MOONBOX_RESUME_MODE=exec` to keep the older one-way process replacement
   behavior. When an SSH data space is active, `enter` opens the handoff picker
-  instead; remote sessions are read-only and cannot be resumed locally.
+  instead; remote sessions are read-only and cannot be resumed locally. If hooks
+  are enabled and Settings separately enables Smart Enter / tmux jump, `enter`
+  routes to a live tmux pane first and falls back to this same resume/handoff
+  behavior when live pane metadata is unavailable or invalid.
 - `o`: preview an `original_resume` command for the selected session's
   original CLI, then press `enter` to use the same suspend-and-return flow.
 - `x`: choose a target CLI, then review a `target_handoff` command before
   launching or copying it. `H` and `t` remain compatibility aliases.
+- `,`: open Settings. M95 exposes Smart Enter / tmux jump there with preview and
+  persistence; hooks install/uninstall remains a CLI command.
 
 The main screen is a global session entry point. Sessions are sorted by time and
 tagged by source CLI. Source filtering is controlled by `f` or `[` / `]` and
@@ -1258,22 +1269,18 @@ Stable interfaces matter more than any single framework:
   non-empty-only `WAITING ON YOU` queue. Disabled hooks keep the current TUI and
   Enter behavior unchanged. Codex hook install now writes snake_case event names
   while uninstall/status still clean up legacy PascalCase Moonbox entries.
+- M95: Opt-in Tmux Jump + Enter Routing; Smart Enter / tmux jump is exposed in
+  Settings and remains disabled by default even when hooks are installed. The
+  Settings modal previews the selected session's Enter route before saving,
+  session rows and the key bar show Jump / Resume / Handoff / Disabled /
+  Unavailable state when relevant, and Enter validates hook-captured tmux socket
+  plus pane metadata with `tmux list-panes` before running `select-window` and
+  `select-pane`. Missing metadata, dead sessions, SSH data spaces, and tmux
+  failures fall back to the guarded resume/handoff path without creating panes,
+  sending input, or mutating source stores.
 
 ### Remaining Milestones
 
-- M95: Opt-in Tmux Jump + Enter Routing. Add jump-first Enter behavior only when
-  hooks are enabled and the user separately enables Smart Enter / tmux jump.
-  Default Enter behavior remains unchanged.
-  - TODO: add Smart Enter settings and behavior preview; persist `$TMUX`,
-    `$TMUX_PANE`, cwd, and session id from hook events; validate pane liveness
-    with tmux before jumping; route to Jump, Resume, Unavailable, or Disabled
-    with explicit row and command-bar hints; show the effect of the setting in
-    Settings before apply; never create panes, send input, or resume source
-    sessions implicitly.
-  - Acceptance: default-off and hooks-on-but-Smart-Enter-off keep existing Enter;
-    fake or isolated tmux tests cover jump, resume, pane missing, socket missing,
-    non-tmux, SSH data space, and fallback reasons; manual TUI review confirms
-    prompts match behavior.
 - M96: UI Preferences: Language + Theme. Add a small configurable preference
   system: English default, Simplified Chinese optional, and Moonbox / Tokyo Night
   / Gruvbox themes. Dashboard only shows a Settings key; Settings owns preview

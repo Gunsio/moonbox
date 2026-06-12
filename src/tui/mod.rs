@@ -17,11 +17,11 @@ use crossterm::{
 use ratatui::DefaultTerminal;
 
 use crate::{
-    app::{App, SessionFilter, TuiExitAction},
+    app::{App, SessionFilter, TmuxJumpPlan, TuiExitAction},
     core::{
         launcher,
         model::{CliTool, LaunchExecution, LaunchPlan, OriginalSessionPlan},
-        workbench,
+        tmux, workbench,
     },
 };
 
@@ -41,6 +41,9 @@ pub fn run(terminal: &mut DefaultTerminal, mut app: App) -> Result<Option<TuiExi
             if let Some(text) = app.take_clipboard_text() {
                 copy_to_terminal_clipboard(&text)?;
             }
+            if let Some(plan) = app.take_pending_tmux_jump() {
+                run_tmux_jump(&mut app, plan);
+            }
             if let Some(plan) = app.take_pending_resume() {
                 suspend_and_resume(terminal, &mut app, plan)?;
             }
@@ -50,6 +53,11 @@ pub fn run(terminal: &mut DefaultTerminal, mut app: App) -> Result<Option<TuiExi
         }
     }
     Ok(app.take_exit_action())
+}
+
+fn run_tmux_jump(app: &mut App, plan: Box<TmuxJumpPlan>) {
+    let result = tmux::execute_jump(&plan.command);
+    app.complete_tmux_jump(plan, result);
 }
 
 pub fn run_with_loading(

@@ -324,8 +324,8 @@ fn hooks_check() -> VerificationCheck {
         "hooks_event_channel",
         status,
         format!(
-            "opt_in_enabled={}; installed_providers={installed}; invalid_configs={invalid}; spool={}; providers=[{}]; new sessions only; TUI live badges and waiting queue are hook-gated; tmux jump remains separately opt-in",
-            report.moonbox_enabled, report.spool.path, providers
+            "opt_in_enabled={}; smart_enter_tmux={}; installed_providers={installed}; invalid_configs={invalid}; spool={}; providers=[{}]; new sessions only; TUI live badges and waiting queue are hook-gated; tmux jump remains separately opt-in",
+            report.moonbox_enabled, report.smart_enter_tmux_enabled, report.spool.path, providers
         ),
     )
 }
