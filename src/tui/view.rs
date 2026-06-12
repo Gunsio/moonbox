@@ -13,7 +13,7 @@ use ratatui::{
 use crate::{
     app::{
         App, CommandPaletteEntry, DATA_SPACE_CONFIG_FIELD_COUNT, EnterRouteKind, Focus,
-        HandoffTrailFrame, HookWaitingItem, SettingsField,
+        HandoffTrailFrame, HookWaitingItem, SessionFilter, SettingsField,
     },
     core::image_preview::{ImagePreviewStatus, PreviewCell, PreviewRgb, TimelineImagePreview},
     core::model::{
@@ -148,11 +148,13 @@ pub fn render_loading(frame: &mut Frame, tick: usize) {
 }
 
 fn render_header(frame: &mut Frame, area: Rect, app: &App) {
+    let language = app.effective_language();
     let preflight = preflight_summary(app);
 
-    let title = Line::from(header_title_spans(area.width, app.effective_language()));
+    let title = Line::from(header_title_spans(area.width, language));
     let state = Line::from(vec![
-        Span::raw("Filter "),
+        Span::raw(i18n::text(language, Text::Filter)),
+        Span::raw(" "),
         Span::styled("[ ]", Style::default().fg(theme::muted())),
         Span::raw(": "),
         Span::styled(
@@ -161,9 +163,9 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
                 .fg(theme::blue())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw("   Data: "),
+        Span::raw(format!("   {}: ", i18n::text(language, Text::Data))),
         Span::styled(data_space_header_label(app), data_space_header_style(app)),
-        Span::raw("   Skill: "),
+        Span::raw(format!("   {}: ", i18n::text(language, Text::Skill))),
         Span::styled(
             &app.data.capsule.compiler,
             Style::default().fg(theme::cyan()),
@@ -174,14 +176,14 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
         .map(|session| format_token_count(session.token_count))
         .unwrap_or_else(|| "-".into());
     let budget = Line::from(vec![
-        Span::raw("Tokens: "),
+        Span::raw(format!("{}: ", i18n::text(language, Text::Tokens))),
         Span::styled(
             token_budget,
             Style::default()
                 .fg(theme::gold())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw("   Pre-flight: "),
+        Span::raw(format!("   {}: ", i18n::text(language, Text::Preflight))),
         Span::styled(
             preflight.status.label(),
             Style::default()
@@ -214,7 +216,10 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
 
     frame.render_widget(
         Paragraph::new(lines)
-            .block(panel_block(" Moonbox CLI ", app.focus == Focus::Branches))
+            .block(dynamic_panel_block(
+                format!(" {} ", i18n::text(language, Text::MoonboxCli)),
+                app.focus == Focus::Branches,
+            ))
             .alignment(Alignment::Left),
         area,
     );
@@ -223,7 +228,7 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
 fn data_space_header_label(app: &App) -> String {
     let space = app.current_data_space();
     if space.is_local() {
-        space.label.clone()
+        i18n::text(app.effective_language(), Text::LocalDataSpace).to_string()
     } else {
         format!("SSH: {}", space.label)
     }
@@ -457,6 +462,7 @@ fn render_waiting_queue(frame: &mut Frame, area: Rect, waiting: &[HookWaitingIte
 }
 
 fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
+    let language = app.effective_language();
     let visible = app.visible_session_indices();
     let selected = visible
         .iter()
@@ -465,20 +471,26 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
     let items: Vec<ListItem> = if visible.is_empty() {
         let mut lines = vec![
             Line::from(Span::styled(
-                "No sessions match",
+                i18n::text(language, Text::NoSessionsMatch),
                 Style::default().fg(theme::muted()),
             )),
             Line::from(vec![
-                Span::styled("Filter: ", Style::default().fg(theme::muted())),
                 Span::styled(
-                    app.session_filter.label(),
+                    format!("{}: ", i18n::text(language, Text::Filter)),
+                    Style::default().fg(theme::muted()),
+                ),
+                Span::styled(
+                    session_filter_label(language, app.session_filter),
                     Style::default().fg(theme::cyan()),
                 ),
             ]),
         ];
         if !app.search_query.is_empty() {
             lines.push(Line::from(vec![
-                Span::styled("Query: ", Style::default().fg(theme::muted())),
+                Span::styled(
+                    format!("{}: ", i18n::text(language, Text::Query)),
+                    Style::default().fg(theme::muted()),
+                ),
                 Span::styled(
                     format!("/{}", app.search_query),
                     Style::default().fg(theme::cyan()),
@@ -486,7 +498,7 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
             ]));
         }
         lines.push(Line::from(Span::styled(
-            "Press a to clear",
+            i18n::text(language, Text::PressAToClear),
             Style::default().fg(theme::muted()),
         )));
         vec![ListItem::new(lines)]
@@ -541,18 +553,27 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
     let title = if app.search_query.is_empty() {
         stable_panel_title(
             format!(
-                "Sessions · {} {}",
-                app.session_filter.label(),
+                "{} · {} {}",
+                i18n::text(language, Text::SessionsTitle),
+                session_filter_label(language, app.session_filter),
                 session_position_label(visible.len(), selected)
             ),
             area,
         )
     } else if area.width < 28 {
-        stable_panel_title(format!("Sessions /{}", app.search_query), area)
+        stable_panel_title(
+            format!(
+                "{} /{}",
+                i18n::text(language, Text::SessionsTitle),
+                app.search_query
+            ),
+            area,
+        )
     } else {
         stable_panel_title(
             format!(
-                "Sessions · {} {}",
+                "{} · {} {}",
+                i18n::text(language, Text::SessionsTitle),
                 filter_label(app),
                 session_position_label(visible.len(), selected)
             ),
@@ -951,10 +972,28 @@ fn session_position_label(total: usize, selected: usize) -> String {
 }
 
 fn filter_label(app: &App) -> String {
+    let language = app.effective_language();
+    let filter = session_filter_label(language, app.session_filter);
     if app.search_query.is_empty() {
-        app.session_filter.label().to_string()
+        filter.to_string()
     } else {
-        format!("{} · /{}", app.session_filter.label(), app.search_query)
+        format!("{filter} · /{}", app.search_query)
+    }
+}
+
+fn session_filter_label(
+    language: crate::core::config::UiLanguage,
+    filter: SessionFilter,
+) -> &'static str {
+    if language == crate::core::config::UiLanguage::English {
+        return filter.label();
+    }
+    match filter {
+        SessionFilter::All => "全部",
+        SessionFilter::Starred => i18n::text(language, Text::Star),
+        SessionFilter::Tool(CliTool::Codex) => "Codex",
+        SessionFilter::Tool(CliTool::Claude) => "Claude",
+        SessionFilter::Tool(CliTool::Hermes) => "Hermes",
     }
 }
 
@@ -1023,6 +1062,7 @@ fn session_health_detail(session: &crate::core::model::SessionSummary) -> String
 }
 
 fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
+    let language = app.effective_language();
     let visible_groups = visible_timeline_groups(app);
     let selected_group = selected_timeline_group_position(&visible_groups, app.selected_event);
     let mut lines = Vec::new();
@@ -1098,14 +1138,17 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
 
     if lines.is_empty() {
         lines.push(Line::from(Span::styled(
-            "No user or assistant turns loaded",
+            i18n::text(language, Text::NoTimelineLoaded),
             Style::default().fg(theme::muted()),
         )));
     }
 
     frame.render_widget(
         Paragraph::new(lines)
-            .block(panel_block(" Timeline ", app.focus == Focus::Timeline))
+            .block(dynamic_panel_block(
+                format!(" {} ", i18n::text(language, Text::TimelineTitle)),
+                app.focus == Focus::Timeline,
+            ))
             .scroll((timeline_scroll(app, area), 0)),
         area,
     );
@@ -1511,6 +1554,7 @@ fn visible_timeline_events(app: &App) -> Vec<(usize, &TimelineEvent)> {
 }
 
 fn render_capsule(frame: &mut Frame, area: Rect, app: &App) {
+    let language = app.effective_language();
     let capsule = &app.data.capsule;
     let mut lines = session_detail_lines(app);
 
@@ -1532,8 +1576,8 @@ fn render_capsule(frame: &mut Frame, area: Rect, app: &App) {
         )));
         frame.render_widget(
             Paragraph::new(lines)
-                .block(panel_block(
-                    " Session Details ",
+                .block(dynamic_panel_block(
+                    format!(" {} ", i18n::text(language, Text::SessionDetailsTitle)),
                     app.focus == Focus::Capsule,
                 ))
                 .scroll((app.capsule_scroll, 0))
@@ -1547,8 +1591,8 @@ fn render_capsule(frame: &mut Frame, area: Rect, app: &App) {
 
     frame.render_widget(
         Paragraph::new(lines)
-            .block(panel_block(
-                " Session Details ",
+            .block(dynamic_panel_block(
+                format!(" {} ", i18n::text(language, Text::SessionDetailsTitle)),
                 app.focus == Focus::Capsule,
             ))
             .scroll((app.capsule_scroll, 0))
@@ -1590,16 +1634,17 @@ fn compact_capsule_lines(capsule: &WorkCapsule) -> Vec<Line<'static>> {
 }
 
 fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
+    let language = app.effective_language();
     let Some(session) = app.current_session() else {
         return vec![
             Line::from(Span::styled(
-                "Real Session Metadata",
+                i18n::text(language, Text::RealSessionMetadata),
                 Style::default()
                     .fg(theme::blue())
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(Span::styled(
-                "  No session selected",
+                format!("  {}", i18n::text(language, Text::NoSelectedSession)),
                 Style::default().fg(theme::muted()),
             )),
         ];
@@ -1608,24 +1653,24 @@ fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
     let zoomed = app.zoomed_focus == Some(Focus::Capsule);
     let mut lines = vec![
         Line::from(Span::styled(
-            "Real Session Metadata",
+            i18n::text(language, Text::RealSessionMetadata),
             Style::default()
                 .fg(theme::blue())
                 .add_modifier(Modifier::BOLD),
         )),
         metadata_line(
-            "Raw Title",
+            i18n::text(language, Text::RawTitle),
             &session.title,
             Style::default().fg(theme::text()),
         ),
         metadata_line(
-            "Source",
+            i18n::text(language, Text::Source),
             &format!("{} · {}", session.cli, session.source_provenance),
             source_provenance_style(session.source_provenance),
         ),
         source_fidelity_line(app, session.cli),
         metadata_line(
-            "Portrait",
+            i18n::text(language, Text::Portrait),
             &session_portrait_summary(app, session),
             Style::default().fg(theme::cyan()),
         ),
@@ -1635,45 +1680,49 @@ fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
 
     lines.extend([
         metadata_line(
-            "Updated",
+            i18n::text(language, Text::Updated),
             &session.updated,
             Style::default().fg(theme::blue()),
         ),
         metadata_line(
-            "Runtime",
+            i18n::text(language, Text::Runtime),
             &session_runtime_detail(session),
             session_runtime_style(session.runtime_status),
         ),
-        metadata_line("Cwd", &session.cwd, Style::default().fg(theme::text())),
         metadata_line(
-            "Branch",
+            i18n::text(language, Text::Cwd),
+            &session.cwd,
+            Style::default().fg(theme::text()),
+        ),
+        metadata_line(
+            i18n::text(language, Text::Branch),
             session.branch.as_deref().unwrap_or("-"),
             Style::default().fg(theme::cyan()),
         ),
         metadata_line(
-            "Timeline Items",
+            i18n::text(language, Text::TimelineItems),
             &session.event_count.to_string(),
             Style::default().fg(theme::muted()),
         ),
         metadata_line(
-            "Tokens",
+            i18n::text(language, Text::Tokens),
             &format_token_count(session.token_count),
             Style::default().fg(theme::gold()),
         ),
         metadata_line(
-            "Raw Size",
+            i18n::text(language, Text::RawSize),
             &format_source_size_opt(session.source_size_bytes),
             Style::default().fg(theme::muted()),
         ),
         metadata_line(
-            "Source Health",
+            i18n::text(language, Text::SourceHealth),
             &session_health_detail(session),
             session_health_style(session.status),
         ),
     ]);
     if let Some(path) = &session.source_path {
         lines.push(metadata_line(
-            "Path",
+            i18n::text(language, Text::Path),
             path,
             Style::default().fg(theme::muted()),
         ));
@@ -1953,16 +2002,17 @@ fn plural_files(count: usize) -> String {
 }
 
 fn source_fidelity_line(app: &App, cli: CliTool) -> Line<'static> {
+    let language = app.effective_language();
     let Some(report) = source_adapter_report(app, cli) else {
         return metadata_line(
-            "Fidelity",
+            i18n::text(language, Text::Fidelity),
             "missing · none",
             source_fidelity_style(SourceFidelityStatus::Missing),
         );
     };
     let value = source_fidelity_detail(report);
     metadata_line(
-        "Fidelity",
+        i18n::text(language, Text::Fidelity),
         &value,
         source_fidelity_style(report.fidelity.status),
     )
@@ -2039,7 +2089,13 @@ fn render_branch_tree(frame: &mut Frame, area: Rect, app: &App) {
         ]
     };
     frame.render_widget(
-        Paragraph::new(lines).block(panel_block(" Action Path ", app.focus == Focus::Branches)),
+        Paragraph::new(lines).block(dynamic_panel_block(
+            format!(
+                " {} ",
+                i18n::text(app.effective_language(), Text::ActionPath)
+            ),
+            app.focus == Focus::Branches,
+        )),
         area,
     );
 }
@@ -2274,8 +2330,8 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             return vec![
                 ("r", run_hint),
                 ("y", i18n::text(language, Text::CopyCommand)),
-                ("gg/G", "Jump"),
-                ("PgUp/Dn", "Scroll"),
+                ("gg/G", i18n::text(language, Text::Jump)),
+                ("PgUp/Dn", i18n::text(language, Text::Scroll)),
                 ("Esc/q", i18n::text(language, Text::Back)),
             ];
         }
@@ -2283,152 +2339,152 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             == LaunchValidationState::Blocked
         {
             return vec![
-                ("j/k", "Target"),
-                ("enter/y", "Blocked"),
-                ("PgUp/Dn", "Scroll"),
-                ("Esc", "Cancel"),
+                ("j/k", i18n::text(language, Text::Target)),
+                ("enter/y", i18n::text(language, Text::Blocked)),
+                ("PgUp/Dn", i18n::text(language, Text::Scroll)),
+                ("Esc", i18n::text(language, Text::Cancel)),
             ];
         }
         return vec![
-            ("j/k", "Target"),
-            ("enter", "Review"),
-            ("y", "Unavailable"),
-            ("PgUp/Dn", "Scroll"),
-            ("Esc", "Cancel"),
+            ("j/k", i18n::text(language, Text::Target)),
+            ("enter", i18n::text(language, Text::Review)),
+            ("y", i18n::text(language, Text::Unavailable)),
+            ("PgUp/Dn", i18n::text(language, Text::Scroll)),
+            ("Esc", i18n::text(language, Text::Cancel)),
         ];
     }
     if app.show_open_original {
         return vec![
-            ("y", "Copy"),
-            ("j/k", "Scroll"),
-            ("PgUp/Dn", "Scroll"),
-            ("Esc", "Close"),
+            ("y", i18n::text(language, Text::Copy)),
+            ("j/k", i18n::text(language, Text::Scroll)),
+            ("PgUp/Dn", i18n::text(language, Text::Scroll)),
+            ("Esc", i18n::text(language, Text::Close)),
         ];
     }
     if app.show_skill_picker {
         return vec![
-            ("j/k", "Skill"),
-            ("enter", "Apply"),
-            ("y", "Copy Ref"),
-            ("q", "Close"),
+            ("j/k", i18n::text(language, Text::Skill)),
+            ("enter", i18n::text(language, Text::Apply)),
+            ("y", i18n::text(language, Text::CopyRef)),
+            ("q", i18n::text(language, Text::Close)),
         ];
     }
     if app.show_doctor {
         return vec![
-            ("v", "Verify"),
-            ("r", "Refresh"),
-            ("y", "Copy JSON"),
-            ("j/k", "Scroll"),
-            ("Esc", "Close"),
+            ("v", i18n::text(language, Text::Verify)),
+            ("r", i18n::text(language, Text::Refresh)),
+            ("y", i18n::text(language, Text::CopyJson)),
+            ("j/k", i18n::text(language, Text::Scroll)),
+            ("Esc", i18n::text(language, Text::Close)),
         ];
     }
     if app.show_capsules {
         return vec![
-            ("r", "Refresh"),
-            ("j/k", "Scroll"),
-            ("PgUp/Dn", "Scroll"),
-            ("Esc", "Close"),
+            ("r", i18n::text(language, Text::Refresh)),
+            ("j/k", i18n::text(language, Text::Scroll)),
+            ("PgUp/Dn", i18n::text(language, Text::Scroll)),
+            ("Esc", i18n::text(language, Text::Close)),
         ];
     }
     if app.show_settings {
         return vec![
-            ("space/t", "Toggle"),
-            ("enter", "Save"),
-            ("ctrl-s", "Save"),
-            ("Esc", "Cancel"),
+            ("space/t", i18n::text(language, Text::Toggle)),
+            ("enter", i18n::text(language, Text::Save)),
+            ("ctrl-s", i18n::text(language, Text::Save)),
+            ("Esc", i18n::text(language, Text::Cancel)),
         ];
     }
     if app.show_data_space_config {
         return vec![
-            ("enter", "Parse/Save"),
-            ("tab", "Next"),
-            ("ctrl-s", "Save"),
-            ("Esc", "Back"),
+            ("enter", i18n::text(language, Text::ParseSave)),
+            ("tab", i18n::text(language, Text::Next)),
+            ("ctrl-s", i18n::text(language, Text::Save)),
+            ("Esc", i18n::text(language, Text::Back)),
         ];
     }
     if app.show_data_spaces {
         return vec![
-            ("n/a", "Add SSH"),
-            ("x", "Delete"),
-            ("j/k", "Choose"),
-            ("enter", "Load"),
-            ("r", "Reload"),
-            ("Esc", "Close"),
+            ("n/a", i18n::text(language, Text::AddSsh)),
+            ("x", i18n::text(language, Text::Delete)),
+            ("j/k", i18n::text(language, Text::Choose)),
+            ("enter", i18n::text(language, Text::Load)),
+            ("r", i18n::text(language, Text::Reload)),
+            ("Esc", i18n::text(language, Text::Close)),
         ];
     }
     if app.show_timeline_detail {
         return vec![
-            ("j/k", "Scroll"),
-            ("PgUp/Dn", "Scroll"),
-            ("Esc", "Close"),
-            ("q", "Close"),
+            ("j/k", i18n::text(language, Text::Scroll)),
+            ("PgUp/Dn", i18n::text(language, Text::Scroll)),
+            ("Esc", i18n::text(language, Text::Close)),
+            ("q", i18n::text(language, Text::Close)),
         ];
     }
     if app.show_help {
         return vec![
-            ("j/k", "Scroll"),
-            ("PgUp/Dn", "Scroll"),
-            ("Esc", "Close"),
-            ("q", "Close"),
+            ("j/k", i18n::text(language, Text::Scroll)),
+            ("PgUp/Dn", i18n::text(language, Text::Scroll)),
+            ("Esc", i18n::text(language, Text::Close)),
+            ("q", i18n::text(language, Text::Close)),
         ];
     }
 
     match app.focus {
         Focus::Sessions => vec![
-            ("j/k", "Sessions"),
-            ("gg/G", "Jump"),
-            ("/", "Search"),
-            ("[ ]", "Source"),
-            ("{ }", "Data"),
-            ("d", "Data Picker"),
-            (",", "Settings"),
-            ("a", "Clear"),
-            ("s", "Star"),
-            ("S", "Skill"),
-            ("+", "Zoom"),
-            ("-", "Restore"),
-            ("o", "Original"),
-            ("enter", app.enter_key_hint()),
-            ("x/H", "Handoff"),
-            ("tab", "Next"),
+            ("j/k", i18n::text(language, Text::SessionsTitle)),
+            ("gg/G", i18n::text(language, Text::Jump)),
+            ("/", i18n::text(language, Text::Search)),
+            ("[ ]", i18n::text(language, Text::Source)),
+            ("{ }", i18n::text(language, Text::Data)),
+            ("d", i18n::text(language, Text::DataPicker)),
+            (",", i18n::text(language, Text::Settings)),
+            ("a", i18n::text(language, Text::Clear)),
+            ("s", i18n::text(language, Text::Star)),
+            ("S", i18n::text(language, Text::Skill)),
+            ("+", i18n::text(language, Text::Zoom)),
+            ("-", i18n::text(language, Text::Restore)),
+            ("o", i18n::text(language, Text::Original)),
+            ("enter", localized_enter_key_hint(app)),
+            ("x/H", i18n::text(language, Text::Handoff)),
+            ("tab", i18n::text(language, Text::Next)),
         ],
         Focus::Timeline => vec![
-            ("j/k", "Events"),
-            ("gg/G", "Jump"),
-            ("e", "Detail"),
-            ("space", "Rewind"),
-            ("c", "Review"),
-            ("+", "Zoom"),
-            ("-", "Restore"),
-            ("tab", "Next"),
-            (":", "Cmd"),
-            ("q", "Quit"),
+            ("j/k", i18n::text(language, Text::Events)),
+            ("gg/G", i18n::text(language, Text::Jump)),
+            ("e", i18n::text(language, Text::Detail)),
+            ("space", i18n::text(language, Text::RewindPoint)),
+            ("c", i18n::text(language, Text::Review)),
+            ("+", i18n::text(language, Text::Zoom)),
+            ("-", i18n::text(language, Text::Restore)),
+            ("tab", i18n::text(language, Text::Next)),
+            (":", i18n::text(language, Text::Cmd)),
+            ("q", i18n::text(language, Text::Quit)),
         ],
         Focus::Capsule => vec![
-            ("j/k", "Scroll"),
-            ("gg/G", "Top/Bottom"),
-            ("c", "Review"),
-            ("v", "Verify"),
-            ("S", "Skill"),
-            ("+", "Zoom"),
-            ("-", "Restore"),
-            ("tab", "Next"),
-            (":", "Cmd"),
-            ("q", "Quit"),
+            ("j/k", i18n::text(language, Text::Scroll)),
+            ("gg/G", i18n::text(language, Text::TopBottom)),
+            ("c", i18n::text(language, Text::Review)),
+            ("v", i18n::text(language, Text::Verify)),
+            ("S", i18n::text(language, Text::Skill)),
+            ("+", i18n::text(language, Text::Zoom)),
+            ("-", i18n::text(language, Text::Restore)),
+            ("tab", i18n::text(language, Text::Next)),
+            (":", i18n::text(language, Text::Cmd)),
+            ("q", i18n::text(language, Text::Quit)),
         ],
         Focus::Branches => vec![
-            ("enter", app.enter_key_hint()),
-            ("x/H", "Handoff"),
-            ("o", "Original"),
-            ("space", "Rewind"),
-            ("D", "Pre-flight"),
-            (",", "Settings"),
-            ("+", "Zoom"),
-            ("-", "Restore"),
-            ("tab", "Next"),
-            (":", "Cmd"),
-            ("?", "Help"),
-            ("q", "Quit"),
+            ("enter", localized_enter_key_hint(app)),
+            ("x/H", i18n::text(language, Text::Handoff)),
+            ("o", i18n::text(language, Text::Original)),
+            ("space", i18n::text(language, Text::RewindPoint)),
+            ("D", i18n::text(language, Text::Preflight)),
+            (",", i18n::text(language, Text::Settings)),
+            ("+", i18n::text(language, Text::Zoom)),
+            ("-", i18n::text(language, Text::Restore)),
+            ("tab", i18n::text(language, Text::Next)),
+            (":", i18n::text(language, Text::Cmd)),
+            ("?", i18n::text(language, Text::Help)),
+            ("q", i18n::text(language, Text::Quit)),
         ],
     }
 }
@@ -2443,7 +2499,22 @@ fn hint_line(hints: &[KeyHint]) -> Line<'static> {
     Line::from(spans)
 }
 
+fn localized_enter_key_hint(app: &App) -> &'static str {
+    let label = app.enter_key_hint();
+    if app.effective_language() == crate::core::config::UiLanguage::English {
+        return label;
+    }
+    match label {
+        "Handoff" => i18n::text(app.effective_language(), Text::Handoff),
+        "Resume" => i18n::text(app.effective_language(), Text::Resume),
+        "Jump" => i18n::text(app.effective_language(), Text::Jump),
+        "Unavailable" => i18n::text(app.effective_language(), Text::Unavailable),
+        _ => label,
+    }
+}
+
 fn status_line(app: &App) -> Line<'_> {
+    let language = app.effective_language();
     let status_lower = app.status_message.to_ascii_lowercase();
     let (color, bold) = if app.data_space_error.is_some()
         || status_lower.contains("failed")
@@ -2477,8 +2548,11 @@ fn status_line(app: &App) -> Line<'_> {
     };
 
     let mut spans = vec![
-        Span::styled("Status ", Style::default().fg(theme::muted())),
-        Span::styled(&app.status_message, message_style),
+        Span::styled(
+            format!("{} ", i18n::text(language, Text::Status)),
+            Style::default().fg(theme::muted()),
+        ),
+        Span::styled(localized_status_message(app), message_style),
     ];
     if let Some(live) = app.hook_live_indicator() {
         let live_style = if live.is_error {
@@ -2494,6 +2568,24 @@ fn status_line(app: &App) -> Line<'_> {
         spans.push(Span::styled(live.label, live_style));
     }
     Line::from(spans)
+}
+
+fn localized_status_message(app: &App) -> String {
+    let language = app.effective_language();
+    if language == crate::core::config::UiLanguage::English {
+        return app.status_message.clone();
+    }
+    if app.status_message == "Settings opened" {
+        return i18n::text(language, Text::SettingsOpened).to_string();
+    }
+    if let Some(reason) = app.status_message.strip_prefix("Target blocked: ") {
+        return format!(
+            "{}: {}",
+            i18n::text(language, Text::Blocked),
+            localize_validation_detail(language, reason)
+        );
+    }
+    app.status_message.clone()
 }
 
 fn render_settings(frame: &mut Frame, root: Rect, app: &App) {
@@ -3297,7 +3389,11 @@ fn render_doctor(frame: &mut Frame, root: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         )),
     ];
-    lines.extend(preflight_readiness_lines(verification.as_ref(), 3));
+    lines.extend(preflight_readiness_lines(
+        verification.as_ref(),
+        3,
+        app.effective_language(),
+    ));
     lines.extend([
         Line::raw(""),
         Line::from(Span::styled(
@@ -4231,14 +4327,14 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                     Style::default().fg(theme::blue()),
                 ),
                 Span::styled(
-                    validation_label(pending_validation.state),
+                    validation_label(language, pending_validation.state),
                     Style::default()
                         .fg(validation_color(pending_validation.state))
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw("  "),
                 Span::styled(
-                    pending_validation.summary(),
+                    validation_summary_text(language, &pending_validation),
                     Style::default().fg(theme::muted()),
                 ),
             ]),
@@ -4285,7 +4381,7 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                     .add_modifier(Modifier::BOLD),
             )),
         ]);
-        lines.extend(readiness_lines(pending_report.as_ref(), 6));
+        lines.extend(readiness_lines(pending_report.as_ref(), 6, language));
         lines.extend([
             Line::raw(""),
             Line::from(Span::styled(
@@ -4374,28 +4470,34 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         let mark = if selected { "[x]" } else { "[ ]" };
         target_lines.push(Line::from(vec![
             Span::styled(format!("{cursor} {mark} {target:<6}"), style),
-            Span::styled(format!("  {}", validation_label(validation.state)), style),
+            Span::styled(
+                format!("  {}", validation_label(language, validation.state)),
+                style,
+            ),
         ]));
         target_lines.push(Line::from(vec![
             Span::raw("    "),
-            Span::styled(validation.summary(), muted_style),
+            Span::styled(validation_summary_text(language, &validation), muted_style),
         ]));
     }
     let mut lines = vec![
         Line::from(Span::styled(
-            "Choose target CLI",
+            i18n::text(language, Text::ChooseTargetCli),
             Style::default()
                 .fg(theme::gold())
                 .add_modifier(Modifier::BOLD),
         )),
         Line::raw(""),
         Line::from(vec![
-            Span::styled("Session: ", Style::default().fg(theme::blue())),
+            Span::styled(
+                format!("{}: ", i18n::text(language, Text::Session)),
+                Style::default().fg(theme::blue()),
+            ),
             Span::raw(session),
         ]),
         Line::raw(""),
         Line::from(Span::styled(
-            "Target",
+            i18n::text(language, Text::Target),
             Style::default()
                 .fg(theme::blue())
                 .add_modifier(Modifier::BOLD),
@@ -4405,59 +4507,76 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
     lines.extend([
         Line::raw(""),
         Line::from(vec![
-            Span::styled("Selected: ", Style::default().fg(theme::blue())),
+            Span::styled(
+                format!("{}: ", i18n::text(language, Text::Selected)),
+                Style::default().fg(theme::blue()),
+            ),
             Span::raw(app.pending_target.to_string()),
         ]),
         Line::from(vec![
-            Span::styled("Validation: ", Style::default().fg(theme::blue())),
             Span::styled(
-                validation_label(pending_validation.state),
+                format!("{}: ", i18n::text(language, Text::Validation)),
+                Style::default().fg(theme::blue()),
+            ),
+            Span::styled(
+                validation_label(language, pending_validation.state),
                 Style::default()
                     .fg(validation_color(pending_validation.state))
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw("  "),
             Span::styled(
-                pending_validation.summary(),
+                validation_summary_text(language, &pending_validation),
                 Style::default().fg(theme::muted()),
             ),
         ]),
         Line::raw(""),
         Line::from(Span::styled(
-            "Readiness",
+            i18n::text(language, Text::Readiness),
             Style::default()
                 .fg(theme::blue())
                 .add_modifier(Modifier::BOLD),
         )),
     ]);
-    lines.extend(readiness_lines(pending_report.as_ref(), 6));
+    lines.extend(readiness_lines(pending_report.as_ref(), 6, language));
     lines.extend([
         if pending_validation.state == LaunchValidationState::Blocked {
             Line::from(Span::styled(
-                "Launch review disabled until validation passes",
+                i18n::text(language, Text::LaunchReviewDisabled),
                 Style::default()
                     .fg(theme::red())
                     .add_modifier(Modifier::BOLD),
             ))
         } else {
             Line::from(Span::styled(
-                "Press enter to review the handoff command before copying",
+                i18n::text(language, Text::ReviewBeforeCopy),
                 Style::default().fg(theme::gold()),
             ))
         },
         Line::raw(""),
         Line::from(Span::styled(
             if pending_validation.state == LaunchValidationState::Blocked {
-                "j/k choose target   enter/y blocked   Esc cancel"
+                if language == crate::core::config::UiLanguage::ZhHans {
+                    "j/k 选择目标   enter/y 已阻塞   Esc 取消"
+                } else {
+                    "j/k choose target   enter/y blocked   Esc cancel"
+                }
             } else {
-                "j/k choose target   enter review   y unavailable   Esc cancel"
+                if language == crate::core::config::UiLanguage::ZhHans {
+                    "j/k 选择目标   enter 确认   y 不可用   Esc 取消"
+                } else {
+                    "j/k choose target   enter review   y unavailable   Esc cancel"
+                }
             },
             Style::default().fg(theme::muted()),
         )),
     ]);
     frame.render_widget(
         Paragraph::new(lines)
-            .block(panel_block(" Launch ", true))
+            .block(dynamic_panel_block(
+                format!(" {} ", i18n::text(language, Text::Launch)),
+                true,
+            ))
             .scroll((app.modal_scroll, 0))
             .wrap(Wrap { trim: true }),
         area,
@@ -4645,12 +4764,44 @@ fn review_snippet(value: &str, max_chars: usize) -> String {
     output
 }
 
-fn validation_label(state: LaunchValidationState) -> &'static str {
+fn validation_label(
+    language: crate::core::config::UiLanguage,
+    state: LaunchValidationState,
+) -> &'static str {
+    if language == crate::core::config::UiLanguage::ZhHans {
+        return match state {
+            LaunchValidationState::Ready => "就绪",
+            LaunchValidationState::Warning => "警告",
+            LaunchValidationState::Blocked => "阻塞",
+        };
+    }
     match state {
         LaunchValidationState::Ready => "READY",
         LaunchValidationState::Warning => "WARN",
         LaunchValidationState::Blocked => "BLOCKED",
     }
+}
+
+fn validation_summary_text(
+    language: crate::core::config::UiLanguage,
+    validation: &crate::core::model::LaunchValidation,
+) -> String {
+    validation
+        .reasons
+        .iter()
+        .map(|reason| localize_validation_detail(language, reason))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn localize_validation_detail(language: crate::core::config::UiLanguage, detail: &str) -> String {
+    if detail.contains("raw source map mismatch")
+        && detail.contains("generated_by ")
+        && detail.contains(" vs compiler ")
+    {
+        return i18n::text(language, Text::HandoffRegenerateRequired).to_string();
+    }
+    detail.to_string()
 }
 
 fn validation_color(state: LaunchValidationState) -> Color {
@@ -4661,11 +4812,15 @@ fn validation_color(state: LaunchValidationState) -> Color {
     }
 }
 
-fn readiness_lines(report: Option<&VerificationReport>, _max_rows: usize) -> Vec<Line<'static>> {
+fn readiness_lines(
+    report: Option<&VerificationReport>,
+    _max_rows: usize,
+    language: crate::core::config::UiLanguage,
+) -> Vec<Line<'static>> {
     let Some(report) = report else {
         return vec![Line::from(vec![
             Span::styled(
-                "BLOCKED ",
+                validation_label(language, LaunchValidationState::Blocked).to_string() + " ",
                 Style::default()
                     .fg(theme::red())
                     .add_modifier(Modifier::BOLD),
@@ -4678,13 +4833,17 @@ fn readiness_lines(report: Option<&VerificationReport>, _max_rows: usize) -> Vec
     let mut lines = Vec::new();
     for group in readiness_groups() {
         lines.push(Line::from(Span::styled(
-            group.title,
+            readiness_group_title(language, group.title),
             Style::default()
                 .fg(group.color)
                 .add_modifier(Modifier::BOLD),
         )));
         let checks = grouped_checks(report, group.names);
-        lines.extend(checks.into_iter().map(readiness_check_line));
+        lines.extend(
+            checks
+                .into_iter()
+                .map(|check| readiness_check_line(check, language)),
+        );
     }
     lines
 }
@@ -4692,9 +4851,10 @@ fn readiness_lines(report: Option<&VerificationReport>, _max_rows: usize) -> Vec
 fn preflight_readiness_lines(
     report: Option<&VerificationReport>,
     max_rows: usize,
+    language: crate::core::config::UiLanguage,
 ) -> Vec<Line<'static>> {
     let Some(report) = report else {
-        return readiness_lines(None, max_rows);
+        return readiness_lines(None, max_rows, language);
     };
 
     let checks = report
@@ -4717,7 +4877,7 @@ fn preflight_readiness_lines(
     let shown = checks.len();
     let mut lines = checks
         .into_iter()
-        .map(readiness_check_line)
+        .map(|check| readiness_check_line(check, language))
         .collect::<Vec<_>>();
     let remaining = report.checks.len().saturating_sub(shown);
     if remaining > 0 {
@@ -4783,6 +4943,23 @@ fn readiness_groups() -> [ReadinessGroup; 5] {
     ]
 }
 
+fn readiness_group_title(
+    language: crate::core::config::UiLanguage,
+    title: &'static str,
+) -> &'static str {
+    if language == crate::core::config::UiLanguage::English {
+        return title;
+    }
+    match title {
+        "Target Readiness" => i18n::text(language, Text::TargetReadiness),
+        "Workspace Restore" => i18n::text(language, Text::WorkspaceRestore),
+        "Source Health" => i18n::text(language, Text::SourceHealth),
+        "Capsule Health" => i18n::text(language, Text::CapsuleHealth),
+        "Semantic Evidence" => i18n::text(language, Text::SemanticEvidence),
+        _ => title,
+    }
+}
+
 fn grouped_checks<'a>(
     report: &'a VerificationReport,
     names: &[&str],
@@ -4802,7 +4979,10 @@ fn grouped_checks<'a>(
     checks
 }
 
-fn readiness_check_line(check: &crate::core::model::VerificationCheck) -> Line<'static> {
+fn readiness_check_line(
+    check: &crate::core::model::VerificationCheck,
+    language: crate::core::config::UiLanguage,
+) -> Line<'static> {
     let color = verification_color(check.status);
     Line::from(vec![
         Span::raw("  "),
@@ -4817,7 +4997,7 @@ fn readiness_check_line(check: &crate::core::model::VerificationCheck) -> Line<'
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            format!("  {}", check.detail),
+            format!("  {}", localize_validation_detail(language, &check.detail)),
             Style::default().fg(theme::muted()),
         ),
     ])
@@ -5309,6 +5489,31 @@ mod tests {
         let theme_screen = render_text(&app, 150, 36);
         assert_screen_contains(&theme_screen, "Tokyo Night");
         assert_screen_contains(&theme_screen, "看下这个问题");
+    }
+
+    #[test]
+    fn zh_hans_preferences_localize_main_chrome_without_touching_session_content() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.set_ui_preferences_for_test(crate::core::config::UiPreferencesConfig {
+            language: crate::core::config::UiLanguage::ZhHans,
+            theme: crate::core::config::UiThemeName::Moonbox,
+        });
+
+        let screen = render_text(&app, 150, 42);
+
+        assert_screen_contains(&screen, "筛选");
+        assert_screen_contains(&screen, "数据:");
+        assert_screen_contains(&screen, "技能:");
+        assert_screen_contains(&screen, "本地");
+        assert_screen_contains(&screen, "会话 · 全部");
+        assert_screen_contains(&screen, "时间线");
+        assert_screen_contains(&screen, "会话详情");
+        assert_screen_contains(&screen, "真实会话元数据");
+        assert_screen_contains(&screen, "原始标题");
+        assert_screen_contains(&screen, "保真度");
+        assert_screen_contains(&screen, "操作路径");
+        assert_screen_contains(&screen, "状态");
+        assert_screen_contains(&screen, "Moonbox session rewind design");
     }
 
     #[test]
@@ -6348,6 +6553,27 @@ mod tests {
         assert_screen_contains(&screen, "target_support");
         assert_screen_contains(&screen, "raw resume is known failed");
         assert_screen_contains(&screen, "enter/y Blocked");
+    }
+
+    #[test]
+    fn launch_overlay_explains_stale_handoff_compiler_mismatch() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.set_ui_preferences_for_test(crate::core::config::UiPreferencesConfig {
+            language: crate::core::config::UiLanguage::ZhHans,
+            theme: crate::core::config::UiThemeName::Moonbox,
+        });
+        app.data.capsule.compiler = "agent:codex:handoff".into();
+        app.show_launch = true;
+        app.pending_target = CliTool::Hermes;
+
+        let screen = render_text(&app, 140, 52);
+
+        assert_screen_contains(&screen, "选择目标 CLI");
+        assert_screen_contains(&screen, "当前 handoff 由其他 skill/compiler 生成");
+        assert_screen_contains(&screen, "请用当前 skill 重新生成后再启动");
+        assert_screen_contains(&screen, "校验通过后才能进入启动确认");
+        assert!(!screen.contains("generated_by"), "{screen}");
+        assert!(!screen.contains(" vs compiler "), "{screen}");
     }
 
     #[test]
