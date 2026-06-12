@@ -653,6 +653,12 @@ report; the runner does not get permission to scan or mutate source session
 stores. Empty agent artifacts fail validation before Moonbox shows the Review
 as runnable.
 
+The production handoff path is skill-first: pick a source session, target
+executor, handoff skill, and runner SDK, then review the generated handoff
+before launching. Community handoff skills and built-in Moonbox skill presets
+must use the same runner path and Review UX. Deterministic built-in compiler
+output is a draft/fallback surface only, not a hidden production handoff path.
+
 Environment variables remain the highest-priority one-off override:
 
 ```bash
@@ -749,6 +755,32 @@ jumps with `select-window` + `select-pane` only when that pane is still live,
 and falls back to the existing resume or handoff route otherwise. The Settings
 panel previews the current route as Jump, Resume, Handoff, Disabled, or
 Unavailable before saving; Moonbox never creates panes or sends input.
+
+Opt-in behavior matrix:
+
+- Fresh install / hooks off: Moonbox does not write Claude/Codex config, does
+  not tail hook spools, does not show live badges or waiting queues, and keeps
+  `enter` on the existing resume/handoff route.
+- `moonbox hooks install`: preview only. It shows the exact provider-config
+  edits and the "new sessions only" limitation without changing files.
+- `moonbox hooks install --apply`: writes only Moonbox-owned provider hook
+  entries plus Moonbox `hooks.enabled=true`; then local TUI views may show live
+  status, recent action text, and `WAITING ON YOU` from the Moonbox spool.
+- Settings Smart Enter on: changes only Moonbox config, previews the selected
+  session's route, and allows `enter` to jump to a validated live tmux pane.
+  Missing pane metadata, dead panes, SSH data spaces, and tmux errors still
+  fall back to guarded resume or handoff.
+- `moonbox hooks uninstall --apply`: removes only Moonbox-owned hook entries
+  and leaves other user/provider hooks intact.
+
+TUI Settings (`,`) also owns UI preferences. Language defaults to English and
+can be switched to Simplified Chinese; themes are Moonbox, Tokyo Night, and
+Gruvbox. Settings previews language and theme changes before saving, marks
+unsaved rows, supports reset, and persists only to Moonbox config. UI
+translation covers Moonbox chrome such as Settings and Handoff Review labels;
+session transcripts, prompts, agent output, tool output, code, paths, cwd,
+branch names, source metadata, and generated handoff content are never
+translated or rewritten.
 
 Generate shell completions with:
 
@@ -1278,30 +1310,27 @@ Stable interfaces matter more than any single framework:
   `select-pane`. Missing metadata, dead sessions, SSH data spaces, and tmux
   failures fall back to the guarded resume/handoff path without creating panes,
   sending input, or mutating source stores.
+- M96: UI Preferences: Language + Theme; Settings now manages previewable
+  Moonbox UI preferences with English as the clean-config default, Simplified
+  Chinese as an optional UI language, and Moonbox / Tokyo Night / Gruvbox
+  semantic themes. The Settings panel supports row focus, h/l or space changes,
+  reset, unsaved indicators, and persistence to Moonbox config only. UI i18n
+  covers Moonbox chrome and Handoff Review labels while preserving source
+  session transcripts, prompts, agent output, tool output, code, paths, cwd,
+  branch names, metadata, and handoff content byte-for-byte.
 
 ### Remaining Milestones
 
-- M96: UI Preferences: Language + Theme. Add a small configurable preference
-  system: English default, Simplified Chinese optional, and Moonbox / Tokyo Night
-  / Gruvbox themes. Dashboard only shows a Settings key; Settings owns preview
-  and persistence.
-  - TODO: introduce an i18n key catalog for Moonbox UI chrome only; keep session
-    transcript, prompts, agent output, tool output, code, paths, cwd, and branch
-    text unmodified; add a theme registry with semantic tokens; implement
-    Settings preview, apply, reset, and config persistence; keep themes
-    pluggable without scattering raw colors through views.
-  - Acceptance: TUI snapshots cover English / Simplified Chinese and all three
-    themes; narrow-window Settings does not overlap; live preview and persisted
-    config work; source session content remains byte-for-byte unchanged.
-- M92: Remote / SSH Session Detail Parity. Low-priority follow-up after the
-  handoff and hooks foundation: make SSH data-space details match local anatomy
-  quality with clear fallback when the remote Moonbox is missing or too old.
+- M92: Remote / SSH Session Detail Parity. Deferred low-priority follow-up
+  after handoff, hooks, Smart Enter, and preferences: make SSH data-space
+  details match local anatomy quality with clear fallback when the remote
+  Moonbox is missing, failing, or too old.
   - TODO: return remote anatomy summaries, negotiate remote capabilities, align
-    Local / SSH detail ordering, show version/stderr/field-missing fallback
-    reasons, and handle empty or oversized fields gracefully.
+    Local / SSH detail ordering, show version, exit status, stderr, and missing
+    field fallback reasons, and handle empty or oversized fields gracefully.
   - Acceptance: fixture / isolated SSH command tests cover compatible,
     incompatible, missing, and failing remotes; local TUI comparison shows
-    parity without reading or mutating source stores.
+    parity without reading, resuming, or mutating source stores.
 - Low-priority backlog:
   - M76: native terminal image protocol. Detect terminal raster capabilities
     such as Kitty, iTerm2, or Sixel and upgrade beyond the M79 text-cell

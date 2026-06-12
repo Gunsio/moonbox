@@ -690,10 +690,8 @@ fn docs_snapshot_is_hidden_fixture_safe_and_generated() {
     assert!(svg.contains("Handoff Review"));
     assert!(svg.contains("Capsule"));
     assert!(svg.contains("Draft Handoff"));
-    assert!(svg.contains("目"));
-    assert!(svg.contains("标"));
-    assert!(svg.contains("运"));
-    assert!(svg.contains("行"));
+    assert!(svg.contains("Target receives"));
+    assert!(svg.contains("Run local target"));
 }
 
 #[test]

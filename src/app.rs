@@ -70,6 +70,29 @@ pub struct TmuxJumpPlan {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsField {
+    Language,
+    Theme,
+    SmartEnter,
+}
+
+impl SettingsField {
+    const ALL: [Self; 3] = [Self::Language, Self::Theme, Self::SmartEnter];
+
+    fn index(self) -> usize {
+        match self {
+            Self::Language => 0,
+            Self::Theme => 1,
+            Self::SmartEnter => 2,
+        }
+    }
+
+    fn from_index(index: usize) -> Self {
+        Self::ALL[index % Self::ALL.len()]
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EnterRouteKind {
     Disabled,
     Resume,
@@ -962,6 +985,10 @@ pub struct App {
     pub data_space_config_form: DataSpaceConfigForm,
     pub data_space_config_field: usize,
     pub data_space_delete_confirmation: Option<String>,
+    ui_preferences: config::UiPreferencesConfig,
+    pub settings_language: config::UiLanguage,
+    pub settings_theme: config::UiThemeName,
+    pub settings_field: SettingsField,
     pub settings_smart_enter_tmux: bool,
     pub pending_target: CliTool,
     pub pending_compiler: usize,
@@ -1016,10 +1043,16 @@ impl App {
         #[cfg(test)]
         let hooks_config = config::HooksConfig::default();
         #[cfg(not(test))]
+        let ui_preferences = config::load_ui_preferences_config();
+        #[cfg(test)]
+        let ui_preferences = config::UiPreferencesConfig::default();
+        #[cfg(not(test))]
         let hook_live = hooks::live_state_from_config(&hooks_config);
         #[cfg(test)]
         let hook_live = None;
         let settings_smart_enter_tmux = hooks_config.smart_enter_tmux;
+        let settings_language = ui_preferences.language;
+        let settings_theme = ui_preferences.theme;
 
         let mut app = Self {
             data,
@@ -1057,6 +1090,10 @@ impl App {
             data_space_config_form: DataSpaceConfigForm::default(),
             data_space_config_field: 0,
             data_space_delete_confirmation: None,
+            ui_preferences,
+            settings_language,
+            settings_theme,
+            settings_field: SettingsField::Language,
             settings_smart_enter_tmux,
             pending_target: target,
             pending_compiler: selected_compiler,
@@ -1292,6 +1329,13 @@ impl App {
     }
 
     #[cfg(test)]
+    pub(crate) fn set_ui_preferences_for_test(&mut self, ui: config::UiPreferencesConfig) {
+        self.ui_preferences = ui;
+        self.settings_language = ui.language;
+        self.settings_theme = ui.theme;
+    }
+
+    #[cfg(test)]
     pub(crate) fn set_hook_live_events_for_test(&mut self, events: Vec<hooks::HookSpoolEvent>) {
         let mut hook_live =
             hooks::HookLiveState::new(std::path::PathBuf::from("/tmp/moonbox-test-hooks.jsonl"));
@@ -1323,6 +1367,48 @@ impl App {
 
     pub fn settings_smart_enter_dirty(&self) -> bool {
         self.settings_smart_enter_tmux != self.hooks_config.smart_enter_tmux
+    }
+
+    pub fn ui_language(&self) -> config::UiLanguage {
+        self.ui_preferences.language
+    }
+
+    pub fn ui_theme(&self) -> config::UiThemeName {
+        self.ui_preferences.theme
+    }
+
+    pub fn effective_language(&self) -> config::UiLanguage {
+        if self.show_settings {
+            self.settings_language
+        } else {
+            self.ui_language()
+        }
+    }
+
+    pub fn effective_theme(&self) -> config::UiThemeName {
+        if self.show_settings {
+            self.settings_theme
+        } else {
+            self.ui_theme()
+        }
+    }
+
+    pub fn settings_language_dirty(&self) -> bool {
+        self.settings_language != self.ui_preferences.language
+    }
+
+    pub fn settings_theme_dirty(&self) -> bool {
+        self.settings_theme != self.ui_preferences.theme
+    }
+
+    pub fn settings_dirty(&self) -> bool {
+        self.settings_language_dirty()
+            || self.settings_theme_dirty()
+            || self.settings_smart_enter_dirty()
+    }
+
+    pub fn settings_field_is_focused(&self, field: SettingsField) -> bool {
+        self.settings_field == field
     }
 
     pub fn hook_live_for_session(
@@ -2073,7 +2159,10 @@ impl App {
             self.set_status("Timeline detail closed");
         } else if self.show_settings {
             self.show_settings = false;
+            self.settings_language = self.ui_preferences.language;
+            self.settings_theme = self.ui_preferences.theme;
             self.settings_smart_enter_tmux = self.hooks_config.smart_enter_tmux;
+            self.settings_field = SettingsField::Language;
             self.modal_scroll = 0;
             self.set_status("Settings closed");
         } else if self.show_open_original {
@@ -2114,7 +2203,10 @@ impl App {
     }
 
     fn open_settings(&mut self) {
+        self.settings_language = self.ui_preferences.language;
+        self.settings_theme = self.ui_preferences.theme;
         self.settings_smart_enter_tmux = self.hooks_config.smart_enter_tmux;
+        self.settings_field = SettingsField::Language;
         self.show_settings = true;
         self.modal_scroll = 0;
         self.set_status("Settings opened");
@@ -2124,7 +2216,13 @@ impl App {
     fn handle_settings_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => self.back_or_quit(),
-            KeyCode::Char(' ') | KeyCode::Char('t') => self.toggle_smart_enter_tmux_setting(),
+            KeyCode::Tab | KeyCode::Char('j') | KeyCode::Down => self.cycle_settings_field(true),
+            KeyCode::BackTab | KeyCode::Char('k') | KeyCode::Up => self.cycle_settings_field(false),
+            KeyCode::Char(' ') | KeyCode::Char('t') | KeyCode::Char('l') | KeyCode::Right => {
+                self.cycle_focused_setting(true)
+            }
+            KeyCode::Char('h') | KeyCode::Left => self.cycle_focused_setting(false),
+            KeyCode::Char('r') => self.reset_settings_draft(),
             KeyCode::Enter => self.save_settings(),
             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.save_settings()
@@ -2133,26 +2231,78 @@ impl App {
         }
     }
 
-    fn toggle_smart_enter_tmux_setting(&mut self) {
-        self.settings_smart_enter_tmux = !self.settings_smart_enter_tmux;
-        let state = if self.settings_smart_enter_tmux {
-            "On"
+    fn cycle_settings_field(&mut self, forward: bool) {
+        let current = self.settings_field.index();
+        let next = if forward {
+            current + 1
         } else {
-            "Off"
+            current + SettingsField::ALL.len() - 1
         };
-        self.set_status(format!("Smart Enter draft: {state}"));
+        self.settings_field = SettingsField::from_index(next);
+        self.pending_g = false;
+    }
+
+    fn cycle_focused_setting(&mut self, forward: bool) {
+        match self.settings_field {
+            SettingsField::Language => {
+                self.settings_language = if forward {
+                    self.settings_language.next()
+                } else {
+                    self.settings_language.previous()
+                };
+                self.set_status(format!(
+                    "Language draft: {}",
+                    self.settings_language.label()
+                ));
+            }
+            SettingsField::Theme => {
+                self.settings_theme = if forward {
+                    self.settings_theme.next()
+                } else {
+                    self.settings_theme.previous()
+                };
+                self.set_status(format!("Theme draft: {}", self.settings_theme.label()));
+            }
+            SettingsField::SmartEnter => {
+                self.settings_smart_enter_tmux = !self.settings_smart_enter_tmux;
+                let state = if self.settings_smart_enter_tmux {
+                    "On"
+                } else {
+                    "Off"
+                };
+                self.set_status(format!("Smart Enter draft: {state}"));
+            }
+        }
+        self.pending_g = false;
+    }
+
+    fn reset_settings_draft(&mut self) {
+        self.settings_language = config::UiLanguage::default();
+        self.settings_theme = config::UiThemeName::default();
+        self.settings_smart_enter_tmux = false;
+        self.set_status("Settings draft reset to defaults");
         self.pending_g = false;
     }
 
     fn save_settings(&mut self) {
-        match config::set_smart_enter_tmux(self.settings_smart_enter_tmux) {
-            Ok(hooks_config) => {
+        let ui = config::UiPreferencesConfig {
+            language: self.settings_language,
+            theme: self.settings_theme,
+        };
+        match config::save_ui_preferences_and_smart_enter(ui, self.settings_smart_enter_tmux) {
+            Ok((ui_preferences, hooks_config)) => {
+                self.ui_preferences = ui_preferences;
                 self.hooks_config = hooks_config;
+                self.settings_language = self.ui_preferences.language;
+                self.settings_theme = self.ui_preferences.theme;
                 self.settings_smart_enter_tmux = self.hooks_config.smart_enter_tmux;
                 self.show_settings = false;
+                self.settings_field = SettingsField::Language;
                 self.modal_scroll = 0;
                 self.set_status(format!(
-                    "Settings saved: Smart Enter / tmux jump {}",
+                    "Settings saved: language {}, theme {}, Smart Enter {}",
+                    self.ui_preferences.language.label(),
+                    self.ui_preferences.theme.label(),
                     if self.hooks_config.smart_enter_tmux {
                         "On"
                     } else {

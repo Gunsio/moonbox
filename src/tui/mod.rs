@@ -1,3 +1,4 @@
+mod i18n;
 mod snapshot;
 mod theme;
 mod view;

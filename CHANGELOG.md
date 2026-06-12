@@ -136,6 +136,12 @@ and this project uses semantic versioning once tagged releases start.
   Missing metadata, dead sessions, SSH data spaces, and tmux failures fall back
   to the guarded resume/handoff path without creating panes, sending input, or
   mutating source stores.
+- TUI UI preferences in Settings: English is the default language, Simplified
+  Chinese is optional, and Moonbox / Tokyo Night / Gruvbox themes are backed by
+  semantic color tokens. Settings previews language and theme drafts before
+  saving, supports reset and unsaved row indicators, persists only to Moonbox
+  config, and keeps session transcripts, prompts, agent output, tool output,
+  code, paths, cwd, branch names, metadata, and handoff content unmodified.
 - Configurable compiler skill presets in `~/.config/moonbox/config.json`,
   including optional description, homepage, and GitHub stars metadata for the
   TUI Skill Picker.
