@@ -39,6 +39,11 @@ pub enum Command {
     Compilers(JsonArgs),
     /// List configured SSH hosts without connecting.
     Ssh(JsonArgs),
+    /// Inspect or configure opt-in Claude/Codex hook event capture.
+    Hooks(HooksArgs),
+    /// Append one provider hook event to Moonbox's local spool.
+    #[command(name = "hook-event")]
+    HookEvent(HookEventArgs),
     /// Diagnose Moonbox configuration without opening sessions.
     Doctor(JsonArgs),
     /// Capture a workspace continuation snapshot without opening sessions.
@@ -79,6 +84,60 @@ pub struct TuiArgs {
 pub struct JsonArgs {
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Debug, Args, Clone, Default)]
+pub struct HooksArgs {
+    #[command(subcommand)]
+    pub command: Option<HooksCommand>,
+}
+
+#[derive(Debug, Subcommand, Clone)]
+pub enum HooksCommand {
+    /// Show Moonbox hook config, provider injection, and spool health.
+    Status(HooksStatusArgs),
+    /// Preview or apply Moonbox hook entries to Claude and Codex config.
+    Install(HooksApplyArgs),
+    /// Preview or remove only Moonbox hook entries from provider config.
+    Uninstall(HooksApplyArgs),
+}
+
+#[derive(Debug, Args, Clone, Default)]
+pub struct HooksStatusArgs {
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct HooksApplyArgs {
+    /// Provider config to change. Defaults to both Claude and Codex.
+    #[arg(long, value_enum)]
+    pub cli: Option<HookTarget>,
+    /// Actually write config files. Without this flag Moonbox prints a dry-run preview.
+    #[arg(long)]
+    pub apply: bool,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct HookEventArgs {
+    /// Provider that emitted the hook event.
+    #[arg(long, value_enum)]
+    pub cli: HookProviderArg,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum HookTarget {
+    All,
+    Claude,
+    Codex,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum HookProviderArg {
+    Claude,
+    Codex,
 }
 
 #[derive(Debug, Args, Clone, Default)]

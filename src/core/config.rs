@@ -45,11 +45,35 @@ pub struct RedactionPolicyConfig {
     pub file_allowlist: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HooksConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    pub spool_path: Option<String>,
+    #[serde(default = "default_hook_spool_max_bytes")]
+    pub spool_max_bytes: u64,
+    #[serde(default = "default_hook_spool_max_files")]
+    pub spool_max_files: usize,
+}
+
+impl Default for HooksConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            spool_path: None,
+            spool_max_bytes: default_hook_spool_max_bytes(),
+            spool_max_files: default_hook_spool_max_files(),
+        }
+    }
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct UserConfig {
     last_target: Option<CliTool>,
     default_compiler: Option<String>,
     redaction_policy: Option<RedactionPolicyConfig>,
+    #[serde(default)]
+    hooks: HooksConfig,
     #[serde(default)]
     compiler_presets: Vec<CompilerPresetConfig>,
     #[serde(default)]
@@ -156,6 +180,19 @@ pub fn load_redaction_policy_config() -> Option<RedactionPolicyConfig> {
         .and_then(|config| config.redaction_policy)
 }
 
+pub fn load_hooks_config() -> HooksConfig {
+    load_user_config()
+        .map(|config| config.hooks)
+        .unwrap_or_default()
+}
+
+pub fn save_hooks_config(config: HooksConfig) -> Result<(), Box<dyn std::error::Error>> {
+    let path = config_path().ok_or("missing home directory")?;
+    let mut user_config = load_user_config_from_path(&path).unwrap_or_default();
+    user_config.hooks = config;
+    save_user_config_to_path(&path, &user_config)
+}
+
 pub fn save_starred_sessions(sessions: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let path = config_path().ok_or("missing home directory")?;
     let mut config = load_user_config_from_path(&path).unwrap_or_default();
@@ -213,6 +250,14 @@ fn enabled_by_default() -> bool {
     true
 }
 
+fn default_hook_spool_max_bytes() -> u64 {
+    10 * 1024 * 1024
+}
+
+fn default_hook_spool_max_files() -> usize {
+    5
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,6 +300,8 @@ mod tests {
         assert_eq!(redaction.file_allowlist, ["README.md", "src/"]);
         assert_eq!(config.compiler_presets[0].id, "handoff");
         assert!(config.compiler_presets[0].enabled);
+        assert!(!config.hooks.enabled);
+        assert_eq!(config.hooks.spool_max_bytes, default_hook_spool_max_bytes());
         assert_eq!(config.compiler_presets[0].args, ["--mode", "handoff"]);
         assert_eq!(
             config.compiler_presets[0].description.as_deref(),
@@ -281,6 +328,7 @@ mod tests {
             &path,
             r#"{
   "default_compiler": "handoff",
+  "hooks": {"enabled": true, "spool_path": "/tmp/moonbox/events.jsonl", "spool_max_bytes": 4096, "spool_max_files": 2},
   "compiler_presets": [
     {"id": "handoff", "command": "/bin/moonbox-handoff", "enabled": false}
   ],
@@ -297,6 +345,13 @@ mod tests {
 
         assert_eq!(saved.last_target, Some(CliTool::Claude));
         assert_eq!(saved.default_compiler.as_deref(), Some("handoff"));
+        assert!(saved.hooks.enabled);
+        assert_eq!(
+            saved.hooks.spool_path.as_deref(),
+            Some("/tmp/moonbox/events.jsonl")
+        );
+        assert_eq!(saved.hooks.spool_max_bytes, 4096);
+        assert_eq!(saved.hooks.spool_max_files, 2);
         assert_eq!(saved.compiler_presets.len(), 1);
         assert!(!saved.compiler_presets[0].enabled);
         assert_eq!(saved.ssh_hosts.len(), 1);
@@ -333,6 +388,7 @@ mod tests {
 
         assert_eq!(saved.last_target, Some(CliTool::Hermes));
         assert_eq!(saved.default_compiler.as_deref(), Some("handoff"));
+        assert!(!saved.hooks.enabled);
         assert_eq!(saved.compiler_presets.len(), 1);
         assert_eq!(saved.ssh_hosts.len(), 1);
         assert_eq!(saved.starred_sessions, ["codex:abc", "claude:def"]);

@@ -1,7 +1,7 @@
 use std::{env, fs, path::Path};
 
 use super::{
-    compiler, config, launcher,
+    compiler, config, hooks, launcher,
     model::{
         CliTool, CompilerPresetStatus, DoctorReport, SessionSummary, SourceAdapterReport,
         VerificationCheck, VerificationStatus,
@@ -35,6 +35,7 @@ pub fn diagnose() -> DoctorReport {
     };
     checks.extend(CliTool::ALL.into_iter().map(target_binary_check));
     checks.push(compiler_catalog_check());
+    checks.push(hooks_check());
 
     report(checks, source_adapters)
 }
@@ -50,6 +51,7 @@ pub fn diagnose_with_inventory(
     checks.push(session_summaries_check(sessions));
     checks.extend(CliTool::ALL.into_iter().map(target_binary_check));
     checks.push(compiler_catalog_check());
+    checks.push(hooks_check());
 
     report(checks, source_adapters.to_vec())
 }
@@ -276,6 +278,55 @@ fn compiler_catalog_check() -> VerificationCheck {
         "compiler_catalog",
         VerificationStatus::Pass,
         format!("default={default}; active={active}; warning={warning}; disabled={disabled}"),
+    )
+}
+
+fn hooks_check() -> VerificationCheck {
+    let report = hooks::status_report();
+    let installed = report
+        .providers
+        .iter()
+        .filter(|provider| provider.installed)
+        .count();
+    let invalid = report
+        .providers
+        .iter()
+        .filter(|provider| !provider.config_valid)
+        .count();
+    let codex_feature_disabled = report.providers.iter().any(|provider| {
+        provider.provider == hooks::HookProvider::Codex && provider.feature_enabled == Some(false)
+    });
+    let status = if !report.moonbox_enabled {
+        VerificationStatus::Pass
+    } else if invalid > 0 || installed == 0 || codex_feature_disabled {
+        VerificationStatus::Warn
+    } else {
+        VerificationStatus::Pass
+    };
+    let providers = report
+        .providers
+        .iter()
+        .map(|provider| {
+            format!(
+                "{}:{}:{}",
+                provider.provider.id(),
+                if provider.installed {
+                    "installed"
+                } else {
+                    "not_installed"
+                },
+                provider.reason
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    check(
+        "hooks_event_channel",
+        status,
+        format!(
+            "opt_in_enabled={}; installed_providers={installed}; invalid_configs={invalid}; spool={}; providers=[{}]; new sessions only; live badges/waiting queue/tmux jump are later milestones",
+            report.moonbox_enabled, report.spool.path, providers
+        ),
     )
 }
 

@@ -1,7 +1,8 @@
 use std::{
     fs,
+    io::Write,
     path::{Path, PathBuf},
-    process::{Command, Output},
+    process::{Command, Output, Stdio},
 };
 
 use rusqlite::{Connection, params};
@@ -30,6 +31,7 @@ fn fixture_safe_command(binary: &str, test_name: &str) -> Command {
         .env("MOONBOX_CLAUDE_HOME", claude_home)
         .env("MOONBOX_HERMES_HOME", hermes_home)
         .env("MOONBOX_CONFIG", home.join("config.json"))
+        .env("MOONBOX_HOME", home.join("moonbox-home"))
         .env("MOONBOX_CAPSULE_STORE", home.join("capsules.sqlite"))
         .env("MOONBOX_LAUNCH_LEDGER", home.join("launches.sqlite"))
         .env("MOONBOX_SSH_CONFIG", home.join(".ssh").join("config"))
@@ -45,6 +47,7 @@ fn fixture_safe_command(binary: &str, test_name: &str) -> Command {
         "MOONBOX_COMPILER_ID",
         "MOONBOX_COMPILER_ARGS",
         "MOONBOX_COMPILER_TIMEOUT_MS",
+        "MOONBOX_HOOK_SPOOL",
         "MOONBOX_CODEX_BIN",
         "MOONBOX_CODEX_APP_SERVER_FIXTURE",
         "MOONBOX_CODEX_APP_SERVER_PROXY",
@@ -349,6 +352,8 @@ fn completion_generation_uses_requested_or_invoked_binary_name() {
     assert!(bash.contains("open-app"));
     assert!(bash.contains("snapshot"));
     assert!(bash.contains("ssh"));
+    assert!(bash.contains("hooks"));
+    assert!(bash.contains("hook-event"));
 
     let fish = output_text(
         moon_command("completion-moon-fish")
@@ -362,6 +367,8 @@ fn completion_generation_uses_requested_or_invoked_binary_name() {
     assert!(fish.contains("open-app"));
     assert!(fish.contains("snapshot"));
     assert!(fish.contains("ssh"));
+    assert!(fish.contains("hooks"));
+    assert!(fish.contains("hook-event"));
 
     let zsh = output_text(
         moonbox_command("completion-explicit-moon-zsh")
@@ -375,6 +382,8 @@ fn completion_generation_uses_requested_or_invoked_binary_name() {
     assert!(zsh.contains("open-app"));
     assert!(zsh.contains("snapshot"));
     assert!(zsh.contains("ssh"));
+    assert!(zsh.contains("hooks"));
+    assert!(zsh.contains("hook-event"));
 }
 
 #[test]
@@ -513,6 +522,154 @@ Host *
 }
 
 #[test]
+fn hooks_cli_is_preview_first_and_uninstalls_only_moonbox_entries() {
+    let test_name = "hooks-config";
+    let home = fixture_home(test_name);
+    fs::create_dir_all(home.join("claude")).expect("claude fixture dir");
+    fs::create_dir_all(home.join("codex")).expect("codex fixture dir");
+    fs::write(
+        home.join("claude").join("settings.json"),
+        r#"{
+  "hooks": {
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "/bin/echo keep-claude"}]}
+    ]
+  }
+}"#,
+    )
+    .expect("claude settings");
+    fs::write(
+        home.join("codex").join("hooks.json"),
+        r#"{
+  "hooks": {
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "/bin/echo keep-codex"}]}
+    ]
+  }
+}"#,
+    )
+    .expect("codex hooks");
+    fs::write(
+        home.join("codex").join("config.toml"),
+        "[features]\nhooks = false\n",
+    )
+    .expect("codex config");
+
+    let preview = output_json(
+        moonbox_command(test_name)
+            .args(["hooks", "install", "--json"])
+            .output()
+            .expect("hooks preview"),
+    );
+    assert_eq!(preview["dry_run"], true);
+    assert!(!home.join("config.json").exists());
+    assert!(
+        !fs::read_to_string(home.join("claude").join("settings.json"))
+            .expect("claude after preview")
+            .contains("hook-event")
+    );
+
+    let applied = output_json(
+        moonbox_command(test_name)
+            .args(["hooks", "install", "--apply", "--json"])
+            .output()
+            .expect("hooks install"),
+    );
+    assert_eq!(applied["dry_run"], false);
+    assert_eq!(applied["moonbox_enabled_after"], true);
+    assert!(
+        applied["providers"]
+            .as_array()
+            .expect("providers")
+            .iter()
+            .all(|provider| provider["changed"] == true)
+    );
+    let status = output_json(
+        moonbox_command(test_name)
+            .args(["hooks", "status", "--json"])
+            .output()
+            .expect("hooks status"),
+    );
+    assert_eq!(status["moonbox_enabled"], true);
+    assert_eq!(status["providers"][1]["feature_enabled"], false);
+    assert_eq!(status["providers"][0]["installed"], true);
+    assert_eq!(status["providers"][1]["installed"], true);
+
+    let reinstall = output_json(
+        moonbox_command(test_name)
+            .args(["hooks", "install", "--apply", "--json"])
+            .output()
+            .expect("hooks reinstall"),
+    );
+    assert!(
+        reinstall["providers"]
+            .as_array()
+            .expect("providers")
+            .iter()
+            .all(|provider| provider["changed"] == false)
+    );
+
+    let removed = output_json(
+        moonbox_command(test_name)
+            .args(["hooks", "uninstall", "--apply", "--json"])
+            .output()
+            .expect("hooks uninstall"),
+    );
+    assert_eq!(removed["moonbox_enabled_after"], false);
+    let claude = fs::read_to_string(home.join("claude").join("settings.json"))
+        .expect("claude after uninstall");
+    let codex =
+        fs::read_to_string(home.join("codex").join("hooks.json")).expect("codex after uninstall");
+    assert!(claude.contains("keep-claude"));
+    assert!(codex.contains("keep-codex"));
+    assert!(!claude.contains("hook-event"));
+    assert!(!codex.contains("hook-event"));
+}
+
+#[test]
+fn hook_event_appends_to_isolated_spool_and_exits_silent() {
+    let test_name = "hooks-spool";
+    let home = fixture_home(test_name);
+    fs::create_dir_all(&home).expect("home dir");
+    fs::write(
+        home.join("config.json"),
+        r#"{"hooks":{"enabled":true,"spool_max_bytes":4096,"spool_max_files":2}}"#,
+    )
+    .expect("hooks config");
+
+    let mut child = moonbox_command(test_name)
+        .args(["hook-event", "--cli", "codex"])
+        .env("TMUX", "/tmp/tmux-501/default,1,0")
+        .env("TMUX_PANE", "%42")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("hook-event spawn");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin")
+        .write_all(
+            br#"{"session_id":"s1","hook_event_name":"PermissionRequest","cwd":"/repo","transcript_path":"/tmp/session.jsonl"}"#,
+        )
+        .expect("write hook stdin");
+    let output = child.wait_with_output().expect("hook output");
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8(output.stdout).expect("stdout"), "");
+
+    let spool = home.join("moonbox-home").join("spool").join("events.jsonl");
+    let contents = fs::read_to_string(spool).expect("spool contents");
+    let line = contents.lines().next().expect("spool line");
+    let event: Value = serde_json::from_str(line).expect("spool json");
+    assert_eq!(event["version"], 1);
+    assert_eq!(event["cli"], "codex");
+    assert_eq!(event["session_id"], "s1");
+    assert_eq!(event["hook_event_name"], "PermissionRequest");
+    assert_eq!(event["tmux_pane"], "%42");
+    assert_eq!(event["event"]["transcript_path"], "/tmp/session.jsonl");
+}
+
+#[test]
 fn docs_snapshot_is_hidden_fixture_safe_and_generated() {
     let help = output_text(
         moonbox_command("docs-snapshot-help")
@@ -586,6 +743,7 @@ fn doctor_cli_contract_is_non_executing_and_fixture_safe() {
     let checks = report["checks"].as_array().expect("checks");
     for name in [
         "config_file",
+        "hooks_event_channel",
         "source_codex_adapter",
         "source_claude_adapter",
         "source_hermes_adapter",

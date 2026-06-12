@@ -653,6 +653,14 @@ const COMMAND_PALETTE_ENTRIES: &[CommandPaletteEntry] = &[
         dangerous: false,
     },
     CommandPaletteEntry {
+        command: "hooks",
+        aliases: &["hook status", "events", "spool"],
+        description: "Open opt-in hook event channel status",
+        params: "disabled by default",
+        badge: "CHECK",
+        dangerous: false,
+    },
+    CommandPaletteEntry {
         command: "source next",
         aliases: &["filter", "filter next", "source"],
         description: "Switch to the next session source filter",
@@ -1564,6 +1572,7 @@ impl App {
             "verify" => self.mark_verify_passed(),
             "help" => self.open_help(),
             "doctor" => self.open_doctor(),
+            "hooks" => self.open_doctor(),
             "source next" => self.cycle_session_filter(true),
             "source prev" => self.cycle_session_filter(false),
             "starred" => self.apply_session_filter(SessionFilter::Starred),
