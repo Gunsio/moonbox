@@ -5693,6 +5693,30 @@ mod tests {
     }
 
     #[test]
+    fn zoomed_session_details_surface_remote_anatomy_fallback_reason() {
+        let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Capsule;
+        app.zoomed_focus = Some(Focus::Capsule);
+        app.data.sessions[app.selected_session].anatomy =
+            Some(crate::core::model::SessionAnatomy {
+                status: SessionAnatomyStatus::Missing,
+                scan_scope: "remote-unavailable".into(),
+                notes: vec![
+                    "Remote moonbox on devbox did not return session anatomy; upgrade the remote moonbox binary to M92 or newer."
+                        .into(),
+                ],
+                ..crate::core::model::SessionAnatomy::default()
+            });
+
+        let screen = render_text(&app, 140, 56);
+
+        assert_screen_contains(&screen, "Session Anatomy");
+        assert_screen_contains(&screen, "remote-unavailable");
+        assert_screen_contains(&screen, "upgrade the remote moonbox binary");
+        assert!(!screen.contains("Source path is not readable"), "{screen}");
+    }
+
+    #[test]
     fn source_badges_share_one_color_mapping() {
         assert_eq!(source_tool_color(CliTool::Codex), theme::blue());
         assert_eq!(source_tool_color(CliTool::Claude), theme::purple());

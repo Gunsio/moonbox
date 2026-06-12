@@ -26,7 +26,7 @@ pub fn workbench_data(source: CliTool, target: CliTool) -> Result<WorkbenchData,
         .find(|session| session.cli == source)
         .cloned()
         .unwrap_or_else(|| fallback_session(source));
-    let source_session = anatomy::enrich_session_summary(source_session);
+    let source_session = ensure_session_anatomy(source_session);
     let source_session_id = source_session.id.clone();
     let timeline = preview_timeline_for_workbench(&source_session)?;
 
@@ -79,7 +79,7 @@ pub fn workbench_data_from_session_snapshot(
     source_adapters: Vec<SourceAdapterReport>,
     target: CliTool,
 ) -> Result<WorkbenchData, CoreError> {
-    let source_session = anatomy::enrich_session_summary(source_session);
+    let source_session = ensure_session_anatomy(source_session);
     let timeline = preview_timeline_for_workbench(&source_session)?;
     workbench_data_from_timeline_snapshot(
         source_session,
@@ -97,7 +97,7 @@ pub fn workbench_data_from_timeline_snapshot(
     target: CliTool,
     timeline: CanonicalTimeline,
 ) -> Result<WorkbenchData, CoreError> {
-    let source_session = anatomy::enrich_session_summary(source_session);
+    let source_session = ensure_session_anatomy(source_session);
     let sessions = include_source_session(sessions, &source_session);
     let source_session_id = source_session.id.clone();
     let rewind_event_id = rewind_event_id_for_timeline(&source_session_id, &timeline);
@@ -141,6 +141,14 @@ pub fn workbench_data_from_readonly_inventory(
         capsule,
         &source_session_id,
     )
+}
+
+fn ensure_session_anatomy(session: SessionSummary) -> SessionSummary {
+    if session.anatomy.is_some() {
+        session
+    } else {
+        anatomy::enrich_session_summary(session)
+    }
 }
 
 pub fn fixture_workbench_data(
@@ -289,7 +297,7 @@ pub fn compile_request_with_compiler(
     rewind_event_id: &str,
     compiler: &str,
 ) -> Result<CapsuleCompileRequest, CoreError> {
-    let source_session = default_source_session(source)?;
+    let source_session = ensure_session_anatomy(default_source_session(source)?);
     let timeline = timeline_for_compile_request(&source_session)?;
     Ok(compile_request_from_parts(
         source_session,
@@ -309,6 +317,7 @@ pub fn compile_request_for_session_id(
     let Some(source_session) = find_session(session_id)? else {
         return Ok(None);
     };
+    let source_session = ensure_session_anatomy(source_session);
     let timeline = timeline_for_compile_request(&source_session)?;
     let rewind_event_id = selected_rewind_event_id(&source_session, &timeline, rewind_event_id);
     Ok(Some(compile_request_from_parts(
@@ -345,6 +354,7 @@ pub fn compile_capsule_for_session_id(
     let Some(source_session) = find_session(session_id)? else {
         return Ok(None);
     };
+    let source_session = ensure_session_anatomy(source_session);
     let timeline = canonical_timeline_for_session(&source_session)?;
     compile_capsule_for_session(
         &source_session,
@@ -363,7 +373,7 @@ pub fn compile_capsule_from_timeline_snapshot(
     rewind_event_id: &str,
     compiler: &str,
 ) -> Result<WorkCapsule, CoreError> {
-    let source_session = anatomy::enrich_session_summary(source_session);
+    let source_session = ensure_session_anatomy(source_session);
     compile_capsule_for_session(
         &source_session,
         target,

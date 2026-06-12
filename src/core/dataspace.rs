@@ -10,8 +10,8 @@ use super::{
     data,
     error::CoreError,
     model::{
-        CanonicalTimeline, CapsuleCompileRequest, CliTool, SessionSummary, SourceProvenance,
-        WorkbenchData,
+        CapsuleCompileRequest, CliTool, SessionAnatomy, SessionAnatomyStatus, SessionSummary,
+        SourceProvenance, WorkbenchData,
     },
     ssh::{self, SshHostEntry},
 };
@@ -120,13 +120,15 @@ pub fn load_remote_workbench_for_session(
     sessions: Vec<SessionSummary>,
     target: CliTool,
 ) -> Result<WorkbenchData, CoreError> {
-    let timeline = load_remote_timeline(space, &source_session, target)?;
+    let request = load_remote_compile_request(space, &source_session, target)?;
+    let source_session =
+        remote_source_session_with_anatomy(space, source_session, request.source_session);
     data::workbench_data_from_timeline_snapshot(
         source_session,
         sessions.clone(),
         remote_adapter_reports(space, &sessions),
         target,
-        timeline,
+        request.timeline,
     )
 }
 
@@ -174,31 +176,59 @@ fn load_remote_sessions_with_bin(
     })
 }
 
-fn load_remote_timeline(
+fn load_remote_compile_request(
     space: &DataSpaceEntry,
     session: &SessionSummary,
     target: CliTool,
-) -> Result<CanonicalTimeline, CoreError> {
+) -> Result<CapsuleCompileRequest, CoreError> {
     let ssh_bin = env::var("MOONBOX_SSH_BIN").unwrap_or_else(|_| "ssh".into());
-    load_remote_timeline_with_bin(space, session, target, &ssh_bin)
+    load_remote_compile_request_with_bin(space, session, target, &ssh_bin)
 }
 
-fn load_remote_timeline_with_bin(
+fn load_remote_compile_request_with_bin(
     space: &DataSpaceEntry,
     session: &SessionSummary,
     target: CliTool,
     ssh_bin: &str,
-) -> Result<CanonicalTimeline, CoreError> {
+) -> Result<CapsuleCompileRequest, CoreError> {
     let command = remote_compile_request_command(&session.id, target);
     let output = run_remote_command_with_bin(space, ssh_bin, &command, "timeline")?;
-    let request =
-        serde_json::from_slice::<CapsuleCompileRequest>(&output.stdout).map_err(|error| {
-            CoreError::DataSpaceLoad {
-                space: space.label.clone(),
-                reason: format!("remote timeline JSON is invalid: {error}"),
-            }
-        })?;
-    Ok(request.timeline)
+    serde_json::from_slice::<CapsuleCompileRequest>(&output.stdout).map_err(|error| {
+        CoreError::DataSpaceLoad {
+            space: space.label.clone(),
+            reason: format!("remote timeline JSON is invalid: {error}"),
+        }
+    })
+}
+
+fn remote_source_session_with_anatomy(
+    space: &DataSpaceEntry,
+    mut fallback: SessionSummary,
+    mut remote: SessionSummary,
+) -> SessionSummary {
+    if remote.id != fallback.id || remote.cli != fallback.cli {
+        fallback.anatomy = Some(remote_anatomy_fallback(format!(
+            "Remote details returned {} {}, expected {} {}; keeping inventory metadata with degraded anatomy.",
+            remote.cli, remote.id, fallback.cli, fallback.id
+        )));
+        return fallback;
+    }
+    if remote.anatomy.is_none() {
+        remote.anatomy = Some(remote_anatomy_fallback(format!(
+            "Remote moonbox on {} did not return session anatomy; upgrade the remote moonbox binary to M92 or newer.",
+            space.label
+        )));
+    }
+    remote
+}
+
+fn remote_anatomy_fallback(reason: impl Into<String>) -> SessionAnatomy {
+    SessionAnatomy {
+        status: SessionAnatomyStatus::Missing,
+        scan_scope: "remote-unavailable".into(),
+        notes: vec![reason.into()],
+        ..SessionAnatomy::default()
+    }
 }
 
 fn run_remote_command_with_bin(
@@ -549,7 +579,7 @@ JSON
             anatomy: None,
         };
 
-        let timeline = load_remote_timeline_with_bin(
+        let request = load_remote_compile_request_with_bin(
             &space,
             &session,
             CliTool::Hermes,
@@ -557,8 +587,240 @@ JSON
         )
         .expect("remote timeline");
 
-        assert_eq!(timeline.source_session, "remote-codex-1");
-        assert_eq!(timeline.events.len(), 1);
-        assert_eq!(timeline.events[0].detail, "remote hello");
+        assert_eq!(request.timeline.source_session, "remote-codex-1");
+        assert_eq!(request.timeline.events.len(), 1);
+        assert_eq!(request.timeline.events[0].detail, "remote hello");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remote_session_details_use_remote_anatomy_from_compile_request() {
+        let script = env::temp_dir().join(format!(
+            "moonbox-fake-ssh-{}-{}",
+            std::process::id(),
+            "remote-anatomy"
+        ));
+        fs::write(
+            &script,
+            r#"#!/bin/sh
+	case "$*" in
+	  *"compile-request --session remote-codex-1 --target hermes --json"*) ;;
+	  *) echo "unexpected: $*" >&2; exit 2 ;;
+	esac
+cat <<'JSON'
+{
+  "version": 1,
+  "source_cli": "codex",
+  "target_cli": "hermes",
+  "source_session": {
+    "id": "remote-codex-1",
+    "cli": "codex",
+    "title": "Remote task",
+    "cwd": "/srv/app",
+    "updated_at": "2026-06-07T10:00:00+08:00",
+    "updated": "2026-06-07 10:00",
+    "status": "healthy",
+    "branch": "main",
+    "token_count": 42000,
+    "health_reason": null,
+    "event_count": 5,
+    "resume_command": "codex resume remote-codex-1",
+    "source_provenance": "real",
+    "source_path": "/remote/session.jsonl",
+    "source_size_bytes": 2048,
+    "parse_skip_count": 0,
+    "anatomy": {
+      "status": "ready",
+      "scan_scope": "full",
+      "source_size_bytes": 2048,
+      "analyzed_bytes": 2048,
+      "sampled": false,
+      "total_lines": 5,
+      "malformed_lines": 0,
+      "value_signals": [
+        {
+          "rank": 1,
+          "group": "Continuation",
+          "label": "Active tail",
+          "value": "512B / 2 rows",
+          "detail": "remote compact tail"
+        }
+      ],
+      "compact": {
+        "label": "context_compacted",
+        "line_number": 3,
+        "tail_lines": 2,
+        "tail_bytes": 512,
+        "detail": "remote active tail"
+      },
+      "size_profile": [
+        {"label": "compacted", "count": 1, "bytes": 1024}
+      ],
+      "event_profile": [
+        {"label": "token_count", "count": 1, "bytes": 256}
+      ],
+      "content_profile": [
+        {"label": "content:text", "count": 2, "bytes": 128}
+      ]
+    }
+  },
+  "rewind_event_id": "evt-1",
+  "token_budget": 100000,
+  "compiler": "engineering-handoff",
+  "timeline": {
+    "version": 1,
+    "source_cli": "codex",
+    "source_session": "remote-codex-1",
+    "events": [
+      {
+        "id": "evt-1",
+        "time": "10:00",
+        "kind": "user",
+        "title": "User",
+        "detail": "remote hello",
+        "metadata": {"note": ""}
+      }
+    ]
+  },
+  "redaction": {
+    "version": 1,
+    "enabled": false,
+    "policy": "disabled",
+    "secret_scan": false,
+    "path_redaction": false,
+    "event_allowlist": [],
+    "file_allowlist": [],
+    "secrets_redacted": 0,
+    "paths_redacted": 0,
+    "events_removed": 0,
+    "prompt_injection_warnings": 0,
+    "external_compiler_disclosure": "",
+    "warnings": []
+  }
+}
+JSON
+"#,
+        )
+        .expect("write fake ssh");
+        let mut perms = fs::metadata(&script).expect("metadata").permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script, perms).expect("chmod");
+        let space = remote_fixture_space();
+        let session = remote_fixture_session();
+        let request = load_remote_compile_request_with_bin(
+            &space,
+            &session,
+            CliTool::Hermes,
+            script.to_str().unwrap(),
+        )
+        .expect("remote compile request");
+        let source_session =
+            remote_source_session_with_anatomy(&space, session.clone(), request.source_session);
+
+        let anatomy = source_session.anatomy.as_ref().expect("remote anatomy");
+        assert_eq!(anatomy.status, SessionAnatomyStatus::Ready);
+        assert_eq!(anatomy.scan_scope, "full");
+        assert_eq!(
+            anatomy.compact.as_ref().map(|compact| compact.tail_lines),
+            Some(2)
+        );
+
+        let data = data::workbench_data_from_timeline_snapshot(
+            source_session,
+            vec![session],
+            remote_adapter_reports(&space, &[]),
+            CliTool::Hermes,
+            request.timeline,
+        )
+        .expect("remote workbench");
+        let selected = data
+            .sessions
+            .iter()
+            .find(|session| session.id == "remote-codex-1")
+            .expect("selected session");
+        assert_eq!(
+            selected.anatomy.as_ref().map(|anatomy| anatomy.status),
+            Some(SessionAnatomyStatus::Ready)
+        );
+    }
+
+    #[test]
+    fn remote_session_details_mark_old_remote_without_anatomy() {
+        let space = remote_fixture_space();
+        let fallback = remote_fixture_session();
+        let remote = remote_fixture_session();
+
+        let source_session = remote_source_session_with_anatomy(&space, fallback, remote);
+
+        let anatomy = source_session.anatomy.as_ref().expect("fallback anatomy");
+        assert_eq!(anatomy.status, SessionAnatomyStatus::Missing);
+        assert_eq!(anatomy.scan_scope, "remote-unavailable");
+        assert!(
+            anatomy
+                .notes
+                .iter()
+                .any(|note| note.contains("upgrade the remote moonbox binary to M92 or newer"))
+        );
+    }
+
+    #[test]
+    fn remote_session_details_keep_inventory_row_when_remote_returns_wrong_session() {
+        let space = remote_fixture_space();
+        let fallback = remote_fixture_session();
+        let mut remote = remote_fixture_session();
+        remote.id = "other-session".into();
+
+        let source_session =
+            remote_source_session_with_anatomy(&space, fallback.clone(), remote.clone());
+
+        assert_eq!(source_session.id, fallback.id);
+        let anatomy = source_session.anatomy.as_ref().expect("fallback anatomy");
+        assert_eq!(anatomy.status, SessionAnatomyStatus::Missing);
+        assert!(
+            anatomy
+                .notes
+                .iter()
+                .any(|note| note.contains("expected") && note.contains("remote-codex-1"))
+        );
+    }
+
+    fn remote_fixture_space() -> DataSpaceEntry {
+        DataSpaceEntry {
+            id: "ssh:devbox".into(),
+            label: "devbox".into(),
+            kind: DataSpaceKind::Ssh,
+            detail: "devbox.internal".into(),
+            ssh_host: Some("devbox.internal".into()),
+            ssh_user: None,
+            ssh_port: None,
+            ssh_identity_file: None,
+            config_source: Some("OpenSSH config".into()),
+            config_path: Some("/tmp/ssh_config".into()),
+        }
+    }
+
+    fn remote_fixture_session() -> SessionSummary {
+        SessionSummary {
+            id: "remote-codex-1".into(),
+            cli: CliTool::Codex,
+            title: "Remote task".into(),
+            cwd: "/srv/app".into(),
+            updated_at: "2026-06-07T10:00:00+08:00".into(),
+            updated: "2026-06-07 10:00".into(),
+            runtime_status: SessionRuntimeStatus::Unknown,
+            runtime_reason: None,
+            status: SessionStatus::Healthy,
+            branch: Some("main".into()),
+            token_count: None,
+            health_reason: None,
+            event_count: 1,
+            resume_command: "codex resume remote-codex-1".into(),
+            source_provenance: SourceProvenance::Real,
+            source_path: Some("/remote/session.jsonl".into()),
+            source_size_bytes: None,
+            parse_skip_count: 0,
+            provider_metadata: None,
+            anatomy: None,
+        }
     }
 }
