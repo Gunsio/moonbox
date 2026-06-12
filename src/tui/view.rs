@@ -11,8 +11,10 @@ use ratatui::{
 };
 
 use crate::{
-    app::{App, CommandPaletteEntry, DATA_SPACE_CONFIG_FIELD_COUNT, Focus, HandoffTrailFrame},
-    core::compiler,
+    app::{
+        App, CommandPaletteEntry, DATA_SPACE_CONFIG_FIELD_COUNT, Focus, HandoffTrailFrame,
+        HookWaitingItem,
+    },
     core::image_preview::{ImagePreviewStatus, PreviewCell, PreviewRgb, TimelineImagePreview},
     core::model::{
         AnatomyMetric, CliTool, CompilerPresetInfo, CompilerPresetKind, CompilerPresetStatus,
@@ -20,6 +22,7 @@ use crate::{
         SourceAdapterReport, SourceFidelityStatus, SourceProvenance, TimelineAttachment,
         TimelineEvent, TimelineKind, VerificationReport, VerificationStatus, WorkCapsule,
     },
+    core::{compiler, hooks},
 };
 
 use super::theme;
@@ -371,6 +374,18 @@ fn render_body(frame: &mut Frame, area: Rect, app: &App) {
         }
         return;
     }
+    let waiting = app.hook_waiting_items();
+    let area = if waiting.is_empty() || area.height < 14 {
+        area
+    } else {
+        let queue_height = (waiting.len() as u16).saturating_add(2).clamp(3, 5);
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(queue_height), Constraint::Min(8)])
+            .split(area);
+        render_waiting_queue(frame, rows[0], &waiting);
+        rows[1]
+    };
     let cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -383,6 +398,46 @@ fn render_body(frame: &mut Frame, area: Rect, app: &App) {
     render_sessions(frame, cols[0], app);
     render_timeline(frame, cols[1], app);
     render_capsule(frame, cols[2], app);
+}
+
+fn render_waiting_queue(frame: &mut Frame, area: Rect, waiting: &[HookWaitingItem]) {
+    let capacity = usize::from(area.height.saturating_sub(2)).max(1);
+    let lines = waiting
+        .iter()
+        .take(capacity)
+        .map(|item| {
+            let mut spans = vec![
+                Span::styled(source_pill(item.cli), source_tool_style(item.cli)),
+                Span::raw("  "),
+                Span::styled(
+                    hooks::age_label_ms(item.waiting_for_ms),
+                    Style::default()
+                        .fg(theme::GOLD)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("  "),
+                Span::styled(
+                    review_snippet(&item.reason, 44),
+                    Style::default().fg(theme::TEXT),
+                ),
+                Span::styled("  ·  ", Style::default().fg(theme::BORDER)),
+                Span::styled(
+                    review_snippet(&item.title, 36),
+                    Style::default().fg(theme::MUTED),
+                ),
+            ];
+            if let Some(pane) = &item.tmux_pane {
+                spans.push(Span::styled("  pane ", Style::default().fg(theme::BORDER)));
+                spans.push(Span::styled(pane.clone(), Style::default().fg(theme::CYAN)));
+            }
+            Line::from(spans)
+        })
+        .collect::<Vec<_>>();
+
+    frame.render_widget(
+        Paragraph::new(lines).block(dynamic_panel_block(" WAITING ON YOU ".into(), false)),
+        area,
+    );
 }
 
 fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
@@ -441,8 +496,15 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
                 title_spans.extend([
                     Span::styled(source_pill(session.cli), source_tool_style(session.cli)),
                     Span::raw("  "),
-                    Span::styled(&session.title, session_title_style(selected_row)),
                 ]);
+                if let Some(live) = app.hook_live_for_session(session) {
+                    title_spans.push(session_live_badge(live));
+                    title_spans.push(Span::raw("  "));
+                }
+                title_spans.push(Span::styled(
+                    &session.title,
+                    session_title_style(selected_row),
+                ));
                 ListItem::new(vec![
                     Line::from(title_spans),
                     session_list_secondary_line(app, session, selected_row, area.width),
@@ -542,7 +604,7 @@ fn session_list_window(total: usize, selected: usize, area_height: u16) -> (usiz
 }
 
 fn session_list_secondary_line(
-    _app: &App,
+    app: &App,
     session: &crate::core::model::SessionSummary,
     selected: bool,
     width: u16,
@@ -561,6 +623,16 @@ fn session_list_secondary_line(
     ));
     spans.push(Span::styled(" · ", Style::default().fg(theme::BORDER)));
     spans.push(Span::styled(updated, Style::default().fg(theme::MUTED)));
+    if width >= 36
+        && let Some(live) = app.hook_live_for_session(session)
+    {
+        let max_live = usize::from(width.saturating_sub(28)).clamp(10, 34);
+        spans.push(Span::styled(" · ", Style::default().fg(theme::BORDER)));
+        spans.push(Span::styled(
+            review_snippet(&live.summary, max_live),
+            session_live_text_style(live.status),
+        ));
+    }
     if width >= 48
         && let Some(branch) = session
             .branch
@@ -575,6 +647,33 @@ fn session_list_secondary_line(
         ));
     }
     Line::from(spans)
+}
+
+fn session_live_badge(live: &hooks::HookSessionLiveInfo) -> Span<'static> {
+    Span::styled(
+        format!(" {} ", live.status.label()),
+        session_live_badge_style(live.status),
+    )
+}
+
+fn session_live_badge_style(status: hooks::HookSessionStatus) -> Style {
+    match status {
+        hooks::HookSessionStatus::Running => Style::default().fg(theme::GREEN),
+        hooks::HookSessionStatus::Waiting => Style::default()
+            .fg(theme::GOLD)
+            .add_modifier(Modifier::BOLD),
+        hooks::HookSessionStatus::Idle => Style::default().fg(theme::MUTED),
+        hooks::HookSessionStatus::Dead => Style::default().fg(theme::RED),
+    }
+}
+
+fn session_live_text_style(status: hooks::HookSessionStatus) -> Style {
+    match status {
+        hooks::HookSessionStatus::Running => Style::default().fg(theme::GREEN),
+        hooks::HookSessionStatus::Waiting => Style::default().fg(theme::GOLD),
+        hooks::HookSessionStatus::Idle => Style::default().fg(theme::MUTED),
+        hooks::HookSessionStatus::Dead => Style::default().fg(theme::RED),
+    }
 }
 
 #[cfg(test)]
@@ -2312,10 +2411,22 @@ fn status_line(app: &App) -> Line<'_> {
         Style::default().fg(color)
     };
 
-    Line::from(vec![
+    let mut spans = vec![
         Span::styled("Status ", Style::default().fg(theme::MUTED)),
         Span::styled(&app.status_message, message_style),
-    ])
+    ];
+    if let Some(live) = app.hook_live_indicator() {
+        let live_style = if live.is_error {
+            Style::default().fg(theme::RED).add_modifier(Modifier::BOLD)
+        } else if live.is_stale {
+            Style::default().fg(theme::GOLD)
+        } else {
+            Style::default().fg(theme::GREEN)
+        };
+        spans.push(Span::styled("   ", Style::default().fg(theme::BORDER)));
+        spans.push(Span::styled(live.label, live_style));
+    }
+    Line::from(spans)
 }
 
 fn render_data_spaces(frame: &mut Frame, root: Rect, app: &App) {
@@ -4685,6 +4796,83 @@ mod tests {
     }
 
     #[test]
+    fn hooks_disabled_does_not_render_live_queue_noise() {
+        let app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        let screen = render_text(&app, 150, 36);
+
+        assert!(!screen.contains("WAITING ON YOU"), "{screen}");
+        assert!(!screen.contains("Live on"), "{screen}");
+    }
+
+    #[test]
+    fn hooks_enabled_waiting_state_renders_queue_badge_and_status() {
+        let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        let session = app
+            .data
+            .sessions
+            .get(app.selected_session)
+            .expect("session");
+        let session_cli = session.cli;
+        let session_id = session.id.clone();
+        app.set_hook_live_events_for_test(vec![test_hook_event(
+            session_cli,
+            &session_id,
+            hooks::HookEventKind::PermissionRequest,
+            "Approval: Edit src/app.rs",
+            Some("Approval: Edit src/app.rs"),
+            hooks::current_millis(),
+        )]);
+
+        let screen = render_text(&app, 150, 36);
+
+        assert_screen_contains(&screen, "WAITING ON YOU");
+        assert_screen_contains(&screen, "WAIT");
+        assert_screen_contains(&screen, "Approval: Edit");
+        assert_screen_contains(&screen, "Live on");
+    }
+
+    #[test]
+    fn hooks_enabled_marks_live_unavailable_for_ssh_data_space() {
+        let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        let session = app
+            .data
+            .sessions
+            .get(app.selected_session)
+            .expect("session");
+        let session_cli = session.cli;
+        let session_id = session.id.clone();
+        app.data_spaces = vec![
+            dataspace::DataSpaceEntry::local(),
+            dataspace::DataSpaceEntry {
+                id: "ssh:devbox".into(),
+                label: "devbox".into(),
+                kind: dataspace::DataSpaceKind::Ssh,
+                detail: "devbox.example".into(),
+                ssh_host: Some("devbox.example".into()),
+                ssh_user: None,
+                ssh_port: None,
+                ssh_identity_file: None,
+                config_source: Some("Moonbox config".into()),
+                config_path: Some("~/.config/moonbox/config.json".into()),
+            },
+        ];
+        app.selected_data_space = 1;
+        app.set_hook_live_events_for_test(vec![test_hook_event(
+            session_cli,
+            &session_id,
+            hooks::HookEventKind::PermissionRequest,
+            "Approval: Edit src/app.rs",
+            Some("Approval: Edit src/app.rs"),
+            hooks::current_millis(),
+        )]);
+
+        let screen = render_text(&app, 150, 36);
+
+        assert_screen_contains(&screen, "Live unavailable: SSH data");
+        assert!(!screen.contains("WAITING ON YOU"), "{screen}");
+    }
+
+    #[test]
     fn unselected_session_titles_are_muted() {
         assert_eq!(session_title_style(false).fg, Some(theme::MUTED));
         assert_eq!(session_title_style(true).fg, Some(theme::TEXT));
@@ -5061,6 +5249,29 @@ mod tests {
             parse_skip_count: 0,
             provider_metadata: None,
             anatomy: None,
+        }
+    }
+
+    fn test_hook_event(
+        cli: CliTool,
+        session_id: &str,
+        kind: hooks::HookEventKind,
+        summary: &str,
+        wait_reason: Option<&str>,
+        captured_at_ms: u128,
+    ) -> hooks::HookSpoolEvent {
+        hooks::HookSpoolEvent {
+            cli,
+            session_id: session_id.into(),
+            transcript_path: None,
+            cwd: Some("/repo".into()),
+            tmux: None,
+            tmux_pane: Some("%42".into()),
+            captured_at_ms,
+            event_name: format!("{kind:?}"),
+            kind,
+            summary: summary.into(),
+            wait_reason: wait_reason.map(str::to_owned),
         }
     }
 

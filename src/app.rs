@@ -11,6 +11,7 @@ use crate::core::{
     capsule_store::CapsuleSummary,
     compiler, config, continuation, dataspace, doctor,
     error::CoreError,
+    hooks,
     image_preview::{TimelineImagePreview, build_timeline_image_previews},
     launcher,
     model::{
@@ -49,6 +50,17 @@ pub struct HandoffTrailFrame {
     pub step: usize,
     pub elapsed_ms: u64,
     pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookWaitingItem {
+    pub cli: CliTool,
+    pub session_id: String,
+    pub title: String,
+    pub reason: String,
+    pub waiting_for_ms: u128,
+    pub cwd: Option<String>,
+    pub tmux_pane: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -936,6 +948,7 @@ pub struct App {
     launch_review_request_id: u64,
     pending_launch_review: Option<PendingLaunchReview>,
     handoff_trail: Option<HandoffTrail>,
+    hook_live: Option<hooks::HookLiveState>,
     clipboard_text: Option<String>,
     pending_resume: Option<Box<OriginalSessionPlan>>,
     pending_launch: Option<Box<LaunchPlan>>,
@@ -964,6 +977,11 @@ impl App {
         let selected_event = rewind_event_index(&data, &rewind_event_id);
         let selected_compiler = compiler_index_for_id(&data, &data.capsule.compiler, 0);
         let doctor_report = doctor::diagnose_with_inventory(&data.sessions, &data.source_adapters);
+        #[cfg(not(test))]
+        let hook_live = hooks::live_state_from_config(&config::load_hooks_config());
+        #[cfg(test)]
+        let hook_live = None;
+
         let mut app = Self {
             data,
             focus: Focus::Sessions,
@@ -1016,6 +1034,7 @@ impl App {
             launch_review_request_id: 0,
             pending_launch_review: None,
             handoff_trail: None,
+            hook_live,
             clipboard_text: None,
             pending_resume: None,
             pending_launch: None,
@@ -1024,6 +1043,9 @@ impl App {
             visible_session_indices: Vec::new(),
         };
         app.refresh_visible_sessions();
+        if let Some(hook_live) = app.hook_live.as_mut() {
+            hook_live.replay_existing();
+        }
         app
     }
 
@@ -1201,6 +1223,82 @@ impl App {
             })
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_hook_live_events_for_test(&mut self, events: Vec<hooks::HookSpoolEvent>) {
+        let mut hook_live =
+            hooks::HookLiveState::new(std::path::PathBuf::from("/tmp/moonbox-test-hooks.jsonl"));
+        for event in events {
+            hook_live.apply_event_for_test(event);
+        }
+        self.hook_live = Some(hook_live);
+    }
+
+    pub fn hook_live_indicator(&self) -> Option<hooks::HookLiveIndicator> {
+        let hook_live = self.hook_live.as_ref()?;
+        if !self.current_data_space().is_local() {
+            return Some(hooks::HookLiveIndicator {
+                label: "Live unavailable: SSH data".into(),
+                is_error: false,
+                is_stale: true,
+            });
+        }
+        Some(hook_live.indicator(hooks::current_millis()))
+    }
+
+    pub fn hook_live_for_session(
+        &self,
+        session: &SessionSummary,
+    ) -> Option<&hooks::HookSessionLiveInfo> {
+        if !self.current_data_space().is_local() {
+            return None;
+        }
+        self.hook_live.as_ref()?.session_for(
+            session.cli,
+            &session.id,
+            session.source_path.as_deref(),
+        )
+    }
+
+    pub fn hook_waiting_items(&self) -> Vec<HookWaitingItem> {
+        let Some(hook_live) = self.hook_live.as_ref() else {
+            return Vec::new();
+        };
+        if !self.current_data_space().is_local() {
+            return Vec::new();
+        }
+        let now_ms = hooks::current_millis();
+        hook_live
+            .waiting_sessions()
+            .into_iter()
+            .map(|session| {
+                let title = self
+                    .data
+                    .sessions
+                    .iter()
+                    .find(|candidate| {
+                        candidate.cli == session.cli
+                            && (candidate.id == session.session_id
+                                || candidate.source_path.as_deref()
+                                    == session.transcript_path.as_deref())
+                    })
+                    .map(|session| session.title.clone())
+                    .unwrap_or_else(|| session.session_id.clone());
+                HookWaitingItem {
+                    cli: session.cli,
+                    session_id: session.session_id.clone(),
+                    title,
+                    reason: session
+                        .wait_reason
+                        .clone()
+                        .unwrap_or_else(|| session.summary.clone()),
+                    waiting_for_ms: now_ms.saturating_sub(session.status_since_ms),
+                    cwd: session.cwd.clone(),
+                    tmux_pane: session.tmux_pane.clone(),
+                }
+            })
+            .collect()
+    }
+
     pub fn current_data_space(&self) -> &dataspace::DataSpaceEntry {
         self.data_spaces
             .get(self.selected_data_space)
@@ -1233,7 +1331,16 @@ impl App {
         if self.poll_launch_review_background() {
             changed = true;
         }
+        if self.poll_hook_live_background() {
+            changed = true;
+        }
         changed
+    }
+
+    fn poll_hook_live_background(&mut self) -> bool {
+        self.hook_live
+            .as_mut()
+            .is_some_and(hooks::HookLiveState::poll)
     }
 
     fn prune_handoff_trail(&mut self) -> bool {

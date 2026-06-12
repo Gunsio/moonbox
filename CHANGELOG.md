@@ -122,6 +122,13 @@ and this project uses semantic versioning once tagged releases start.
   Claude/Codex hooks, remove only Moonbox-owned entries, report Codex feature
   gating and trust-review limits, and append fail-open JSONL events with
   cwd/tmux metadata to a size-bounded Moonbox spool.
+- Hook-gated live session status and waiting queue in the TUI: when hooks are
+  enabled, Moonbox replays and tails the local spool for `RUN` / `WAIT` / `IDLE`
+  / `END` row badges, recent-action summaries, `Live on` / stale / error status,
+  an SSH data-space unavailable indicator, and a compact `WAITING ON YOU` panel.
+  Disabled hooks leave the Dashboard, Timeline, status bar, and Enter behavior
+  unchanged. Codex hook injection now writes snake_case event names while
+  uninstall/status still recognize legacy PascalCase Moonbox entries.
 - Configurable compiler skill presets in `~/.config/moonbox/config.json`,
   including optional description, homepage, and GitHub stars metadata for the
   TUI Skill Picker.

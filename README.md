@@ -236,7 +236,9 @@ The first implementation focuses on the product shell:
 - Opt-in Claude/Codex hook event capture through `moonbox hooks`. Fresh runs do
   not modify provider config or tail hook spools; `hooks install` previews the
   exact edits and `hooks install --apply` is required before Moonbox writes its
-  own config plus provider hook entries.
+  own config plus provider hook entries. Once enabled, the TUI replays and tails
+  the Moonbox spool for local live badges, recent-action summaries, `Live`
+  status, and a non-empty-only `WAITING ON YOU` panel.
 - Source filter defaults to `All`; `Source` is a session-list filter, not a global handoff mode
 - `moonbox sessions --filter <source>` lists one source while keeping default output as the time-sorted global session index
 - `moonbox sessions --json` keeps the stable session array shape and annotates each session with `source_provenance`, `source_path`, and `parse_skip_count`
@@ -731,8 +733,16 @@ cwd, `$TMUX`, and `$TMUX_PANE`, then appends one JSONL row to
 `$MOONBOX_HOME/spool/events.jsonl` or `$MOONBOX_HOOK_SPOOL`. The handler is
 fail-open and exits 0 even when the spool cannot be written. Spool rotation is
 size-bounded through `hooks.spool_max_bytes` and `hooks.spool_max_files` in
-Moonbox config. M93 exposes status and spool health only; live row badges,
-waiting queues, and tmux jump routing are later opt-in milestones.
+Moonbox config.
+
+When hooks are enabled, the TUI replays existing spool rows on startup and tails
+new rows during the normal 120ms background poll. Enabled UI changes are limited
+to local data spaces: the status bar adds `Live on`, `Live stale`, `Live error`,
+or `Live unavailable: SSH data`; session rows may show `RUN`, `WAIT`, `IDLE`, or
+`END` badges plus a short recent-action summary; and waiting sessions appear in
+a compact `WAITING ON YOU` panel sorted by longest wait. Hooks disabled keeps
+the current Dashboard, Timeline, status bar, and Enter behavior unchanged. Tmux
+jump routing remains a separate M95 opt-in.
 
 Generate shell completions with:
 
@@ -1240,25 +1250,17 @@ Stable interfaces matter more than any single framework:
   The TUI exposes hook status through `:hooks` / Doctor only; live status,
   waiting queues, and tmux jump behavior remain off until later opt-in
   milestones.
+- M94: Hook-gated Live Status + Waiting Queue; when hooks are enabled, Moonbox
+  replays and tails the local hook spool behind the config gate, maps
+  Claude/Codex events into running/waiting/idle/dead state, and renders restrained
+  `RUN` / `WAIT` / `IDLE` / `END` row badges, recent-action summaries, status-bar
+  `Live on` / `Live stale` / `Live error` / SSH-unavailable indicators, and a
+  non-empty-only `WAITING ON YOU` queue. Disabled hooks keep the current TUI and
+  Enter behavior unchanged. Codex hook install now writes snake_case event names
+  while uninstall/status still clean up legacy PascalCase Moonbox entries.
 
 ### Remaining Milestones
 
-- M94: Hook-gated Live Status + Waiting Queue. Use the M93 spool only when hooks
-  are enabled to show live session state and a restrained `WAITING ON YOU`
-  queue. Disabled hooks keep the current Dashboard, Timeline, status bar, and
-  Enter behavior unchanged.
-  - TODO: replay and tail spool behind the config gate; maintain
-    running/waiting/idle/dead/unknown state; show small row badges, recent action
-    summaries, Live on/stale/error/off status, and a non-empty-only waiting
-    panel; document exactly what changes on screen when enabled: list status
-    badges, top waiting queue, recent action text, stale/error indicator, and
-    hook health details in Settings/Doctor; explain local-only or unavailable
-    states for SSH data spaces.
-  - Acceptance: disabled baseline snapshots match current behavior; fixture
-    spool tests cover replay, tailing, state transitions, stale/error handling,
-    queue sorting, enqueue/dequeue, SSH unavailable reasons, and no source-store
-    mutation. Manual TUI review confirms enabled mode is useful without turning
-    the Dashboard into a noisy log stream.
 - M95: Opt-in Tmux Jump + Enter Routing. Add jump-first Enter behavior only when
   hooks are enabled and the user separately enables Smart Enter / tmux jump.
   Default Enter behavior remains unchanged.

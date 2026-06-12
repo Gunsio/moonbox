@@ -1,6 +1,7 @@
 use std::{
+    collections::BTreeMap,
     env, fs,
-    io::{self, Read, Write},
+    io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -11,6 +12,7 @@ use serde_json::{Map, Value, json};
 use super::{
     config::{self, HooksConfig},
     error::CoreError,
+    model::CliTool,
 };
 
 const CLAUDE_EVENTS: &[&str] = &[
@@ -24,6 +26,20 @@ const CLAUDE_EVENTS: &[&str] = &[
     "SessionEnd",
 ];
 const CODEX_EVENTS: &[&str] = &[
+    "session_start",
+    "user_prompt_submit",
+    "pre_tool_use",
+    "permission_request",
+    "post_tool_use",
+    "stop",
+];
+const CODEX_CLEANUP_EVENTS: &[&str] = &[
+    "session_start",
+    "user_prompt_submit",
+    "pre_tool_use",
+    "permission_request",
+    "post_tool_use",
+    "stop",
     "SessionStart",
     "UserPromptSubmit",
     "PreToolUse",
@@ -32,6 +48,7 @@ const CODEX_EVENTS: &[&str] = &[
     "Stop",
 ];
 const MOONBOX_HOOK_MARKER: &str = "hook-event --cli";
+const HOOK_LIVE_STALE_AFTER_MS: u128 = 5 * 60 * 1000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -66,6 +83,13 @@ impl HookProvider {
         match self {
             Self::Claude => CLAUDE_EVENTS,
             Self::Codex => CODEX_EVENTS,
+        }
+    }
+
+    fn cleanup_events(self) -> &'static [&'static str] {
+        match self {
+            Self::Claude => CLAUDE_EVENTS,
+            Self::Codex => CODEX_CLEANUP_EVENTS,
         }
     }
 }
@@ -139,6 +163,92 @@ pub struct HooksApplyReport {
     pub spool: HookSpoolReport,
     pub providers: Vec<HookProviderChange>,
     pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HookEventKind {
+    SessionStart,
+    UserPromptSubmit,
+    PreToolUse,
+    PostToolUse,
+    Stop,
+    PermissionRequest,
+    Notification,
+    SessionEnd,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HookSessionStatus {
+    Running,
+    Waiting,
+    Idle,
+    Dead,
+}
+
+impl HookSessionStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Running => "RUN",
+            Self::Waiting => "WAIT",
+            Self::Idle => "IDLE",
+            Self::Dead => "END",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookSpoolEvent {
+    pub cli: CliTool,
+    pub session_id: String,
+    pub transcript_path: Option<String>,
+    pub cwd: Option<String>,
+    pub tmux: Option<String>,
+    pub tmux_pane: Option<String>,
+    pub captured_at_ms: u128,
+    pub event_name: String,
+    pub kind: HookEventKind,
+    pub summary: String,
+    pub wait_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookSessionLiveInfo {
+    pub cli: CliTool,
+    pub session_id: String,
+    pub transcript_path: Option<String>,
+    pub cwd: Option<String>,
+    pub tmux: Option<String>,
+    pub tmux_pane: Option<String>,
+    pub status: HookSessionStatus,
+    pub summary: String,
+    pub wait_reason: Option<String>,
+    pub status_since_ms: u128,
+    pub updated_at_ms: u128,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookSpoolRead {
+    pub next_offset: u64,
+    pub events: Vec<HookSpoolEvent>,
+    pub skipped_lines: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookLiveIndicator {
+    pub label: String,
+    pub is_error: bool,
+    pub is_stale: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct HookLiveState {
+    spool_path: PathBuf,
+    offset: u64,
+    sessions: BTreeMap<String, HookSessionLiveInfo>,
+    last_event_at_ms: Option<u128>,
+    last_error: Option<String>,
+    skipped_lines: usize,
 }
 
 pub fn status_report() -> HooksStatusReport {
@@ -244,6 +354,202 @@ pub fn default_providers() -> Vec<HookProvider> {
     vec![HookProvider::Claude, HookProvider::Codex]
 }
 
+#[cfg_attr(test, allow(dead_code))]
+pub fn live_state_from_config(config: &HooksConfig) -> Option<HookLiveState> {
+    config
+        .enabled
+        .then(|| HookLiveState::new(spool_path(config)))
+}
+
+pub fn current_millis() -> u128 {
+    now_millis()
+}
+
+pub fn read_spool_events(path: &Path, offset: u64) -> io::Result<HookSpoolRead> {
+    let mut file = fs::OpenOptions::new().read(true).open(path)?;
+    let len = file.metadata()?.len();
+    let start = offset.min(len);
+    file.seek(SeekFrom::Start(start))?;
+    let mut contents = String::new();
+    file.read_to_string(&mut contents)?;
+    let mut events = Vec::new();
+    let mut skipped_lines = 0;
+    for line in contents.lines().filter(|line| !line.trim().is_empty()) {
+        match parse_spool_event(line) {
+            Ok(event) => events.push(event),
+            Err(_) => skipped_lines += 1,
+        }
+    }
+    Ok(HookSpoolRead {
+        next_offset: start.saturating_add(contents.len() as u64),
+        events,
+        skipped_lines,
+    })
+}
+
+pub fn parse_spool_event(line: &str) -> Result<HookSpoolEvent, String> {
+    let value = serde_json::from_str::<Value>(line).map_err(|error| error.to_string())?;
+    event_from_value(&value)
+}
+
+impl HookLiveState {
+    pub fn new(spool_path: PathBuf) -> Self {
+        Self {
+            spool_path,
+            offset: 0,
+            sessions: BTreeMap::new(),
+            last_event_at_ms: None,
+            last_error: None,
+            skipped_lines: 0,
+        }
+    }
+
+    pub fn replay_existing(&mut self) -> bool {
+        self.offset = 0;
+        self.poll()
+    }
+
+    pub fn poll(&mut self) -> bool {
+        match read_spool_events(&self.spool_path, self.offset) {
+            Ok(read) => {
+                let changed =
+                    !read.events.is_empty() || read.skipped_lines > 0 || self.last_error.is_some();
+                self.offset = read.next_offset;
+                self.skipped_lines = self.skipped_lines.saturating_add(read.skipped_lines);
+                self.last_error = None;
+                for event in read.events {
+                    self.apply_event(event);
+                }
+                changed
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                let changed = self.last_error.is_some();
+                self.last_error = None;
+                changed
+            }
+            Err(error) => {
+                let reason = error.to_string();
+                let changed = self.last_error.as_deref() != Some(reason.as_str());
+                self.last_error = Some(reason);
+                changed
+            }
+        }
+    }
+
+    pub fn indicator(&self, now_ms: u128) -> HookLiveIndicator {
+        if let Some(error) = &self.last_error {
+            return HookLiveIndicator {
+                label: format!("Live error: {error}"),
+                is_error: true,
+                is_stale: false,
+            };
+        }
+        match self.last_event_at_ms {
+            Some(last) if now_ms.saturating_sub(last) > HOOK_LIVE_STALE_AFTER_MS => {
+                HookLiveIndicator {
+                    label: format!("Live stale: {}", age_label_ms(now_ms.saturating_sub(last))),
+                    is_error: false,
+                    is_stale: true,
+                }
+            }
+            Some(_) => HookLiveIndicator {
+                label: "Live on".into(),
+                is_error: false,
+                is_stale: false,
+            },
+            None => HookLiveIndicator {
+                label: "Live on: no events".into(),
+                is_error: false,
+                is_stale: false,
+            },
+        }
+    }
+
+    pub fn session_for(
+        &self,
+        cli: CliTool,
+        session_id: &str,
+        source_path: Option<&str>,
+    ) -> Option<&HookSessionLiveInfo> {
+        self.sessions
+            .get(&session_key(cli, session_id))
+            .or_else(|| {
+                source_path.and_then(|path| {
+                    self.sessions.values().find(|session| {
+                        session.cli == cli && session.transcript_path.as_deref() == Some(path)
+                    })
+                })
+            })
+    }
+
+    pub fn waiting_sessions(&self) -> Vec<&HookSessionLiveInfo> {
+        let mut sessions = self
+            .sessions
+            .values()
+            .filter(|session| session.status == HookSessionStatus::Waiting)
+            .collect::<Vec<_>>();
+        sessions.sort_by(|left, right| {
+            left.status_since_ms
+                .cmp(&right.status_since_ms)
+                .then_with(|| left.session_id.cmp(&right.session_id))
+        });
+        sessions
+    }
+
+    fn apply_event(&mut self, event: HookSpoolEvent) {
+        self.last_event_at_ms = Some(event.captured_at_ms);
+        let key = session_key(event.cli, &event.session_id);
+        let status = status_for_event(event.kind);
+        if let Some(existing) = self.sessions.get_mut(&key) {
+            let status_changed = existing.status != status;
+            existing.transcript_path = event.transcript_path.or(existing.transcript_path.take());
+            existing.cwd = event.cwd.or(existing.cwd.take());
+            existing.tmux = event.tmux.or(existing.tmux.take());
+            existing.tmux_pane = event.tmux_pane.or(existing.tmux_pane.take());
+            existing.status = status;
+            existing.summary = event.summary;
+            existing.wait_reason = event.wait_reason;
+            if status_changed {
+                existing.status_since_ms = event.captured_at_ms;
+            }
+            existing.updated_at_ms = event.captured_at_ms;
+        } else {
+            self.sessions.insert(
+                key,
+                HookSessionLiveInfo {
+                    cli: event.cli,
+                    session_id: event.session_id,
+                    transcript_path: event.transcript_path,
+                    cwd: event.cwd,
+                    tmux: event.tmux,
+                    tmux_pane: event.tmux_pane,
+                    status,
+                    summary: event.summary,
+                    wait_reason: event.wait_reason,
+                    status_since_ms: event.captured_at_ms,
+                    updated_at_ms: event.captured_at_ms,
+                },
+            );
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn apply_event_for_test(&mut self, event: HookSpoolEvent) {
+        self.apply_event(event);
+    }
+}
+
+pub fn age_label_ms(age_ms: u128) -> String {
+    let seconds = age_ms / 1000;
+    if seconds < 60 {
+        format!("{seconds}s")
+    } else if seconds < 60 * 60 {
+        format!("{}m", seconds / 60)
+    } else {
+        format!("{}h", seconds / 3600)
+    }
+}
+
 fn provider_report(provider: HookProvider) -> HookProviderReport {
     let Some(path) = provider.config_path() else {
         return HookProviderReport {
@@ -304,6 +610,198 @@ fn provider_report(provider: HookProvider) -> HookProviderReport {
             reason: error,
         },
     }
+}
+
+fn event_from_value(value: &Value) -> Result<HookSpoolEvent, String> {
+    let event = value.get("event").unwrap_or(value);
+    let cli = text_field(value, "cli")
+        .or_else(|| text_field(event, "cli"))
+        .and_then(|name| parse_cli(&name))
+        .ok_or_else(|| "missing supported cli".to_string())?;
+    let event_name = text_field(value, "hook_event_name")
+        .or_else(|| text_field(event, "hook_event_name"))
+        .or_else(|| text_field(event, "subtype"))
+        .or_else(|| text_field(event, "type"))
+        .unwrap_or_else(|| "unknown".into());
+    let kind = normalize_event_kind(&event_name);
+    let session_id = text_field(value, "session_id")
+        .or_else(|| text_field(event, "session_id"))
+        .or_else(|| nested_text(event, &["session", "id"]))
+        .ok_or_else(|| "missing session_id".to_string())?;
+    let captured_at_ms = value
+        .get("captured_at_ms")
+        .and_then(Value::as_u64)
+        .map(u128::from)
+        .or_else(|| {
+            value
+                .get("captured_at_ms")
+                .and_then(Value::as_str)
+                .and_then(|value| value.parse::<u128>().ok())
+        })
+        .unwrap_or_else(now_millis);
+    let wait_reason = wait_reason_for_event(kind, event);
+    let summary = summary_for_event(kind, event, wait_reason.as_deref());
+
+    Ok(HookSpoolEvent {
+        cli,
+        session_id,
+        transcript_path: text_field(value, "transcript_path")
+            .or_else(|| text_field(event, "transcript_path")),
+        cwd: text_field(value, "cwd").or_else(|| text_field(event, "cwd")),
+        tmux: text_field(value, "tmux"),
+        tmux_pane: text_field(value, "tmux_pane"),
+        captured_at_ms,
+        event_name,
+        kind,
+        summary,
+        wait_reason,
+    })
+}
+
+fn parse_cli(value: &str) -> Option<CliTool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "claude" | "claude_code" | "claude-code" => Some(CliTool::Claude),
+        "codex" => Some(CliTool::Codex),
+        _ => None,
+    }
+}
+
+fn normalize_event_kind(name: &str) -> HookEventKind {
+    match name
+        .chars()
+        .filter(|ch| *ch != '_' && *ch != '-')
+        .collect::<String>()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "sessionstart" => HookEventKind::SessionStart,
+        "userpromptsubmit" => HookEventKind::UserPromptSubmit,
+        "pretooluse" => HookEventKind::PreToolUse,
+        "posttooluse" => HookEventKind::PostToolUse,
+        "stop" => HookEventKind::Stop,
+        "permissionrequest" => HookEventKind::PermissionRequest,
+        "notification" => HookEventKind::Notification,
+        "sessionend" => HookEventKind::SessionEnd,
+        _ => HookEventKind::Unknown,
+    }
+}
+
+fn status_for_event(kind: HookEventKind) -> HookSessionStatus {
+    match kind {
+        HookEventKind::PermissionRequest | HookEventKind::Notification => {
+            HookSessionStatus::Waiting
+        }
+        HookEventKind::Stop => HookSessionStatus::Idle,
+        HookEventKind::SessionEnd => HookSessionStatus::Dead,
+        HookEventKind::SessionStart
+        | HookEventKind::UserPromptSubmit
+        | HookEventKind::PreToolUse
+        | HookEventKind::PostToolUse
+        | HookEventKind::Unknown => HookSessionStatus::Running,
+    }
+}
+
+fn wait_reason_for_event(kind: HookEventKind, event: &Value) -> Option<String> {
+    match kind {
+        HookEventKind::PermissionRequest => {
+            let detail = event_detail(event)
+                .or_else(|| tool_name(event))
+                .unwrap_or_else(|| "approval required".into());
+            Some(format!("Approval: {}", compact_text(&detail, 56)))
+        }
+        HookEventKind::Notification => {
+            let detail = event_detail(event).unwrap_or_else(|| "agent notification".into());
+            Some(format!("Notification: {}", compact_text(&detail, 56)))
+        }
+        _ => None,
+    }
+}
+
+fn summary_for_event(kind: HookEventKind, event: &Value, wait_reason: Option<&str>) -> String {
+    match kind {
+        HookEventKind::SessionStart => "Session started".into(),
+        HookEventKind::UserPromptSubmit => "User prompt submitted".into(),
+        HookEventKind::PreToolUse => tool_action_summary("Running", event),
+        HookEventKind::PostToolUse => tool_action_summary("Finished", event),
+        HookEventKind::Stop => "Idle after stop".into(),
+        HookEventKind::PermissionRequest | HookEventKind::Notification => {
+            wait_reason.unwrap_or("Waiting on you").into()
+        }
+        HookEventKind::SessionEnd => "Session ended".into(),
+        HookEventKind::Unknown => {
+            let detail = event_detail(event).unwrap_or_else(|| "Hook event".into());
+            compact_text(&detail, 64)
+        }
+    }
+}
+
+fn tool_action_summary(prefix: &str, event: &Value) -> String {
+    let tool = tool_name(event).unwrap_or_else(|| "tool".into());
+    let mut summary = format!("{prefix} {tool}");
+    if let Some(target) = tool_target(event) {
+        summary.push(' ');
+        summary.push_str(&compact_text(&target, 40));
+    }
+    compact_text(&summary, 64)
+}
+
+fn tool_name(event: &Value) -> Option<String> {
+    text_field(event, "tool_name")
+        .or_else(|| text_field(event, "toolName"))
+        .or_else(|| match event.get("tool") {
+            Some(Value::String(value)) => non_empty(value),
+            Some(value) => text_field(value, "name"),
+            None => None,
+        })
+        .or_else(|| nested_text(event, &["tool_use", "name"]))
+        .or_else(|| nested_text(event, &["tool_input", "name"]))
+}
+
+fn tool_target(event: &Value) -> Option<String> {
+    nested_text(event, &["tool_input", "file_path"])
+        .or_else(|| nested_text(event, &["tool_input", "path"]))
+        .or_else(|| nested_text(event, &["tool_input", "command"]))
+        .or_else(|| text_field(event, "file_path"))
+        .or_else(|| text_field(event, "command"))
+}
+
+fn event_detail(event: &Value) -> Option<String> {
+    nested_text(event, &["message", "content"])
+        .or_else(|| text_field(event, "message"))
+        .or_else(|| text_field(event, "reason"))
+        .or_else(|| text_field(event, "detail"))
+        .or_else(|| nested_text(event, &["notification", "message"]))
+        .or_else(|| nested_text(event, &["permission", "reason"]))
+}
+
+fn text_field(value: &Value, key: &str) -> Option<String> {
+    value.get(key).and_then(Value::as_str).and_then(non_empty)
+}
+
+fn nested_text(value: &Value, path: &[&str]) -> Option<String> {
+    let mut cursor = value;
+    for key in path {
+        cursor = cursor.get(*key)?;
+    }
+    cursor.as_str().and_then(non_empty)
+}
+
+fn non_empty(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+fn compact_text(value: &str, max_chars: usize) -> String {
+    let collapsed = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.chars().count() <= max_chars {
+        return collapsed;
+    }
+    let keep = max_chars.saturating_sub(3);
+    format!("{}...", collapsed.chars().take(keep).collect::<String>())
+}
+
+fn session_key(cli: CliTool, session_id: &str) -> String {
+    format!("{}:{session_id}", cli.id())
 }
 
 fn provider_change(
@@ -415,7 +913,7 @@ fn uninstall_provider_entries(
         return Ok(false);
     };
     let mut changed = false;
-    for event in provider.events() {
+    for event in provider.cleanup_events() {
         let Some(groups) = hooks.get_mut(*event).and_then(Value::as_array_mut) else {
             continue;
         };
@@ -500,7 +998,7 @@ fn count_moonbox_entries(provider: HookProvider, config: &Value) -> usize {
         .and_then(Value::as_object)
         .map(|hooks| {
             provider
-                .events()
+                .cleanup_events()
                 .iter()
                 .filter_map(|event| hooks.get(*event).and_then(Value::as_array))
                 .flat_map(|groups| groups.iter())
@@ -694,7 +1192,7 @@ fn status_notes() -> Vec<String> {
         "Hooks are opt-in and disabled until `moonbox hooks install --apply` writes Moonbox and provider config.".into(),
         "Provider hooks affect only new Claude/Codex sessions started after installation.".into(),
         "Codex command hooks must still be reviewed and trusted from Codex `/hooks`; Moonbox never writes Codex trust state.".into(),
-        "M93 surfaces configuration and spool health only; live badges, waiting queue, and tmux jump are later milestones.".into(),
+        "When hooks are enabled, the TUI can replay/tail the Moonbox spool for live badges and the waiting queue; tmux jump remains a separate opt-in milestone.".into(),
     ]
 }
 
@@ -747,16 +1245,26 @@ mod tests {
     fn uninstall_removes_only_moonbox_handlers() {
         let mut value = json!({"hooks": {}});
         install_provider_entries(HookProvider::Codex, &mut value).expect("install");
-        value["hooks"]["Stop"]
+        value["hooks"]["stop"]
             .as_array_mut()
             .expect("stop groups")
             .push(json!({"hooks": [{"type": "command", "command": "/bin/echo keep"}]}));
+        value["hooks"]["Stop"] = json!([
+            {"hooks": [{"type": "command", "command": "moonbox hook-event --cli codex"}]}
+        ]);
 
         assert!(uninstall_provider_entries(HookProvider::Codex, &mut value).expect("uninstall"));
 
         assert_eq!(count_moonbox_entries(HookProvider::Codex, &value), 0);
         assert!(
-            value["hooks"]["Stop"]
+            value["hooks"]
+                .as_object()
+                .expect("hooks")
+                .get("Stop")
+                .is_none()
+        );
+        assert!(
+            value["hooks"]["stop"]
                 .as_array()
                 .expect("stop groups")
                 .iter()
@@ -784,6 +1292,85 @@ mod tests {
             })
             .count();
         assert_eq!(rotations, 1);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn parse_spool_event_accepts_codex_snake_case_and_summarizes_tool() {
+        let event = parse_spool_event(
+            r#"{"version":1,"cli":"codex","captured_at_ms":1780000000000,"hook_event_name":"pre_tool_use","session_id":"s1","transcript_path":"/tmp/s1.jsonl","tmux_pane":"%7","event":{"tool_name":"Edit","tool_input":{"file_path":"src/app.rs"}}}"#,
+        )
+        .expect("event");
+
+        assert_eq!(event.cli, CliTool::Codex);
+        assert_eq!(event.kind, HookEventKind::PreToolUse);
+        assert_eq!(event.session_id, "s1");
+        assert_eq!(event.transcript_path.as_deref(), Some("/tmp/s1.jsonl"));
+        assert_eq!(event.tmux_pane.as_deref(), Some("%7"));
+        assert_eq!(event.summary, "Running Edit src/app.rs");
+    }
+
+    #[test]
+    fn live_state_tracks_waiting_queue_and_dequeues_on_followup_event() {
+        let mut state = HookLiveState::new(PathBuf::from("/tmp/moonbox-unused-spool"));
+        state.apply_event(HookSpoolEvent {
+            cli: CliTool::Claude,
+            session_id: "claude-s1".into(),
+            transcript_path: Some("/tmp/claude-s1.jsonl".into()),
+            cwd: Some("/repo".into()),
+            tmux: None,
+            tmux_pane: Some("%1".into()),
+            captured_at_ms: 1000,
+            event_name: "PermissionRequest".into(),
+            kind: HookEventKind::PermissionRequest,
+            summary: "Approval: Edit".into(),
+            wait_reason: Some("Approval: Edit".into()),
+        });
+
+        let waiting = state.waiting_sessions();
+        assert_eq!(waiting.len(), 1);
+        assert_eq!(waiting[0].status, HookSessionStatus::Waiting);
+        assert_eq!(waiting[0].wait_reason.as_deref(), Some("Approval: Edit"));
+
+        state.apply_event(HookSpoolEvent {
+            cli: CliTool::Claude,
+            session_id: "claude-s1".into(),
+            transcript_path: Some("/tmp/claude-s1.jsonl".into()),
+            cwd: Some("/repo".into()),
+            tmux: None,
+            tmux_pane: Some("%1".into()),
+            captured_at_ms: 2000,
+            event_name: "PreToolUse".into(),
+            kind: HookEventKind::PreToolUse,
+            summary: "Running Edit src/lib.rs".into(),
+            wait_reason: None,
+        });
+
+        assert!(state.waiting_sessions().is_empty());
+        let live = state
+            .session_for(CliTool::Claude, "claude-s1", Some("/tmp/claude-s1.jsonl"))
+            .expect("live session");
+        assert_eq!(live.status, HookSessionStatus::Running);
+        assert_eq!(live.status_since_ms, 2000);
+    }
+
+    #[test]
+    fn read_spool_events_respects_offset_and_skips_bad_lines() {
+        let root = env::temp_dir().join(format!("moonbox-hooks-read-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("spool root");
+        let path = root.join("events.jsonl");
+        let first = r#"{"version":1,"cli":"codex","captured_at_ms":1,"hook_event_name":"stop","session_id":"s1","event":{}}"#;
+        fs::write(&path, format!("{first}\nnot-json\n")).expect("write one");
+        let read = read_spool_events(&path, 0).expect("read one");
+        assert_eq!(read.events.len(), 1);
+        assert_eq!(read.skipped_lines, 1);
+
+        let second = r#"{"version":1,"cli":"codex","captured_at_ms":2,"hook_event_name":"session_end","session_id":"s1","event":{}}"#;
+        append_spool_line(&path, second, 4096, 2).expect("append second");
+        let read = read_spool_events(&path, read.next_offset).expect("read tail");
+        assert_eq!(read.events.len(), 1);
+        assert_eq!(read.events[0].kind, HookEventKind::SessionEnd);
         let _ = fs::remove_dir_all(root);
     }
 }
