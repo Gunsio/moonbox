@@ -49,6 +49,8 @@ pub struct RedactionPolicyConfig {
 pub struct HooksConfig {
     #[serde(default)]
     pub enabled: bool,
+    #[serde(default)]
+    pub smart_enter_tmux: bool,
     pub spool_path: Option<String>,
     #[serde(default = "default_hook_spool_max_bytes")]
     pub spool_max_bytes: u64,
@@ -60,6 +62,7 @@ impl Default for HooksConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            smart_enter_tmux: false,
             spool_path: None,
             spool_max_bytes: default_hook_spool_max_bytes(),
             spool_max_files: default_hook_spool_max_files(),
@@ -193,6 +196,21 @@ pub fn save_hooks_config(config: HooksConfig) -> Result<(), Box<dyn std::error::
     save_user_config_to_path(&path, &user_config)
 }
 
+pub fn set_smart_enter_tmux(enabled: bool) -> Result<HooksConfig, Box<dyn std::error::Error>> {
+    let path = config_path().ok_or("missing home directory")?;
+    set_smart_enter_tmux_to_path(&path, enabled)
+}
+
+fn set_smart_enter_tmux_to_path(
+    path: &Path,
+    enabled: bool,
+) -> Result<HooksConfig, Box<dyn std::error::Error>> {
+    let mut user_config = load_user_config_from_path(path).unwrap_or_default();
+    user_config.hooks.smart_enter_tmux = enabled;
+    save_user_config_to_path(path, &user_config)?;
+    Ok(user_config.hooks)
+}
+
 pub fn save_starred_sessions(sessions: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let path = config_path().ok_or("missing home directory")?;
     let mut config = load_user_config_from_path(&path).unwrap_or_default();
@@ -301,6 +319,7 @@ mod tests {
         assert_eq!(config.compiler_presets[0].id, "handoff");
         assert!(config.compiler_presets[0].enabled);
         assert!(!config.hooks.enabled);
+        assert!(!config.hooks.smart_enter_tmux);
         assert_eq!(config.hooks.spool_max_bytes, default_hook_spool_max_bytes());
         assert_eq!(config.compiler_presets[0].args, ["--mode", "handoff"]);
         assert_eq!(
@@ -328,7 +347,7 @@ mod tests {
             &path,
             r#"{
   "default_compiler": "handoff",
-  "hooks": {"enabled": true, "spool_path": "/tmp/moonbox/events.jsonl", "spool_max_bytes": 4096, "spool_max_files": 2},
+  "hooks": {"enabled": true, "smart_enter_tmux": true, "spool_path": "/tmp/moonbox/events.jsonl", "spool_max_bytes": 4096, "spool_max_files": 2},
   "compiler_presets": [
     {"id": "handoff", "command": "/bin/moonbox-handoff", "enabled": false}
   ],
@@ -346,6 +365,7 @@ mod tests {
         assert_eq!(saved.last_target, Some(CliTool::Claude));
         assert_eq!(saved.default_compiler.as_deref(), Some("handoff"));
         assert!(saved.hooks.enabled);
+        assert!(saved.hooks.smart_enter_tmux);
         assert_eq!(
             saved.hooks.spool_path.as_deref(),
             Some("/tmp/moonbox/events.jsonl")
@@ -392,6 +412,40 @@ mod tests {
         assert_eq!(saved.compiler_presets.len(), 1);
         assert_eq!(saved.ssh_hosts.len(), 1);
         assert_eq!(saved.starred_sessions, ["codex:abc", "claude:def"]);
+    }
+
+    #[test]
+    fn set_smart_enter_tmux_preserves_other_config() {
+        let path = env::temp_dir().join(format!(
+            "moonbox-config-smart-enter-{}.json",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        fs::write(
+            &path,
+            r#"{
+  "hooks": {"enabled": true, "spool_path": "/tmp/moonbox/events.jsonl"},
+  "ssh_hosts": [
+    {"name": "prod", "host": "prod.internal"}
+  ],
+  "starred_sessions": ["codex:abc"]
+}"#,
+        )
+        .expect("write config");
+
+        let hooks = set_smart_enter_tmux_to_path(&path, true).expect("save smart enter");
+        let saved = load_user_config_from_path(&path).expect("saved");
+
+        assert!(hooks.enabled);
+        assert!(hooks.smart_enter_tmux);
+        assert!(saved.hooks.enabled);
+        assert!(saved.hooks.smart_enter_tmux);
+        assert_eq!(
+            saved.hooks.spool_path.as_deref(),
+            Some("/tmp/moonbox/events.jsonl")
+        );
+        assert_eq!(saved.ssh_hosts[0].name, "prod");
+        assert_eq!(saved.starred_sessions, ["codex:abc"]);
     }
 
     #[test]

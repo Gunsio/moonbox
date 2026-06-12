@@ -20,7 +20,7 @@ use crate::core::{
         SessionSummary, SourceProvenance, TimelineKind, VerificationReport, WorkCapsule,
         WorkbenchData,
     },
-    verifier, workbench,
+    tmux, verifier, workbench,
 };
 
 type SessionLoadResult = Result<WorkbenchData, CoreError>;
@@ -61,6 +61,28 @@ pub struct HookWaitingItem {
     pub waiting_for_ms: u128,
     pub cwd: Option<String>,
     pub tmux_pane: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TmuxJumpPlan {
+    pub source_session: SessionSummary,
+    pub command: tmux::TmuxJumpCommand,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnterRouteKind {
+    Disabled,
+    Resume,
+    Jump,
+    Unavailable,
+    Handoff,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnterRoutePreview {
+    pub kind: EnterRouteKind,
+    pub label: &'static str,
+    pub detail: String,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -673,6 +695,14 @@ const COMMAND_PALETTE_ENTRIES: &[CommandPaletteEntry] = &[
         dangerous: false,
     },
     CommandPaletteEntry {
+        command: "settings",
+        aliases: &["prefs", "preferences", "smart enter", "tmux jump"],
+        description: "Configure opt-in TUI behavior",
+        params: "Smart Enter / tmux jump",
+        badge: "SAFE",
+        dangerous: false,
+    },
+    CommandPaletteEntry {
         command: "source next",
         aliases: &["filter", "filter next", "source"],
         description: "Switch to the next session source filter",
@@ -913,6 +943,7 @@ pub struct App {
     pub show_doctor: bool,
     pub show_skill_picker: bool,
     pub show_capsules: bool,
+    pub show_settings: bool,
     pub show_data_spaces: bool,
     pub show_data_space_config: bool,
     pub show_timeline_detail: bool,
@@ -931,6 +962,7 @@ pub struct App {
     pub data_space_config_form: DataSpaceConfigForm,
     pub data_space_config_field: usize,
     pub data_space_delete_confirmation: Option<String>,
+    pub settings_smart_enter_tmux: bool,
     pub pending_target: CliTool,
     pub pending_compiler: usize,
     pub status_message: String,
@@ -948,10 +980,12 @@ pub struct App {
     launch_review_request_id: u64,
     pending_launch_review: Option<PendingLaunchReview>,
     handoff_trail: Option<HandoffTrail>,
+    hooks_config: config::HooksConfig,
     hook_live: Option<hooks::HookLiveState>,
     clipboard_text: Option<String>,
     pending_resume: Option<Box<OriginalSessionPlan>>,
     pending_launch: Option<Box<LaunchPlan>>,
+    pending_tmux_jump: Option<Box<TmuxJumpPlan>>,
     exit_action: Option<TuiExitAction>,
     should_quit: bool,
 }
@@ -978,9 +1012,14 @@ impl App {
         let selected_compiler = compiler_index_for_id(&data, &data.capsule.compiler, 0);
         let doctor_report = doctor::diagnose_with_inventory(&data.sessions, &data.source_adapters);
         #[cfg(not(test))]
-        let hook_live = hooks::live_state_from_config(&config::load_hooks_config());
+        let hooks_config = config::load_hooks_config();
+        #[cfg(test)]
+        let hooks_config = config::HooksConfig::default();
+        #[cfg(not(test))]
+        let hook_live = hooks::live_state_from_config(&hooks_config);
         #[cfg(test)]
         let hook_live = None;
+        let settings_smart_enter_tmux = hooks_config.smart_enter_tmux;
 
         let mut app = Self {
             data,
@@ -1000,6 +1039,7 @@ impl App {
             show_doctor: false,
             show_skill_picker: false,
             show_capsules: false,
+            show_settings: false,
             show_data_spaces: false,
             show_data_space_config: false,
             show_timeline_detail: false,
@@ -1017,6 +1057,7 @@ impl App {
             data_space_config_form: DataSpaceConfigForm::default(),
             data_space_config_field: 0,
             data_space_delete_confirmation: None,
+            settings_smart_enter_tmux,
             pending_target: target,
             pending_compiler: selected_compiler,
             status_message: "Ready".into(),
@@ -1034,10 +1075,12 @@ impl App {
             launch_review_request_id: 0,
             pending_launch_review: None,
             handoff_trail: None,
+            hooks_config,
             hook_live,
             clipboard_text: None,
             pending_resume: None,
             pending_launch: None,
+            pending_tmux_jump: None,
             exit_action: None,
             should_quit: false,
             visible_session_indices: Vec::new(),
@@ -1065,8 +1108,27 @@ impl App {
         self.pending_launch.take()
     }
 
+    pub fn take_pending_tmux_jump(&mut self) -> Option<Box<TmuxJumpPlan>> {
+        self.pending_tmux_jump.take()
+    }
+
     pub fn take_exit_action(&mut self) -> Option<TuiExitAction> {
         self.exit_action.take()
+    }
+
+    pub fn complete_tmux_jump(&mut self, plan: Box<TmuxJumpPlan>, result: Result<(), String>) {
+        match result {
+            Ok(()) => self.set_status(format!(
+                "Jumped to pane {} for {} {}",
+                plan.command.pane_id, plan.source_session.cli, plan.source_session.id
+            )),
+            Err(reason) => {
+                self.queue_original_resume_with_status(format!(
+                    "Tmux jump unavailable: {reason}; falling back to resume"
+                ));
+            }
+        }
+        self.pending_g = false;
     }
 
     pub fn complete_target_handoff(
@@ -1224,6 +1286,12 @@ impl App {
     }
 
     #[cfg(test)]
+    pub(crate) fn set_hooks_config_for_test(&mut self, hooks_config: config::HooksConfig) {
+        self.settings_smart_enter_tmux = hooks_config.smart_enter_tmux;
+        self.hooks_config = hooks_config;
+    }
+
+    #[cfg(test)]
     pub(crate) fn set_hook_live_events_for_test(&mut self, events: Vec<hooks::HookSpoolEvent>) {
         let mut hook_live =
             hooks::HookLiveState::new(std::path::PathBuf::from("/tmp/moonbox-test-hooks.jsonl"));
@@ -1243,6 +1311,18 @@ impl App {
             });
         }
         Some(hook_live.indicator(hooks::current_millis()))
+    }
+
+    pub fn hooks_enabled(&self) -> bool {
+        self.hooks_config.enabled
+    }
+
+    pub fn smart_enter_tmux_enabled(&self) -> bool {
+        self.hooks_config.smart_enter_tmux
+    }
+
+    pub fn settings_smart_enter_dirty(&self) -> bool {
+        self.settings_smart_enter_tmux != self.hooks_config.smart_enter_tmux
     }
 
     pub fn hook_live_for_session(
@@ -1297,6 +1377,75 @@ impl App {
                 }
             })
             .collect()
+    }
+
+    pub fn enter_key_hint(&self) -> &'static str {
+        self.current_session()
+            .map(|session| self.enter_route_preview(session).label)
+            .unwrap_or("Unavailable")
+    }
+
+    pub fn enter_route_preview(&self, session: &SessionSummary) -> EnterRoutePreview {
+        self.enter_route_preview_for(session, self.hooks_config.smart_enter_tmux)
+    }
+
+    pub fn settings_enter_route_preview(&self) -> Option<EnterRoutePreview> {
+        self.current_session()
+            .map(|session| self.enter_route_preview_for(session, self.settings_smart_enter_tmux))
+    }
+
+    fn enter_route_preview_for(
+        &self,
+        session: &SessionSummary,
+        smart_enter_tmux: bool,
+    ) -> EnterRoutePreview {
+        if !self.current_data_space().is_local() {
+            return EnterRoutePreview {
+                kind: EnterRouteKind::Handoff,
+                label: "Handoff",
+                detail: "SSH data space is read-only; Enter opens guarded handoff".into(),
+            };
+        }
+        if !self.hooks_config.enabled {
+            return EnterRoutePreview {
+                kind: EnterRouteKind::Disabled,
+                label: "Resume",
+                detail: "Hooks are disabled; Enter keeps the existing resume path".into(),
+            };
+        }
+        if !smart_enter_tmux {
+            return EnterRoutePreview {
+                kind: EnterRouteKind::Disabled,
+                label: "Resume",
+                detail: "Smart Enter / tmux jump is disabled in Settings".into(),
+            };
+        }
+        let Some(live) = self.hook_live_for_session(session) else {
+            return EnterRoutePreview {
+                kind: EnterRouteKind::Resume,
+                label: "Resume",
+                detail: "No hook live state for this session; Enter resumes normally".into(),
+            };
+        };
+        if live.status == hooks::HookSessionStatus::Dead {
+            return EnterRoutePreview {
+                kind: EnterRouteKind::Resume,
+                label: "Resume",
+                detail: "Hook state marks this session ended; Enter resumes normally".into(),
+            };
+        }
+        match tmux::target_from_hook(live.tmux.as_deref(), live.tmux_pane.as_deref()) {
+            Ok(target) => EnterRoutePreview {
+                kind: EnterRouteKind::Jump,
+                label: "Jump",
+                detail: format!("Enter validates and jumps to tmux pane {}", target.pane_id),
+            },
+            Err(reason) => EnterRoutePreview {
+                kind: EnterRouteKind::Unavailable,
+                label: "Resume",
+                detail: format!("{reason}; Enter falls back to resume"),
+            },
+        }
     }
 
     pub fn current_data_space(&self) -> &dataspace::DataSpaceEntry {
@@ -1482,6 +1631,7 @@ impl App {
             KeyCode::Char('d') => self.open_data_space_picker(),
             KeyCode::Char('f') => self.cycle_session_filter(true),
             KeyCode::Char('a') => self.clear_session_filters(),
+            KeyCode::Char(',') => self.open_settings(),
             KeyCode::Char('s') | KeyCode::Char('*') => self.toggle_starred_session(),
             KeyCode::Char('o') => self.open_original(),
             KeyCode::Char('x') | KeyCode::Char('t') | KeyCode::Char('H') => {
@@ -1511,10 +1661,47 @@ impl App {
             KeyCode::Char('+') | KeyCode::Char('=') => self.zoom_current_panel(),
             KeyCode::Char('-') => self.restore_zoom(),
             KeyCode::Char('y') => self.copy_focused_command(),
-            KeyCode::Enter if self.current_data_space().is_local() => self.queue_original_resume(),
-            KeyCode::Enter => self.open_launch_picker_for_remote_session(),
+            KeyCode::Enter => self.handle_main_enter(),
             _ => self.pending_g = false,
         }
+    }
+
+    fn handle_main_enter(&mut self) {
+        if !self.current_data_space().is_local() {
+            self.open_launch_picker_for_remote_session();
+            return;
+        }
+        let Some(session) = self.current_session().cloned() else {
+            self.set_status("No session selected");
+            return;
+        };
+        let preview = self.enter_route_preview(&session);
+        if preview.kind != EnterRouteKind::Jump {
+            self.queue_original_resume();
+            return;
+        }
+        let Some(live) = self.hook_live_for_session(&session) else {
+            self.queue_original_resume();
+            return;
+        };
+        match tmux::target_from_hook(live.tmux.as_deref(), live.tmux_pane.as_deref()) {
+            Ok(target) => {
+                let command = target.command();
+                let pane_id = command.pane_id.clone();
+                self.pending_tmux_jump = Some(Box::new(TmuxJumpPlan {
+                    source_session: session.clone(),
+                    command,
+                }));
+                self.set_status(format!(
+                    "Jumping to pane {pane_id}: {} {}",
+                    session.cli, session.id
+                ));
+            }
+            Err(reason) => {
+                self.queue_original_resume_with_status(format!("{reason}; falling back to resume"));
+            }
+        }
+        self.pending_g = false;
     }
 
     fn handle_command_key(&mut self, key: KeyEvent) {
@@ -1680,6 +1867,7 @@ impl App {
             "help" => self.open_help(),
             "doctor" => self.open_doctor(),
             "hooks" => self.open_doctor(),
+            "settings" => self.open_settings(),
             "source next" => self.cycle_session_filter(true),
             "source prev" => self.cycle_session_filter(false),
             "starred" => self.apply_session_filter(SessionFilter::Starred),
@@ -1815,6 +2003,10 @@ impl App {
     }
 
     fn handle_overlay_key(&mut self, key: KeyEvent) {
+        if self.show_settings {
+            self.handle_settings_key(key);
+            return;
+        }
         if self.show_skill_picker {
             self.handle_skill_picker_key(key);
             return;
@@ -1879,6 +2071,11 @@ impl App {
             self.timeline_image_previews.clear();
             self.modal_scroll = 0;
             self.set_status("Timeline detail closed");
+        } else if self.show_settings {
+            self.show_settings = false;
+            self.settings_smart_enter_tmux = self.hooks_config.smart_enter_tmux;
+            self.modal_scroll = 0;
+            self.set_status("Settings closed");
         } else if self.show_open_original {
             self.show_open_original = false;
             self.modal_scroll = 0;
@@ -1912,6 +2109,60 @@ impl App {
         };
         if self.zoomed_focus.is_some() {
             self.zoomed_focus = Some(self.focus);
+        }
+        self.pending_g = false;
+    }
+
+    fn open_settings(&mut self) {
+        self.settings_smart_enter_tmux = self.hooks_config.smart_enter_tmux;
+        self.show_settings = true;
+        self.modal_scroll = 0;
+        self.set_status("Settings opened");
+        self.pending_g = false;
+    }
+
+    fn handle_settings_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => self.back_or_quit(),
+            KeyCode::Char(' ') | KeyCode::Char('t') => self.toggle_smart_enter_tmux_setting(),
+            KeyCode::Enter => self.save_settings(),
+            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.save_settings()
+            }
+            _ => {}
+        }
+    }
+
+    fn toggle_smart_enter_tmux_setting(&mut self) {
+        self.settings_smart_enter_tmux = !self.settings_smart_enter_tmux;
+        let state = if self.settings_smart_enter_tmux {
+            "On"
+        } else {
+            "Off"
+        };
+        self.set_status(format!("Smart Enter draft: {state}"));
+        self.pending_g = false;
+    }
+
+    fn save_settings(&mut self) {
+        match config::set_smart_enter_tmux(self.settings_smart_enter_tmux) {
+            Ok(hooks_config) => {
+                self.hooks_config = hooks_config;
+                self.settings_smart_enter_tmux = self.hooks_config.smart_enter_tmux;
+                self.show_settings = false;
+                self.modal_scroll = 0;
+                self.set_status(format!(
+                    "Settings saved: Smart Enter / tmux jump {}",
+                    if self.hooks_config.smart_enter_tmux {
+                        "On"
+                    } else {
+                        "Off"
+                    }
+                ));
+            }
+            Err(error) => {
+                self.set_status(format!("Settings save failed: {error}"));
+            }
         }
         self.pending_g = false;
     }
@@ -2453,7 +2704,22 @@ impl App {
         self.queue_original_resume_with_mode(original_resume_mode_from_env());
     }
 
+    fn queue_original_resume_with_status(&mut self, status: String) {
+        self.queue_original_resume_with_mode_and_status(
+            original_resume_mode_from_env(),
+            Some(status),
+        );
+    }
+
     fn queue_original_resume_with_mode(&mut self, mode: OriginalResumeMode) {
+        self.queue_original_resume_with_mode_and_status(mode, None);
+    }
+
+    fn queue_original_resume_with_mode_and_status(
+        &mut self,
+        mode: OriginalResumeMode,
+        status: Option<String>,
+    ) {
         if !self.current_data_space().is_local() {
             self.show_open_original = false;
             self.set_status("SSH sessions cannot be resumed locally; use handoff");
@@ -2480,15 +2746,16 @@ impl App {
         match mode {
             OriginalResumeMode::Suspend => {
                 self.pending_resume = Some(Box::new(plan));
-                self.set_status(format!(
-                    "Suspending to original: {} {}",
-                    session.cli, session.id
-                ));
+                self.set_status(status.unwrap_or_else(|| {
+                    format!("Suspending to original: {} {}", session.cli, session.id)
+                }));
             }
             OriginalResumeMode::Exec => {
                 self.exit_action = Some(TuiExitAction::OriginalResume(Box::new(plan)));
                 self.should_quit = true;
-                self.set_status(format!("Opening original: {} {}", session.cli, session.id));
+                self.set_status(status.unwrap_or_else(|| {
+                    format!("Opening original: {} {}", session.cli, session.id)
+                }));
             }
         }
     }
@@ -2674,6 +2941,7 @@ impl App {
             || self.show_doctor
             || self.show_skill_picker
             || self.show_capsules
+            || self.show_settings
             || self.show_data_spaces
             || self.show_data_space_config
             || self.show_timeline_detail
@@ -3733,6 +4001,35 @@ mod tests {
         app
     }
 
+    fn enable_hook_config(app: &mut App, smart_enter_tmux: bool) {
+        app.set_hooks_config_for_test(config::HooksConfig {
+            enabled: true,
+            smart_enter_tmux,
+            ..config::HooksConfig::default()
+        });
+    }
+
+    fn hook_event_for_session(
+        session: &SessionSummary,
+        kind: hooks::HookEventKind,
+        tmux: Option<&str>,
+        tmux_pane: Option<&str>,
+    ) -> hooks::HookSpoolEvent {
+        hooks::HookSpoolEvent {
+            cli: session.cli,
+            session_id: session.id.clone(),
+            transcript_path: session.source_path.clone(),
+            cwd: Some("/repo".into()),
+            tmux: tmux.map(str::to_owned),
+            tmux_pane: tmux_pane.map(str::to_owned),
+            captured_at_ms: hooks::current_millis(),
+            event_name: format!("{kind:?}"),
+            kind,
+            summary: "Edit src/app.rs".into(),
+            wait_reason: None,
+        }
+    }
+
     fn wait_for_background(app: &mut App, mut done: impl FnMut(&App) -> bool) {
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline {
@@ -4754,6 +5051,93 @@ Host devbox
             app.status_message,
             "Suspending to original: Codex codex-cxcp-design"
         );
+    }
+
+    #[test]
+    fn main_enter_keeps_resume_when_hooks_enabled_but_smart_enter_off() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        enable_hook_config(&mut app, false);
+        let session = app.current_session().expect("session").clone();
+        app.set_hook_live_events_for_test(vec![hook_event_for_session(
+            &session,
+            hooks::HookEventKind::PreToolUse,
+            Some("/tmp/tmux-501/default,1,0"),
+            Some("%42"),
+        )]);
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(app.take_pending_tmux_jump().is_none());
+        assert!(app.take_pending_resume().is_some());
+        assert_eq!(app.enter_key_hint(), "Resume");
+    }
+
+    #[test]
+    fn main_enter_queues_tmux_jump_when_smart_enter_has_live_pane_metadata() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        enable_hook_config(&mut app, true);
+        let session = app.current_session().expect("session").clone();
+        app.set_hook_live_events_for_test(vec![hook_event_for_session(
+            &session,
+            hooks::HookEventKind::PreToolUse,
+            Some("/tmp/tmux-501/default,1,0"),
+            Some("%42"),
+        )]);
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        let Some(plan) = app.take_pending_tmux_jump() else {
+            panic!("expected tmux jump plan");
+        };
+        assert!(app.take_pending_resume().is_none());
+        assert_eq!(plan.command.socket_path, "/tmp/tmux-501/default");
+        assert_eq!(plan.command.pane_id, "%42");
+        assert_eq!(plan.source_session.id, session.id);
+        assert_eq!(app.enter_key_hint(), "Jump");
+        assert!(app.status_message.contains("Jumping to pane %42"));
+    }
+
+    #[test]
+    fn failed_tmux_jump_queues_resume_with_visible_reason() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        let session = app.current_session().expect("session").clone();
+        let plan = TmuxJumpPlan {
+            source_session: session.clone(),
+            command: tmux::TmuxJumpCommand {
+                program: "tmux".into(),
+                socket_path: "/tmp/tmux-501/default".into(),
+                pane_id: "%42".into(),
+                display: "tmux -S /tmp/tmux-501/default select-pane -t %42".into(),
+            },
+        };
+
+        app.complete_tmux_jump(Box::new(plan), Err("tmux pane %42 is not live".into()));
+
+        let Some(resume) = app.take_pending_resume() else {
+            panic!("expected fallback resume");
+        };
+        assert_eq!(resume.source_session.id, session.id);
+        assert!(app.status_message.contains("Tmux jump unavailable"));
+        assert!(app.status_message.contains("tmux pane %42 is not live"));
+    }
+
+    #[test]
+    fn main_enter_falls_back_to_resume_when_smart_enter_lacks_tmux_metadata() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        enable_hook_config(&mut app, true);
+        let session = app.current_session().expect("session").clone();
+        app.set_hook_live_events_for_test(vec![hook_event_for_session(
+            &session,
+            hooks::HookEventKind::PreToolUse,
+            None,
+            Some("%42"),
+        )]);
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(app.take_pending_tmux_jump().is_none());
+        assert!(app.take_pending_resume().is_some());
+        assert_eq!(app.enter_key_hint(), "Resume");
     }
 
     #[test]

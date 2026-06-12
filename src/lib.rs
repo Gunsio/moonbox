@@ -618,12 +618,13 @@ fn print_hooks_status(args: cli::HooksStatusArgs) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         println!(
-            "hooks: {}",
+            "hooks: {}  smart_enter_tmux={}",
             if report.moonbox_enabled {
                 "enabled"
             } else {
                 "disabled"
-            }
+            },
+            report.smart_enter_tmux_enabled
         );
         if let Some(path) = &report.moonbox_config_path {
             println!("moonbox_config: {path}");
@@ -656,6 +657,7 @@ fn print_hooks_apply(action: core::hooks::HookAction, args: cli::HooksApplyArgs)
                 "moonbox_config: {path}  enabled {} -> {}",
                 report.moonbox_enabled_before, report.moonbox_enabled_after
             );
+            println!("smart_enter_tmux: {}", report.smart_enter_tmux_enabled);
         }
         print_hook_spool(&report.spool);
         for change in &report.providers {

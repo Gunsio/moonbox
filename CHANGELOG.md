@@ -129,6 +129,13 @@ and this project uses semantic versioning once tagged releases start.
   Disabled hooks leave the Dashboard, Timeline, status bar, and Enter behavior
   unchanged. Codex hook injection now writes snake_case event names while
   uninstall/status still recognize legacy PascalCase Moonbox entries.
+- Opt-in Smart Enter / tmux jump routing in the TUI. The setting lives behind
+  Settings (`,`), remains disabled by default even after hooks are installed,
+  previews the selected session's Enter route before saving, and only jumps when
+  hook-captured tmux socket/pane metadata validates through `tmux list-panes`.
+  Missing metadata, dead sessions, SSH data spaces, and tmux failures fall back
+  to the guarded resume/handoff path without creating panes, sending input, or
+  mutating source stores.
 - Configurable compiler skill presets in `~/.config/moonbox/config.json`,
   including optional description, homepage, and GitHub stars metadata for the
   TUI Skill Picker.

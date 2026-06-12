@@ -135,6 +135,7 @@ pub struct HookProviderReport {
 pub struct HooksStatusReport {
     pub version: u8,
     pub moonbox_enabled: bool,
+    pub smart_enter_tmux_enabled: bool,
     pub moonbox_config_path: Option<String>,
     pub spool: HookSpoolReport,
     pub providers: Vec<HookProviderReport>,
@@ -159,6 +160,7 @@ pub struct HooksApplyReport {
     pub dry_run: bool,
     pub moonbox_enabled_before: bool,
     pub moonbox_enabled_after: bool,
+    pub smart_enter_tmux_enabled: bool,
     pub moonbox_config_path: Option<String>,
     pub spool: HookSpoolReport,
     pub providers: Vec<HookProviderChange>,
@@ -262,6 +264,7 @@ pub fn status_report() -> HooksStatusReport {
     HooksStatusReport {
         version: 1,
         moonbox_enabled: hooks_config.enabled,
+        smart_enter_tmux_enabled: hooks_config.smart_enter_tmux,
         moonbox_config_path: config::config_path().map(|path| path.display().to_string()),
         spool,
         providers,
@@ -301,6 +304,7 @@ pub fn apply(
         dry_run: !apply,
         moonbox_enabled_before: before_config.enabled,
         moonbox_enabled_after: after_config.enabled,
+        smart_enter_tmux_enabled: after_config.smart_enter_tmux,
         moonbox_config_path: config::config_path().map(|path| path.display().to_string()),
         spool: spool_report(&after_config),
         providers: provider_changes,
@@ -1192,7 +1196,7 @@ fn status_notes() -> Vec<String> {
         "Hooks are opt-in and disabled until `moonbox hooks install --apply` writes Moonbox and provider config.".into(),
         "Provider hooks affect only new Claude/Codex sessions started after installation.".into(),
         "Codex command hooks must still be reviewed and trusted from Codex `/hooks`; Moonbox never writes Codex trust state.".into(),
-        "When hooks are enabled, the TUI can replay/tail the Moonbox spool for live badges and the waiting queue; tmux jump remains a separate opt-in milestone.".into(),
+        "When hooks are enabled, the TUI can replay/tail the Moonbox spool for live badges and the waiting queue; Smart Enter / tmux jump is still a separate Settings opt-in.".into(),
     ]
 }
 

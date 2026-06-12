@@ -12,8 +12,8 @@ use ratatui::{
 
 use crate::{
     app::{
-        App, CommandPaletteEntry, DATA_SPACE_CONFIG_FIELD_COUNT, Focus, HandoffTrailFrame,
-        HookWaitingItem,
+        App, CommandPaletteEntry, DATA_SPACE_CONFIG_FIELD_COUNT, EnterRouteKind, Focus,
+        HandoffTrailFrame, HookWaitingItem,
     },
     core::image_preview::{ImagePreviewStatus, PreviewCell, PreviewRgb, TimelineImagePreview},
     core::model::{
@@ -83,6 +83,9 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
     if app.show_capsules {
         render_capsules(frame, root, app);
+    }
+    if app.show_settings {
+        render_settings(frame, root, app);
     }
     if app.show_data_space_config {
         render_data_space_config(frame, root, app);
@@ -623,7 +626,13 @@ fn session_list_secondary_line(
     ));
     spans.push(Span::styled(" · ", Style::default().fg(theme::BORDER)));
     spans.push(Span::styled(updated, Style::default().fg(theme::MUTED)));
-    if width >= 36
+    if width >= 34 && (app.hooks_enabled() || app.smart_enter_tmux_enabled()) {
+        let route = app.enter_route_preview(session);
+        spans.push(Span::styled(" · ", Style::default().fg(theme::BORDER)));
+        spans.push(Span::styled("Enter ", Style::default().fg(theme::BORDER)));
+        spans.push(Span::styled(route.label, enter_route_style(route.kind)));
+    }
+    if width >= 52
         && let Some(live) = app.hook_live_for_session(session)
     {
         let max_live = usize::from(width.saturating_sub(28)).clamp(10, 34);
@@ -633,7 +642,7 @@ fn session_list_secondary_line(
             session_live_text_style(live.status),
         ));
     }
-    if width >= 48
+    if width >= 60
         && let Some(branch) = session
             .branch
             .as_deref()
@@ -893,6 +902,16 @@ fn source_tool_style(tool: CliTool) -> Style {
     Style::default()
         .fg(source_tool_color(tool))
         .add_modifier(Modifier::BOLD)
+}
+
+fn enter_route_style(kind: EnterRouteKind) -> Style {
+    let color = match kind {
+        EnterRouteKind::Jump => theme::GREEN,
+        EnterRouteKind::Handoff => theme::GOLD,
+        EnterRouteKind::Unavailable => theme::RED,
+        EnterRouteKind::Disabled | EnterRouteKind::Resume => theme::MUTED,
+    };
+    Style::default().fg(color).add_modifier(Modifier::BOLD)
 }
 
 fn source_tool_color(tool: CliTool) -> Color {
@@ -2275,6 +2294,14 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("Esc", "Close"),
         ];
     }
+    if app.show_settings {
+        return vec![
+            ("space/t", "Toggle"),
+            ("enter", "Save"),
+            ("ctrl-s", "Save"),
+            ("Esc", "Cancel"),
+        ];
+    }
     if app.show_data_space_config {
         return vec![
             ("enter", "Parse/Save"),
@@ -2318,13 +2345,14 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("[ ]", "Source"),
             ("{ }", "Data"),
             ("d", "Data Picker"),
+            (",", "Settings"),
             ("a", "Clear"),
             ("s", "Star"),
             ("S", "Skill"),
             ("+", "Zoom"),
             ("-", "Restore"),
             ("o", "Original"),
-            ("enter", "Open"),
+            ("enter", app.enter_key_hint()),
             ("x/H", "Handoff"),
             ("tab", "Next"),
         ],
@@ -2353,11 +2381,12 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("q", "Quit"),
         ],
         Focus::Branches => vec![
-            ("enter", "Open"),
+            ("enter", app.enter_key_hint()),
             ("x/H", "Handoff"),
             ("o", "Original"),
             ("space", "Rewind"),
             ("D", "Pre-flight"),
+            (",", "Settings"),
             ("+", "Zoom"),
             ("-", "Restore"),
             ("tab", "Next"),
@@ -2427,6 +2456,134 @@ fn status_line(app: &App) -> Line<'_> {
         spans.push(Span::styled(live.label, live_style));
     }
     Line::from(spans)
+}
+
+fn render_settings(frame: &mut Frame, root: Rect, app: &App) {
+    let area = modal_area(root, 70, 58);
+    frame.render_widget(Clear, area);
+    let route = app.settings_enter_route_preview();
+    let dirty = app.settings_smart_enter_dirty();
+    let saved = if app.smart_enter_tmux_enabled() {
+        "On"
+    } else {
+        "Off"
+    };
+    let draft = if app.settings_smart_enter_tmux {
+        "On"
+    } else {
+        "Off"
+    };
+    let hooks = if app.hooks_enabled() {
+        ("Enabled", theme::GREEN)
+    } else {
+        ("Disabled", theme::MUTED)
+    };
+    let effect = if !app.hooks_enabled() {
+        "Smart Enter cannot jump until hooks are installed and new agent sessions are started."
+    } else if !app.settings_smart_enter_tmux {
+        "Enter keeps the existing resume or handoff behavior."
+    } else if app.current_data_space().is_local() {
+        "Enter validates hook tmux metadata, jumps to a live pane when available, and falls back to resume otherwise."
+    } else {
+        "SSH data spaces stay read-only; Enter opens guarded handoff instead of local resume or tmux jump."
+    };
+
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "Settings",
+            Style::default()
+                .fg(theme::GOLD)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "Opt-in behavior only. Saved settings apply to Moonbox, not source session stores.",
+            Style::default().fg(theme::MUTED),
+        )),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled("Hooks event channel  ", Style::default().fg(theme::BLUE)),
+            Span::styled(
+                hooks.0,
+                Style::default().fg(hooks.1).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "  install/uninstall is managed by `moonbox hooks`",
+                Style::default().fg(theme::MUTED),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Smart Enter / tmux   ", Style::default().fg(theme::BLUE)),
+            Span::styled(
+                format!("Draft {draft}"),
+                Style::default()
+                    .fg(if app.settings_smart_enter_tmux {
+                        theme::GREEN
+                    } else {
+                        theme::MUTED
+                    })
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("   Saved {saved}"),
+                Style::default().fg(theme::MUTED),
+            ),
+            if dirty {
+                Span::styled("   Unsaved", Style::default().fg(theme::GOLD))
+            } else {
+                Span::styled("   Saved", Style::default().fg(theme::GREEN))
+            },
+        ]),
+        Line::raw(""),
+        Line::from(Span::styled(
+            "Current Enter Route",
+            Style::default()
+                .fg(theme::BLUE)
+                .add_modifier(Modifier::BOLD),
+        )),
+    ];
+
+    if let Some(route) = route {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{:<10}", route.label),
+                enter_route_style(route.kind),
+            ),
+            Span::styled(route.detail, Style::default().fg(theme::TEXT)),
+        ]));
+    } else {
+        lines.push(Line::from(Span::styled(
+            "No selected session",
+            Style::default().fg(theme::ORANGE),
+        )));
+    }
+
+    lines.extend([
+        Line::raw(""),
+        Line::from(Span::styled(
+            "Effect",
+            Style::default()
+                .fg(theme::BLUE)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(effect, Style::default().fg(theme::TEXT))),
+        Line::raw(""),
+        Line::from(Span::styled(
+            "Moonbox never creates panes, sends keystrokes, resumes source sessions, or mutates source stores from this setting.",
+            Style::default().fg(theme::MUTED),
+        )),
+        Line::raw(""),
+        Line::from(Span::styled(
+            "space/t toggle   Enter save   Ctrl-S save   Esc cancel",
+            Style::default().fg(theme::MUTED),
+        )),
+    ]);
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(panel_block(" Settings ", true))
+            .wrap(Wrap { trim: true }),
+        area,
+    );
 }
 
 fn render_data_spaces(frame: &mut Frame, root: Rect, app: &App) {
@@ -2761,6 +2918,7 @@ fn render_help(frame: &mut Frame, root: Rect, app: &App) {
         Line::raw("space           set rewind point"),
         Line::raw("c               refresh capsule and open handoff review"),
         Line::raw("v, S            verify capsule, switch skill"),
+        Line::raw(",               open Settings"),
         Line::raw(":               command mode"),
         Line::raw("q / Ctrl-C      quit"),
         Line::raw("Esc             cancel command/search or close overlay"),
@@ -4870,6 +5028,78 @@ mod tests {
 
         assert_screen_contains(&screen, "Live unavailable: SSH data");
         assert!(!screen.contains("WAITING ON YOU"), "{screen}");
+    }
+
+    #[test]
+    fn settings_overlay_previews_smart_enter_effect_before_save() {
+        let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.set_hooks_config_for_test(crate::core::config::HooksConfig {
+            enabled: true,
+            smart_enter_tmux: false,
+            ..crate::core::config::HooksConfig::default()
+        });
+        let session = app
+            .data
+            .sessions
+            .get(app.selected_session)
+            .expect("session");
+        let session_cli = session.cli;
+        let session_id = session.id.clone();
+        let mut event = test_hook_event(
+            session_cli,
+            &session_id,
+            hooks::HookEventKind::PreToolUse,
+            "Edit src/app.rs",
+            None,
+            hooks::current_millis(),
+        );
+        event.tmux = Some("/tmp/tmux-501/default,1,0".into());
+        app.set_hook_live_events_for_test(vec![event]);
+
+        app.handle_key(key(','));
+        let off_screen = render_text(&app, 150, 36);
+        assert_screen_contains(&off_screen, "Settings");
+        assert_screen_contains(&off_screen, "Draft Off");
+        assert_screen_contains(&off_screen, "Resume");
+
+        app.handle_key(key(' '));
+        let on_screen = render_text(&app, 150, 36);
+        assert_screen_contains(&on_screen, "Draft On");
+        assert_screen_contains(&on_screen, "Unsaved");
+        assert_screen_contains(&on_screen, "Jump");
+        assert_screen_contains(&on_screen, "never creates panes");
+    }
+
+    #[test]
+    fn session_row_marks_enter_jump_when_smart_enter_is_active() {
+        let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.set_hooks_config_for_test(crate::core::config::HooksConfig {
+            enabled: true,
+            smart_enter_tmux: true,
+            ..crate::core::config::HooksConfig::default()
+        });
+        let session = app
+            .data
+            .sessions
+            .get(app.selected_session)
+            .expect("session");
+        let session_cli = session.cli;
+        let session_id = session.id.clone();
+        let mut event = test_hook_event(
+            session_cli,
+            &session_id,
+            hooks::HookEventKind::PreToolUse,
+            "Edit src/app.rs",
+            None,
+            hooks::current_millis(),
+        );
+        event.tmux = Some("/tmp/tmux-501/default,1,0".into());
+        app.set_hook_live_events_for_test(vec![event]);
+
+        let screen = render_text(&app, 150, 36);
+
+        assert_screen_contains(&screen, "Enter");
+        assert_screen_contains(&screen, "Jump");
     }
 
     #[test]
