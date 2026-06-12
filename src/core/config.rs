@@ -70,6 +70,77 @@ impl Default for HooksConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UiLanguage {
+    #[default]
+    English,
+    ZhHans,
+}
+
+impl UiLanguage {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::English => "English",
+            Self::ZhHans => "简体中文",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::English => Self::ZhHans,
+            Self::ZhHans => Self::English,
+        }
+    }
+
+    pub fn previous(self) -> Self {
+        self.next()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UiThemeName {
+    #[default]
+    Moonbox,
+    TokyoNight,
+    Gruvbox,
+}
+
+impl UiThemeName {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Moonbox => "Moonbox",
+            Self::TokyoNight => "Tokyo Night",
+            Self::Gruvbox => "Gruvbox",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Moonbox => Self::TokyoNight,
+            Self::TokyoNight => Self::Gruvbox,
+            Self::Gruvbox => Self::Moonbox,
+        }
+    }
+
+    pub fn previous(self) -> Self {
+        match self {
+            Self::Moonbox => Self::Gruvbox,
+            Self::TokyoNight => Self::Moonbox,
+            Self::Gruvbox => Self::TokyoNight,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct UiPreferencesConfig {
+    #[serde(default)]
+    pub language: UiLanguage,
+    #[serde(default)]
+    pub theme: UiThemeName,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct UserConfig {
     last_target: Option<CliTool>,
@@ -77,6 +148,8 @@ struct UserConfig {
     redaction_policy: Option<RedactionPolicyConfig>,
     #[serde(default)]
     hooks: HooksConfig,
+    #[serde(default)]
+    ui: UiPreferencesConfig,
     #[serde(default)]
     compiler_presets: Vec<CompilerPresetConfig>,
     #[serde(default)]
@@ -189,6 +262,13 @@ pub fn load_hooks_config() -> HooksConfig {
         .unwrap_or_default()
 }
 
+#[cfg(not(test))]
+pub fn load_ui_preferences_config() -> UiPreferencesConfig {
+    load_user_config()
+        .map(|config| config.ui)
+        .unwrap_or_default()
+}
+
 pub fn save_hooks_config(config: HooksConfig) -> Result<(), Box<dyn std::error::Error>> {
     let path = config_path().ok_or("missing home directory")?;
     let mut user_config = load_user_config_from_path(&path).unwrap_or_default();
@@ -196,19 +276,35 @@ pub fn save_hooks_config(config: HooksConfig) -> Result<(), Box<dyn std::error::
     save_user_config_to_path(&path, &user_config)
 }
 
-pub fn set_smart_enter_tmux(enabled: bool) -> Result<HooksConfig, Box<dyn std::error::Error>> {
-    let path = config_path().ok_or("missing home directory")?;
-    set_smart_enter_tmux_to_path(&path, enabled)
+#[cfg(test)]
+fn save_ui_preferences_config_to_path(
+    path: &Path,
+    ui: UiPreferencesConfig,
+) -> Result<UiPreferencesConfig, Box<dyn std::error::Error>> {
+    let mut user_config = load_user_config_from_path(path).unwrap_or_default();
+    user_config.ui = ui;
+    save_user_config_to_path(path, &user_config)?;
+    Ok(user_config.ui)
 }
 
-fn set_smart_enter_tmux_to_path(
+pub fn save_ui_preferences_and_smart_enter(
+    ui: UiPreferencesConfig,
+    smart_enter_tmux: bool,
+) -> Result<(UiPreferencesConfig, HooksConfig), Box<dyn std::error::Error>> {
+    let path = config_path().ok_or("missing home directory")?;
+    save_ui_preferences_and_smart_enter_to_path(&path, ui, smart_enter_tmux)
+}
+
+fn save_ui_preferences_and_smart_enter_to_path(
     path: &Path,
-    enabled: bool,
-) -> Result<HooksConfig, Box<dyn std::error::Error>> {
+    ui: UiPreferencesConfig,
+    smart_enter_tmux: bool,
+) -> Result<(UiPreferencesConfig, HooksConfig), Box<dyn std::error::Error>> {
     let mut user_config = load_user_config_from_path(path).unwrap_or_default();
-    user_config.hooks.smart_enter_tmux = enabled;
+    user_config.ui = ui;
+    user_config.hooks.smart_enter_tmux = smart_enter_tmux;
     save_user_config_to_path(path, &user_config)?;
-    Ok(user_config.hooks)
+    Ok((user_config.ui, user_config.hooks))
 }
 
 pub fn save_starred_sessions(sessions: &[String]) -> Result<(), Box<dyn std::error::Error>> {
@@ -293,6 +389,7 @@ mod tests {
 	    "event_allowlist": ["user", "assistant", "tool", "rewind_point"],
 	    "file_allowlist": ["README.md", "src/"]
 	  },
+	  "ui": {"language": "zh_hans", "theme": "tokyo-night"},
 	  "compiler_presets": [
     {"id": "handoff", "command": "/bin/moonbox-handoff", "args": ["--mode", "handoff"], "timeout_ms": 12000, "description": "Compresses source timelines for target CLIs.", "homepage": "https://github.com/example/handoff", "github_stars": 42}
   ],
@@ -321,6 +418,8 @@ mod tests {
         assert!(!config.hooks.enabled);
         assert!(!config.hooks.smart_enter_tmux);
         assert_eq!(config.hooks.spool_max_bytes, default_hook_spool_max_bytes());
+        assert_eq!(config.ui.language, UiLanguage::ZhHans);
+        assert_eq!(config.ui.theme, UiThemeName::TokyoNight);
         assert_eq!(config.compiler_presets[0].args, ["--mode", "handoff"]);
         assert_eq!(
             config.compiler_presets[0].description.as_deref(),
@@ -348,6 +447,7 @@ mod tests {
             r#"{
   "default_compiler": "handoff",
   "hooks": {"enabled": true, "smart_enter_tmux": true, "spool_path": "/tmp/moonbox/events.jsonl", "spool_max_bytes": 4096, "spool_max_files": 2},
+  "ui": {"language": "zh_hans", "theme": "gruvbox"},
   "compiler_presets": [
     {"id": "handoff", "command": "/bin/moonbox-handoff", "enabled": false}
   ],
@@ -372,6 +472,8 @@ mod tests {
         );
         assert_eq!(saved.hooks.spool_max_bytes, 4096);
         assert_eq!(saved.hooks.spool_max_files, 2);
+        assert_eq!(saved.ui.language, UiLanguage::ZhHans);
+        assert_eq!(saved.ui.theme, UiThemeName::Gruvbox);
         assert_eq!(saved.compiler_presets.len(), 1);
         assert!(!saved.compiler_presets[0].enabled);
         assert_eq!(saved.ssh_hosts.len(), 1);
@@ -409,6 +511,7 @@ mod tests {
         assert_eq!(saved.last_target, Some(CliTool::Hermes));
         assert_eq!(saved.default_compiler.as_deref(), Some("handoff"));
         assert!(!saved.hooks.enabled);
+        assert_eq!(saved.ui, UiPreferencesConfig::default());
         assert_eq!(saved.compiler_presets.len(), 1);
         assert_eq!(saved.ssh_hosts.len(), 1);
         assert_eq!(saved.starred_sessions, ["codex:abc", "claude:def"]);
@@ -425,6 +528,7 @@ mod tests {
             &path,
             r#"{
   "hooks": {"enabled": true, "spool_path": "/tmp/moonbox/events.jsonl"},
+  "ui": {"language": "zh_hans", "theme": "tokyo-night"},
   "ssh_hosts": [
     {"name": "prod", "host": "prod.internal"}
   ],
@@ -433,7 +537,15 @@ mod tests {
         )
         .expect("write config");
 
-        let hooks = set_smart_enter_tmux_to_path(&path, true).expect("save smart enter");
+        let (_, hooks) = save_ui_preferences_and_smart_enter_to_path(
+            &path,
+            UiPreferencesConfig {
+                language: UiLanguage::ZhHans,
+                theme: UiThemeName::TokyoNight,
+            },
+            true,
+        )
+        .expect("save smart enter");
         let saved = load_user_config_from_path(&path).expect("saved");
 
         assert!(hooks.enabled);
@@ -444,6 +556,97 @@ mod tests {
             saved.hooks.spool_path.as_deref(),
             Some("/tmp/moonbox/events.jsonl")
         );
+        assert_eq!(saved.ui.language, UiLanguage::ZhHans);
+        assert_eq!(saved.ui.theme, UiThemeName::TokyoNight);
+        assert_eq!(saved.ssh_hosts[0].name, "prod");
+        assert_eq!(saved.starred_sessions, ["codex:abc"]);
+    }
+
+    #[test]
+    fn save_ui_preferences_preserves_other_config() {
+        let path = env::temp_dir().join(format!(
+            "moonbox-config-ui-prefs-{}.json",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        fs::write(
+            &path,
+            r#"{
+  "hooks": {"enabled": true, "smart_enter_tmux": true, "spool_path": "/tmp/moonbox/events.jsonl"},
+  "compiler_presets": [
+    {"id": "handoff", "command": "/bin/moonbox-handoff"}
+  ],
+  "ssh_hosts": [
+    {"name": "prod", "host": "prod.internal"}
+  ],
+  "starred_sessions": ["codex:abc"]
+}"#,
+        )
+        .expect("write config");
+
+        let ui = save_ui_preferences_config_to_path(
+            &path,
+            UiPreferencesConfig {
+                language: UiLanguage::ZhHans,
+                theme: UiThemeName::TokyoNight,
+            },
+        )
+        .expect("save ui preferences");
+        let saved = load_user_config_from_path(&path).expect("saved");
+
+        assert_eq!(ui.language, UiLanguage::ZhHans);
+        assert_eq!(ui.theme, UiThemeName::TokyoNight);
+        assert!(saved.hooks.enabled);
+        assert!(saved.hooks.smart_enter_tmux);
+        assert_eq!(
+            saved.hooks.spool_path.as_deref(),
+            Some("/tmp/moonbox/events.jsonl")
+        );
+        assert_eq!(saved.compiler_presets[0].id, "handoff");
+        assert_eq!(saved.ssh_hosts[0].name, "prod");
+        assert_eq!(saved.starred_sessions, ["codex:abc"]);
+    }
+
+    #[test]
+    fn save_ui_preferences_and_smart_enter_preserves_other_config() {
+        let path = env::temp_dir().join(format!(
+            "moonbox-config-ui-smart-{}.json",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        fs::write(
+            &path,
+            r#"{
+  "hooks": {"enabled": true, "smart_enter_tmux": false, "spool_path": "/tmp/moonbox/events.jsonl"},
+  "compiler_presets": [
+    {"id": "handoff", "command": "/bin/moonbox-handoff"}
+  ],
+  "ssh_hosts": [
+    {"name": "prod", "host": "prod.internal"}
+  ],
+  "starred_sessions": ["codex:abc"]
+}"#,
+        )
+        .expect("write config");
+
+        let (ui, hooks) = save_ui_preferences_and_smart_enter_to_path(
+            &path,
+            UiPreferencesConfig {
+                language: UiLanguage::ZhHans,
+                theme: UiThemeName::Gruvbox,
+            },
+            true,
+        )
+        .expect("save ui preferences and smart enter");
+        let saved = load_user_config_from_path(&path).expect("saved");
+
+        assert_eq!(ui.language, UiLanguage::ZhHans);
+        assert_eq!(ui.theme, UiThemeName::Gruvbox);
+        assert!(hooks.enabled);
+        assert!(hooks.smart_enter_tmux);
+        assert_eq!(saved.ui.language, UiLanguage::ZhHans);
+        assert_eq!(saved.ui.theme, UiThemeName::Gruvbox);
+        assert_eq!(saved.compiler_presets[0].id, "handoff");
         assert_eq!(saved.ssh_hosts[0].name, "prod");
         assert_eq!(saved.starred_sessions, ["codex:abc"]);
     }

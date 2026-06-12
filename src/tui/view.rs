@@ -13,7 +13,7 @@ use ratatui::{
 use crate::{
     app::{
         App, CommandPaletteEntry, DATA_SPACE_CONFIG_FIELD_COUNT, EnterRouteKind, Focus,
-        HandoffTrailFrame, HookWaitingItem,
+        HandoffTrailFrame, HookWaitingItem, SettingsField,
     },
     core::image_preview::{ImagePreviewStatus, PreviewCell, PreviewRgb, TimelineImagePreview},
     core::model::{
@@ -25,12 +25,16 @@ use crate::{
     core::{compiler, hooks},
 };
 
-use super::theme;
+use super::{
+    i18n::{self, Text},
+    theme,
+};
 
 pub fn render(frame: &mut Frame, app: &App) {
+    let _theme = theme::use_current(app.effective_theme());
     let area = frame.area();
     frame.render_widget(
-        Block::default().style(Style::default().fg(theme::TEXT)),
+        Block::default().style(Style::default().fg(theme::text())),
         area,
     );
 
@@ -106,35 +110,32 @@ pub fn render(frame: &mut Frame, app: &App) {
 pub fn render_loading(frame: &mut Frame, tick: usize) {
     let area = frame.area();
     frame.render_widget(
-        Block::default().style(Style::default().fg(theme::TEXT)),
+        Block::default().style(Style::default().fg(theme::text())),
         area,
     );
     let root = centered(area, 52, 32);
     let spinner = ["|", "/", "-", "\\"][tick % 4];
     let lines = vec![
-        Line::from(vec![
-            Span::styled(
-                " MOONBOX ",
-                Style::default()
-                    .fg(theme::TEXT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("月光宝盒", Style::default().fg(theme::MUTED)),
-        ]),
+        Line::from(vec![Span::styled(
+            " MOONBOX ",
+            Style::default()
+                .fg(theme::text())
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::raw(""),
         Line::from(vec![
-            Span::styled(spinner, Style::default().fg(theme::GOLD)),
+            Span::styled(spinner, Style::default().fg(theme::gold())),
             Span::raw(" indexing source sessions"),
         ]),
         Line::from(vec![
             Span::raw("   bounded scan "),
-            Span::styled("active", Style::default().fg(theme::GREEN)),
+            Span::styled("active", Style::default().fg(theme::green())),
         ]),
         Line::raw(""),
         Line::from(vec![
-            Span::styled("q", Style::default().fg(theme::BLUE)),
+            Span::styled("q", Style::default().fg(theme::blue())),
             Span::raw(" quit   "),
-            Span::styled("ctrl-c", Style::default().fg(theme::BLUE)),
+            Span::styled("ctrl-c", Style::default().fg(theme::blue())),
             Span::raw(" quit"),
         ]),
     ];
@@ -149,21 +150,24 @@ pub fn render_loading(frame: &mut Frame, tick: usize) {
 fn render_header(frame: &mut Frame, area: Rect, app: &App) {
     let preflight = preflight_summary(app);
 
-    let title = Line::from(header_title_spans(area.width));
+    let title = Line::from(header_title_spans(area.width, app.effective_language()));
     let state = Line::from(vec![
         Span::raw("Filter "),
-        Span::styled("[ ]", Style::default().fg(theme::MUTED)),
+        Span::styled("[ ]", Style::default().fg(theme::muted())),
         Span::raw(": "),
         Span::styled(
             filter_label(app),
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::blue())
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw("   Data: "),
         Span::styled(data_space_header_label(app), data_space_header_style(app)),
         Span::raw("   Skill: "),
-        Span::styled(&app.data.capsule.compiler, Style::default().fg(theme::CYAN)),
+        Span::styled(
+            &app.data.capsule.compiler,
+            Style::default().fg(theme::cyan()),
+        ),
     ]);
     let token_budget = app
         .current_session()
@@ -174,7 +178,7 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
         Span::styled(
             token_budget,
             Style::default()
-                .fg(theme::GOLD)
+                .fg(theme::gold())
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw("   Pre-flight: "),
@@ -227,22 +231,25 @@ fn data_space_header_label(app: &App) -> String {
 
 fn data_space_header_style(app: &App) -> Style {
     let color = if app.current_data_space().is_local() {
-        theme::CYAN
+        theme::cyan()
     } else {
-        theme::ORANGE
+        theme::orange()
     };
     Style::default().fg(color).add_modifier(Modifier::BOLD)
 }
 
-fn header_title_spans(width: u16) -> Vec<Span<'static>> {
+fn header_title_spans(width: u16, language: crate::core::config::UiLanguage) -> Vec<Span<'static>> {
     let mut spans = vec![Span::styled(
         " MOONBOX ",
         Style::default()
-            .fg(theme::TEXT)
+            .fg(theme::text())
             .add_modifier(Modifier::BOLD),
     )];
-    if width >= 120 {
-        spans.push(Span::styled("月光宝盒", Style::default().fg(theme::MUTED)));
+    if width >= 120 && language == crate::core::config::UiLanguage::ZhHans {
+        spans.push(Span::styled(
+            "月光宝盒",
+            Style::default().fg(theme::muted()),
+        ));
     }
     spans
 }
@@ -265,9 +272,9 @@ impl PreflightStatus {
 
     fn color(self) -> Color {
         match self {
-            Self::Pass => theme::GREEN,
-            Self::Warn => theme::GOLD,
-            Self::Blocked => theme::RED,
+            Self::Pass => theme::green(),
+            Self::Warn => theme::gold(),
+            Self::Blocked => theme::red(),
         }
     }
 }
@@ -290,9 +297,9 @@ impl PreflightConfidence {
 
     fn color(self) -> Color {
         match self {
-            Self::Strong => theme::CONFIDENCE_STRONG,
-            Self::Medium => theme::CONFIDENCE_MEDIUM,
-            Self::Weak => theme::CONFIDENCE_WEAK,
+            Self::Strong => theme::confidence_strong(),
+            Self::Medium => theme::confidence_medium(),
+            Self::Weak => theme::confidence_weak(),
         }
     }
 }
@@ -415,23 +422,29 @@ fn render_waiting_queue(frame: &mut Frame, area: Rect, waiting: &[HookWaitingIte
                 Span::styled(
                     hooks::age_label_ms(item.waiting_for_ms),
                     Style::default()
-                        .fg(theme::GOLD)
+                        .fg(theme::gold())
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw("  "),
                 Span::styled(
                     review_snippet(&item.reason, 44),
-                    Style::default().fg(theme::TEXT),
+                    Style::default().fg(theme::text()),
                 ),
-                Span::styled("  ·  ", Style::default().fg(theme::BORDER)),
+                Span::styled("  ·  ", Style::default().fg(theme::border())),
                 Span::styled(
                     review_snippet(&item.title, 36),
-                    Style::default().fg(theme::MUTED),
+                    Style::default().fg(theme::muted()),
                 ),
             ];
             if let Some(pane) = &item.tmux_pane {
-                spans.push(Span::styled("  pane ", Style::default().fg(theme::BORDER)));
-                spans.push(Span::styled(pane.clone(), Style::default().fg(theme::CYAN)));
+                spans.push(Span::styled(
+                    "  pane ",
+                    Style::default().fg(theme::border()),
+                ));
+                spans.push(Span::styled(
+                    pane.clone(),
+                    Style::default().fg(theme::cyan()),
+                ));
             }
             Line::from(spans)
         })
@@ -453,25 +466,28 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
         let mut lines = vec![
             Line::from(Span::styled(
                 "No sessions match",
-                Style::default().fg(theme::MUTED),
+                Style::default().fg(theme::muted()),
             )),
             Line::from(vec![
-                Span::styled("Filter: ", Style::default().fg(theme::MUTED)),
-                Span::styled(app.session_filter.label(), Style::default().fg(theme::CYAN)),
+                Span::styled("Filter: ", Style::default().fg(theme::muted())),
+                Span::styled(
+                    app.session_filter.label(),
+                    Style::default().fg(theme::cyan()),
+                ),
             ]),
         ];
         if !app.search_query.is_empty() {
             lines.push(Line::from(vec![
-                Span::styled("Query: ", Style::default().fg(theme::MUTED)),
+                Span::styled("Query: ", Style::default().fg(theme::muted())),
                 Span::styled(
                     format!("/{}", app.search_query),
-                    Style::default().fg(theme::CYAN),
+                    Style::default().fg(theme::cyan()),
                 ),
             ]));
         }
         lines.push(Line::from(Span::styled(
             "Press a to clear",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         )));
         vec![ListItem::new(lines)]
     } else {
@@ -485,7 +501,7 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
                     Span::styled(
                         "▸",
                         Style::default()
-                            .fg(theme::TEXT)
+                            .fg(theme::text())
                             .add_modifier(Modifier::BOLD),
                     )
                 } else {
@@ -549,7 +565,7 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
         .highlight_symbol("")
         .highlight_style(
             Style::default()
-                .fg(theme::TEXT)
+                .fg(theme::text())
                 .add_modifier(Modifier::BOLD),
         );
     frame.render_stateful_widget(list, area, &mut state);
@@ -562,10 +578,10 @@ fn compile_status_label(status: &str) -> String {
 fn session_title_style(selected: bool) -> Style {
     if selected {
         Style::default()
-            .fg(theme::TEXT)
+            .fg(theme::text())
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(theme::MUTED)
+        Style::default().fg(theme::muted())
     }
 }
 
@@ -578,15 +594,19 @@ fn session_row_markers(
         markers.push(Span::styled(
             "*",
             Style::default()
-                .fg(theme::GOLD)
+                .fg(theme::gold())
                 .add_modifier(Modifier::BOLD),
         ));
     }
     match session.status {
-        SessionStatus::Warning => markers.push(Span::styled("▲", Style::default().fg(theme::GOLD))),
+        SessionStatus::Warning => {
+            markers.push(Span::styled("▲", Style::default().fg(theme::gold())))
+        }
         SessionStatus::Failed => markers.push(Span::styled(
             "!",
-            Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::red())
+                .add_modifier(Modifier::BOLD),
         )),
         SessionStatus::Healthy => {}
     }
@@ -616,27 +636,27 @@ fn session_list_secondary_line(
         .unwrap_or_else(|| session.updated.clone());
     let mut spans = vec![Span::raw("    ")];
     let metric_style = if selected {
-        Style::default().fg(theme::CYAN)
+        Style::default().fg(theme::cyan())
     } else {
-        Style::default().fg(theme::MUTED)
+        Style::default().fg(theme::muted())
     };
     spans.push(Span::styled(
         session_inventory_metric(session),
         metric_style,
     ));
-    spans.push(Span::styled(" · ", Style::default().fg(theme::BORDER)));
-    spans.push(Span::styled(updated, Style::default().fg(theme::MUTED)));
+    spans.push(Span::styled(" · ", Style::default().fg(theme::border())));
+    spans.push(Span::styled(updated, Style::default().fg(theme::muted())));
     if width >= 34 && (app.hooks_enabled() || app.smart_enter_tmux_enabled()) {
         let route = app.enter_route_preview(session);
-        spans.push(Span::styled(" · ", Style::default().fg(theme::BORDER)));
-        spans.push(Span::styled("Enter ", Style::default().fg(theme::BORDER)));
+        spans.push(Span::styled(" · ", Style::default().fg(theme::border())));
+        spans.push(Span::styled("Enter ", Style::default().fg(theme::border())));
         spans.push(Span::styled(route.label, enter_route_style(route.kind)));
     }
     if width >= 52
         && let Some(live) = app.hook_live_for_session(session)
     {
         let max_live = usize::from(width.saturating_sub(28)).clamp(10, 34);
-        spans.push(Span::styled(" · ", Style::default().fg(theme::BORDER)));
+        spans.push(Span::styled(" · ", Style::default().fg(theme::border())));
         spans.push(Span::styled(
             review_snippet(&live.summary, max_live),
             session_live_text_style(live.status),
@@ -649,10 +669,10 @@ fn session_list_secondary_line(
             .filter(|branch| !branch.is_empty())
     {
         let max_branch = usize::from(width.saturating_sub(34)).clamp(8, 28);
-        spans.push(Span::styled(" · ", Style::default().fg(theme::BORDER)));
+        spans.push(Span::styled(" · ", Style::default().fg(theme::border())));
         spans.push(Span::styled(
             review_snippet(branch, max_branch),
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         ));
     }
     Line::from(spans)
@@ -667,21 +687,21 @@ fn session_live_badge(live: &hooks::HookSessionLiveInfo) -> Span<'static> {
 
 fn session_live_badge_style(status: hooks::HookSessionStatus) -> Style {
     match status {
-        hooks::HookSessionStatus::Running => Style::default().fg(theme::GREEN),
+        hooks::HookSessionStatus::Running => Style::default().fg(theme::green()),
         hooks::HookSessionStatus::Waiting => Style::default()
-            .fg(theme::GOLD)
+            .fg(theme::gold())
             .add_modifier(Modifier::BOLD),
-        hooks::HookSessionStatus::Idle => Style::default().fg(theme::MUTED),
-        hooks::HookSessionStatus::Dead => Style::default().fg(theme::RED),
+        hooks::HookSessionStatus::Idle => Style::default().fg(theme::muted()),
+        hooks::HookSessionStatus::Dead => Style::default().fg(theme::red()),
     }
 }
 
 fn session_live_text_style(status: hooks::HookSessionStatus) -> Style {
     match status {
-        hooks::HookSessionStatus::Running => Style::default().fg(theme::GREEN),
-        hooks::HookSessionStatus::Waiting => Style::default().fg(theme::GOLD),
-        hooks::HookSessionStatus::Idle => Style::default().fg(theme::MUTED),
-        hooks::HookSessionStatus::Dead => Style::default().fg(theme::RED),
+        hooks::HookSessionStatus::Running => Style::default().fg(theme::green()),
+        hooks::HookSessionStatus::Waiting => Style::default().fg(theme::gold()),
+        hooks::HookSessionStatus::Idle => Style::default().fg(theme::muted()),
+        hooks::HookSessionStatus::Dead => Style::default().fg(theme::red()),
     }
 }
 
@@ -906,19 +926,19 @@ fn source_tool_style(tool: CliTool) -> Style {
 
 fn enter_route_style(kind: EnterRouteKind) -> Style {
     let color = match kind {
-        EnterRouteKind::Jump => theme::GREEN,
-        EnterRouteKind::Handoff => theme::GOLD,
-        EnterRouteKind::Unavailable => theme::RED,
-        EnterRouteKind::Disabled | EnterRouteKind::Resume => theme::MUTED,
+        EnterRouteKind::Jump => theme::green(),
+        EnterRouteKind::Handoff => theme::gold(),
+        EnterRouteKind::Unavailable => theme::red(),
+        EnterRouteKind::Disabled | EnterRouteKind::Resume => theme::muted(),
     };
     Style::default().fg(color).add_modifier(Modifier::BOLD)
 }
 
 fn source_tool_color(tool: CliTool) -> Color {
     match tool {
-        CliTool::Codex => theme::BLUE,
-        CliTool::Claude => theme::PURPLE,
-        CliTool::Hermes => theme::ORANGE,
+        CliTool::Codex => theme::blue(),
+        CliTool::Claude => theme::purple(),
+        CliTool::Hermes => theme::orange(),
     }
 }
 
@@ -968,19 +988,23 @@ fn format_source_size(bytes: u64) -> String {
 
 fn session_health_style(status: SessionStatus) -> Style {
     match status {
-        SessionStatus::Healthy => Style::default().fg(theme::GREEN),
-        SessionStatus::Warning => Style::default().fg(theme::GOLD),
-        SessionStatus::Failed => Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+        SessionStatus::Healthy => Style::default().fg(theme::green()),
+        SessionStatus::Warning => Style::default().fg(theme::gold()),
+        SessionStatus::Failed => Style::default()
+            .fg(theme::red())
+            .add_modifier(Modifier::BOLD),
     }
 }
 
 fn source_provenance_style(provenance: SourceProvenance) -> Style {
     match provenance {
         SourceProvenance::Real => Style::default()
-            .fg(theme::GREEN)
+            .fg(theme::green())
             .add_modifier(Modifier::BOLD),
-        SourceProvenance::Fixture => Style::default().fg(theme::BLUE),
-        SourceProvenance::Missing => Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+        SourceProvenance::Fixture => Style::default().fg(theme::blue()),
+        SourceProvenance::Missing => Style::default()
+            .fg(theme::red())
+            .add_modifier(Modifier::BOLD),
     }
 }
 
@@ -1035,10 +1059,10 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
         };
         let title_style = if active {
             Style::default()
-                .fg(theme::TEXT)
+                .fg(theme::text())
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(theme::TEXT)
+            Style::default().fg(theme::text())
         };
         let time = timeline_group_time(group);
         lines.push(timeline_header_line(
@@ -1075,7 +1099,7 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
     if lines.is_empty() {
         lines.push(Line::from(Span::styled(
             "No user or assistant turns loaded",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         )));
     }
 
@@ -1155,40 +1179,44 @@ fn timeline_group_title<'a>(group: &TimelineGroup<'a>) -> Option<&'a str> {
 }
 
 fn timeline_group_accent(color: Color, is_rewind: bool) -> Color {
-    if is_rewind { theme::ROLE_REWIND } else { color }
+    if is_rewind {
+        theme::role_rewind()
+    } else {
+        color
+    }
 }
 
 fn timeline_prefix_style(active: bool, accent: Color) -> Style {
     if active {
         Style::default().fg(accent).add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(theme::MUTED)
+        Style::default().fg(theme::muted())
     }
 }
 
 fn timeline_marker_style(active: bool, selected: bool, is_rewind: bool) -> Style {
     if active {
         Style::default()
-            .fg(theme::CYAN)
+            .fg(theme::cyan())
             .add_modifier(Modifier::BOLD)
     } else if is_rewind {
         Style::default()
-            .fg(theme::ROLE_REWIND)
+            .fg(theme::role_rewind())
             .add_modifier(Modifier::BOLD)
     } else if selected {
         Style::default()
-            .fg(theme::TEXT)
+            .fg(theme::text())
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(theme::MUTED)
+        Style::default().fg(theme::muted())
     }
 }
 
 fn timeline_detail_style(active: bool, is_rewind: bool, kind: TimelineKind) -> Style {
     if active || is_rewind || kind == TimelineKind::RewindPoint {
-        Style::default().fg(theme::TEXT)
+        Style::default().fg(theme::text())
     } else {
-        Style::default().fg(theme::MUTED)
+        Style::default().fg(theme::muted())
     }
 }
 
@@ -1436,20 +1464,20 @@ fn timeline_group_label(
     source: CliTool,
 ) -> (String, Color) {
     if is_rewind {
-        return ("REWIND".into(), theme::GOLD);
+        return ("REWIND".into(), theme::gold());
     }
     match group.kind() {
-        TimelineKind::User => ("USER".into(), theme::BLUE),
+        TimelineKind::User => ("USER".into(), theme::blue()),
         TimelineKind::Assistant if group.len() > 1 => (
             format!("{} x{}", assistant_source_label(source), group.len()),
-            theme::GOLD,
+            theme::gold(),
         ),
-        TimelineKind::Assistant => (assistant_source_label(source).into(), theme::GOLD),
-        TimelineKind::Tool => ("TOOL".into(), theme::MUTED),
-        TimelineKind::Compact => ("COMPACT".into(), theme::CYAN),
-        TimelineKind::Error => ("ERROR".into(), theme::RED),
-        TimelineKind::GitDiff => ("GIT DIFF".into(), theme::GREEN),
-        TimelineKind::RewindPoint => ("REWIND".into(), theme::GOLD),
+        TimelineKind::Assistant => (assistant_source_label(source).into(), theme::gold()),
+        TimelineKind::Tool => ("TOOL".into(), theme::muted()),
+        TimelineKind::Compact => ("COMPACT".into(), theme::cyan()),
+        TimelineKind::Error => ("ERROR".into(), theme::red()),
+        TimelineKind::GitDiff => ("GIT DIFF".into(), theme::green()),
+        TimelineKind::RewindPoint => ("REWIND".into(), theme::gold()),
     }
 }
 
@@ -1491,16 +1519,16 @@ fn render_capsule(frame: &mut Frame, area: Rect, app: &App) {
         lines.push(Line::from(Span::styled(
             "Loading",
             Style::default()
-                .fg(theme::GOLD)
+                .fg(theme::gold())
                 .add_modifier(Modifier::BOLD),
         )));
         lines.push(Line::from(Span::styled(
             "  Hydrating timeline and capsule preview for the selected session.",
-            Style::default().fg(theme::TEXT),
+            Style::default().fg(theme::text()),
         )));
         lines.push(Line::from(Span::styled(
             "  Launch, verify, compile, and rewind wait until this completes.",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         )));
         frame.render_widget(
             Paragraph::new(lines)
@@ -1535,16 +1563,16 @@ fn compact_capsule_lines(capsule: &WorkCapsule) -> Vec<Line<'static>> {
         Line::from(Span::styled(
             "Handoff Snapshot",
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::blue())
                 .add_modifier(Modifier::BOLD),
         )),
-        review_label_line("State", capsule.state.clone(), theme::GOLD),
+        review_label_line("State", capsule.state.clone(), theme::gold()),
         review_label_line(
             "Rewind",
             review_snippet(&capsule.rewind_point, 96),
-            theme::GOLD,
+            theme::gold(),
         ),
-        review_label_line("Goal", review_snippet(&capsule.goal, 96), theme::BLUE),
+        review_label_line("Goal", review_snippet(&capsule.goal, 96), theme::blue()),
         review_label_line(
             "Risk",
             capsule
@@ -1552,11 +1580,11 @@ fn compact_capsule_lines(capsule: &WorkCapsule) -> Vec<Line<'static>> {
                 .first()
                 .map(|risk| review_snippet(risk, 96))
                 .unwrap_or_else(|| "none".into()),
-            theme::RED,
+            theme::red(),
         ),
         Line::from(Span::styled(
             "Press c to refresh and review the full handoff.",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         )),
     ]
 }
@@ -1567,12 +1595,12 @@ fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
             Line::from(Span::styled(
                 "Real Session Metadata",
                 Style::default()
-                    .fg(theme::BLUE)
+                    .fg(theme::blue())
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(Span::styled(
                 "  No session selected",
-                Style::default().fg(theme::MUTED),
+                Style::default().fg(theme::muted()),
             )),
         ];
     };
@@ -1582,13 +1610,13 @@ fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
         Line::from(Span::styled(
             "Real Session Metadata",
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::blue())
                 .add_modifier(Modifier::BOLD),
         )),
         metadata_line(
             "Raw Title",
             &session.title,
-            Style::default().fg(theme::TEXT),
+            Style::default().fg(theme::text()),
         ),
         metadata_line(
             "Source",
@@ -1599,7 +1627,7 @@ fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
         metadata_line(
             "Portrait",
             &session_portrait_summary(app, session),
-            Style::default().fg(theme::CYAN),
+            Style::default().fg(theme::cyan()),
         ),
     ];
 
@@ -1609,33 +1637,33 @@ fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
         metadata_line(
             "Updated",
             &session.updated,
-            Style::default().fg(theme::BLUE),
+            Style::default().fg(theme::blue()),
         ),
         metadata_line(
             "Runtime",
             &session_runtime_detail(session),
             session_runtime_style(session.runtime_status),
         ),
-        metadata_line("Cwd", &session.cwd, Style::default().fg(theme::TEXT)),
+        metadata_line("Cwd", &session.cwd, Style::default().fg(theme::text())),
         metadata_line(
             "Branch",
             session.branch.as_deref().unwrap_or("-"),
-            Style::default().fg(theme::CYAN),
+            Style::default().fg(theme::cyan()),
         ),
         metadata_line(
             "Timeline Items",
             &session.event_count.to_string(),
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         ),
         metadata_line(
             "Tokens",
             &format_token_count(session.token_count),
-            Style::default().fg(theme::GOLD),
+            Style::default().fg(theme::gold()),
         ),
         metadata_line(
             "Raw Size",
             &format_source_size_opt(session.source_size_bytes),
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         ),
         metadata_line(
             "Source Health",
@@ -1647,7 +1675,7 @@ fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
         lines.push(metadata_line(
             "Path",
             path,
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         ));
     }
     if zoomed {
@@ -1676,13 +1704,13 @@ fn session_anatomy_summary_lines(
                 format_source_size(compact.tail_bytes),
                 compact.tail_lines
             ),
-            Style::default().fg(theme::GOLD),
+            Style::default().fg(theme::gold()),
         ));
     } else if anatomy.status != SessionAnatomyStatus::Missing {
         lines.push(metadata_line(
             "Context Window",
             "no compact boundary in analyzed scope",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         ));
     }
     if let Some(signal) = anatomy
@@ -1705,12 +1733,12 @@ fn session_anatomy_zoom_lines(session: &crate::core::model::SessionSummary) -> V
         lines.push(Line::from(Span::styled(
             "Session Anatomy",
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::blue())
                 .add_modifier(Modifier::BOLD),
         )));
         lines.push(Line::from(Span::styled(
             "No anatomy has been loaded for this session yet.",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         )));
         return lines;
     };
@@ -1718,7 +1746,7 @@ fn session_anatomy_zoom_lines(session: &crate::core::model::SessionSummary) -> V
     lines.push(Line::from(Span::styled(
         "Session Anatomy",
         Style::default()
-            .fg(theme::BLUE)
+            .fg(theme::blue())
             .add_modifier(Modifier::BOLD),
     )));
     lines.push(review_label_line(
@@ -1729,7 +1757,7 @@ fn session_anatomy_zoom_lines(session: &crate::core::model::SessionSummary) -> V
             format_source_size(anatomy.analyzed_bytes),
             if anatomy.sampled { " · sampled" } else { "" }
         ),
-        theme::CYAN,
+        theme::cyan(),
     ));
     if let Some(lines_count) = anatomy.total_lines {
         lines.push(review_label_line(
@@ -1738,13 +1766,13 @@ fn session_anatomy_zoom_lines(session: &crate::core::model::SessionSummary) -> V
                 "{lines_count} parsed · {} malformed",
                 anatomy.malformed_lines
             ),
-            theme::MUTED,
+            theme::muted(),
         ));
     } else {
         lines.push(review_label_line(
             "Rows",
             format!("sample parsed · {} malformed", anatomy.malformed_lines),
-            theme::MUTED,
+            theme::muted(),
         ));
     }
 
@@ -1758,12 +1786,12 @@ fn session_anatomy_zoom_lines(session: &crate::core::model::SessionSummary) -> V
                     .fg(value_signal_color(signal.rank))
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(signal.value.clone(), Style::default().fg(theme::TEXT)),
+            Span::styled(signal.value.clone(), Style::default().fg(theme::text())),
         ]));
         if !signal.detail.is_empty() {
             lines.push(Line::from(Span::styled(
                 format!("   {}", review_snippet(&signal.detail, 128)),
-                Style::default().fg(theme::MUTED),
+                Style::default().fg(theme::muted()),
             )));
         }
     }
@@ -1777,7 +1805,7 @@ fn session_anatomy_zoom_lines(session: &crate::core::model::SessionSummary) -> V
                 Some(line) => format!("{} at line {line}", compact.label),
                 None => format!("{} in analyzed sample", compact.label),
             },
-            theme::GOLD,
+            theme::gold(),
         ));
         lines.push(review_label_line(
             "Active Tail",
@@ -1786,7 +1814,7 @@ fn session_anatomy_zoom_lines(session: &crate::core::model::SessionSummary) -> V
                 format_source_size(compact.tail_bytes),
                 plural_rows(compact.tail_lines)
             ),
-            theme::GOLD,
+            theme::gold(),
         ));
     }
 
@@ -1802,7 +1830,7 @@ fn session_anatomy_zoom_lines(session: &crate::core::model::SessionSummary) -> V
                 Span::styled(
                     format!("{}: ", sidecar.kind),
                     Style::default()
-                        .fg(theme::PURPLE)
+                        .fg(theme::purple())
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
@@ -1811,7 +1839,7 @@ fn session_anatomy_zoom_lines(session: &crate::core::model::SessionSummary) -> V
                         format_source_size(sidecar.bytes),
                         plural_files(sidecar.file_count)
                     ),
-                    Style::default().fg(theme::TEXT),
+                    Style::default().fg(theme::text()),
                 ),
             ]));
         }
@@ -1823,7 +1851,7 @@ fn session_anatomy_zoom_lines(session: &crate::core::model::SessionSummary) -> V
         for note in &anatomy.notes {
             lines.push(Line::from(Span::styled(
                 format!("- {}", review_snippet(note, 128)),
-                Style::default().fg(theme::MUTED),
+                Style::default().fg(theme::muted()),
             )));
         }
     }
@@ -1841,7 +1869,7 @@ fn append_metric_section(
     if metrics.is_empty() {
         lines.push(Line::from(Span::styled(
             "No rows in analyzed scope.",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         )));
         return;
     }
@@ -1850,7 +1878,7 @@ fn append_metric_section(
             Span::styled(
                 format!("{}: ", metric.label),
                 Style::default()
-                    .fg(theme::CYAN)
+                    .fg(theme::cyan())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -1859,7 +1887,7 @@ fn append_metric_section(
                     format_source_size(metric.bytes),
                     plural_rows(metric.count)
                 ),
-                Style::default().fg(theme::TEXT),
+                Style::default().fg(theme::text()),
             ),
         ]));
     }
@@ -1869,7 +1897,7 @@ fn section_header(title: &'static str) -> Line<'static> {
     Line::from(Span::styled(
         title,
         Style::default()
-            .fg(theme::BLUE)
+            .fg(theme::blue())
             .add_modifier(Modifier::BOLD),
     ))
 }
@@ -1890,21 +1918,21 @@ fn anatomy_status_text(status: SessionAnatomyStatus, sampled: bool) -> String {
 
 fn anatomy_status_style(status: SessionAnatomyStatus) -> Style {
     match status {
-        SessionAnatomyStatus::Ready => Style::default().fg(theme::GREEN),
-        SessionAnatomyStatus::Partial => Style::default().fg(theme::GOLD),
-        SessionAnatomyStatus::Missing => Style::default().fg(theme::MUTED),
-        SessionAnatomyStatus::Failed => {
-            Style::default().fg(theme::RED).add_modifier(Modifier::BOLD)
-        }
+        SessionAnatomyStatus::Ready => Style::default().fg(theme::green()),
+        SessionAnatomyStatus::Partial => Style::default().fg(theme::gold()),
+        SessionAnatomyStatus::Missing => Style::default().fg(theme::muted()),
+        SessionAnatomyStatus::Failed => Style::default()
+            .fg(theme::red())
+            .add_modifier(Modifier::BOLD),
     }
 }
 
 fn value_signal_color(rank: u8) -> Color {
     match rank {
-        1 => theme::GOLD,
-        2 => theme::GREEN,
-        3 => theme::CYAN,
-        _ => theme::MUTED,
+        1 => theme::gold(),
+        2 => theme::green(),
+        3 => theme::cyan(),
+        _ => theme::muted(),
     }
 }
 
@@ -1962,16 +1990,16 @@ fn source_fidelity_detail(report: &SourceAdapterReport) -> String {
 
 fn source_fidelity_style(status: SourceFidelityStatus) -> Style {
     match status {
-        SourceFidelityStatus::FullFidelity => Style::default().fg(theme::GREEN),
-        SourceFidelityStatus::Partial => Style::default().fg(theme::GOLD),
-        SourceFidelityStatus::Fallback => Style::default().fg(theme::ORANGE),
-        SourceFidelityStatus::Missing => Style::default().fg(theme::RED),
+        SourceFidelityStatus::FullFidelity => Style::default().fg(theme::green()),
+        SourceFidelityStatus::Partial => Style::default().fg(theme::gold()),
+        SourceFidelityStatus::Fallback => Style::default().fg(theme::orange()),
+        SourceFidelityStatus::Missing => Style::default().fg(theme::red()),
     }
 }
 
 fn metadata_line(label: &'static str, value: &str, style: Style) -> Line<'static> {
     Line::from(vec![
-        Span::styled(format!("{label}: "), Style::default().fg(theme::MUTED)),
+        Span::styled(format!("{label}: "), Style::default().fg(theme::muted())),
         Span::styled(value.to_owned(), style),
     ])
 }
@@ -1990,9 +2018,9 @@ fn session_runtime_detail(session: &crate::core::model::SessionSummary) -> Strin
 
 fn session_runtime_style(status: SessionRuntimeStatus) -> Style {
     match status {
-        SessionRuntimeStatus::Active => Style::default().fg(theme::GREEN),
-        SessionRuntimeStatus::Inactive => Style::default().fg(theme::MUTED),
-        SessionRuntimeStatus::Unknown => Style::default().fg(theme::GOLD),
+        SessionRuntimeStatus::Active => Style::default().fg(theme::green()),
+        SessionRuntimeStatus::Inactive => Style::default().fg(theme::muted()),
+        SessionRuntimeStatus::Unknown => Style::default().fg(theme::gold()),
     }
 }
 
@@ -2030,7 +2058,7 @@ fn handoff_path_line(app: &App, width: u16) -> Line<'static> {
                 source_tool_color(session.cli),
             )
         })
-        .unwrap_or_else(|| ("no session".into(), theme::MUTED));
+        .unwrap_or_else(|| ("no session".into(), theme::muted()));
     let rewind = format!("rewind {}", short_identifier(&app.rewind_event_id, 12));
     let target_cli = if app.show_launch {
         app.pending_target
@@ -2040,14 +2068,14 @@ fn handoff_path_line(app: &App, width: u16) -> Line<'static> {
     let target = format!("target {target_cli}");
     let nodes = [
         (session, source_color),
-        (rewind, theme::ROLE_REWIND),
-        (target, theme::ROLE_TARGET),
+        (rewind, theme::role_rewind()),
+        (target, theme::role_target()),
     ];
 
-    let mut spans = vec![Span::styled("   ", Style::default().fg(theme::MUTED))];
+    let mut spans = vec![Span::styled("   ", Style::default().fg(theme::muted()))];
     for (idx, (label, color)) in nodes.iter().enumerate() {
         if idx > 0 {
-            spans.push(Span::styled(" -> ", Style::default().fg(theme::BORDER)));
+            spans.push(Span::styled(" -> ", Style::default().fg(theme::border())));
         }
         spans.push(Span::styled(
             label.clone(),
@@ -2070,37 +2098,37 @@ fn handoff_trail_line(frame: HandoffTrailFrame) -> Line<'static> {
     };
     let source_style = if frame.step == 0 {
         Style::default()
-            .fg(theme::GOLD)
+            .fg(theme::gold())
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(theme::MUTED)
+        Style::default().fg(theme::muted())
     };
     let rewind_style = if (2..=3).contains(&frame.step) {
         Style::default()
-            .fg(theme::GOLD)
+            .fg(theme::gold())
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(theme::MUTED)
+        Style::default().fg(theme::muted())
     };
     let target_style = if frame.step >= 5 {
         Style::default()
-            .fg(theme::CYAN)
+            .fg(theme::cyan())
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(theme::MUTED)
+        Style::default().fg(theme::muted())
     };
     Line::from(vec![
-        Span::styled("   handoff trail  ", Style::default().fg(theme::MUTED)),
+        Span::styled("   handoff trail  ", Style::default().fg(theme::muted())),
         Span::styled("source", source_style),
-        Span::styled(arrow_one, Style::default().fg(theme::ROLE_REWIND)),
+        Span::styled(arrow_one, Style::default().fg(theme::role_rewind())),
         Span::styled("rewind", rewind_style),
-        Span::styled(arrow_two, Style::default().fg(theme::ROLE_TARGET)),
+        Span::styled(arrow_two, Style::default().fg(theme::role_target())),
         Span::styled("target", target_style),
-        Span::styled("  ", Style::default().fg(theme::BORDER)),
+        Span::styled("  ", Style::default().fg(theme::border())),
         Span::styled(
             frame.phase.label(),
             Style::default()
-                .fg(theme::ROLE_TARGET)
+                .fg(theme::role_target())
                 .add_modifier(Modifier::BOLD),
         ),
     ])
@@ -2110,7 +2138,7 @@ fn cwd_inventory_line(app: &App, width: u16) -> Line<'static> {
     let Some(session) = app.current_session() else {
         return Line::from(Span::styled(
             "   cwd: no session",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         ));
     };
     let codex = cwd_session_count(app, &session.cwd, CliTool::Codex);
@@ -2118,22 +2146,22 @@ fn cwd_inventory_line(app: &App, width: u16) -> Line<'static> {
     let hermes = cwd_session_count(app, &session.cwd, CliTool::Hermes);
     let max_path_chars = usize::from(width.saturating_sub(56)).clamp(12, 64);
     Line::from(vec![
-        Span::styled("   cwd: ", Style::default().fg(theme::MUTED)),
+        Span::styled("   cwd: ", Style::default().fg(theme::muted())),
         Span::styled(
             review_snippet(&session.cwd, max_path_chars),
-            Style::default().fg(theme::TEXT),
+            Style::default().fg(theme::text()),
         ),
-        Span::styled(" · ", Style::default().fg(theme::BORDER)),
+        Span::styled(" · ", Style::default().fg(theme::border())),
         Span::styled(
             format!("Codex {codex}"),
             Style::default().fg(source_tool_color(CliTool::Codex)),
         ),
-        Span::styled(" · ", Style::default().fg(theme::BORDER)),
+        Span::styled(" · ", Style::default().fg(theme::border())),
         Span::styled(
             format!("Claude {claude}"),
             Style::default().fg(source_tool_color(CliTool::Claude)),
         ),
-        Span::styled(" · ", Style::default().fg(theme::BORDER)),
+        Span::styled(" · ", Style::default().fg(theme::border())),
         Span::styled(
             format!("Hermes {hermes}"),
             Style::default().fg(source_tool_color(CliTool::Hermes)),
@@ -2172,10 +2200,10 @@ fn render_command_bar(frame: &mut Frame, area: Rect, app: &App) {
                 Span::styled(
                     prompt,
                     Style::default()
-                        .fg(theme::GOLD)
+                        .fg(theme::gold())
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(input, Style::default().fg(theme::TEXT)),
+                Span::styled(input, Style::default().fg(theme::text())),
             ]),
         ]
     } else if app.command_mode {
@@ -2202,7 +2230,7 @@ fn render_command_bar(frame: &mut Frame, area: Rect, app: &App) {
         Paragraph::new(lines).block(
             Block::default()
                 .borders(Borders::TOP)
-                .border_style(Style::default().fg(theme::BORDER))
+                .border_style(Style::default().fg(theme::border()))
                 .style(Style::default()),
         ),
         area,
@@ -2212,12 +2240,20 @@ fn render_command_bar(frame: &mut Frame, area: Rect, app: &App) {
 type KeyHint = (&'static str, &'static str);
 
 fn active_key_hints(app: &App) -> Vec<KeyHint> {
+    let language = app.effective_language();
     if app.show_launch {
         if app.is_launch_review_pending() {
-            return vec![("Esc/q", "隐藏"), ("wait", "后台生成")];
+            return vec![
+                ("Esc/q", i18n::text(language, Text::Back)),
+                ("wait", i18n::text(language, Text::WaitBackground)),
+            ];
         }
         if app.target_launch_result.is_some() {
-            return vec![("r", "再运行"), ("y", "复制命令"), ("Esc/q", "返回")];
+            return vec![
+                ("r", i18n::text(language, Text::Rerun)),
+                ("y", i18n::text(language, Text::CopyCommand)),
+                ("Esc/q", i18n::text(language, Text::Back)),
+            ];
         }
         if app.launch_review {
             let capsule = app.launch_capsule_for_target(app.pending_target);
@@ -2225,22 +2261,22 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
                 .validate_launch_for_target(app.pending_target)
                 .is_blocked()
             {
-                "不可运行"
+                i18n::text(language, Text::CannotRun)
             } else if compiler::compiler_is_builtin(&capsule.compiler)
                 && app
                     .current_session()
                     .is_some_and(|session| session.source_provenance != SourceProvenance::Fixture)
             {
-                "草稿禁用"
+                i18n::text(language, Text::DraftCannotRun)
             } else {
-                "运行"
+                i18n::text(language, Text::RunLocalTarget)
             };
             return vec![
                 ("r", run_hint),
-                ("y", "复制命令"),
-                ("gg/G", "跳转"),
-                ("PgUp/Dn", "滚动"),
-                ("Esc/q", "关闭"),
+                ("y", i18n::text(language, Text::CopyCommand)),
+                ("gg/G", "Jump"),
+                ("PgUp/Dn", "Scroll"),
+                ("Esc/q", i18n::text(language, Text::Back)),
             ];
         }
         if app.validate_launch_for_target(app.pending_target).state
@@ -2417,22 +2453,22 @@ fn status_line(app: &App) -> Line<'_> {
         || status_lower.contains("cannot ")
         || status_lower.contains("invalid")
     {
-        (theme::RED, true)
+        (theme::red(), true)
     } else if app.status_message.contains("cancelled")
         || app.status_message.contains("No session")
         || app.status_message.contains("Unknown")
         || app.status_message.contains("NEEDS REVIEW")
     {
-        (theme::ORANGE, true)
+        (theme::orange(), true)
     } else if app.status_message.contains("PASS")
         || app.status_message.contains("saved")
         || app.status_message.contains("compiled")
         || app.status_message.contains("refreshed")
         || app.status_message.contains("cleared")
     {
-        (theme::GREEN, true)
+        (theme::green(), true)
     } else {
-        (theme::MUTED, false)
+        (theme::muted(), false)
     };
     let message_style = if bold {
         Style::default().fg(color).add_modifier(Modifier::BOLD)
@@ -2441,18 +2477,20 @@ fn status_line(app: &App) -> Line<'_> {
     };
 
     let mut spans = vec![
-        Span::styled("Status ", Style::default().fg(theme::MUTED)),
+        Span::styled("Status ", Style::default().fg(theme::muted())),
         Span::styled(&app.status_message, message_style),
     ];
     if let Some(live) = app.hook_live_indicator() {
         let live_style = if live.is_error {
-            Style::default().fg(theme::RED).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme::red())
+                .add_modifier(Modifier::BOLD)
         } else if live.is_stale {
-            Style::default().fg(theme::GOLD)
+            Style::default().fg(theme::gold())
         } else {
-            Style::default().fg(theme::GREEN)
+            Style::default().fg(theme::green())
         };
-        spans.push(Span::styled("   ", Style::default().fg(theme::BORDER)));
+        spans.push(Span::styled("   ", Style::default().fg(theme::border())));
         spans.push(Span::styled(live.label, live_style));
     }
     Line::from(spans)
@@ -2461,83 +2499,73 @@ fn status_line(app: &App) -> Line<'_> {
 fn render_settings(frame: &mut Frame, root: Rect, app: &App) {
     let area = modal_area(root, 70, 58);
     frame.render_widget(Clear, area);
+    let language = app.effective_language();
     let route = app.settings_enter_route_preview();
-    let dirty = app.settings_smart_enter_dirty();
-    let saved = if app.smart_enter_tmux_enabled() {
-        "On"
-    } else {
-        "Off"
-    };
-    let draft = if app.settings_smart_enter_tmux {
-        "On"
-    } else {
-        "Off"
-    };
     let hooks = if app.hooks_enabled() {
-        ("Enabled", theme::GREEN)
+        (i18n::text(language, Text::Enabled), theme::green())
     } else {
-        ("Disabled", theme::MUTED)
+        (i18n::text(language, Text::Disabled), theme::muted())
     };
-    let effect = if !app.hooks_enabled() {
-        "Smart Enter cannot jump until hooks are installed and new agent sessions are started."
-    } else if !app.settings_smart_enter_tmux {
-        "Enter keeps the existing resume or handoff behavior."
-    } else if app.current_data_space().is_local() {
-        "Enter validates hook tmux metadata, jumps to a live pane when available, and falls back to resume otherwise."
-    } else {
-        "SSH data spaces stay read-only; Enter opens guarded handoff instead of local resume or tmux jump."
-    };
+    let effect = settings_effect(app, language);
 
     let mut lines = vec![
         Line::from(Span::styled(
-            "Settings",
+            i18n::text(language, Text::SettingsTitle),
             Style::default()
-                .fg(theme::GOLD)
+                .fg(theme::gold())
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
-            "Opt-in behavior only. Saved settings apply to Moonbox, not source session stores.",
-            Style::default().fg(theme::MUTED),
+            i18n::text(language, Text::SettingsSubtitle),
+            Style::default().fg(theme::muted()),
         )),
         Line::raw(""),
         Line::from(vec![
-            Span::styled("Hooks event channel  ", Style::default().fg(theme::BLUE)),
+            Span::styled(
+                format!("{:<22}", i18n::text(language, Text::HooksEventChannel)),
+                Style::default().fg(theme::blue()),
+            ),
             Span::styled(
                 hooks.0,
                 Style::default().fg(hooks.1).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                "  install/uninstall is managed by `moonbox hooks`",
-                Style::default().fg(theme::MUTED),
+                format!("  {}", i18n::text(language, Text::HooksManagedByCli)),
+                Style::default().fg(theme::muted()),
             ),
         ]),
-        Line::from(vec![
-            Span::styled("Smart Enter / tmux   ", Style::default().fg(theme::BLUE)),
-            Span::styled(
-                format!("Draft {draft}"),
-                Style::default()
-                    .fg(if app.settings_smart_enter_tmux {
-                        theme::GREEN
-                    } else {
-                        theme::MUTED
-                    })
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("   Saved {saved}"),
-                Style::default().fg(theme::MUTED),
-            ),
-            if dirty {
-                Span::styled("   Unsaved", Style::default().fg(theme::GOLD))
-            } else {
-                Span::styled("   Saved", Style::default().fg(theme::GREEN))
-            },
-        ]),
+        settings_row(
+            app,
+            language,
+            SettingsField::Language,
+            i18n::text(language, Text::Language),
+            i18n::language_name(language, app.settings_language),
+            i18n::language_name(language, app.ui_language()),
+            app.settings_language_dirty(),
+        ),
+        settings_row(
+            app,
+            language,
+            SettingsField::Theme,
+            i18n::text(language, Text::Theme),
+            app.settings_theme.label(),
+            app.ui_theme().label(),
+            app.settings_theme_dirty(),
+        ),
+        settings_row(
+            app,
+            language,
+            SettingsField::SmartEnter,
+            i18n::text(language, Text::SmartEnterTmux),
+            i18n::on_off(language, app.settings_smart_enter_tmux),
+            i18n::on_off(language, app.smart_enter_tmux_enabled()),
+            app.settings_smart_enter_dirty(),
+        ),
         Line::raw(""),
         Line::from(Span::styled(
-            "Current Enter Route",
+            i18n::text(language, Text::CurrentEnterRoute),
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::blue())
                 .add_modifier(Modifier::BOLD),
         )),
     ];
@@ -2548,42 +2576,131 @@ fn render_settings(frame: &mut Frame, root: Rect, app: &App) {
                 format!("{:<10}", route.label),
                 enter_route_style(route.kind),
             ),
-            Span::styled(route.detail, Style::default().fg(theme::TEXT)),
+            Span::styled(route.detail, Style::default().fg(theme::text())),
         ]));
     } else {
         lines.push(Line::from(Span::styled(
-            "No selected session",
-            Style::default().fg(theme::ORANGE),
+            i18n::text(language, Text::NoSelectedSession),
+            Style::default().fg(theme::orange()),
         )));
     }
 
     lines.extend([
         Line::raw(""),
         Line::from(Span::styled(
-            "Effect",
+            i18n::text(language, Text::Effect),
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::blue())
                 .add_modifier(Modifier::BOLD),
         )),
-        Line::from(Span::styled(effect, Style::default().fg(theme::TEXT))),
+        Line::from(Span::styled(effect, Style::default().fg(theme::text()))),
         Line::raw(""),
         Line::from(Span::styled(
-            "Moonbox never creates panes, sends keystrokes, resumes source sessions, or mutates source stores from this setting.",
-            Style::default().fg(theme::MUTED),
+            i18n::text(language, Text::SettingsSafety),
+            Style::default().fg(theme::muted()),
         )),
         Line::raw(""),
         Line::from(Span::styled(
-            "space/t toggle   Enter save   Ctrl-S save   Esc cancel",
-            Style::default().fg(theme::MUTED),
+            i18n::text(language, Text::SettingsKeys),
+            Style::default().fg(theme::muted()),
         )),
     ]);
 
     frame.render_widget(
         Paragraph::new(lines)
-            .block(panel_block(" Settings ", true))
+            .block(panel_block(
+                if app.settings_dirty() {
+                    " Settings * "
+                } else {
+                    " Settings "
+                },
+                true,
+            ))
             .wrap(Wrap { trim: true }),
         area,
     );
+}
+
+fn settings_row(
+    app: &App,
+    language: crate::core::config::UiLanguage,
+    field: SettingsField,
+    label: &str,
+    draft: &str,
+    saved: &str,
+    dirty: bool,
+) -> Line<'static> {
+    let focused = app.settings_field_is_focused(field);
+    let marker = if focused { ">" } else { " " };
+    let marker_color = if focused {
+        theme::gold()
+    } else {
+        theme::border()
+    };
+    let label_color = if focused {
+        theme::text()
+    } else {
+        theme::blue()
+    };
+    let state_color = if dirty { theme::gold() } else { theme::green() };
+    Line::from(vec![
+        Span::styled(marker, Style::default().fg(marker_color)),
+        Span::raw(" "),
+        Span::styled(
+            format!("{label:<22}"),
+            Style::default().fg(label_color).add_modifier(if focused {
+                Modifier::BOLD
+            } else {
+                Modifier::empty()
+            }),
+        ),
+        Span::styled(
+            format!("{} {draft}", i18n::text(language, Text::Draft)),
+            Style::default().fg(if dirty { theme::gold() } else { theme::text() }),
+        ),
+        Span::styled(
+            format!("   {} {saved}", i18n::text(language, Text::Saved)),
+            Style::default().fg(theme::muted()),
+        ),
+        Span::styled(
+            format!(
+                "   {}",
+                if dirty {
+                    i18n::text(language, Text::Unsaved)
+                } else {
+                    i18n::text(language, Text::Saved)
+                }
+            ),
+            Style::default().fg(state_color),
+        ),
+    ])
+}
+
+fn settings_effect(app: &App, language: crate::core::config::UiLanguage) -> &'static str {
+    match language {
+        crate::core::config::UiLanguage::English => {
+            if !app.hooks_enabled() {
+                "Smart Enter cannot jump until hooks are installed and new agent sessions are started."
+            } else if !app.settings_smart_enter_tmux {
+                "Enter keeps the existing resume or handoff behavior."
+            } else if app.current_data_space().is_local() {
+                "Enter validates hook tmux metadata, jumps to a live pane when available, and falls back to resume otherwise."
+            } else {
+                "SSH data spaces stay read-only; Enter opens guarded handoff instead of local resume or tmux jump."
+            }
+        }
+        crate::core::config::UiLanguage::ZhHans => {
+            if !app.hooks_enabled() {
+                "安装 hooks 并新开 agent session 后，Smart Enter 才能跳转。"
+            } else if !app.settings_smart_enter_tmux {
+                "Enter 保持既有 resume 或 handoff 行为。"
+            } else if app.current_data_space().is_local() {
+                "Enter 会校验 hook 捕获的 tmux metadata；pane 存活才跳转，否则降级 resume。"
+            } else {
+                "SSH data space 保持只读；Enter 打开受保护 handoff，不做本地 resume 或 tmux jump。"
+            }
+        }
+    }
 }
 
 fn render_data_spaces(frame: &mut Frame, root: Rect, app: &App) {
@@ -2598,12 +2715,12 @@ fn render_data_spaces(frame: &mut Frame, root: Rect, app: &App) {
         Line::from(Span::styled(
             "Data Spaces",
             Style::default()
-                .fg(theme::GOLD)
+                .fg(theme::gold())
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
             "Local plus SSH spaces saved in Moonbox. OpenSSH hosts are not auto-loaded.",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         )),
         Line::raw(""),
     ];
@@ -2611,15 +2728,17 @@ fn render_data_spaces(frame: &mut Frame, root: Rect, app: &App) {
     if let Some(error) = &app.data_space_error {
         lines.push(Line::from(Span::styled(
             "Load Failed",
-            Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::red())
+                .add_modifier(Modifier::BOLD),
         )));
         lines.push(Line::from(Span::styled(
             review_snippet(error, 118),
-            Style::default().fg(theme::RED),
+            Style::default().fg(theme::red()),
         )));
         lines.push(Line::from(Span::styled(
             "Install moonbox on the remote host, or set MOONBOX_REMOTE_BIN to an absolute remote path.",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         )));
         lines.push(Line::raw(""));
     }
@@ -2627,7 +2746,9 @@ fn render_data_spaces(frame: &mut Frame, root: Rect, app: &App) {
     if app.data_spaces.is_empty() {
         lines.push(Line::from(Span::styled(
             "No data spaces configured",
-            Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::red())
+                .add_modifier(Modifier::BOLD),
         )));
     } else {
         for (index, space) in app.data_spaces.iter().enumerate() {
@@ -2643,7 +2764,7 @@ fn render_data_spaces(frame: &mut Frame, root: Rect, app: &App) {
     lines.push(Line::from(Span::styled(
         "Selected Configuration",
         Style::default()
-            .fg(theme::BLUE)
+            .fg(theme::blue())
             .add_modifier(Modifier::BOLD),
     )));
     if let Some(space) = selected {
@@ -2651,7 +2772,7 @@ fn render_data_spaces(frame: &mut Frame, root: Rect, app: &App) {
     } else {
         lines.push(Line::from(Span::styled(
             "No selected data space",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         )));
     }
     if let Some(name) = &app.data_space_delete_confirmation {
@@ -2659,7 +2780,7 @@ fn render_data_spaces(frame: &mut Frame, root: Rect, app: &App) {
         lines.push(Line::from(Span::styled(
             format!("Press x again to delete {name} from Moonbox config."),
             Style::default()
-                .fg(theme::ORANGE)
+                .fg(theme::orange())
                 .add_modifier(Modifier::BOLD),
         )));
     }
@@ -2667,7 +2788,7 @@ fn render_data_spaces(frame: &mut Frame, root: Rect, app: &App) {
     lines.push(Line::raw(""));
     lines.push(Line::from(Span::styled(
         "n/a add SSH   x delete   j/k choose   Enter load   r reload   Esc close",
-        Style::default().fg(theme::MUTED),
+        Style::default().fg(theme::muted()),
     )));
 
     frame.render_widget(
@@ -2686,12 +2807,12 @@ fn render_data_space_config(frame: &mut Frame, root: Rect, app: &App) {
         Line::from(Span::styled(
             "Add SSH Space",
             Style::default()
-                .fg(theme::GOLD)
+                .fg(theme::gold())
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
             "Paste ssh user@host, ssh://user@host:22, or an OpenSSH Host block.",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         )),
         Line::raw(""),
     ];
@@ -2704,14 +2825,16 @@ fn render_data_space_config(frame: &mut Frame, root: Rect, app: &App) {
         lines.push(Line::raw(""));
         lines.push(Line::from(Span::styled(
             review_snippet(error, 96),
-            Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::red())
+                .add_modifier(Modifier::BOLD),
         )));
     }
 
     lines.push(Line::raw(""));
     lines.push(Line::from(Span::styled(
         "Enter parse/save quick target   Tab next   Ctrl-S save   Esc back",
-        Style::default().fg(theme::MUTED),
+        Style::default().fg(theme::muted()),
     )));
 
     frame.render_widget(
@@ -2771,21 +2894,21 @@ fn data_space_config_field_line(app: &App, index: usize) -> Line<'static> {
     };
     let value_style = if selected {
         Style::default()
-            .fg(theme::TEXT)
+            .fg(theme::text())
             .add_modifier(Modifier::BOLD)
     } else if required && value == "<required>" {
-        Style::default().fg(theme::ORANGE)
+        Style::default().fg(theme::orange())
     } else {
-        Style::default().fg(theme::TEXT)
+        Style::default().fg(theme::text())
     };
 
     Line::from(vec![
-        Span::styled(marker, Style::default().fg(theme::CYAN)),
+        Span::styled(marker, Style::default().fg(theme::cyan())),
         Span::raw(" "),
-        Span::styled(format!("{label:<7}"), Style::default().fg(theme::BLUE)),
+        Span::styled(format!("{label:<7}"), Style::default().fg(theme::blue())),
         Span::styled(format!("{value}{cursor:<1}"), value_style),
         Span::raw("  "),
-        Span::styled(hint, Style::default().fg(theme::MUTED)),
+        Span::styled(hint, Style::default().fg(theme::muted())),
     ])
 }
 
@@ -2798,20 +2921,20 @@ fn data_space_row(
     let state = if active { "ACTIVE" } else { "      " };
     let kind = if space.is_local() { "LOCAL" } else { "SSH" };
     let kind_color = if space.is_local() {
-        theme::CYAN
+        theme::cyan()
     } else {
-        theme::ORANGE
+        theme::orange()
     };
     let label_style = if selected {
         Style::default()
-            .fg(theme::TEXT)
+            .fg(theme::text())
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(theme::TEXT)
+        Style::default().fg(theme::text())
     };
 
     Line::from(vec![
-        Span::styled(format!("{marker:<2}"), Style::default().fg(theme::CYAN)),
+        Span::styled(format!("{marker:<2}"), Style::default().fg(theme::cyan())),
         Span::styled(format!("{state:<7}"), data_space_state_style(active)),
         Span::styled(format!("{kind:<6}"), Style::default().fg(kind_color)),
         Span::styled(
@@ -2820,7 +2943,7 @@ fn data_space_row(
         ),
         Span::styled(
             review_snippet(&space.detail, 42),
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         ),
     ])
 }
@@ -2828,16 +2951,16 @@ fn data_space_row(
 fn data_space_state_style(active: bool) -> Style {
     if active {
         Style::default()
-            .fg(theme::GREEN)
+            .fg(theme::green())
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(theme::MUTED)
+        Style::default().fg(theme::muted())
     }
 }
 
 fn data_space_detail_lines(space: &crate::core::dataspace::DataSpaceEntry) -> Vec<Line<'static>> {
     let mut lines = vec![
-        detail_line("Name", &space.label, theme::TEXT),
+        detail_line("Name", &space.label, theme::text()),
         detail_line(
             "Kind",
             if space.is_local() {
@@ -2846,37 +2969,37 @@ fn data_space_detail_lines(space: &crate::core::dataspace::DataSpaceEntry) -> Ve
                 "SSH read-only inventory"
             },
             if space.is_local() {
-                theme::CYAN
+                theme::cyan()
             } else {
-                theme::ORANGE
+                theme::orange()
             },
         ),
-        detail_line("Target", &space.detail, theme::TEXT),
+        detail_line("Target", &space.detail, theme::text()),
         detail_line(
             "Config",
             space.config_source.as_deref().unwrap_or("unknown"),
-            theme::MUTED,
+            theme::muted(),
         ),
     ];
     if let Some(path) = &space.config_path {
-        lines.push(detail_line("Path", path, theme::MUTED));
+        lines.push(detail_line("Path", path, theme::muted()));
     }
     if space.is_local() {
         lines.push(detail_line(
             "Inventory",
             "reads local Codex / Claude / Hermes stores",
-            theme::MUTED,
+            theme::muted(),
         ));
     } else {
         lines.push(detail_line(
             "Inventory",
             &format!("ssh {} [moonbox|moon] sessions --json", space.detail),
-            theme::MUTED,
+            theme::muted(),
         ));
         lines.push(detail_line(
             "Safety",
             "read-only summary import; no remote resume or launch",
-            theme::MUTED,
+            theme::muted(),
         ));
     }
     lines
@@ -2884,7 +3007,7 @@ fn data_space_detail_lines(space: &crate::core::dataspace::DataSpaceEntry) -> Ve
 
 fn detail_line(label: &'static str, value: &str, color: Color) -> Line<'static> {
     Line::from(vec![
-        Span::styled(format!("{label:<10}"), Style::default().fg(theme::MUTED)),
+        Span::styled(format!("{label:<10}"), Style::default().fg(theme::muted())),
         Span::styled(value.to_owned(), Style::default().fg(color)),
     ])
 }
@@ -2896,7 +3019,7 @@ fn render_help(frame: &mut Frame, root: Rect, app: &App) {
         Line::from(Span::styled(
             "Moonbox Keys",
             Style::default()
-                .fg(theme::GOLD)
+                .fg(theme::gold())
                 .add_modifier(Modifier::BOLD),
         )),
         Line::raw(""),
@@ -2948,15 +3071,18 @@ fn render_command_palette(frame: &mut Frame, root: Rect, app: &App) {
             Span::styled(
                 ": ",
                 Style::default()
-                    .fg(theme::GOLD)
+                    .fg(theme::gold())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(app.command_input.clone(), Style::default().fg(theme::TEXT)),
-            Span::styled("▏", Style::default().fg(theme::CYAN)),
+            Span::styled(
+                app.command_input.clone(),
+                Style::default().fg(theme::text()),
+            ),
+            Span::styled("▏", Style::default().fg(theme::cyan())),
         ]),
         Line::from(Span::styled(
             "Tab complete   Enter run selected   j/k choose   Esc close",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         )),
         Line::raw(""),
     ];
@@ -2965,18 +3091,20 @@ fn render_command_palette(frame: &mut Frame, root: Rect, app: &App) {
         lines.extend([
             Line::from(Span::styled(
                 "No commands match",
-                Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::red())
+                    .add_modifier(Modifier::BOLD),
             )),
             Line::from(Span::styled(
                 "Try open, capsule, handoff, source, data, skill, doctor, or help.",
-                Style::default().fg(theme::MUTED),
+                Style::default().fg(theme::muted()),
             )),
         ]);
     } else {
         lines.push(Line::from(Span::styled(
             "Matches",
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::blue())
                 .add_modifier(Modifier::BOLD),
         )));
         for (index, entry) in matches.iter().take(8).enumerate() {
@@ -2988,7 +3116,7 @@ fn render_command_palette(frame: &mut Frame, root: Rect, app: &App) {
                     "  {} more commands hidden by the current terminal height",
                     matches.len() - 8
                 ),
-                Style::default().fg(theme::MUTED),
+                Style::default().fg(theme::muted()),
             )));
         }
         if let Some(entry) = selected {
@@ -3008,20 +3136,20 @@ fn command_palette_row(entry: &CommandPaletteEntry, selected: bool) -> Line<'sta
     let marker = if selected { "›" } else { " " };
     let command_style = if selected {
         Style::default()
-            .fg(theme::TEXT)
+            .fg(theme::text())
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(theme::TEXT)
+        Style::default().fg(theme::text())
     };
     Line::from(vec![
-        Span::styled(marker, Style::default().fg(theme::CYAN)),
+        Span::styled(marker, Style::default().fg(theme::cyan())),
         Span::raw(" "),
         Span::styled(format!("{:<14}", entry.command), command_style),
         Span::styled(
             format!(" {:<8} ", entry.badge),
             command_palette_badge_style(entry),
         ),
-        Span::styled(entry.description, Style::default().fg(theme::MUTED)),
+        Span::styled(entry.description, Style::default().fg(theme::muted())),
     ])
 }
 
@@ -3043,25 +3171,25 @@ fn command_palette_details(entry: &CommandPaletteEntry) -> Vec<Line<'static>> {
         Line::from(Span::styled(
             "Selected command",
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::blue())
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(vec![
-            Span::styled("Params: ", Style::default().fg(theme::BLUE)),
-            Span::styled(entry.params, Style::default().fg(theme::TEXT)),
+            Span::styled("Params: ", Style::default().fg(theme::blue())),
+            Span::styled(entry.params, Style::default().fg(theme::text())),
         ]),
         Line::from(vec![
-            Span::styled("Aliases: ", Style::default().fg(theme::BLUE)),
-            Span::styled(aliases, Style::default().fg(theme::MUTED)),
+            Span::styled("Aliases: ", Style::default().fg(theme::blue())),
+            Span::styled(aliases, Style::default().fg(theme::muted())),
         ]),
         Line::from(vec![
-            Span::styled("Risk: ", Style::default().fg(theme::BLUE)),
+            Span::styled("Risk: ", Style::default().fg(theme::blue())),
             Span::styled(
                 risk,
                 Style::default().fg(if entry.dangerous {
-                    theme::RED
+                    theme::red()
                 } else {
-                    theme::MUTED
+                    theme::muted()
                 }),
             ),
         ]),
@@ -3070,13 +3198,13 @@ fn command_palette_details(entry: &CommandPaletteEntry) -> Vec<Line<'static>> {
 
 fn command_palette_badge_style(entry: &CommandPaletteEntry) -> Style {
     let color = if entry.dangerous {
-        theme::RED
+        theme::red()
     } else {
         match entry.badge {
-            "CHECK" => theme::GREEN,
-            "DRY-RUN" | "PREVIEW" | "REVIEW" => theme::GOLD,
-            "SWITCH" | "PICKER" => theme::CYAN,
-            _ => theme::MUTED,
+            "CHECK" => theme::green(),
+            "DRY-RUN" | "PREVIEW" | "REVIEW" => theme::gold(),
+            "SWITCH" | "PICKER" => theme::cyan(),
+            _ => theme::muted(),
         }
     };
     Style::default().fg(color).add_modifier(Modifier::BOLD)
@@ -3093,7 +3221,7 @@ fn render_doctor(frame: &mut Frame, root: Rect, app: &App) {
             Span::styled(
                 "Pre-flight",
                 Style::default()
-                    .fg(theme::GOLD)
+                    .fg(theme::gold())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw("  "),
@@ -3111,7 +3239,7 @@ fn render_doctor(frame: &mut Frame, root: Rect, app: &App) {
             ),
         ]),
         Line::from(vec![
-            Span::styled("Compiler: ", Style::default().fg(theme::BLUE)),
+            Span::styled("Compiler: ", Style::default().fg(theme::blue())),
             Span::styled(
                 compile_status_label(app.compile_status),
                 Style::default()
@@ -3120,11 +3248,11 @@ fn render_doctor(frame: &mut Frame, root: Rect, app: &App) {
             ),
             Span::styled(
                 format!("  {}", app.data.capsule.compiler),
-                Style::default().fg(theme::MUTED),
+                Style::default().fg(theme::muted()),
             ),
         ]),
         Line::from(vec![
-            Span::styled("Doctor: ", Style::default().fg(theme::BLUE)),
+            Span::styled("Doctor: ", Style::default().fg(theme::blue())),
             Span::styled(
                 app.doctor_report.status.to_string(),
                 Style::default()
@@ -3133,11 +3261,11 @@ fn render_doctor(frame: &mut Frame, root: Rect, app: &App) {
             ),
             Span::styled(
                 format!("  {} checks", app.doctor_report.checks.len()),
-                Style::default().fg(theme::MUTED),
+                Style::default().fg(theme::muted()),
             ),
         ]),
         Line::from(vec![
-            Span::styled("Verify: ", Style::default().fg(theme::BLUE)),
+            Span::styled("Verify: ", Style::default().fg(theme::blue())),
             Span::styled(
                 if preflight.verify_reviewed {
                     preflight.verify_status.to_string()
@@ -3148,24 +3276,24 @@ fn render_doctor(frame: &mut Frame, root: Rect, app: &App) {
                     .fg(if preflight.verify_reviewed {
                         verification_color(preflight.verify_status)
                     } else {
-                        theme::RED
+                        theme::red()
                     })
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 verify_detail_text(verification.as_ref(), preflight.verify_reviewed),
-                Style::default().fg(theme::MUTED),
+                Style::default().fg(theme::muted()),
             ),
         ]),
         Line::from(Span::styled(
             "v Verify   r Refresh doctor   y Copy JSON   Esc Close",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         )),
         Line::raw(""),
         Line::from(Span::styled(
             "Verifier evidence",
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::blue())
                 .add_modifier(Modifier::BOLD),
         )),
     ];
@@ -3175,7 +3303,7 @@ fn render_doctor(frame: &mut Frame, root: Rect, app: &App) {
         Line::from(Span::styled(
             "Environment doctor",
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::blue())
                 .add_modifier(Modifier::BOLD),
         )),
     ]);
@@ -3191,13 +3319,13 @@ fn render_doctor(frame: &mut Frame, root: Rect, app: &App) {
             Span::styled(
                 &check.name,
                 Style::default()
-                    .fg(theme::TEXT)
+                    .fg(theme::text())
                     .add_modifier(Modifier::BOLD),
             ),
         ]));
         lines.push(Line::from(vec![
-            Span::styled("  ", Style::default().fg(theme::MUTED)),
-            Span::styled(&check.detail, Style::default().fg(theme::MUTED)),
+            Span::styled("  ", Style::default().fg(theme::muted())),
+            Span::styled(&check.detail, Style::default().fg(theme::muted())),
         ]));
         lines.push(Line::raw(""));
     }
@@ -3205,11 +3333,11 @@ fn render_doctor(frame: &mut Frame, root: Rect, app: &App) {
     lines.extend([
         Line::from(Span::styled(
             "Read-only diagnostics. No timeline load, resume, launch, or target spawn.",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         )),
         Line::from(Span::styled(
             "v Verify   r Refresh doctor   y Copy JSON   Esc Close",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         )),
     ]);
 
@@ -3240,12 +3368,12 @@ fn render_skill_picker(frame: &mut Frame, root: Rect, app: &App) {
         Line::from(Span::styled(
             "Choose compiler skill",
             Style::default()
-                .fg(theme::GOLD)
+                .fg(theme::gold())
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
             "Compression and compatibility live in replaceable compiler skills.",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         )),
         Line::raw(""),
     ];
@@ -3266,15 +3394,15 @@ fn render_skill_picker(frame: &mut Frame, root: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD)
         } else if active {
             Style::default()
-                .fg(theme::TEXT)
+                .fg(theme::text())
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(theme::TEXT)
+            Style::default().fg(theme::text())
         };
         let muted_style = if pending {
-            Style::default().fg(theme::TEXT)
+            Style::default().fg(theme::text())
         } else {
-            Style::default().fg(theme::MUTED)
+            Style::default().fg(theme::muted())
         };
         let cursor = if pending { ">" } else { " " };
         let active_mark = if active { "active" } else { "      " };
@@ -3297,10 +3425,13 @@ fn render_skill_picker(frame: &mut Frame, root: Rect, app: &App) {
         ]));
         lines.push(Line::from(vec![
             Span::raw("    "),
-            Span::styled("stars: ", Style::default().fg(theme::MUTED)),
-            Span::styled(format_star_count(&info), Style::default().fg(theme::GOLD)),
-            Span::styled("  link: ", Style::default().fg(theme::MUTED)),
-            Span::styled(compiler_reference(&info), Style::default().fg(theme::CYAN)),
+            Span::styled("stars: ", Style::default().fg(theme::muted())),
+            Span::styled(format_star_count(&info), Style::default().fg(theme::gold())),
+            Span::styled("  link: ", Style::default().fg(theme::muted())),
+            Span::styled(
+                compiler_reference(&info),
+                Style::default().fg(theme::cyan()),
+            ),
         ]));
         lines.push(Line::raw(""));
     }
@@ -3308,12 +3439,14 @@ fn render_skill_picker(frame: &mut Frame, root: Rect, app: &App) {
     if app.data.compilers.is_empty() {
         lines.push(Line::from(Span::styled(
             "No compiler skills configured.",
-            Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::red())
+                .add_modifier(Modifier::BOLD),
         )));
     }
     lines.push(Line::from(Span::styled(
         "j/k choose   enter apply   y copy link/command   q close",
-        Style::default().fg(theme::MUTED),
+        Style::default().fg(theme::muted()),
     )));
 
     frame.render_widget(
@@ -3332,12 +3465,12 @@ fn render_capsules(frame: &mut Frame, root: Rect, app: &App) {
         Line::from(Span::styled(
             "Saved Capsules",
             Style::default()
-                .fg(theme::GOLD)
+                .fg(theme::gold())
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
             "Local continuation objects. Listing never opens, resumes, or launches source sessions.",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         )),
         Line::raw(""),
     ];
@@ -3345,29 +3478,31 @@ fn render_capsules(frame: &mut Frame, root: Rect, app: &App) {
     if let Some(error) = &app.saved_capsule_error {
         lines.push(Line::from(Span::styled(
             "Capsule store unavailable",
-            Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::red())
+                .add_modifier(Modifier::BOLD),
         )));
         lines.push(Line::from(Span::styled(
             review_snippet(error, 120),
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         )));
     } else if app.saved_capsules.is_empty() {
         lines.push(Line::from(Span::styled(
             "No saved Capsules",
             Style::default()
-                .fg(theme::MUTED)
+                .fg(theme::muted())
                 .add_modifier(Modifier::BOLD),
         )));
         lines.push(Line::from(Span::styled(
             "Use `moonbox capsule save <name> --session <id> --target <cli>` to create one.",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         )));
     } else {
         lines.push(Line::from(vec![
-            Span::styled("Name", Style::default().fg(theme::BLUE)),
+            Span::styled("Name", Style::default().fg(theme::blue())),
             Span::styled(
                 "                     Target   Source session              Updated",
-                Style::default().fg(theme::MUTED),
+                Style::default().fg(theme::muted()),
             ),
         ]));
         for capsule in &app.saved_capsules {
@@ -3376,35 +3511,35 @@ fn render_capsules(frame: &mut Frame, root: Rect, app: &App) {
                 Span::styled(
                     format!("{:<24}", review_snippet(&capsule.name, 24)),
                     Style::default()
-                        .fg(theme::TEXT)
+                        .fg(theme::text())
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     format!("{:<8}", capsule.target_cli.id()),
-                    Style::default().fg(theme::ROLE_TARGET),
+                    Style::default().fg(theme::role_target()),
                 ),
                 Span::styled(
                     format!("{:<28}", review_snippet(&capsule.source_session, 28)),
                     Style::default().fg(source_color),
                 ),
-                Span::styled(&capsule.updated_at, Style::default().fg(theme::MUTED)),
+                Span::styled(&capsule.updated_at, Style::default().fg(theme::muted())),
             ]));
             lines.push(Line::from(vec![
                 Span::raw("  "),
-                Span::styled("rewind ", Style::default().fg(theme::MUTED)),
+                Span::styled("rewind ", Style::default().fg(theme::muted())),
                 Span::styled(
                     review_snippet(&capsule.rewind_point, 52),
-                    Style::default().fg(theme::ROLE_REWIND),
+                    Style::default().fg(theme::role_rewind()),
                 ),
-                Span::styled("  checksum ", Style::default().fg(theme::MUTED)),
-                Span::styled(&capsule.checksum, Style::default().fg(theme::CYAN)),
+                Span::styled("  checksum ", Style::default().fg(theme::muted())),
+                Span::styled(&capsule.checksum, Style::default().fg(theme::cyan())),
             ]));
             lines.push(Line::raw(""));
         }
     }
     lines.push(Line::from(Span::styled(
         "r refresh   Esc/q close",
-        Style::default().fg(theme::MUTED),
+        Style::default().fg(theme::muted()),
     )));
 
     frame.render_widget(
@@ -3426,7 +3561,7 @@ fn render_timeline_detail(frame: &mut Frame, root: Rect, app: &App) {
             Paragraph::new(vec![Line::from(Span::styled(
                 "No timeline event selected",
                 Style::default()
-                    .fg(theme::GOLD)
+                    .fg(theme::gold())
                     .add_modifier(Modifier::BOLD),
             ))])
             .block(panel_block(" Timeline Detail ", true)),
@@ -3456,7 +3591,7 @@ fn render_timeline_detail(frame: &mut Frame, root: Rect, app: &App) {
     lines.push(Line::raw(""));
     lines.push(Line::from(Span::styled(
         "j/k scroll   PgUp/PgDn page   Esc/q close",
-        Style::default().fg(theme::MUTED),
+        Style::default().fg(theme::muted()),
     )));
 
     frame.render_widget(
@@ -3486,7 +3621,7 @@ fn timeline_detail_group_header_lines(group: &TimelineGroup<'_>, app: &App) -> V
         Span::styled(
             format!("{id} "),
             Style::default()
-                .fg(theme::CYAN)
+                .fg(theme::cyan())
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
@@ -3496,21 +3631,21 @@ fn timeline_detail_group_header_lines(group: &TimelineGroup<'_>, app: &App) -> V
         Span::raw("  "),
         Span::styled(
             timeline_group_time(group),
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         ),
     ])];
     if group.len() == 1 {
         lines.push(Line::from(vec![
-            Span::styled("Title: ", Style::default().fg(theme::MUTED)),
-            Span::styled(primary.title.clone(), Style::default().fg(theme::TEXT)),
+            Span::styled("Title: ", Style::default().fg(theme::muted())),
+            Span::styled(primary.title.clone(), Style::default().fg(theme::text())),
         ]));
     } else {
         lines.push(Line::from(vec![
-            Span::styled("Events: ", Style::default().fg(theme::MUTED)),
+            Span::styled("Events: ", Style::default().fg(theme::muted())),
             Span::styled(
                 group.len().to_string(),
                 Style::default()
-                    .fg(theme::GOLD)
+                    .fg(theme::gold())
                     .add_modifier(Modifier::BOLD),
             ),
         ]));
@@ -3527,12 +3662,12 @@ fn timeline_detail_event_header_line(
     Line::from(vec![
         Span::styled(
             format!("{position}/{total} "),
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         ),
         Span::styled(
             format!("{} ", event.id),
             Style::default()
-                .fg(theme::CYAN)
+                .fg(theme::cyan())
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
@@ -3542,7 +3677,7 @@ fn timeline_detail_event_header_line(
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw("  "),
-        Span::styled(event.time.clone(), Style::default().fg(theme::MUTED)),
+        Span::styled(event.time.clone(), Style::default().fg(theme::muted())),
     ])
 }
 
@@ -3557,7 +3692,7 @@ fn timeline_detail_event_lines(
         lines.push(Line::from(Span::styled(
             "Attachments",
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::blue())
                 .add_modifier(Modifier::BOLD),
         )));
         for attachment in &event.metadata.attachments {
@@ -3565,7 +3700,7 @@ fn timeline_detail_event_lines(
                 Span::raw("  "),
                 Span::styled(
                     timeline_attachment_label(attachment),
-                    Style::default().fg(theme::CYAN),
+                    Style::default().fg(theme::cyan()),
                 ),
             ]));
         }
@@ -3579,7 +3714,7 @@ fn timeline_detail_event_lines(
         lines.push(Line::from(Span::styled(
             "Image Preview",
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::blue())
                 .add_modifier(Modifier::BOLD),
         )));
         for preview in event_image_previews {
@@ -3592,7 +3727,7 @@ fn timeline_detail_event_lines(
         lines.push(Line::from(Span::styled(
             "Body",
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::blue())
                 .add_modifier(Modifier::BOLD),
         )));
     }
@@ -3606,7 +3741,7 @@ fn timeline_image_preview_lines(preview: &TimelineImagePreview) -> Vec<Line<'sta
         Span::styled(
             preview.label.clone(),
             Style::default()
-                .fg(theme::CYAN)
+                .fg(theme::cyan())
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw("  "),
@@ -3620,18 +3755,18 @@ fn timeline_image_preview_lines(preview: &TimelineImagePreview) -> Vec<Line<'sta
             Span::raw("  "),
             Span::styled(
                 format!("{width}x{height}"),
-                Style::default().fg(theme::MUTED),
+                Style::default().fg(theme::muted()),
             ),
             Span::raw("  "),
             Span::styled(
                 preview.path.clone().unwrap_or_default(),
-                Style::default().fg(theme::MUTED),
+                Style::default().fg(theme::muted()),
             ),
         ]));
     } else if let Some(path) = &preview.path {
         lines.push(Line::from(vec![
             Span::raw("  "),
-            Span::styled(path.clone(), Style::default().fg(theme::MUTED)),
+            Span::styled(path.clone(), Style::default().fg(theme::muted())),
         ]));
     }
     if preview.is_rendered() {
@@ -3679,9 +3814,9 @@ fn timeline_image_preview_status(preview: &TimelineImagePreview) -> String {
 
 fn timeline_image_preview_status_color(preview: &TimelineImagePreview) -> Color {
     match preview.status {
-        ImagePreviewStatus::Rendered => theme::GREEN,
-        ImagePreviewStatus::MissingPath | ImagePreviewStatus::UnsupportedPath(_) => theme::MUTED,
-        ImagePreviewStatus::TooLarge { .. } | ImagePreviewStatus::DecodeError(_) => theme::ORANGE,
+        ImagePreviewStatus::Rendered => theme::green(),
+        ImagePreviewStatus::MissingPath | ImagePreviewStatus::UnsupportedPath(_) => theme::muted(),
+        ImagePreviewStatus::TooLarge { .. } | ImagePreviewStatus::DecodeError(_) => theme::orange(),
     }
 }
 
@@ -3699,7 +3834,7 @@ fn timeline_detail_body_lines(detail: &str) -> Vec<Line<'static>> {
     if detail.trim().is_empty() {
         return vec![Line::from(Span::styled(
             "(empty)",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         ))];
     }
     detail
@@ -3707,7 +3842,7 @@ fn timeline_detail_body_lines(detail: &str) -> Vec<Line<'static>> {
         .map(|line| {
             Line::from(Span::styled(
                 line.to_owned(),
-                Style::default().fg(theme::TEXT),
+                Style::default().fg(theme::text()),
             ))
         })
         .collect()
@@ -3727,13 +3862,13 @@ fn timeline_kind_label(kind: TimelineKind) -> &'static str {
 
 fn timeline_kind_color(kind: TimelineKind) -> Color {
     match kind {
-        TimelineKind::User => theme::BLUE,
-        TimelineKind::Assistant => theme::GOLD,
-        TimelineKind::Tool => theme::MUTED,
-        TimelineKind::Compact => theme::CYAN,
-        TimelineKind::Error => theme::RED,
-        TimelineKind::GitDiff => theme::GREEN,
-        TimelineKind::RewindPoint => theme::ROLE_REWIND,
+        TimelineKind::User => theme::blue(),
+        TimelineKind::Assistant => theme::gold(),
+        TimelineKind::Tool => theme::muted(),
+        TimelineKind::Compact => theme::cyan(),
+        TimelineKind::Error => theme::red(),
+        TimelineKind::GitDiff => theme::green(),
+        TimelineKind::RewindPoint => theme::role_rewind(),
     }
 }
 
@@ -3763,9 +3898,9 @@ fn compiler_status_label(status: CompilerPresetStatus) -> &'static str {
 
 fn compiler_status_color(status: CompilerPresetStatus) -> Color {
     match status {
-        CompilerPresetStatus::Ready => theme::GREEN,
-        CompilerPresetStatus::Warning => theme::GOLD,
-        CompilerPresetStatus::Disabled => theme::MUTED,
+        CompilerPresetStatus::Ready => theme::green(),
+        CompilerPresetStatus::Warning => theme::gold(),
+        CompilerPresetStatus::Disabled => theme::muted(),
     }
 }
 
@@ -3796,7 +3931,7 @@ fn action_button<'a>(key: &'a str, label: &'a str) -> Span<'a> {
         format!(" {key} {label} "),
         Style::default()
             .fg(ratatui::style::Color::Black)
-            .bg(theme::GOLD)
+            .bg(theme::gold())
             .add_modifier(Modifier::BOLD),
     )
 }
@@ -3805,8 +3940,8 @@ fn disabled_action_button<'a>(key: &'a str, label: &'a str) -> Span<'a> {
     Span::styled(
         format!(" {key} {label} "),
         Style::default()
-            .fg(theme::MUTED)
-            .bg(theme::BORDER)
+            .fg(theme::muted())
+            .bg(theme::border())
             .add_modifier(Modifier::BOLD),
     )
 }
@@ -3845,6 +3980,7 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
     let area = modal_area(root, 76, 78);
     frame.render_widget(Clear, modal_area(root, 100, 60));
     frame.render_widget(Clear, area);
+    let language = app.effective_language();
     let session = app
         .current_session()
         .map(|session| format!("{} / {}", session.cli, session.id))
@@ -3853,22 +3989,28 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
     if app.is_launch_review_pending() {
         let mut lines = vec![
             Line::from(Span::styled(
-                "Generating Handoff Review",
+                i18n::text(language, Text::GeneratingReview),
                 Style::default()
-                    .fg(theme::GOLD)
+                    .fg(theme::gold())
                     .add_modifier(Modifier::BOLD),
             )),
             Line::raw(""),
             Line::from(vec![
-                Span::styled("会话: ", Style::default().fg(theme::BLUE)),
+                Span::styled(
+                    format!("{}: ", i18n::text(language, Text::Session)),
+                    Style::default().fg(theme::blue()),
+                ),
                 Span::raw(session),
             ]),
             Line::from(vec![
-                Span::styled("目标: ", Style::default().fg(theme::BLUE)),
+                Span::styled(
+                    format!("{}: ", i18n::text(language, Text::Target)),
+                    Style::default().fg(theme::blue()),
+                ),
                 Span::styled(
                     app.pending_target.to_string(),
                     Style::default()
-                        .fg(theme::CYAN)
+                        .fg(theme::cyan())
                         .add_modifier(Modifier::BOLD),
                 ),
             ]),
@@ -3876,21 +4018,21 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         if let Some(status) = app.launch_review_job_status() {
             lines.extend([
                 Line::from(vec![
-                    Span::styled("Compiler: ", Style::default().fg(theme::BLUE)),
-                    Span::styled(status.compiler_id, Style::default().fg(theme::CYAN)),
+                    Span::styled("Compiler: ", Style::default().fg(theme::blue())),
+                    Span::styled(status.compiler_id, Style::default().fg(theme::cyan())),
                 ]),
                 Line::from(vec![
-                    Span::styled("Stage: ", Style::default().fg(theme::BLUE)),
+                    Span::styled("Stage: ", Style::default().fg(theme::blue())),
                     Span::styled(
                         status.stage_label,
                         Style::default()
-                            .fg(theme::GREEN)
+                            .fg(theme::green())
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::raw(format!("  {} ms", status.elapsed_ms)),
                 ]),
                 Line::from(vec![
-                    Span::styled("Last: ", Style::default().fg(theme::BLUE)),
+                    Span::styled("Last: ", Style::default().fg(theme::blue())),
                     Span::raw(status.detail),
                 ]),
             ]);
@@ -3902,7 +4044,7 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                 } else {
                     "Reading SSH source timeline in read-only mode and running the local handoff skill..."
                 },
-                Style::default().fg(theme::TEXT),
+                Style::default().fg(theme::text()),
             )),
             Line::raw(""),
         ]);
@@ -3911,14 +4053,14 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         } else {
             lines.push(Line::from(Span::styled(
                 "   source --> rewind --> target   Review",
-                Style::default().fg(theme::MUTED),
+                Style::default().fg(theme::muted()),
             )));
         }
         lines.extend([
             Line::raw(""),
             Line::from(Span::styled(
-                "Esc hides this panel; the handoff job continues in the background.",
-                Style::default().fg(theme::MUTED),
+                i18n::text(language, Text::LoadingHiddenJob),
+                Style::default().fg(theme::muted()),
             )),
         ]);
         frame.render_widget(
@@ -3933,9 +4075,9 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
     let pending_report = app.launch_verification_for_target(app.pending_target);
     if let Some(result) = &app.target_launch_result {
         let outcome_color = if result.success {
-            theme::GREEN
+            theme::green()
         } else {
-            theme::RED
+            theme::red()
         };
         let lines = vec![
             Line::from(Span::styled(
@@ -3950,7 +4092,10 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             )),
             Line::raw(""),
             Line::from(vec![
-                Span::styled("结果: ", Style::default().fg(theme::BLUE)),
+                Span::styled(
+                    format!("{}: ", i18n::text(language, Text::Result)),
+                    Style::default().fg(theme::blue()),
+                ),
                 Span::styled(
                     result.outcome.clone(),
                     Style::default()
@@ -3959,32 +4104,41 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                 ),
             ]),
             Line::from(vec![
-                Span::styled("来源: ", Style::default().fg(theme::BLUE)),
+                Span::styled(
+                    format!("{}: ", i18n::text(language, Text::Source)),
+                    Style::default().fg(theme::blue()),
+                ),
                 Span::raw(format!("{} {}", result.source, result.session_id)),
             ]),
             Line::from(vec![
-                Span::styled("目标: ", Style::default().fg(theme::BLUE)),
+                Span::styled(
+                    format!("{}: ", i18n::text(language, Text::Target)),
+                    Style::default().fg(theme::blue()),
+                ),
                 Span::raw(result.target.to_string()),
             ]),
             Line::from(vec![
-                Span::styled("命令: ", Style::default().fg(theme::BLUE)),
+                Span::styled(
+                    format!("{}: ", i18n::text(language, Text::Command)),
+                    Style::default().fg(theme::blue()),
+                ),
                 Span::styled(
                     result.command_summary.clone(),
-                    Style::default().fg(theme::CYAN),
+                    Style::default().fg(theme::cyan()),
                 ),
             ]),
             Line::raw(""),
             Line::from(vec![
-                action_button("r", "再运行"),
+                action_button("r", i18n::text(language, Text::Rerun)),
                 Span::raw("  "),
-                action_button("y", "复制命令"),
+                action_button("y", i18n::text(language, Text::CopyCommand)),
                 Span::raw("  "),
-                action_button("Esc", "返回"),
+                action_button("Esc", i18n::text(language, Text::Back)),
             ]),
             Line::raw(""),
             Line::from(Span::styled(
-                "下一步不会自动打开或恢复 session；需要你明确选择。",
-                Style::default().fg(theme::MUTED),
+                i18n::text(language, Text::TargetLaunchNoAuto),
+                Style::default().fg(theme::muted()),
             )),
         ];
         frame.render_widget(
@@ -4007,60 +4161,75 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             Line::from(Span::styled(
                 "Handoff Review",
                 Style::default()
-                    .fg(theme::GOLD)
+                    .fg(theme::gold())
                     .add_modifier(Modifier::BOLD),
             )),
             Line::raw(""),
             Line::from(vec![
-                Span::styled("动作: ", Style::default().fg(theme::BLUE)),
+                Span::styled(
+                    format!("{}: ", i18n::text(language, Text::Action)),
+                    Style::default().fg(theme::blue()),
+                ),
                 Span::styled(
                     "handoff",
                     Style::default()
-                        .fg(theme::CYAN)
+                        .fg(theme::cyan())
                         .add_modifier(Modifier::BOLD),
                 ),
             ]),
             Line::from(Span::styled(
                 if run_blocked {
-                    "下一步: 当前只能按 y 复制命令；Esc 返回".to_string()
+                    i18n::text(language, Text::NextCopyOnly).to_string()
                 } else {
-                    format!(
-                        "下一步: 按 r 启动本地 {}；按 y 复制命令；Esc 返回",
-                        app.pending_target
-                    )
+                    i18n::text(language, Text::NextRunCopy).to_string()
                 },
                 Style::default()
-                    .fg(theme::GOLD)
+                    .fg(theme::gold())
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(Span::styled(
                 if app.current_data_space().is_local() {
-                    "本地 source：原生 resume 仍可用 o 单独打开。"
+                    i18n::text(language, Text::LocalSourceOriginal)
                 } else {
-                    "SSH source 只读：Moonbox 只构建本地目标 handoff，不远程 resume。"
+                    i18n::text(language, Text::SshSourceReadOnly)
                 },
-                Style::default().fg(theme::MUTED),
+                Style::default().fg(theme::muted()),
             )),
             handoff_review_path_line(app),
             handoff_review_portrait_line(app),
             Line::from(vec![
-                Span::styled("会话: ", Style::default().fg(theme::BLUE)),
+                Span::styled(
+                    format!("{}: ", i18n::text(language, Text::Session)),
+                    Style::default().fg(theme::blue()),
+                ),
                 Span::raw(session),
             ]),
             Line::from(vec![
-                Span::styled("目标: ", Style::default().fg(theme::BLUE)),
+                Span::styled(
+                    format!("{}: ", i18n::text(language, Text::Target)),
+                    Style::default().fg(theme::blue()),
+                ),
                 Span::raw(app.pending_target.to_string()),
             ]),
             Line::from(vec![
-                Span::styled("标签: ", Style::default().fg(theme::BLUE)),
+                Span::styled(
+                    format!("{}: ", i18n::text(language, Text::Label)),
+                    Style::default().fg(theme::blue()),
+                ),
                 Span::raw(handoff_label),
             ]),
             Line::from(vec![
-                Span::styled("回退点: ", Style::default().fg(theme::BLUE)),
+                Span::styled(
+                    format!("{}: ", i18n::text(language, Text::RewindPoint)),
+                    Style::default().fg(theme::blue()),
+                ),
                 Span::raw(capsule.rewind_point.clone()),
             ]),
             Line::from(vec![
-                Span::styled("校验: ", Style::default().fg(theme::BLUE)),
+                Span::styled(
+                    format!("{}: ", i18n::text(language, Text::Validation)),
+                    Style::default().fg(theme::blue()),
+                ),
                 Span::styled(
                     validation_label(pending_validation.state),
                     Style::default()
@@ -4070,26 +4239,29 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                 Span::raw("  "),
                 Span::styled(
                     pending_validation.summary(),
-                    Style::default().fg(theme::MUTED),
+                    Style::default().fg(theme::muted()),
                 ),
             ]),
             Line::from(vec![
-                Span::styled("目标命令: ", Style::default().fg(theme::BLUE)),
+                Span::styled(
+                    format!("{}: ", i18n::text(language, Text::TargetCommand)),
+                    Style::default().fg(theme::blue()),
+                ),
                 Span::styled(
                     app.target_launch_command_summary()
                         .unwrap_or_else(|| app.launch_command()),
-                    Style::default().fg(theme::CYAN),
+                    Style::default().fg(theme::cyan()),
                 ),
             ]),
             Line::raw(""),
             Line::from(Span::styled(
-                "目标会收到",
+                i18n::text(language, Text::TargetReceives),
                 Style::default()
-                    .fg(theme::BLUE)
+                    .fg(theme::blue())
                     .add_modifier(Modifier::BOLD),
             )),
         ];
-        lines.extend(target_input_lines(app));
+        lines.extend(target_input_lines(app, language));
         lines.extend([
             Line::raw(""),
             Line::from(Span::styled(
@@ -4099,17 +4271,17 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                     "Handoff Artifact"
                 },
                 Style::default()
-                    .fg(theme::BLUE)
+                    .fg(theme::blue())
                     .add_modifier(Modifier::BOLD),
             )),
         ]);
-        lines.extend(capsule_review_lines(&capsule, 1));
+        lines.extend(capsule_review_lines(&capsule, 1, language));
         lines.extend([
             Line::raw(""),
             Line::from(Span::styled(
-                "就绪检查",
+                i18n::text(language, Text::Readiness),
                 Style::default()
-                    .fg(theme::BLUE)
+                    .fg(theme::blue())
                     .add_modifier(Modifier::BOLD),
             )),
         ]);
@@ -4117,9 +4289,9 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         lines.extend([
             Line::raw(""),
             Line::from(Span::styled(
-                "传给目标的内容",
+                i18n::text(language, Text::TargetContent),
                 Style::default()
-                    .fg(theme::GOLD)
+                    .fg(theme::gold())
                     .add_modifier(Modifier::BOLD),
             )),
         ]);
@@ -4128,41 +4300,44 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             Line::raw(""),
             if launch_blocked {
                 Line::from(vec![
-                    disabled_action_button("r", "不可运行"),
+                    disabled_action_button("r", i18n::text(language, Text::CannotRun)),
                     Span::raw("  "),
-                    disabled_action_button("y", "不可复制"),
+                    disabled_action_button("y", i18n::text(language, Text::CannotCopy)),
                     Span::raw("  "),
-                    action_button("Esc", "返回"),
-                    Span::styled("  校验未通过", Style::default().fg(theme::RED)),
+                    action_button("Esc", i18n::text(language, Text::Back)),
+                    Span::styled(
+                        format!("  {}", i18n::text(language, Text::ValidationFailed)),
+                        Style::default().fg(theme::red()),
+                    ),
                 ])
             } else if draft_run_blocked {
                 Line::from(vec![
-                    disabled_action_button("r", "草稿不可运行"),
+                    disabled_action_button("r", i18n::text(language, Text::DraftCannotRun)),
                     Span::raw("  "),
-                    action_button("y", "复制命令"),
+                    action_button("y", i18n::text(language, Text::CopyCommand)),
                     Span::raw("  "),
-                    action_button("Esc", "返回"),
+                    action_button("Esc", i18n::text(language, Text::Back)),
                     Span::styled(
-                        "  选择 AI skill 后可运行",
-                        Style::default().fg(theme::MUTED),
+                        format!("  {}", i18n::text(language, Text::ChooseAiSkillToRun)),
+                        Style::default().fg(theme::muted()),
                     ),
                 ])
             } else {
                 Line::from(vec![
-                    action_button("r", "运行本地目标"),
+                    action_button("r", i18n::text(language, Text::RunLocalTarget)),
                     Span::raw("  "),
-                    action_button("y", "复制命令"),
+                    action_button("y", i18n::text(language, Text::CopyCommand)),
                     Span::raw("  "),
-                    action_button("Esc", "返回"),
+                    action_button("Esc", i18n::text(language, Text::Back)),
                 ])
             },
             Line::from(Span::styled(
                 if run_blocked {
-                    "gg 顶部   G 底部   j/k 滚动"
+                    i18n::text(language, Text::ScrollOnlyKeys)
                 } else {
-                    "gg 顶部   G 底部   j/k 滚动   r/y/Esc 操作"
+                    i18n::text(language, Text::ReviewActionKeys)
                 },
-                Style::default().fg(theme::MUTED),
+                Style::default().fg(theme::muted()),
             )),
         ]);
         let scroll = modal_scroll_offset(app.modal_scroll, &lines, area);
@@ -4193,7 +4368,7 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                 .fg(ratatui::style::Color::Black)
                 .bg(validation_color(validation.state))
         } else {
-            Style::default().fg(theme::MUTED)
+            Style::default().fg(theme::muted())
         };
         let cursor = if selected { ">" } else { " " };
         let mark = if selected { "[x]" } else { "[ ]" };
@@ -4210,19 +4385,19 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         Line::from(Span::styled(
             "Choose target CLI",
             Style::default()
-                .fg(theme::GOLD)
+                .fg(theme::gold())
                 .add_modifier(Modifier::BOLD),
         )),
         Line::raw(""),
         Line::from(vec![
-            Span::styled("Session: ", Style::default().fg(theme::BLUE)),
+            Span::styled("Session: ", Style::default().fg(theme::blue())),
             Span::raw(session),
         ]),
         Line::raw(""),
         Line::from(Span::styled(
             "Target",
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::blue())
                 .add_modifier(Modifier::BOLD),
         )),
     ];
@@ -4230,11 +4405,11 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
     lines.extend([
         Line::raw(""),
         Line::from(vec![
-            Span::styled("Selected: ", Style::default().fg(theme::BLUE)),
+            Span::styled("Selected: ", Style::default().fg(theme::blue())),
             Span::raw(app.pending_target.to_string()),
         ]),
         Line::from(vec![
-            Span::styled("Validation: ", Style::default().fg(theme::BLUE)),
+            Span::styled("Validation: ", Style::default().fg(theme::blue())),
             Span::styled(
                 validation_label(pending_validation.state),
                 Style::default()
@@ -4244,14 +4419,14 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             Span::raw("  "),
             Span::styled(
                 pending_validation.summary(),
-                Style::default().fg(theme::MUTED),
+                Style::default().fg(theme::muted()),
             ),
         ]),
         Line::raw(""),
         Line::from(Span::styled(
             "Readiness",
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::blue())
                 .add_modifier(Modifier::BOLD),
         )),
     ]);
@@ -4260,12 +4435,14 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         if pending_validation.state == LaunchValidationState::Blocked {
             Line::from(Span::styled(
                 "Launch review disabled until validation passes",
-                Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::red())
+                    .add_modifier(Modifier::BOLD),
             ))
         } else {
             Line::from(Span::styled(
                 "Press enter to review the handoff command before copying",
-                Style::default().fg(theme::GOLD),
+                Style::default().fg(theme::gold()),
             ))
         },
         Line::raw(""),
@@ -4275,7 +4452,7 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             } else {
                 "j/k choose target   enter review   y unavailable   Esc cancel"
             },
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         )),
     ]);
     frame.render_widget(
@@ -4299,25 +4476,25 @@ fn handoff_review_path_line(app: &App) -> Line<'static> {
         })
         .unwrap_or_else(|| "source no session".into());
     Line::from(vec![
-        Span::styled("Path: ", Style::default().fg(theme::BLUE)),
+        Span::styled("Path: ", Style::default().fg(theme::blue())),
         Span::styled(
             session,
             Style::default()
-                .fg(theme::TEXT)
+                .fg(theme::text())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" -> ", Style::default().fg(theme::BORDER)),
+        Span::styled(" -> ", Style::default().fg(theme::border())),
         Span::styled(
             format!("rewind {}", short_identifier(&app.rewind_event_id, 12)),
             Style::default()
-                .fg(theme::GOLD)
+                .fg(theme::gold())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" -> ", Style::default().fg(theme::BORDER)),
+        Span::styled(" -> ", Style::default().fg(theme::border())),
         Span::styled(
             format!("target {}", app.pending_target),
             Style::default()
-                .fg(theme::CYAN)
+                .fg(theme::cyan())
                 .add_modifier(Modifier::BOLD),
         ),
     ])
@@ -4329,17 +4506,21 @@ fn handoff_review_portrait_line(app: &App) -> Line<'static> {
         .map(|session| session_portrait_detail(app, session))
         .unwrap_or_else(|| "no session selected".into());
     Line::from(vec![
-        Span::styled("Portrait: ", Style::default().fg(theme::BLUE)),
+        Span::styled("Portrait: ", Style::default().fg(theme::blue())),
         Span::styled(
             portrait,
             Style::default()
-                .fg(theme::CYAN)
+                .fg(theme::cyan())
                 .add_modifier(Modifier::BOLD),
         ),
     ])
 }
 
-fn capsule_review_lines(capsule: &WorkCapsule, _max_rows: usize) -> Vec<Line<'static>> {
+fn capsule_review_lines(
+    capsule: &WorkCapsule,
+    _max_rows: usize,
+    language: crate::core::config::UiLanguage,
+) -> Vec<Line<'static>> {
     let decision = capsule
         .decisions
         .first()
@@ -4359,42 +4540,62 @@ fn capsule_review_lines(capsule: &WorkCapsule, _max_rows: usize) -> Vec<Line<'st
         .map(|value| review_snippet(value, 88))
         .unwrap_or_else(|| "none".into());
     let mut lines = vec![
-        review_label_line("目标", review_snippet(&capsule.goal, 88), theme::BLUE),
-        review_label_line("状态", capsule.state.clone(), theme::GOLD),
-        review_label_line("决策", decision, theme::BLUE),
-        review_label_line("待办", todo, theme::BLUE),
-        review_label_line("风险", risk, theme::RED),
+        review_label_line(
+            i18n::text(language, Text::Goal),
+            review_snippet(&capsule.goal, 88),
+            theme::blue(),
+        ),
+        review_label_line(
+            i18n::text(language, Text::State),
+            capsule.state.clone(),
+            theme::gold(),
+        ),
+        review_label_line(
+            i18n::text(language, Text::Decision),
+            decision,
+            theme::blue(),
+        ),
+        review_label_line(i18n::text(language, Text::Todo), todo, theme::blue()),
+        review_label_line(i18n::text(language, Text::Risk), risk, theme::red()),
     ];
     if let Some(artifact) = &capsule.handoff_artifact {
         lines.push(review_label_line(
             "Handoff",
             review_snippet(artifact, 88),
-            theme::GREEN,
+            theme::green(),
         ));
     }
     lines
 }
 
-fn target_input_lines(app: &App) -> Vec<Line<'static>> {
+fn target_input_lines(app: &App, language: crate::core::config::UiLanguage) -> Vec<Line<'static>> {
     let Some(preview) = app.target_command_preview() else {
         return vec![Line::from(Span::styled(
             "No target input available for the current selection.",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         ))];
     };
     let cwd = preview.cwd.unwrap_or_else(|| "terminal default".into());
     vec![
-        review_label_line("程序", preview.program, theme::BLUE),
-        review_label_line("目录", cwd, theme::BLUE),
         review_label_line(
-            "参数",
-            format!("{} 个参数，最后一个是 handoff prompt", preview.args.len()),
-            theme::BLUE,
+            i18n::text(language, Text::Program),
+            preview.program,
+            theme::blue(),
+        ),
+        review_label_line(i18n::text(language, Text::Directory), cwd, theme::blue()),
+        review_label_line(
+            i18n::text(language, Text::Arguments),
+            format!(
+                "{} {}",
+                preview.args.len(),
+                i18n::text(language, Text::ArgumentCountHandoff)
+            ),
+            theme::blue(),
         ),
         review_label_line(
-            "Prompt",
-            "下面完整展示，会作为最后一个参数传入".into(),
-            theme::BLUE,
+            i18n::text(language, Text::Prompt),
+            i18n::text(language, Text::PromptDisplayedBelow).into(),
+            theme::blue(),
         ),
     ]
 }
@@ -4403,7 +4604,7 @@ fn target_prompt_lines(app: &App) -> Vec<Line<'static>> {
     let Some(preview) = app.target_command_preview() else {
         return vec![Line::from(Span::styled(
             "No prompt available for the current selection.",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         ))];
     };
     preview
@@ -4411,7 +4612,7 @@ fn target_prompt_lines(app: &App) -> Vec<Line<'static>> {
         .lines()
         .map(|line| {
             Line::from(vec![
-                Span::styled("> ", Style::default().fg(theme::MUTED)),
+                Span::styled("> ", Style::default().fg(theme::muted())),
                 Span::raw(line.to_string()),
             ])
         })
@@ -4428,7 +4629,7 @@ fn review_label_line(
             format!("{label}: "),
             Style::default().fg(color).add_modifier(Modifier::BOLD),
         ),
-        Span::styled(value, Style::default().fg(theme::TEXT)),
+        Span::styled(value, Style::default().fg(theme::text())),
     ])
 }
 
@@ -4454,9 +4655,9 @@ fn validation_label(state: LaunchValidationState) -> &'static str {
 
 fn validation_color(state: LaunchValidationState) -> Color {
     match state {
-        LaunchValidationState::Ready => theme::GREEN,
-        LaunchValidationState::Warning => theme::GOLD,
-        LaunchValidationState::Blocked => theme::RED,
+        LaunchValidationState::Ready => theme::green(),
+        LaunchValidationState::Warning => theme::gold(),
+        LaunchValidationState::Blocked => theme::red(),
     }
 }
 
@@ -4465,10 +4666,12 @@ fn readiness_lines(report: Option<&VerificationReport>, _max_rows: usize) -> Vec
         return vec![Line::from(vec![
             Span::styled(
                 "BLOCKED ",
-                Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::red())
+                    .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("session", Style::default().fg(theme::TEXT)),
-            Span::styled("  No session selected", Style::default().fg(theme::MUTED)),
+            Span::styled("session", Style::default().fg(theme::text())),
+            Span::styled("  No session selected", Style::default().fg(theme::muted())),
         ])];
     };
 
@@ -4520,7 +4723,7 @@ fn preflight_readiness_lines(
     if remaining > 0 {
         lines.push(Line::from(Span::styled(
             format!("  {remaining} more verifier checks"),
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         )));
     }
     lines
@@ -4536,22 +4739,22 @@ fn readiness_groups() -> [ReadinessGroup; 5] {
     [
         ReadinessGroup {
             title: "Target Readiness",
-            color: theme::GREEN,
+            color: theme::green(),
             names: &["target_support", "target_command"],
         },
         ReadinessGroup {
             title: "Workspace Restore",
-            color: theme::PURPLE,
+            color: theme::purple(),
             names: &["continuation_level", "package_import", "workspace_restore"],
         },
         ReadinessGroup {
             title: "Source Health",
-            color: theme::BLUE,
+            color: theme::blue(),
             names: &["source_health", "token_budget", "rewind_exists"],
         },
         ReadinessGroup {
             title: "Capsule Health",
-            color: theme::GOLD,
+            color: theme::gold(),
             names: &[
                 "compiler_mode",
                 "capsule_version",
@@ -4568,7 +4771,7 @@ fn readiness_groups() -> [ReadinessGroup; 5] {
         },
         ReadinessGroup {
             title: "Semantic Evidence",
-            color: theme::CYAN,
+            color: theme::cyan(),
             names: &[
                 "semantic_source_map",
                 "semantic_compiler_coverage",
@@ -4610,21 +4813,21 @@ fn readiness_check_line(check: &crate::core::model::VerificationCheck) -> Line<'
         Span::styled(
             check.name.clone(),
             Style::default()
-                .fg(theme::TEXT)
+                .fg(theme::text())
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             format!("  {}", check.detail),
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::muted()),
         ),
     ])
 }
 
 fn verification_color(status: VerificationStatus) -> Color {
     match status {
-        VerificationStatus::Pass => theme::GREEN,
-        VerificationStatus::Warn => theme::GOLD,
-        VerificationStatus::Fail => theme::RED,
+        VerificationStatus::Pass => theme::green(),
+        VerificationStatus::Warn => theme::gold(),
+        VerificationStatus::Fail => theme::red(),
     }
 }
 
@@ -4636,52 +4839,52 @@ fn render_open_original(frame: &mut Frame, root: Rect, app: &App) {
             Line::from(Span::styled(
                 "Open original session",
                 Style::default()
-                    .fg(theme::GOLD)
+                    .fg(theme::gold())
                     .add_modifier(Modifier::BOLD),
             )),
             Line::raw(""),
             Line::from(vec![
-                Span::styled("CLI: ", Style::default().fg(theme::BLUE)),
+                Span::styled("CLI: ", Style::default().fg(theme::blue())),
                 Span::raw(session.cli.to_string()),
             ]),
             Line::from(vec![
-                Span::styled("Session: ", Style::default().fg(theme::BLUE)),
+                Span::styled("Session: ", Style::default().fg(theme::blue())),
                 Span::raw(&session.id),
             ]),
             Line::from(vec![
-                Span::styled("cwd: ", Style::default().fg(theme::BLUE)),
+                Span::styled("cwd: ", Style::default().fg(theme::blue())),
                 Span::raw(&session.cwd),
             ]),
             Line::raw(""),
             Line::from(Span::styled(
                 "Will run",
                 Style::default()
-                    .fg(theme::BLUE)
+                    .fg(theme::blue())
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(Span::styled(
                 app.original_resume_display_command().unwrap_or_default(),
-                Style::default().fg(theme::CYAN),
+                Style::default().fg(theme::cyan()),
             )),
             Line::raw(""),
             Line::from(Span::styled(
                 "Copy wrapper",
                 Style::default()
-                    .fg(theme::BLUE)
+                    .fg(theme::blue())
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(Span::styled(
                 app.original_open_command().unwrap_or_default(),
-                Style::default().fg(theme::MUTED),
+                Style::default().fg(theme::muted()),
             )),
             Line::raw(""),
             Line::from(Span::styled(
                 "Action: Moonbox hands this terminal to the original CLI, then returns.",
-                Style::default().fg(theme::MUTED),
+                Style::default().fg(theme::muted()),
             )),
             Line::from(Span::styled(
                 "enter resume   y copy wrapper command   Esc close",
-                Style::default().fg(theme::MUTED),
+                Style::default().fg(theme::muted()),
             )),
         ]
     } else {
@@ -4689,13 +4892,13 @@ fn render_open_original(frame: &mut Frame, root: Rect, app: &App) {
             Line::from(Span::styled(
                 "No session selected",
                 Style::default()
-                    .fg(theme::GOLD)
+                    .fg(theme::gold())
                     .add_modifier(Modifier::BOLD),
             )),
             Line::raw(""),
             Line::from(Span::styled(
                 "Adjust filter or search, then try again.",
-                Style::default().fg(theme::MUTED),
+                Style::default().fg(theme::muted()),
             )),
         ]
     };
@@ -4710,24 +4913,32 @@ fn render_open_original(frame: &mut Frame, root: Rect, app: &App) {
 }
 
 fn panel_block(title: &'static str, focused: bool) -> Block<'static> {
-    let color = if focused { theme::GOLD } else { theme::BORDER };
+    let color = if focused {
+        theme::gold()
+    } else {
+        theme::border()
+    };
     Block::default()
         .title(title)
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(color))
-        .style(Style::default().fg(theme::TEXT))
+        .style(Style::default().fg(theme::text()))
         .padding(Padding::horizontal(1))
 }
 
 fn dynamic_panel_block(title: String, focused: bool) -> Block<'static> {
-    let color = if focused { theme::GOLD } else { theme::BORDER };
+    let color = if focused {
+        theme::gold()
+    } else {
+        theme::border()
+    };
     Block::default()
         .title(title)
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(color))
-        .style(Style::default().fg(theme::TEXT))
+        .style(Style::default().fg(theme::text()))
         .padding(Padding::horizontal(1))
 }
 
@@ -4741,13 +4952,13 @@ fn key(label: &'static str) -> Span<'static> {
     Span::styled(
         format!(" {label} "),
         Style::default()
-            .fg(theme::BLUE)
+            .fg(theme::blue())
             .add_modifier(Modifier::BOLD),
     )
 }
 
 fn txt(label: &'static str) -> Span<'static> {
-    Span::styled(label, Style::default().fg(theme::MUTED))
+    Span::styled(label, Style::default().fg(theme::muted()))
 }
 
 fn modal_area(root: Rect, percent_x: u16, percent_y: u16) -> Rect {
@@ -4937,10 +5148,10 @@ mod tests {
         let inactive = timeline_detail_style(false, false, TimelineKind::User);
 
         assert!(!active.add_modifier.contains(Modifier::BOLD));
-        assert_eq!(active.fg, Some(theme::TEXT));
+        assert_eq!(active.fg, Some(theme::text()));
         assert!(!inactive_rewind.add_modifier.contains(Modifier::BOLD));
-        assert_eq!(inactive_rewind.fg, Some(theme::TEXT));
-        assert_eq!(inactive.fg, Some(theme::MUTED));
+        assert_eq!(inactive_rewind.fg, Some(theme::text()));
+        assert_eq!(inactive.fg, Some(theme::muted()));
     }
 
     #[test]
@@ -4949,7 +5160,7 @@ mod tests {
         let line = status_line(&app);
         let message = &line.spans[1];
 
-        assert_eq!(message.style.fg, Some(theme::MUTED));
+        assert_eq!(message.style.fg, Some(theme::muted()));
         assert!(!message.style.add_modifier.contains(Modifier::BOLD));
     }
 
@@ -5059,15 +5270,63 @@ mod tests {
         app.handle_key(key(','));
         let off_screen = render_text(&app, 150, 36);
         assert_screen_contains(&off_screen, "Settings");
+        assert_screen_contains(&off_screen, "Language");
+        assert_screen_contains(&off_screen, "Theme");
         assert_screen_contains(&off_screen, "Draft Off");
         assert_screen_contains(&off_screen, "Resume");
 
+        app.handle_key(key('j'));
+        app.handle_key(key('j'));
         app.handle_key(key(' '));
         let on_screen = render_text(&app, 150, 36);
         assert_screen_contains(&on_screen, "Draft On");
         assert_screen_contains(&on_screen, "Unsaved");
         assert_screen_contains(&on_screen, "Jump");
-        assert_screen_contains(&on_screen, "never creates panes");
+        assert_screen_contains(&on_screen, "never translates session content");
+    }
+
+    #[test]
+    fn settings_overlay_previews_language_and_theme_without_touching_session_text() {
+        let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.data.timeline = vec![TimelineEvent {
+            id: "evt-zh".into(),
+            time: "10:00".into(),
+            kind: TimelineKind::User,
+            title: "User".into(),
+            detail: "看下这个问题".into(),
+            metadata: Default::default(),
+        }];
+
+        app.handle_key(key(','));
+        app.handle_key(key(' '));
+        let zh_screen = render_text(&app, 150, 36);
+        assert_screen_contains(&zh_screen, "设置");
+        assert_screen_contains(&zh_screen, "语言");
+        assert_screen_contains(&zh_screen, "简体中文");
+
+        app.handle_key(key('j'));
+        app.handle_key(key(' '));
+        let theme_screen = render_text(&app, 150, 36);
+        assert_screen_contains(&theme_screen, "Tokyo Night");
+        assert_screen_contains(&theme_screen, "看下这个问题");
+    }
+
+    #[test]
+    fn settings_overlay_renders_all_theme_names() {
+        let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.handle_key(key(','));
+
+        let moonbox = render_text(&app, 150, 36);
+        assert_screen_contains(&moonbox, "Moonbox");
+
+        app.handle_key(key('j'));
+        app.handle_key(key(' '));
+        let tokyo = render_text(&app, 150, 36);
+        assert_screen_contains(&tokyo, "Tokyo Night");
+
+        app.handle_key(key(' '));
+        let gruvbox = render_text(&app, 150, 36);
+        assert_screen_contains(&gruvbox, "Gruvbox");
     }
 
     #[test]
@@ -5104,8 +5363,8 @@ mod tests {
 
     #[test]
     fn unselected_session_titles_are_muted() {
-        assert_eq!(session_title_style(false).fg, Some(theme::MUTED));
-        assert_eq!(session_title_style(true).fg, Some(theme::TEXT));
+        assert_eq!(session_title_style(false).fg, Some(theme::muted()));
+        assert_eq!(session_title_style(true).fg, Some(theme::text()));
         assert!(
             session_title_style(true)
                 .add_modifier
@@ -5203,7 +5462,7 @@ mod tests {
         assert_screen_contains(&screen, "Load Failed");
         assert_screen_contains(&screen, "Install moonbox");
         let line = status_line(&app);
-        assert_eq!(line.spans[1].style.fg, Some(theme::RED));
+        assert_eq!(line.spans[1].style.fg, Some(theme::red()));
         assert!(line.spans[1].style.add_modifier.contains(Modifier::BOLD));
     }
 
@@ -5226,17 +5485,22 @@ mod tests {
 
     #[test]
     fn header_brand_degrades_on_narrow_width() {
-        let narrow = header_title_spans(80)
+        let narrow = header_title_spans(80, crate::core::config::UiLanguage::English)
             .into_iter()
             .map(|span| span.content.into_owned())
             .collect::<String>();
-        let wide = header_title_spans(140)
+        let wide = header_title_spans(140, crate::core::config::UiLanguage::English)
+            .into_iter()
+            .map(|span| span.content.into_owned())
+            .collect::<String>();
+        let zh_wide = header_title_spans(140, crate::core::config::UiLanguage::ZhHans)
             .into_iter()
             .map(|span| span.content.into_owned())
             .collect::<String>();
 
         assert_eq!(narrow, " MOONBOX ");
-        assert_eq!(wide, " MOONBOX 月光宝盒");
+        assert_eq!(wide, " MOONBOX ");
+        assert_eq!(zh_wide, " MOONBOX 月光宝盒");
     }
 
     #[test]
@@ -5260,13 +5524,13 @@ mod tests {
     fn confidence_uses_stable_semantic_colors() {
         assert_eq!(
             PreflightConfidence::Strong.color(),
-            theme::CONFIDENCE_STRONG
+            theme::confidence_strong()
         );
         assert_eq!(
             PreflightConfidence::Medium.color(),
-            theme::CONFIDENCE_MEDIUM
+            theme::confidence_medium()
         );
-        assert_eq!(PreflightConfidence::Weak.color(), theme::CONFIDENCE_WEAK);
+        assert_eq!(PreflightConfidence::Weak.color(), theme::confidence_weak());
     }
 
     #[test]
@@ -5430,9 +5694,9 @@ mod tests {
 
     #[test]
     fn source_badges_share_one_color_mapping() {
-        assert_eq!(source_tool_color(CliTool::Codex), theme::BLUE);
-        assert_eq!(source_tool_color(CliTool::Claude), theme::PURPLE);
-        assert_eq!(source_tool_color(CliTool::Hermes), theme::ORANGE);
+        assert_eq!(source_tool_color(CliTool::Codex), theme::blue());
+        assert_eq!(source_tool_color(CliTool::Claude), theme::purple());
+        assert_eq!(source_tool_color(CliTool::Hermes), theme::orange());
         assert_eq!(
             source_tool_style(CliTool::Claude).fg,
             Some(source_tool_color(CliTool::Claude))
@@ -5919,8 +6183,8 @@ mod tests {
             .expect("target span");
 
         assert_eq!(source.style.fg, Some(source_tool_color(CliTool::Codex)));
-        assert_eq!(rewind.style.fg, Some(theme::ROLE_REWIND));
-        assert_eq!(target.style.fg, Some(theme::ROLE_TARGET));
+        assert_eq!(rewind.style.fg, Some(theme::role_rewind()));
+        assert_eq!(target.style.fg, Some(theme::role_target()));
     }
 
     #[test]
@@ -5938,24 +6202,27 @@ mod tests {
 
     #[test]
     fn selected_timeline_rows_keep_role_accent_colors() {
-        assert_eq!(timeline_group_accent(theme::BLUE, false), theme::BLUE);
-        assert_eq!(timeline_group_accent(theme::GOLD, false), theme::GOLD);
-        assert_eq!(timeline_group_accent(theme::BLUE, true), theme::ROLE_REWIND);
+        assert_eq!(timeline_group_accent(theme::blue(), false), theme::blue());
+        assert_eq!(timeline_group_accent(theme::gold(), false), theme::gold());
+        assert_eq!(
+            timeline_group_accent(theme::blue(), true),
+            theme::role_rewind()
+        );
 
-        let selected_user_prefix = timeline_prefix_style(true, theme::BLUE);
-        assert_eq!(selected_user_prefix.fg, Some(theme::BLUE));
+        let selected_user_prefix = timeline_prefix_style(true, theme::blue());
+        assert_eq!(selected_user_prefix.fg, Some(theme::blue()));
         assert!(selected_user_prefix.add_modifier.contains(Modifier::BOLD));
 
-        let selected_ai_prefix = timeline_prefix_style(true, theme::GOLD);
-        assert_eq!(selected_ai_prefix.fg, Some(theme::GOLD));
+        let selected_ai_prefix = timeline_prefix_style(true, theme::gold());
+        assert_eq!(selected_ai_prefix.fg, Some(theme::gold()));
         assert!(selected_ai_prefix.add_modifier.contains(Modifier::BOLD));
 
         let active_cursor_marker = timeline_marker_style(true, true, false);
-        assert_eq!(active_cursor_marker.fg, Some(theme::CYAN));
+        assert_eq!(active_cursor_marker.fg, Some(theme::cyan()));
         assert!(active_cursor_marker.add_modifier.contains(Modifier::BOLD));
 
         let inactive_rewind_marker = timeline_marker_style(false, false, true);
-        assert_eq!(inactive_rewind_marker.fg, Some(theme::ROLE_REWIND));
+        assert_eq!(inactive_rewind_marker.fg, Some(theme::role_rewind()));
         assert!(inactive_rewind_marker.add_modifier.contains(Modifier::BOLD));
     }
 
@@ -6069,19 +6336,39 @@ mod tests {
 
         assert_screen_contains(&screen, "Handoff Review");
         assert_screen_contains(&screen, "handoff");
-        assert_screen_contains(&screen, "下一步:");
+        assert_screen_contains(&screen, "Next:");
         assert_screen_contains(&screen, "Path:");
         assert_screen_contains(&screen, "source Codex codex-cxcp-des...");
         assert_screen_contains(&screen, "-> rewind evt-091 -> target Hermes");
         assert_screen_contains(&screen, "Portrait:");
         assert_screen_contains(&screen, "user 1 / assistant 1 / tool 4 / rewind 1");
-        assert_screen_contains(&screen, "目标会收到");
+        assert_screen_contains(&screen, "Target receives");
         assert_screen_contains(&screen, "Prompt");
         assert_screen_contains(&screen, "Draft Handoff");
-        assert_screen_contains(&screen, "目标");
-        assert_screen_contains(&screen, "就绪检查");
+        assert_screen_contains(&screen, "Goal");
+        assert_screen_contains(&screen, "Readiness");
         assert_screen_contains(&screen, "PASS");
         assert_screen_contains(&screen, "target_support");
+        assert_screen_contains(&screen, "Target command:");
+        assert_screen_contains(&screen, "r Run");
+        assert_screen_contains(&screen, "y Copy command");
+    }
+
+    #[test]
+    fn launch_review_uses_simplified_chinese_ui_when_configured() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.set_ui_preferences_for_test(crate::core::config::UiPreferencesConfig {
+            language: crate::core::config::UiLanguage::ZhHans,
+            theme: crate::core::config::UiThemeName::Moonbox,
+        });
+        app.show_launch = true;
+        app.launch_review = true;
+        app.pending_target = CliTool::Hermes;
+        let screen = render_text(&app, 120, 48);
+
+        assert_screen_contains(&screen, "下一步:");
+        assert_screen_contains(&screen, "目标会收到");
+        assert_screen_contains(&screen, "就绪检查");
         assert_screen_contains(&screen, "目标命令:");
         assert_screen_contains(&screen, "r 运行");
         assert_screen_contains(&screen, "y 复制命令");
@@ -6101,7 +6388,7 @@ mod tests {
         assert_screen_contains(&screen, "queued");
         assert_screen_contains(&screen, "waiting for background handoff worker");
         assert_screen_contains(&screen, "Esc hides this panel");
-        assert_screen_contains(&screen, "wait 后台生成");
+        assert_screen_contains(&screen, "wait background job");
     }
 
     #[test]
@@ -6113,7 +6400,7 @@ mod tests {
         app.modal_scroll = 38;
         let screen = render_text(&app, 120, 36);
 
-        assert_screen_contains(&screen, "传给目标的内容");
+        assert_screen_contains(&screen, "Content sent to target");
         assert_screen_contains(&screen, "You are receiving a Moonbox cross-CLI handoff");
         assert_screen_contains(&screen, "- CLI: Hermes");
     }
