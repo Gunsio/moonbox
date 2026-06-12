@@ -99,8 +99,15 @@ and this project uses semantic versioning once tagged releases start.
   flooding the modal.
 - Agent-backed handoff compiler catalog entries now discover local generic
   handoff skills and expose Codex / Claude runner choices in the same Skill
-  Picker. Codex uses the app-server thread surface with read-only sandboxing,
-  while Claude uses a temporary local-plugin bridge for the Claude Agent SDK.
+  Picker. Codex uses the official `openai-codex` SDK bridge with
+  `Sandbox.read_only`, while Claude uses a temporary local-plugin bridge for the
+  Claude Agent SDK and filters execution to the selected `plugin:skill`.
+- Agent handoff generation now sends a bounded context pack with rewind-window
+  bounds, session index, compact frontier, tool/approval evidence, file changes,
+  attachments, raw references, and redaction details instead of handing the
+  runner an unbounded transcript slice.
+- Empty agent handoff artifacts now fail validation before they can enter the
+  runnable Handoff Review path.
 - Handoff Review generation now compiles the selected compiler in the
   background after loading the source timeline, reports queued /
   preparing_context / starting_runner / running_skill / verifying progress, and

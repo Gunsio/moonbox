@@ -632,13 +632,20 @@ each discovered handoff skill, plus install-hint placeholders when no handoff
 skill is installed. Agent runners are never selected implicitly as the default
 compiler; choose one in the TUI Skill Picker, pass its `--compiler
 agent:<runner>:<skill>` id, or set it as `default_compiler` after reviewing the
-preflight state. Codex handoff generation uses the Codex app-server thread
-surface with read-only sandboxing and `approvalPolicy=never`. Claude handoff
-generation uses the Claude Agent SDK through a temporary local plugin bridge and
-requires SDK/provider credentials such as `ANTHROPIC_API_KEY`, Bedrock, or
-Vertex configuration. In both cases Moonbox builds a bounded read-only context
-pack; the runner does not get permission to scan or mutate source session
-stores.
+preflight state. Codex handoff generation uses the official `openai-codex`
+Python SDK with `Sandbox.read_only`; install it with `pip install openai-codex`,
+set `MOONBOX_CODEX_SDK_PYTHON` when the SDK lives outside `python3`, and use
+`MOONBOX_CODEX_BIN` only to intentionally point the SDK at a specific Codex
+runtime. Claude handoff generation uses the Claude Agent SDK through a temporary
+local plugin bridge, filters the run to the selected `plugin:skill`, and uses
+`permission_mode="dontAsk"` with only the Skill tool allowed. Claude requires
+SDK/provider credentials such as `ANTHROPIC_API_KEY`, Bedrock, or Vertex
+configuration. In both cases Moonbox builds a bounded read-only context pack
+from the selected rewind window, session index, compact frontier, tool and
+approval evidence, file changes, attachments, raw references, and redaction
+report; the runner does not get permission to scan or mutate source session
+stores. Empty agent artifacts fail validation before Moonbox shows the Review
+as runnable.
 
 Environment variables remain the highest-priority one-off override:
 
@@ -1172,58 +1179,74 @@ Stable interfaces matter more than any single framework:
   now runs in the background with a cancellable loading panel, opens at the
   bottom action area, supports `gg` / `G` review jumps, and blocks real-session
   draft compiler runs before spawning a target process.
+- M90: Agent-backed Handoff Runtime + Review UX; Moonbox discovers local
+  generic handoff skills, exposes explicit Codex / Claude runner choices in the
+  Skill Picker, compiles selected handoff reviews in a background worker with
+  queued / preparing_context / starting_runner / running_skill / verifying
+  progress, and keeps hidden in-process jobs alive. Codex uses the app-server
+  thread surface with read-only sandboxing and `approvalPolicy=never`; Claude
+  uses a Claude Agent SDK local-plugin bridge with preflight warnings when the
+  SDK or provider credentials are missing. Agent runners are never selected as
+  implicit defaults; users must choose them explicitly or configure them.
+- M91: Production Agent Handoff SDK + Community Skill Path; Codex handoff
+  generation now uses the official `openai-codex` SDK bridge with
+  `Sandbox.read_only`, while Claude filters the temporary local plugin bridge to
+  the selected `plugin:skill` under `permission_mode="dontAsk"`. Moonbox sends a
+  bounded read-only context pack containing rewind-window bounds, session index,
+  compact frontier, tool/approval evidence, file changes, attachments, raw
+  references, and redaction details, then rejects empty agent artifacts before
+  they can enter the runnable Review path. The user-facing path stays
+  skill-first: source session, target executor, handoff skill, runner SDK,
+  review, then explicit launch.
 
 ### Remaining Milestones
 
-- M90: Agent-backed Handoff Runtime + Review UX. This merges the former SDK /
-  skill handoff milestone into the Handoff Review work and makes the
-  skill-backed AI path the production path. Users choose a source session, target
-  executor, handoff skill, and runner; Moonbox builds a bounded context pack and
-  validates the output, while Codex / Claude P0 SDK runners generate the actual
-  handoff artifact. `Capsule` remains only a legacy/internal envelope name.
-  - TODO: build the read-only `HandoffContextPack`; discover installed generic
-    handoff skills, with `handoff` preferred when present; support Codex
-    app-server / SDK and Claude Agent SDK runners; preflight install, auth,
-    provider, model, sandbox, and admin restrictions; persist background job
-    states; show loading/progress/failure/ready states in Review; keep
-    deterministic Rust output fixture/debug-only.
-  - Acceptance: fixture and isolated-home tests cover skill discovery, Codex and
-    Claude ready/auth/missing/blocked/timeout paths, invalid output, retry, copy,
-    run-disabled, long content, background restoration, and TUI resize; no test
-    opens, resumes, or launches recent real sessions.
 - M93: Opt-in Hook Event Channel Foundation. Add the hooks substrate without
-  changing user files or TUI behavior by default. Only explicit CLI or Settings
-  install writes Moonbox-marked Claude / Codex hook entries after a preview.
+  changing user files or TUI behavior by default. Hooks are a configurable
+  integration, not part of first-run behavior: install is off until a user
+  opens Settings or runs an explicit CLI command, reviews the exact file edits,
+  and confirms apply.
   - TODO: add `hooks.enabled=false`, per-CLI install state, spool path, and GC
     policy; implement `moonbox hooks status/install/uninstall` and
-    `moonbox hook-event`; append events fail-open to Moonbox spool with tmux/cwd
-    metadata; preserve existing user hooks and uninstall only Moonbox entries;
-    recheck official Claude and Codex hooks docs before implementation.
-  - Acceptance: fresh install leaves Claude/Codex configs untouched; install,
-    status, uninstall, idempotency, existing-hook preservation, spool rotation,
-    missing fields, write failure, and exit-0 behavior are covered with isolated
-    homes. Enabling M93 adds only Settings/status/spool-health surfaces; no live
-    row badges, waiting queue, or Enter change yet.
+    `moonbox hook-event`; add a Settings preview that lists every planned edit
+    to Claude / Codex config, the restart/new-session requirement, spool path,
+    retention policy, and uninstall effect; append hook events fail-open to a
+    Moonbox-owned spool with tmux/cwd metadata; preserve existing user hooks,
+    never import all OpenSSH or CLI config entries implicitly, and uninstall
+    only Moonbox-owned entries; recheck official Claude and Codex hooks docs
+    before implementation.
+  - Acceptance: fresh install leaves Claude/Codex configs untouched and the
+    Dashboard only exposes a Settings entry. Dry-run preview is available in CLI
+    and TUI before writes. Apply, status, uninstall, idempotency, existing-hook
+    preservation, invalid config, spool rotation, missing fields, write failure,
+    and exit-0 behavior are covered with isolated homes. Enabling M93 changes
+    only hook status/spool health surfaces; no live row badges, waiting queue,
+    or Enter behavior changes yet.
 - M94: Hook-gated Live Status + Waiting Queue. Use the M93 spool only when hooks
-  are enabled to show live session state and a restrained `WAITING ON YOU` queue.
-  Disabled hooks keep the current Dashboard, Timeline, status bar, and Enter
-  behavior unchanged.
+  are enabled to show live session state and a restrained `WAITING ON YOU`
+  queue. Disabled hooks keep the current Dashboard, Timeline, status bar, and
+  Enter behavior unchanged.
   - TODO: replay and tail spool behind the config gate; maintain
     running/waiting/idle/dead/unknown state; show small row badges, recent action
-    summaries, Live on/stale/error status, and a non-empty-only waiting panel;
-    explain local-only or unavailable states for SSH data spaces.
+    summaries, Live on/stale/error/off status, and a non-empty-only waiting
+    panel; document exactly what changes on screen when enabled: list status
+    badges, top waiting queue, recent action text, stale/error indicator, and
+    hook health details in Settings/Doctor; explain local-only or unavailable
+    states for SSH data spaces.
   - Acceptance: disabled baseline snapshots match current behavior; fixture
     spool tests cover replay, tailing, state transitions, stale/error handling,
     queue sorting, enqueue/dequeue, SSH unavailable reasons, and no source-store
-    mutation.
+    mutation. Manual TUI review confirms enabled mode is useful without turning
+    the Dashboard into a noisy log stream.
 - M95: Opt-in Tmux Jump + Enter Routing. Add jump-first Enter behavior only when
   hooks are enabled and the user separately enables Smart Enter / tmux jump.
   Default Enter behavior remains unchanged.
   - TODO: add Smart Enter settings and behavior preview; persist `$TMUX`,
     `$TMUX_PANE`, cwd, and session id from hook events; validate pane liveness
     with tmux before jumping; route to Jump, Resume, Unavailable, or Disabled
-    with explicit row and command-bar hints; never create panes, send input, or
-    resume source sessions implicitly.
+    with explicit row and command-bar hints; show the effect of the setting in
+    Settings before apply; never create panes, send input, or resume source
+    sessions implicitly.
   - Acceptance: default-off and hooks-on-but-Smart-Enter-off keep existing Enter;
     fake or isolated tmux tests cover jump, resume, pane missing, socket missing,
     non-tmux, SSH data space, and fallback reasons; manual TUI review confirms

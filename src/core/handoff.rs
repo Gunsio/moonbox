@@ -1,9 +1,8 @@
 use std::{
     env, fs, io,
-    io::{BufRead, BufReader, Read, Write},
+    io::{Read, Write},
     path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
-    sync::mpsc,
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -14,14 +13,77 @@ use super::{
     compiler::{self, CompilerError},
     model::{
         CapsuleCompileOutput, CapsuleCompileRequest, ChecklistItem, CompilerPresetStatus,
-        WorkCapsule,
+        TimelineEvent, TimelineKind, WorkCapsule,
     },
 };
 
 const COMPILER_PREFIX: &str = "agent";
 const DEFAULT_TIMEOUT_MS: u64 = 180_000;
 const MAX_ARTIFACT_CHARS: usize = 40_000;
+const MAX_CONTEXT_EVENTS: usize = 80;
+const MAX_CONTEXT_COMPACTS: usize = 5;
+const MAX_CONTEXT_EVIDENCE: usize = 40;
+const MAX_CONTEXT_EXCERPT_CHARS: usize = 480;
 const CLAUDE_PLUGIN_NAME: &str = "moonbox-handoff";
+const CODEX_PYTHON_BRIDGE: &str = r#"
+import json
+import sys
+
+from openai_codex import Codex, Sandbox
+
+try:
+    from openai_codex import CodexConfig
+except Exception:
+    CodexConfig = None
+
+
+payload = json.load(sys.stdin)
+
+
+def codex_client():
+    codex_bin = payload.get("codex_bin")
+    if codex_bin and CodexConfig is not None:
+        config = CodexConfig(codex_bin=codex_bin)
+        try:
+            return Codex(config)
+        except TypeError:
+            return Codex(config=config)
+    return Codex()
+
+
+def start_thread(client):
+    kwargs = {"sandbox": Sandbox.read_only}
+    if payload.get("cwd"):
+        kwargs["cwd"] = payload["cwd"]
+    if payload.get("model"):
+        kwargs["model"] = payload["model"]
+    try:
+        return client.thread_start(**kwargs)
+    except TypeError:
+        kwargs.pop("cwd", None)
+        return client.thread_start(**kwargs)
+
+
+def run_turn(thread):
+    prompt = payload["prompt"]
+    try:
+        return thread.run(prompt, sandbox=Sandbox.read_only)
+    except TypeError:
+        return thread.run(prompt)
+
+
+with codex_client() as codex:
+    thread = start_thread(codex)
+    result = run_turn(thread)
+
+artifact = (
+    getattr(result, "final_response", None)
+    or getattr(result, "text", None)
+    or getattr(result, "output_text", None)
+    or str(result)
+)
+print(json.dumps({"artifact": artifact, "warnings": []}, ensure_ascii=False))
+"#;
 const CLAUDE_PYTHON_BRIDGE: &str = r#"
 import asyncio
 import json
@@ -34,11 +96,13 @@ payload = json.load(sys.stdin)
 
 
 async def main():
-    prompt = f"/{payload['plugin_name']}:{payload['skill_id']}\n\n{payload['prompt']}"
+    plugin_skill = f"{payload['plugin_name']}:{payload['skill_id']}"
+    prompt = payload["prompt"]
     options = ClaudeAgentOptions(
         cwd=payload.get("cwd"),
         setting_sources=[],
         plugins=[{"type": "local", "path": payload["plugin_path"]}],
+        skills=[plugin_skill],
         allowed_tools=["Skill"],
         disallowed_tools=[
             "Bash",
@@ -106,7 +170,7 @@ impl AgentRunner {
 
     pub fn bin_env(self) -> &'static str {
         match self {
-            Self::Codex => "MOONBOX_CODEX_BIN",
+            Self::Codex => "MOONBOX_CODEX_SDK_PYTHON",
             Self::Claude => "MOONBOX_CLAUDE_AGENT_SDK_PYTHON",
         }
     }
@@ -197,6 +261,13 @@ pub fn runner_preflight(runner: AgentRunner) -> RunnerPreflight {
             command: Some(command),
         };
     }
+    if runner == AgentRunner::Codex && !python_module_available(&command, "openai_codex") {
+        return RunnerPreflight {
+            status: CompilerPresetStatus::Warning,
+            reason: "not_installed: install the Codex SDK with `pip install openai-codex`".into(),
+            command: Some(command),
+        };
+    }
     let auth_reason = match runner {
         AgentRunner::Codex => codex_auth_reason(),
         AgentRunner::Claude => claude_auth_reason(),
@@ -244,6 +315,7 @@ pub fn compile_with_agent_runner(
     } else {
         run_agent(request, spec.runner, &skill, &skill_source, &prompt)?
     };
+    let artifact = validate_agent_artifact(request, artifact)?;
     let capsule = normalize_agent_artifact(request, spec.runner, &skill, &artifact);
     Ok(compiler::enrich_compile_output(
         request,
@@ -358,6 +430,12 @@ fn normalize_agent_artifact(
 }
 
 fn context_pack_markdown(request: &CapsuleCompileRequest) -> String {
+    let events_through_rewind = events_through_rewind(request).collect::<Vec<_>>();
+    let selected_start = events_through_rewind
+        .len()
+        .saturating_sub(MAX_CONTEXT_EVENTS);
+    let selected_events = &events_through_rewind[selected_start..];
+    let omitted_events = selected_start;
     let mut lines = vec![
         "# Moonbox Handoff Context Pack".into(),
         String::new(),
@@ -372,6 +450,64 @@ fn context_pack_markdown(request: &CapsuleCompileRequest) -> String {
             request.source_session.branch.as_deref().unwrap_or("-")
         ),
         format!("- Rewind event: {}", request.rewind_event_id),
+        format!("- Token budget: {}", request.token_budget),
+        String::new(),
+        "## Context Bounds".into(),
+        "- Scope: read-only Moonbox inventory already loaded for the selected rewind.".into(),
+        "- Source store access: not granted to the runner.".into(),
+        format!(
+            "- Timeline events through rewind: {}",
+            events_through_rewind.len()
+        ),
+        format!("- Included recent events: {}", selected_events.len()),
+        format!("- Omitted older events: {}", omitted_events),
+        format!("- Max event excerpt chars: {}", MAX_CONTEXT_EXCERPT_CHARS),
+        String::new(),
+        "## Session Index".into(),
+        format!("- Updated: {}", request.source_session.updated),
+        format!("- Status: {:?}", request.source_session.status),
+        format!(
+            "- Runtime: {:?}{}",
+            request.source_session.runtime_status,
+            request
+                .source_session
+                .runtime_reason
+                .as_deref()
+                .map(|reason| format!(" / {}", single_line_excerpt(reason, 180)))
+                .unwrap_or_default()
+        ),
+        format!(
+            "- Tokens: {}",
+            request
+                .source_session
+                .token_count
+                .map(|tokens| tokens.to_string())
+                .unwrap_or_else(|| "-".into())
+        ),
+        format!(
+            "- Raw size bytes: {}",
+            request
+                .source_session
+                .source_size_bytes
+                .map(|bytes| bytes.to_string())
+                .unwrap_or_else(|| "-".into())
+        ),
+        format!(
+            "- Source path: {}",
+            request.source_session.source_path.as_deref().unwrap_or("-")
+        ),
+        format!(
+            "- Health: {}",
+            request
+                .source_session
+                .health_reason
+                .as_deref()
+                .map(|reason| single_line_excerpt(reason, 220))
+                .unwrap_or_else(|| "-".into())
+        ),
+    ];
+    push_anatomy_index(request, &mut lines);
+    lines.extend([
         String::new(),
         "## Redaction".into(),
         format!("- Policy: {}", request.redaction.policy),
@@ -381,18 +517,282 @@ fn context_pack_markdown(request: &CapsuleCompileRequest) -> String {
             "- Prompt-injection warnings: {}",
             request.redaction.prompt_injection_warnings
         ),
-        String::new(),
-        "## Timeline Through Rewind".into(),
-    ];
-    for event in events_through_rewind(request) {
+    ]);
+    if !request.redaction.warnings.is_empty() {
         lines.push(format!(
-            "- [{}] {:?}: {}",
+            "- Warnings: {}",
+            request
+                .redaction
+                .warnings
+                .iter()
+                .take(5)
+                .map(|warning| single_line_excerpt(warning, 160))
+                .collect::<Vec<_>>()
+                .join(" | ")
+        ));
+    }
+    push_compact_frontier(&events_through_rewind, &mut lines);
+    push_tool_evidence(&events_through_rewind, &mut lines);
+    push_file_evidence(&events_through_rewind, &mut lines);
+    push_attachment_refs(&events_through_rewind, &mut lines);
+    lines.extend([String::new(), "## Selected Rewind Window".into()]);
+    for event in selected_events {
+        lines.push(format!(
+            "- [{}] {} {:?}: {} :: {}",
             event.id,
+            event.time,
             event.kind,
-            single_line_excerpt(&event.detail, 480)
+            event.title,
+            single_line_excerpt(&event.detail, MAX_CONTEXT_EXCERPT_CHARS)
         ));
     }
     lines.join("\n")
+}
+
+fn push_anatomy_index(request: &CapsuleCompileRequest, lines: &mut Vec<String>) {
+    let Some(anatomy) = request.source_session.anatomy.as_ref() else {
+        return;
+    };
+    lines.push(format!("- Anatomy status: {:?}", anatomy.status));
+    if !anatomy.scan_scope.is_empty() {
+        lines.push(format!("- Anatomy scope: {}", anatomy.scan_scope));
+    }
+    if let Some(compact) = anatomy.compact.as_ref() {
+        lines.push(format!(
+            "- Anatomy compact frontier: {}{} / tail {} lines, {} bytes",
+            compact.label,
+            compact
+                .line_number
+                .map(|line| format!(" line {line}"))
+                .unwrap_or_default(),
+            compact.tail_lines,
+            compact.tail_bytes
+        ));
+        if !compact.detail.is_empty() {
+            lines.push(format!(
+                "- Anatomy compact detail: {}",
+                single_line_excerpt(&compact.detail, 260)
+            ));
+        }
+    }
+    if let Some(tokens) = anatomy.token_profile.as_ref() {
+        lines.push(format!(
+            "- Anatomy tokens: input={} output={} cache_read={} cache_write={} reasoning={} total={}",
+            tokens.input,
+            tokens.output,
+            tokens.cache_read,
+            tokens.cache_write,
+            tokens.reasoning,
+            tokens.total
+        ));
+    }
+    if !anatomy.value_signals.is_empty() {
+        let signals = anatomy
+            .value_signals
+            .iter()
+            .take(5)
+            .map(|signal| {
+                format!(
+                    "{}={} ({})",
+                    signal.label,
+                    signal.value,
+                    single_line_excerpt(&signal.detail, 100)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" | ");
+        lines.push(format!("- Anatomy signals: {signals}"));
+    }
+}
+
+fn push_compact_frontier(events: &[&TimelineEvent], lines: &mut Vec<String>) {
+    lines.extend([String::new(), "## Compact Frontier".into()]);
+    let mut compact_events = events
+        .iter()
+        .rev()
+        .filter(|event| event.kind == TimelineKind::Compact)
+        .take(MAX_CONTEXT_COMPACTS)
+        .copied()
+        .collect::<Vec<_>>();
+    compact_events.reverse();
+    if compact_events.is_empty() {
+        lines.push("- No compact event observed before the rewind point.".into());
+        return;
+    }
+    for event in compact_events {
+        lines.push(format!(
+            "- [{}] {} :: {}",
+            event.id,
+            event.title,
+            single_line_excerpt(&event.detail, MAX_CONTEXT_EXCERPT_CHARS)
+        ));
+    }
+}
+
+fn push_tool_evidence(events: &[&TimelineEvent], lines: &mut Vec<String>) {
+    lines.extend([String::new(), "## Tool And Approval Evidence".into()]);
+    let mut count = 0;
+    for event in events {
+        for call in &event.metadata.tool_calls {
+            if count >= MAX_CONTEXT_EVIDENCE {
+                lines.push(format!(
+                    "- ... truncated after {MAX_CONTEXT_EVIDENCE} entries"
+                ));
+                return;
+            }
+            count += 1;
+            lines.push(format!(
+                "- [{}] call {}{}{}",
+                event.id,
+                call.name.as_deref().unwrap_or("unknown"),
+                call.id
+                    .as_deref()
+                    .map(|id| format!(" id={id}"))
+                    .unwrap_or_default(),
+                call.arguments
+                    .as_ref()
+                    .map(|args| format!(" args={}", json_excerpt(args, 220)))
+                    .unwrap_or_default()
+            ));
+        }
+        for result in &event.metadata.tool_results {
+            if count >= MAX_CONTEXT_EVIDENCE {
+                lines.push(format!(
+                    "- ... truncated after {MAX_CONTEXT_EVIDENCE} entries"
+                ));
+                return;
+            }
+            count += 1;
+            lines.push(format!(
+                "- [{}] result {} error={} :: {}",
+                event.id,
+                result.name.as_deref().unwrap_or("unknown"),
+                result.is_error.unwrap_or(false),
+                result
+                    .content
+                    .as_deref()
+                    .map(|content| single_line_excerpt(content, 260))
+                    .or_else(|| result.raw.as_ref().map(|raw| json_excerpt(raw, 260)))
+                    .unwrap_or_else(|| "-".into())
+            ));
+        }
+        for approval in &event.metadata.approvals {
+            if count >= MAX_CONTEXT_EVIDENCE {
+                lines.push(format!(
+                    "- ... truncated after {MAX_CONTEXT_EVIDENCE} entries"
+                ));
+                return;
+            }
+            count += 1;
+            lines.push(format!(
+                "- [{}] approval action={} decision={} reason={}",
+                event.id,
+                approval.action.as_deref().unwrap_or("-"),
+                approval.decision.as_deref().unwrap_or("-"),
+                approval
+                    .reason
+                    .as_deref()
+                    .map(|reason| single_line_excerpt(reason, 220))
+                    .unwrap_or_else(|| "-".into())
+            ));
+        }
+    }
+    if count == 0 {
+        lines.push("- No tool calls, tool results, or approvals were indexed.".into());
+    }
+}
+
+fn push_file_evidence(events: &[&TimelineEvent], lines: &mut Vec<String>) {
+    lines.extend([String::new(), "## File Change Evidence".into()]);
+    let mut count = 0;
+    for event in events {
+        for change in &event.metadata.file_changes {
+            if count >= MAX_CONTEXT_EVIDENCE {
+                lines.push(format!(
+                    "- ... truncated after {MAX_CONTEXT_EVIDENCE} entries"
+                ));
+                return;
+            }
+            count += 1;
+            lines.push(format!(
+                "- [{}] {} {} :: {}{}",
+                event.id,
+                change.operation.as_deref().unwrap_or("change"),
+                change.path.as_deref().unwrap_or("-"),
+                change
+                    .summary
+                    .as_deref()
+                    .map(|summary| single_line_excerpt(summary, 240))
+                    .unwrap_or_else(|| "-".into()),
+                change
+                    .diff
+                    .as_deref()
+                    .map(|diff| format!(" diff={}", single_line_excerpt(diff, 240)))
+                    .unwrap_or_default()
+            ));
+        }
+    }
+    if count == 0 {
+        lines.push("- No file changes were indexed.".into());
+    }
+}
+
+fn push_attachment_refs(events: &[&TimelineEvent], lines: &mut Vec<String>) {
+    lines.extend([String::new(), "## Attachments And Raw References".into()]);
+    let mut count = 0;
+    for event in events {
+        for attachment in &event.metadata.attachments {
+            if count >= MAX_CONTEXT_EVIDENCE {
+                lines.push(format!(
+                    "- ... truncated after {MAX_CONTEXT_EVIDENCE} entries"
+                ));
+                return;
+            }
+            count += 1;
+            lines.push(format!(
+                "- [{}] attachment id={} name={} path={} mime={} bytes={}",
+                event.id,
+                attachment.id.as_deref().unwrap_or("-"),
+                attachment.name.as_deref().unwrap_or("-"),
+                attachment.path.as_deref().unwrap_or("-"),
+                attachment.mime_type.as_deref().unwrap_or("-"),
+                attachment
+                    .size_bytes
+                    .map(|bytes| bytes.to_string())
+                    .unwrap_or_else(|| "-".into())
+            ));
+        }
+        for raw_ref in &event.metadata.raw_refs {
+            if count >= MAX_CONTEXT_EVIDENCE {
+                lines.push(format!(
+                    "- ... truncated after {MAX_CONTEXT_EVIDENCE} entries"
+                ));
+                return;
+            }
+            count += 1;
+            lines.push(format!(
+                "- [{}] raw source={} line={} digest={} role={} type={}",
+                event.id,
+                raw_ref.source_path.as_deref().unwrap_or("-"),
+                raw_ref
+                    .line_number
+                    .map(|line| line.to_string())
+                    .unwrap_or_else(|| "-".into()),
+                raw_ref.digest.as_deref().unwrap_or("-"),
+                raw_ref.role.as_deref().unwrap_or("-"),
+                raw_ref.record_type.as_deref().unwrap_or("-")
+            ));
+        }
+    }
+    if count == 0 {
+        lines.push("- No attachments or raw references were indexed.".into());
+    }
+}
+
+fn json_excerpt(value: &Value, max_chars: usize) -> String {
+    serde_json::to_string(value)
+        .map(|json| single_line_excerpt(&json, max_chars))
+        .unwrap_or_else(|_| "<invalid-json>".into())
 }
 
 fn events_through_rewind(
@@ -410,6 +810,20 @@ fn events_through_rewind(
     })
 }
 
+fn validate_agent_artifact(
+    request: &CapsuleCompileRequest,
+    artifact: String,
+) -> Result<String, CompilerError> {
+    let artifact = artifact.trim();
+    if artifact.is_empty() {
+        return Err(CompilerError::InvalidOutput {
+            compiler: request.compiler.clone(),
+            reason: "agent runner returned an empty handoff artifact".into(),
+        });
+    }
+    Ok(artifact.into())
+}
+
 fn run_agent(
     request: &CapsuleCompileRequest,
     runner: AgentRunner,
@@ -418,230 +832,47 @@ fn run_agent(
     prompt: &str,
 ) -> Result<String, CompilerError> {
     match runner {
-        AgentRunner::Codex => run_codex_app_server(request, skill, prompt),
+        AgentRunner::Codex => run_codex_agent_sdk(request, skill, prompt),
         AgentRunner::Claude => run_claude_agent_sdk(request, skill, skill_source, prompt),
     }
 }
 
-fn run_codex_app_server(
+fn run_codex_agent_sdk(
     request: &CapsuleCompileRequest,
     skill: &HandoffSkill,
     prompt: &str,
 ) -> Result<String, CompilerError> {
     let timeout = agent_timeout()?;
-    let program =
+    let python =
         runner_command(AgentRunner::Codex).ok_or_else(|| CompilerError::InvalidConfig {
             name: request.compiler.clone(),
-            reason: "Codex app-server command is not configured".into(),
+            reason: "Codex SDK Python command is not configured".into(),
         })?;
-    let mut child = Command::new(&program)
-        .arg("app-server")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| CompilerError::Spawn {
-            compiler: request.compiler.clone(),
-            program: program.clone(),
-            reason: error.to_string(),
-        })?;
-    let mut stdin = child.stdin.take().ok_or_else(|| CompilerError::Io {
-        compiler: request.compiler.clone(),
-        stream: "stdin",
-        reason: "stdin was not piped".into(),
-    })?;
-    let stdout = child.stdout.take().ok_or_else(|| CompilerError::Io {
-        compiler: request.compiler.clone(),
-        stream: "stdout",
-        reason: "stdout was not piped".into(),
-    })?;
-    let stderr = child.stderr.take().ok_or_else(|| CompilerError::Io {
-        compiler: request.compiler.clone(),
-        stream: "stderr",
-        reason: "stderr was not piped".into(),
-    })?;
-    let (line_sender, line_receiver) = mpsc::channel::<io::Result<String>>();
-    let stdout_reader = thread::spawn(move || {
-        let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            if line_sender.send(line).is_err() {
-                break;
-            }
-        }
+    let payload = json!({
+        "prompt": format!("${}\n\n{}", skill.name, prompt),
+        "cwd": sdk_cwd(request),
+        "skill_id": skill.id,
+        "skill_path": skill.path.to_string_lossy(),
+        "codex_bin": env::var("MOONBOX_CODEX_BIN").ok(),
+        "model": env::var("MOONBOX_CODEX_MODEL").ok(),
     });
-    let stderr_reader = read_child_pipe(stderr);
-    send_rpc(
-        &mut stdin,
-        json!({
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "clientInfo": {
-                    "name": "moonbox",
-                    "title": "Moonbox",
-                    "version": env!("CARGO_PKG_VERSION")
-                }
-            }
-        }),
-    )
-    .map_err(|error| CompilerError::Io {
-        compiler: request.compiler.clone(),
-        stream: "stdin",
-        reason: error.to_string(),
-    })?;
-    send_rpc(
-        &mut stdin,
-        json!({
-            "method": "initialized",
-            "params": {}
-        }),
-    )
-    .map_err(|error| CompilerError::Io {
-        compiler: request.compiler.clone(),
-        stream: "stdin",
-        reason: error.to_string(),
-    })?;
-    send_rpc(
-        &mut stdin,
-        json!({
-            "id": 2,
-            "method": "thread/start",
-            "params": {
-                "cwd": sdk_cwd(request),
-                "approvalPolicy": "never",
-                "sandbox": "readOnly",
-                "serviceName": "moonbox_handoff"
-            }
-        }),
-    )
-    .map_err(|error| CompilerError::Io {
-        compiler: request.compiler.clone(),
-        stream: "stdin",
-        reason: error.to_string(),
-    })?;
-
-    let started = Instant::now();
-    let mut thread_id = None;
-    let mut turn_started = false;
-    let mut artifact = String::new();
-    let mut completed = false;
-
-    while started.elapsed() < timeout {
-        let remaining = timeout.saturating_sub(started.elapsed());
-        let line = match line_receiver.recv_timeout(remaining.min(Duration::from_millis(250))) {
-            Ok(Ok(line)) => line,
-            Ok(Err(error)) => {
-                return Err(CompilerError::Io {
-                    compiler: request.compiler.clone(),
-                    stream: "stdout",
-                    reason: error.to_string(),
-                });
-            }
-            Err(mpsc::RecvTimeoutError::Timeout) => continue,
-            Err(mpsc::RecvTimeoutError::Disconnected) => break,
-        };
-        if line.trim().is_empty() {
-            continue;
-        }
-        let message =
-            serde_json::from_str::<Value>(&line).map_err(|error| CompilerError::InvalidOutput {
-                compiler: request.compiler.clone(),
-                reason: format!("invalid Codex app-server JSON: {error}; line={line}"),
-            })?;
-        if message.get("id").and_then(Value::as_i64) == Some(2) {
-            thread_id = message
-                .pointer("/result/thread/id")
-                .and_then(Value::as_str)
-                .map(str::to_owned);
-            if let Some(id) = &thread_id {
-                send_rpc(
-                    &mut stdin,
-                    json!({
-                        "id": 3,
-                        "method": "turn/start",
-                        "params": {
-                            "threadId": id,
-                            "input": [
-                                {
-                                    "type": "text",
-                                    "text": format!("${}\n\n{}", skill.name, prompt)
-                                },
-                                {
-                                    "type": "skill",
-                                    "name": skill.name,
-                                    "path": skill.path.to_string_lossy()
-                                }
-                            ]
-                        }
-                    }),
-                )
-                .map_err(|error| CompilerError::Io {
-                    compiler: request.compiler.clone(),
-                    stream: "stdin",
-                    reason: error.to_string(),
-                })?;
-                turn_started = true;
-            }
-            continue;
-        }
-        if let Some(error) = message.get("error") {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(CompilerError::InvalidOutput {
-                compiler: request.compiler.clone(),
-                reason: format!(
-                    "Codex app-server error: {}",
-                    single_line_excerpt(&error.to_string(), 500)
-                ),
-            });
-        }
-        collect_codex_text(&message, &mut artifact);
-        if message.get("method").and_then(Value::as_str) == Some("turn/completed") {
-            completed = true;
-            break;
-        }
-    }
-
-    if !completed {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err(CompilerError::Timeout {
+    let (stdout, stderr) = run_child_with_input(
+        &request.compiler,
+        &python,
+        &["-c".into(), CODEX_PYTHON_BRIDGE.into()],
+        serde_json::to_vec(&payload).map_err(|error| CompilerError::InvalidOutput {
             compiler: request.compiler.clone(),
-            timeout_ms: duration_millis(timeout),
-        });
-    }
-    let _ = child.kill();
-    let _ = child.wait();
-    let _ = stdout_reader.join();
-    let stderr =
-        join_io_thread_bytes(stderr_reader, &request.compiler, "stderr")?.map_err(|error| {
-            CompilerError::Io {
-                compiler: request.compiler.clone(),
-                stream: "stderr",
-                reason: error.to_string(),
-            }
-        })?;
-    if !turn_started || thread_id.is_none() {
+            reason: error.to_string(),
+        })?,
+        timeout,
+    )?;
+    if !stderr.trim().is_empty() && stdout.trim().is_empty() {
         return Err(CompilerError::InvalidOutput {
             compiler: request.compiler.clone(),
-            reason: "Codex app-server did not start a thread/turn".into(),
+            reason: truncate(stderr.trim(), 500),
         });
     }
-    if artifact.trim().is_empty() {
-        let stderr = String::from_utf8_lossy(&stderr);
-        return Err(CompilerError::InvalidOutput {
-            compiler: request.compiler.clone(),
-            reason: format!(
-                "Codex app-server completed without agent text{}",
-                if stderr.trim().is_empty() {
-                    String::new()
-                } else {
-                    format!("; stderr: {}", truncate(stderr.trim(), 500))
-                }
-            ),
-        });
-    }
-    Ok(agent_artifact_from_output(&artifact))
+    Ok(agent_artifact_from_output(&stdout))
 }
 
 fn run_claude_agent_sdk(
@@ -686,52 +917,6 @@ fn run_claude_agent_sdk(
         });
     }
     Ok(agent_artifact_from_output(&stdout))
-}
-
-fn send_rpc(stdin: &mut impl Write, message: Value) -> io::Result<()> {
-    serde_json::to_writer(&mut *stdin, &message)?;
-    stdin.write_all(b"\n")?;
-    stdin.flush()
-}
-
-fn collect_codex_text(message: &Value, output: &mut String) {
-    let Some(method) = message.get("method").and_then(Value::as_str) else {
-        return;
-    };
-    if !method.contains("agentMessage") && method != "item/completed" {
-        return;
-    }
-    let mut parts = Vec::new();
-    collect_text_fields(message.get("params").unwrap_or(message), &mut parts);
-    if !parts.is_empty() {
-        if !output.is_empty() {
-            output.push('\n');
-        }
-        output.push_str(&parts.join("\n"));
-    }
-}
-
-fn collect_text_fields(value: &Value, parts: &mut Vec<String>) {
-    match value {
-        Value::String(text) => {
-            if !text.trim().is_empty() {
-                parts.push(text.clone());
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                collect_text_fields(item, parts);
-            }
-        }
-        Value::Object(object) => {
-            for key in ["delta", "text", "content", "message", "result", "item"] {
-                if let Some(value) = object.get(key) {
-                    collect_text_fields(value, parts);
-                }
-            }
-        }
-        _ => {}
-    }
 }
 
 fn agent_artifact_from_output(output: &str) -> String {
@@ -877,7 +1062,7 @@ fn runner_command(runner: AgentRunner) -> Option<String> {
         .filter(|value| !value.trim().is_empty())
         .or_else(|| {
             Some(match runner {
-                AgentRunner::Codex => "codex".into(),
+                AgentRunner::Codex => "python3".into(),
                 AgentRunner::Claude => "python3".into(),
             })
         })
@@ -990,6 +1175,9 @@ fn sanitize_skill_id(name: &str) -> String {
 }
 
 fn codex_auth_reason() -> Option<String> {
+    if env_non_empty("OPENAI_API_KEY") || env_non_empty("OPENAI_API_KEY_FILE") {
+        return None;
+    }
     if let Some(home) = env::var_os("CODEX_HOME").or_else(|| env::var_os("MOONBOX_CODEX_HOME"))
         && PathBuf::from(home).join("auth.json").is_file()
     {
@@ -1004,7 +1192,7 @@ fn codex_auth_reason() -> Option<String> {
     {
         return None;
     }
-    Some("auth_required: Codex auth cache was not found".into())
+    Some("auth_required: Codex SDK needs OPENAI_API_KEY or a Codex auth cache".into())
 }
 
 fn claude_auth_reason() -> Option<String> {
@@ -1207,7 +1395,13 @@ fn truncate(value: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{data, model::CliTool};
+    use crate::core::{
+        data,
+        model::{
+            CliTool, TimelineAttachment, TimelineEventMetadata, TimelineFileChange,
+            TimelineToolCall, TimelineToolResult,
+        },
+    };
 
     #[test]
     fn parses_agent_compiler_id() {
@@ -1257,6 +1451,77 @@ Write the handoff.
     }
 
     #[test]
+    fn context_pack_bounds_large_timeline_and_surfaces_metadata() {
+        let mut request =
+            data::compile_request(CliTool::Codex, CliTool::Claude, "evt-091").expect("request");
+        request.rewind_event_id = "evt-129".into();
+        request.timeline.events = (0..130)
+            .map(|index| TimelineEvent {
+                id: format!("evt-{index:03}"),
+                time: format!("2026-06-12T10:{:02}:00Z", index % 60),
+                kind: if index == 100 {
+                    TimelineKind::Compact
+                } else if index == 120 {
+                    TimelineKind::Tool
+                } else {
+                    TimelineKind::Assistant
+                },
+                title: format!("event title {index:03}"),
+                detail: format!("event detail {index:03}"),
+                metadata: TimelineEventMetadata::default(),
+            })
+            .collect();
+        let tool_event = request
+            .timeline
+            .events
+            .iter_mut()
+            .find(|event| event.id == "evt-120")
+            .expect("tool event");
+        tool_event.metadata.tool_calls = vec![TimelineToolCall {
+            id: Some("call-1".into()),
+            name: Some("Edit".into()),
+            arguments: Some(json!({"file_path":"src/core/handoff.rs"})),
+            raw: None,
+        }];
+        tool_event.metadata.tool_results = vec![TimelineToolResult {
+            call_id: Some("call-1".into()),
+            name: Some("Edit".into()),
+            content: Some("patched handoff context pack".into()),
+            is_error: Some(false),
+            raw: None,
+        }];
+        tool_event.metadata.file_changes = vec![TimelineFileChange {
+            path: Some("src/core/handoff.rs".into()),
+            operation: Some("modify".into()),
+            summary: Some("add context pack evidence sections".into()),
+            diff: Some("@@ context pack @@".into()),
+            raw: None,
+        }];
+        tool_event.metadata.attachments = vec![TimelineAttachment {
+            id: Some("att-1".into()),
+            name: Some("screenshot.png".into()),
+            path: Some("/tmp/screenshot.png".into()),
+            mime_type: Some("image/png".into()),
+            size_bytes: Some(1234),
+            raw: None,
+        }];
+
+        let context = context_pack_markdown(&request);
+
+        assert!(context.contains("- Timeline events through rewind: 130"));
+        assert!(context.contains("- Included recent events: 80"));
+        assert!(context.contains("- Omitted older events: 50"));
+        assert!(context.contains("## Compact Frontier"));
+        assert!(context.contains("[evt-100] event title 100"));
+        assert!(context.contains("call Edit id=call-1"));
+        assert!(context.contains("patched handoff context pack"));
+        assert!(context.contains("modify src/core/handoff.rs"));
+        assert!(context.contains("attachment id=att-1"));
+        assert!(context.contains("[evt-050]"));
+        assert!(!context.contains("[evt-049]"));
+    }
+
+    #[test]
     fn normalizes_agent_artifact_into_legacy_compatible_capsule() {
         let request =
             data::compile_request(CliTool::Codex, CliTool::Claude, "evt-091").expect("request");
@@ -1295,34 +1560,28 @@ Write the handoff.
     }
 
     #[test]
-    fn collects_codex_app_server_agent_text() {
-        let mut output = String::new();
-        collect_codex_text(
-            &json!({
-                "method": "item/agentMessage/delta",
-                "params": {
-                    "delta": "# Handoff",
-                }
-            }),
-            &mut output,
-        );
-        collect_codex_text(
-            &json!({
-                "method": "item/completed",
-                "params": {
-                    "item": {
-                        "type": "message",
-                        "content": [
-                            {"type": "output_text", "text": "Continue safely."}
-                        ]
-                    }
-                }
-            }),
-            &mut output,
-        );
+    fn validates_agent_artifact_is_not_empty() {
+        let request =
+            data::compile_request(CliTool::Codex, CliTool::Claude, "evt-091").expect("request");
 
-        assert!(output.contains("# Handoff"));
-        assert!(output.contains("Continue safely."));
+        let error = validate_agent_artifact(&request, " \n\t ".into()).expect_err("empty artifact");
+
+        assert!(error.to_string().contains("empty handoff artifact"));
+    }
+
+    #[test]
+    fn codex_bridge_uses_official_sdk_and_read_only_sandbox() {
+        assert!(CODEX_PYTHON_BRIDGE.contains("from openai_codex import Codex, Sandbox"));
+        assert!(CODEX_PYTHON_BRIDGE.contains("Sandbox.read_only"));
+        assert!(CODEX_PYTHON_BRIDGE.contains("thread.run(prompt"));
+        assert!(CODEX_PYTHON_BRIDGE.contains("final_response"));
+    }
+
+    #[test]
+    fn claude_bridge_filters_to_selected_plugin_skill() {
+        assert!(CLAUDE_PYTHON_BRIDGE.contains("skills=[plugin_skill]"));
+        assert!(CLAUDE_PYTHON_BRIDGE.contains("allowed_tools=[\"Skill\"]"));
+        assert!(CLAUDE_PYTHON_BRIDGE.contains("permission_mode=\"dontAsk\""));
     }
 
     #[test]
