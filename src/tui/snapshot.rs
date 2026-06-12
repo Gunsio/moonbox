@@ -192,14 +192,11 @@ mod tests {
 
         assert!(svg.contains("Handoff Review"));
         assert!(svg.contains("Capsule"));
-        assert!(svg.contains("审"));
-        assert!(svg.contains("阅"));
         assert!(svg.contains("Portrait"));
         assert!(svg.contains("cached timeline"));
+        assert!(svg.contains("Draft Handoff"));
         assert!(svg.contains("目"));
         assert!(svg.contains("标"));
-        assert!(svg.contains("草"));
-        assert!(svg.contains("稿"));
         assert!(svg.contains("r"));
         assert!(svg.contains("运"));
         assert!(svg.contains("行"));

@@ -97,6 +97,18 @@ and this project uses semantic versioning once tagged releases start.
 - Handoff Review and target launch notices now show concise target command
   summaries, keeping the full prompt available for copy/execution without
   flooding the modal.
+- Agent-backed handoff compiler catalog entries now discover local generic
+  handoff skills and expose Codex / Claude runner choices in the same Skill
+  Picker. Codex uses the app-server thread surface with read-only sandboxing,
+  while Claude uses a temporary local-plugin bridge for the Claude Agent SDK.
+- Handoff Review generation now compiles the selected compiler in the
+  background after loading the source timeline, reports queued /
+  preparing_context / starting_runner / running_skill / verifying progress, and
+  keeps the in-process job alive when the review panel is hidden.
+- Missing community handoff skills now appear as non-default agent placeholders
+  with install guidance instead of silently falling back to hidden assumptions;
+  ready agent runners must be selected explicitly or configured as the default
+  compiler before they run.
 - Configurable compiler skill presets in `~/.config/moonbox/config.json`,
   including optional description, homepage, and GitHub stars metadata for the
   TUI Skill Picker.

@@ -589,6 +589,12 @@ pub struct WorkCapsule {
     pub todo: Vec<ChecklistItem>,
     pub evidence: Vec<String>,
     pub risks: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handoff_artifact: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handoff_runner: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handoff_skill: Option<String>,
     #[serde(default)]
     pub raw_source_map: Option<RawSourceMap>,
     #[serde(default)]
@@ -1117,6 +1123,7 @@ pub enum CompilerPresetKind {
     Builtin,
     Environment,
     Config,
+    Agent,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

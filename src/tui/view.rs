@@ -2096,7 +2096,7 @@ type KeyHint = (&'static str, &'static str);
 fn active_key_hints(app: &App) -> Vec<KeyHint> {
     if app.show_launch {
         if app.is_launch_review_pending() {
-            return vec![("Esc/q", "取消"), ("wait", "生成 Review")];
+            return vec![("Esc/q", "隐藏"), ("wait", "后台生成")];
         }
         if app.target_launch_result.is_some() {
             return vec![("r", "再运行"), ("y", "复制命令"), ("Esc/q", "返回")];
@@ -3505,6 +3505,7 @@ fn compiler_kind_label(kind: CompilerPresetKind) -> &'static str {
         CompilerPresetKind::Builtin => "builtin",
         CompilerPresetKind::Environment => "env",
         CompilerPresetKind::Config => "config",
+        CompilerPresetKind::Agent => "agent",
     }
 }
 
@@ -3559,7 +3560,9 @@ fn format_star_count(info: &CompilerPresetInfo) -> String {
     let Some(stars) = info.github_stars else {
         return match info.kind {
             CompilerPresetKind::Builtin => "n/a".into(),
-            CompilerPresetKind::Environment | CompilerPresetKind::Config => "not configured".into(),
+            CompilerPresetKind::Environment
+            | CompilerPresetKind::Config
+            | CompilerPresetKind::Agent => "not configured".into(),
         };
     };
     if stars >= 1_000 {
@@ -3581,7 +3584,7 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
     if app.is_launch_review_pending() {
         let mut lines = vec![
             Line::from(Span::styled(
-                "正在生成 Handoff Review",
+                "Generating Handoff Review",
                 Style::default()
                     .fg(theme::GOLD)
                     .add_modifier(Modifier::BOLD),
@@ -3600,16 +3603,40 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                         .add_modifier(Modifier::BOLD),
                 ),
             ]),
+        ];
+        if let Some(status) = app.launch_review_job_status() {
+            lines.extend([
+                Line::from(vec![
+                    Span::styled("Compiler: ", Style::default().fg(theme::BLUE)),
+                    Span::styled(status.compiler_id, Style::default().fg(theme::CYAN)),
+                ]),
+                Line::from(vec![
+                    Span::styled("Stage: ", Style::default().fg(theme::BLUE)),
+                    Span::styled(
+                        status.stage_label,
+                        Style::default()
+                            .fg(theme::GREEN)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(format!("  {} ms", status.elapsed_ms)),
+                ]),
+                Line::from(vec![
+                    Span::styled("Last: ", Style::default().fg(theme::BLUE)),
+                    Span::raw(status.detail),
+                ]),
+            ]);
+        }
+        lines.extend([
             Line::from(Span::styled(
                 if app.current_data_space().is_local() {
-                    "正在读取本地 source timeline 并编译 Capsule..."
+                    "Reading local source timeline and running the selected handoff skill..."
                 } else {
-                    "正在通过 SSH 只读拉取 timeline 并编译本地目标 Capsule..."
+                    "Reading SSH source timeline in read-only mode and running the local handoff skill..."
                 },
                 Style::default().fg(theme::TEXT),
             )),
             Line::raw(""),
-        ];
+        ]);
         if let Some(trail) = app.handoff_trail_frame() {
             lines.push(handoff_trail_line(trail));
         } else {
@@ -3621,7 +3648,7 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         lines.extend([
             Line::raw(""),
             Line::from(Span::styled(
-                "Esc 取消；完成后会自动滚到 Review 底部显示可执行动作。",
+                "Esc hides this panel; the handoff job continues in the background.",
                 Style::default().fg(theme::MUTED),
             )),
         ]);
@@ -3709,7 +3736,7 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         let run_blocked = launch_blocked || draft_run_blocked;
         let mut lines = vec![
             Line::from(Span::styled(
-                "Capsule 审阅",
+                "Handoff Review",
                 Style::default()
                     .fg(theme::GOLD)
                     .add_modifier(Modifier::BOLD),
@@ -3798,9 +3825,9 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             Line::raw(""),
             Line::from(Span::styled(
                 if compiler::compiler_is_builtin(&capsule.compiler) {
-                    "草稿 Capsule"
+                    "Draft Handoff"
                 } else {
-                    "Capsule"
+                    "Handoff Artifact"
                 },
                 Style::default()
                     .fg(theme::BLUE)
@@ -3847,7 +3874,7 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                     Span::raw("  "),
                     action_button("Esc", "返回"),
                     Span::styled(
-                        "  配置外部 compiler 后可运行",
+                        "  选择 AI skill 后可运行",
                         Style::default().fg(theme::MUTED),
                     ),
                 ])
@@ -4062,13 +4089,21 @@ fn capsule_review_lines(capsule: &WorkCapsule, _max_rows: usize) -> Vec<Line<'st
         .first()
         .map(|value| review_snippet(value, 88))
         .unwrap_or_else(|| "none".into());
-    vec![
+    let mut lines = vec![
         review_label_line("目标", review_snippet(&capsule.goal, 88), theme::BLUE),
         review_label_line("状态", capsule.state.clone(), theme::GOLD),
         review_label_line("决策", decision, theme::BLUE),
         review_label_line("待办", todo, theme::BLUE),
         review_label_line("风险", risk, theme::RED),
-    ]
+    ];
+    if let Some(artifact) = &capsule.handoff_artifact {
+        lines.push(review_label_line(
+            "Handoff",
+            review_snippet(artifact, 88),
+            theme::GREEN,
+        ));
+    }
+    lines
 }
 
 fn target_input_lines(app: &App) -> Vec<Line<'static>> {
@@ -5592,7 +5627,6 @@ mod tests {
         let screen = render_text(&app, 120, 48);
 
         assert_screen_contains(&screen, "Handoff Review");
-        assert_screen_contains(&screen, "Capsule 审阅");
         assert_screen_contains(&screen, "handoff");
         assert_screen_contains(&screen, "下一步:");
         assert_screen_contains(&screen, "Path:");
@@ -5602,7 +5636,7 @@ mod tests {
         assert_screen_contains(&screen, "user 1 / assistant 1 / tool 4 / rewind 1");
         assert_screen_contains(&screen, "目标会收到");
         assert_screen_contains(&screen, "Prompt");
-        assert_screen_contains(&screen, "草稿 Capsule");
+        assert_screen_contains(&screen, "Draft Handoff");
         assert_screen_contains(&screen, "目标");
         assert_screen_contains(&screen, "就绪检查");
         assert_screen_contains(&screen, "PASS");
@@ -5620,9 +5654,13 @@ mod tests {
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
         let screen = render_text(&app, 120, 36);
 
-        assert_screen_contains(&screen, "正在生成 Handoff Review");
-        assert_screen_contains(&screen, "Esc 取消");
-        assert_screen_contains(&screen, "wait 生成 Review");
+        assert_screen_contains(&screen, "Generating Handoff Review");
+        assert_screen_contains(&screen, "Compiler:");
+        assert_screen_contains(&screen, "Stage:");
+        assert_screen_contains(&screen, "queued");
+        assert_screen_contains(&screen, "waiting for background handoff worker");
+        assert_screen_contains(&screen, "Esc hides this panel");
+        assert_screen_contains(&screen, "wait 后台生成");
     }
 
     #[test]

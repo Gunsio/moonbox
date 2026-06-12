@@ -197,6 +197,36 @@ pub fn compile_capsule(
     data::compile_capsule_for_session_id(session_id, target, rewind_event_id, compiler)
 }
 
+pub fn compile_capsule_from_workbench_snapshot(
+    workbench: &WorkbenchData,
+    session_id: &str,
+    target: CliTool,
+    rewind_event_id: &str,
+    compiler: &str,
+) -> Result<Option<WorkCapsule>, CoreError> {
+    let Some(source_session) = workbench
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .cloned()
+    else {
+        return Ok(None);
+    };
+    data::compile_capsule_from_timeline_snapshot(
+        source_session,
+        target,
+        super::model::CanonicalTimeline {
+            version: 1,
+            source_cli: workbench.source,
+            source_session: session_id.into(),
+            events: workbench.timeline.clone(),
+        },
+        rewind_event_id,
+        compiler,
+    )
+    .map(Some)
+}
+
 pub fn save_capsule_for_selection(
     name: &str,
     session_id: Option<&str>,

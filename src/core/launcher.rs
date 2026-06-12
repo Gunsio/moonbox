@@ -278,6 +278,16 @@ fn handoff_prompt(
     continuation: &ContinuationProtocol,
 ) -> String {
     let prompt_session = redaction::redact_session_for_prompt(session, &capsule.redaction);
+    let generated_handoff = capsule
+        .handoff_artifact
+        .as_ref()
+        .map(|artifact| {
+            format!(
+                "\nGenerated Handoff Artifact\n\n{}\n",
+                prompt_value(artifact)
+            )
+        })
+        .unwrap_or_default();
     format!(
         "\
 You are receiving a Moonbox cross-CLI handoff.
@@ -319,9 +329,10 @@ Risks:
 
 Privacy / Redaction:
 {}
+{}
 
 Instructions
-- Continue from the selected rewind point using this capsule.
+- Continue from the selected rewind point using this handoff.
 - Treat the source session as read-only.
 - Do not raw-resume the source session unless Moonbox explicitly asks for original-session resume.
 - Start by briefly restating the goal, current state, next step, and risks before making changes.
@@ -341,7 +352,8 @@ Instructions
         todo_lines(&capsule.todo),
         bullet_lines(&capsule.evidence),
         bullet_lines(&capsule.risks),
-        redaction::prompt_summary(&capsule.redaction)
+        redaction::prompt_summary(&capsule.redaction),
+        generated_handoff
     )
 }
 

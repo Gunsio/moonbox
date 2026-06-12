@@ -13,6 +13,7 @@ pub mod dataspace;
 pub mod doctor;
 pub mod error;
 pub mod fixture;
+pub mod handoff;
 pub mod hermes;
 pub mod image_preview;
 pub mod launch_ledger;

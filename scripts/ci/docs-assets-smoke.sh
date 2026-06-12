@@ -43,12 +43,9 @@ grep -Fq 'Apple Command Line Tools are not required' README.md
 
 grep -Fq 'Handoff Review' "$svg"
 grep -Fq 'Capsule' "$svg"
-grep -Fq '审' "$svg"
-grep -Fq '阅' "$svg"
+grep -Fq 'Draft Handoff' "$svg"
 grep -Fq '目' "$svg"
 grep -Fq '标' "$svg"
-grep -Fq '草' "$svg"
-grep -Fq '稿' "$svg"
 grep -Fq '就' "$svg"
 grep -Fq '绪' "$svg"
 grep -Fq 'Pre-flight:' "$svg"
