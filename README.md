@@ -631,17 +631,18 @@ Catalog entries include their source (`Environment`, `Config`, `Agent`, or
 arguments, timeout, and the reason behind the quality signal.
 
 Agent-backed handoff skills appear in the same catalog with source `Agent` for
-CLI/JSON compatibility. In the TUI Skill Picker they are presented as `Skill`
-entries, with runner, skill id, readiness, missing setup, command, and install
-link shown as separate fields. Moonbox discovers generic `handoff` skills from
-`MOONBOX_SKILLS_DIRS`, `CODEX_HOME` / `MOONBOX_CODEX_HOME` `skills`, and the
-user's local Codex / agent skill homes. The Skill Picker shows Codex and Claude
-runner entries for each discovered handoff skill, plus install-hint
-placeholders when no handoff skill is installed. Agent runners are never
-selected implicitly as the default compiler; choose one in the TUI Skill Picker,
-pass its `--compiler agent:<runner>:<skill>` id, or set it as
-`default_compiler` after reviewing the preflight state. Codex handoff generation
-uses the official `openai-codex`
+CLI/JSON compatibility. The TUI Skill Picker is skill-first: it collapses
+runner-specific catalog entries into one handoff skill row, shows whether that
+skill is installed locally, and shows either the local `SKILL.md` path or the
+community install source. Runner SDK setup, package-manager choice, login, and
+provider credential checks are launch preflight concerns, not Skill Picker
+choices. Moonbox discovers generic `handoff` skills from `MOONBOX_SKILLS_DIRS`,
+`CODEX_HOME` / `MOONBOX_CODEX_HOME` `skills`, and the user's local Codex /
+agent skill homes. When no handoff skill is installed, the Skill Picker shows a
+single install-hint skill row rather than Codex / Claude runner choices. The
+CLI still accepts explicit `--compiler agent:<runner>:<skill>` ids and
+`default_compiler` values for automation after reviewing preflight state. Codex
+handoff generation uses the official `openai-codex`
 Python SDK with `Sandbox.read_only`; install it with `pip install openai-codex`,
 set `MOONBOX_CODEX_SDK_PYTHON` when the SDK lives outside `python3`, and use
 `MOONBOX_CODEX_BIN` only to intentionally point the SDK at a specific Codex
@@ -824,9 +825,10 @@ Moonbox has two separate actions for a selected session:
   original CLI, then press `enter` to use the same suspend-and-return flow.
 - `x`: choose a target CLI, then review a `target_handoff` command before
   launching or copying it. `H` and `t` remain compatibility aliases.
-- `S`: open Skill Picker. Agent-backed handoff rows show the runner and skill
-  separately plus the next setup step; built-in fallback rows are labeled as
-  draft templates. Press `y` to copy the relevant setup command or install link.
+- `S`: open Skill Picker. Agent-backed handoff rows are collapsed by skill and
+  show installed/local path or install source; runner SDK setup is checked
+  before launch. Built-in fallback rows are labeled as draft templates. Press
+  `y` to copy the skill path or install source.
 - `,`: open Settings. M95 exposes Smart Enter / tmux jump there with preview and
   persistence; hooks install/uninstall remains a CLI command.
 
@@ -1333,10 +1335,15 @@ Stable interfaces matter more than any single framework:
   source session transcripts, prompts, agent output, tool output, code, paths,
   cwd, branch names, metadata, and handoff content byte-for-byte.
 - M96.1: Skill Picker product copy correction; the picker now presents
-  agent-backed handoff options as `Skill` rows with runner, skill id, setup
-  need, and command separated, labels built-in fallback compilers as draft
-  templates, removes `n/a` / `not configured` metadata noise, and makes `y`
-  copy the actionable SDK install command or handoff skill link.
+  agent-backed handoff options as `Skill` rows, labels built-in fallback
+  compilers as draft templates, removes `n/a` / `not configured` metadata
+  noise, and makes `y` copy the actionable SDK install command or handoff skill
+  link.
+- M96.2: Skill Picker skill-first correction; the picker collapses Codex /
+  Claude agent catalog rows into one handoff skill choice, shows installed
+  local skill paths or install sources, hides runner IDs and SDK package
+  commands from the skill-selection surface, and leaves runner setup / login /
+  package-manager decisions to launch preflight.
 - M92: Remote / SSH Session Detail Parity; SSH data spaces now hydrate selected
   session details from the remote `compile-request --json` response, preserving
   remote-computed bounded anatomy in the same Details / Zoom Details rendering
