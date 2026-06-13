@@ -3495,15 +3495,18 @@ fn render_skill_picker(frame: &mut Frame, root: Rect, app: &App) {
         Line::raw(""),
     ];
 
-    for (index, id) in app.data.compilers.iter().enumerate() {
+    for index in app.skill_picker_candidate_indices() {
+        let Some(id) = app.data.compilers.get(index) else {
+            continue;
+        };
         let info = catalog
             .iter()
             .find(|entry| entry.id == *id)
             .cloned()
             .unwrap_or_else(|| fallback_compiler_info(id));
         let pending = index == app.pending_compiler;
-        let active = index == app.selected_compiler;
-        let status_color = compiler_status_color(info.status);
+        let active = app.compiler_selection_matches(index, app.selected_compiler);
+        let status_color = skill_picker_status_color(&info);
         let row_style = if pending {
             Style::default()
                 .fg(Color::Black)
@@ -3529,10 +3532,10 @@ fn render_skill_picker(frame: &mut Frame, root: Rect, app: &App) {
         };
         lines.push(Line::from(vec![
             Span::styled(format!("{cursor} "), row_style),
-            Span::styled(format!("{:<24}", info.id), row_style),
+            Span::styled(format!("{:<24}", skill_picker_row_title(&info)), row_style),
             Span::styled("  ", row_style),
             Span::styled(
-                format!("{:<7}", compiler_status_label(info.status, language)),
+                format!("{:<7}", skill_picker_status_label(&info, language)),
                 row_style,
             ),
             Span::styled("  ", row_style),
@@ -3545,7 +3548,7 @@ fn render_skill_picker(frame: &mut Frame, root: Rect, app: &App) {
         ]));
         lines.push(Line::from(vec![
             Span::raw("    "),
-            Span::styled(compiler_description(&info, language), muted_style),
+            Span::styled(skill_picker_description(&info, language), muted_style),
         ]));
         lines.extend(compiler_detail_lines(&info, language, muted_style));
         lines.push(Line::raw(""));
@@ -4012,6 +4015,35 @@ fn fallback_compiler_info(id: &str) -> CompilerPresetInfo {
     }
 }
 
+fn skill_picker_row_title(info: &CompilerPresetInfo) -> String {
+    handoff::parse_compiler_id(&info.id)
+        .map(|spec| spec.skill_id)
+        .unwrap_or_else(|| info.id.clone())
+}
+
+fn skill_picker_status_label(
+    info: &CompilerPresetInfo,
+    language: crate::core::config::UiLanguage,
+) -> &'static str {
+    if handoff::parse_compiler_id(&info.id).is_some() {
+        if compiler::compiler_skill_path(info).is_some() {
+            return localized(language, "INSTALLED", "已安装");
+        }
+        return localized(language, "INSTALL", "安装");
+    }
+    compiler_status_label(info.status, language)
+}
+
+fn skill_picker_status_color(info: &CompilerPresetInfo) -> Color {
+    if handoff::parse_compiler_id(&info.id).is_some() {
+        if compiler::compiler_skill_path(info).is_some() {
+            return theme::green();
+        }
+        return theme::gold();
+    }
+    compiler_status_color(info.status)
+}
+
 fn compiler_status_label(
     status: CompilerPresetStatus,
     language: crate::core::config::UiLanguage,
@@ -4048,8 +4080,8 @@ fn compiler_detail_lines(
     language: crate::core::config::UiLanguage,
     muted_style: Style,
 ) -> Vec<Line<'static>> {
-    if let Some(spec) = handoff::parse_compiler_id(&info.id) {
-        return agent_skill_detail_lines(info, spec, language, muted_style);
+    if handoff::parse_compiler_id(&info.id).is_some() {
+        return agent_skill_detail_lines(info, language);
     }
 
     match info.kind {
@@ -4109,52 +4141,35 @@ fn compiler_detail_lines(
 
 fn agent_skill_detail_lines(
     info: &CompilerPresetInfo,
-    spec: handoff::AgentCompilerSpec,
     language: crate::core::config::UiLanguage,
-    _muted_style: Style,
 ) -> Vec<Line<'static>> {
-    let mut lines = vec![Line::from(vec![
-        compiler_detail_label(language, "Runner", "执行器"),
-        Span::styled(
-            spec.runner.label().to_string(),
-            Style::default().fg(theme::cyan()),
-        ),
-        Span::raw("  "),
-        compiler_detail_label(language, "Skill", "Skill"),
-        Span::styled(spec.skill_id.clone(), Style::default().fg(theme::text())),
-    ])];
-
-    if info.status == CompilerPresetStatus::Ready {
-        lines.push(compiler_detail_line(
-            language,
-            "Status",
-            "状态",
-            localized(language, "Ready to run", "可运行").into(),
-            Style::default().fg(theme::green()),
-        ));
-    } else {
-        lines.push(compiler_detail_line(
-            language,
-            "Needs",
-            "需要",
-            compiler_setup_hint(info, language),
-            compiler_status_detail_style(info),
-        ));
+    if let Some(path) = compiler::compiler_skill_path(info) {
+        return vec![
+            compiler_detail_line(
+                language,
+                "Status",
+                "状态",
+                localized(language, "Installed locally", "本机已安装").into(),
+                Style::default().fg(theme::green()),
+            ),
+            compiler_detail_line(
+                language,
+                "Path",
+                "路径",
+                path.into(),
+                Style::default().fg(theme::cyan()),
+            ),
+        ];
     }
 
-    if let Some(command) = info.command.as_deref() {
-        lines.push(compiler_detail_line(
-            language,
-            "Command",
-            "命令",
-            command.into(),
-            Style::default().fg(theme::cyan()),
-        ));
-    }
-
-    if info.reason.contains("skill_not_installed")
-        && let Some(homepage) = &info.homepage
-    {
+    let mut lines = vec![compiler_detail_line(
+        language,
+        "Status",
+        "状态",
+        localized(language, "Skill not installed", "Skill 未安装").into(),
+        Style::default().fg(theme::gold()),
+    )];
+    if let Some(homepage) = &info.homepage {
         lines.push(compiler_detail_line(
             language,
             "Install",
@@ -4163,7 +4178,6 @@ fn agent_skill_detail_lines(
             Style::default().fg(theme::cyan()),
         ));
     }
-
     lines
 }
 
@@ -4296,6 +4310,30 @@ fn compiler_command(info: &CompilerPresetInfo) -> Option<String> {
     })
 }
 
+fn skill_picker_description(
+    info: &CompilerPresetInfo,
+    language: crate::core::config::UiLanguage,
+) -> String {
+    if handoff::parse_compiler_id(&info.id).is_some()
+        && let Some(description) = info.description.as_deref()
+    {
+        if description.ends_with(" runner placeholder for the community `handoff` skill.") {
+            return localized(
+                language,
+                "Community handoff skill for transferring context to another agent.",
+                "社区 handoff skill，用于把上下文交给另一个 agent 接手。",
+            )
+            .into();
+        }
+        if let Some((_, skill_description)) =
+            description.split_once(" runner using community handoff skill: ")
+        {
+            return localized_external_skill_description_for_language(language, skill_description);
+        }
+    }
+    compiler_description(info, language)
+}
+
 fn compiler_description(
     info: &CompilerPresetInfo,
     language: crate::core::config::UiLanguage,
@@ -4339,9 +4377,24 @@ fn localized_compiler_description(info: &CompilerPresetInfo) -> Option<String> {
 }
 
 fn localized_external_skill_description(description: &str) -> String {
+    localized_external_skill_description_for_language(
+        crate::core::config::UiLanguage::ZhHans,
+        description,
+    )
+}
+
+fn localized_external_skill_description_for_language(
+    language: crate::core::config::UiLanguage,
+    description: &str,
+) -> String {
     match description {
         "Compact the current conversation into a handoff document for another agent to pick up." => {
-            "将当前对话压缩成 handoff 文档，交给另一个 agent 接手。".into()
+            localized(
+                language,
+                "Compact the current conversation into a handoff document for another agent to pick up.",
+                "将当前对话压缩成 handoff 文档，交给另一个 agent 接手。",
+            )
+            .into()
         }
         other => other.into(),
     }
@@ -6688,15 +6741,22 @@ mod tests {
         let screen = render_text(&app, 140, 40);
 
         assert_screen_contains(&screen, "Skill Picker");
-        assert_screen_contains(&screen, "Choose compiler skill");
-        assert_screen_contains(&screen, "agent:codex:handoff");
+        assert_screen_contains(&screen, "Choose handoff skill");
+        assert_screen_contains(
+            &screen,
+            "Pick the handoff skill; runner setup is checked before launch.",
+        );
+        assert_screen_contains(&screen, "handoff");
         assert_screen_contains(&screen, "Skill");
-        assert_screen_contains(&screen, "Runner:");
-        assert_screen_contains(&screen, "Skill: handoff");
+        assert_screen_contains(&screen, "Status:");
         assert_screen_contains(&screen, "engineering-handoff");
         assert_screen_contains(&screen, "draft template");
         assert_screen_contains(&screen, "Built-in fallback draft");
         assert_screen_contains(&screen, "j/k Choose");
+        assert!(!screen.contains("agent:codex:handoff"), "{screen}");
+        assert!(!screen.contains("Runner:"), "{screen}");
+        assert!(!screen.contains("Command:"), "{screen}");
+        assert!(!screen.contains("pip install"), "{screen}");
         assert!(!screen.contains("stars:"), "{screen}");
         assert!(!screen.contains("n/a"), "{screen}");
     }
@@ -6716,11 +6776,14 @@ mod tests {
         let screen = render_text(&app, 140, 40);
 
         assert_screen_contains(&screen, "Skill 选择器");
-        assert_screen_contains(&screen, "选择编译 Skill");
-        assert_screen_contains(&screen, "压缩与兼容性由可替换的编译 skill 提供");
-        assert_screen_contains(&screen, "agent:codex:handoff");
-        assert_screen_contains(&screen, "Skill: handoff");
-        assert_screen_contains(&screen, "执行器:");
+        assert_screen_contains(&screen, "选择 Handoff Skill");
+        assert_screen_contains(
+            &screen,
+            "这里只选择 handoff skill；执行器配置会在启动前预检。",
+        );
+        assert_screen_contains(&screen, "handoff");
+        assert_screen_contains(&screen, "Skill");
+        assert_screen_contains(&screen, "状态:");
         assert_screen_contains(&screen, "engineering-handoff");
         assert_screen_contains(&screen, "警告");
         assert_screen_contains(&screen, "草稿模板");
@@ -6729,6 +6792,10 @@ mod tests {
         assert_screen_contains(&screen, "已启用");
         assert_screen_contains(&screen, "j/k 选择");
         assert!(!screen.contains("Choose compiler skill"), "{screen}");
+        assert!(!screen.contains("agent:codex:handoff"), "{screen}");
+        assert!(!screen.contains("执行器:"), "{screen}");
+        assert!(!screen.contains("命令:"), "{screen}");
+        assert!(!screen.contains("pip install"), "{screen}");
         assert!(!screen.contains("stars:"), "{screen}");
         assert!(!screen.contains("热度:"), "{screen}");
         assert!(!screen.contains("不适用"), "{screen}");

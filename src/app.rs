@@ -11,7 +11,7 @@ use crate::core::{
     capsule_store::CapsuleSummary,
     compiler, config, continuation, dataspace, doctor,
     error::CoreError,
-    hooks,
+    handoff, hooks,
     image_preview::{TimelineImagePreview, build_timeline_image_previews},
     launcher,
     model::{
@@ -106,6 +106,14 @@ pub struct EnterRoutePreview {
     pub kind: EnterRouteKind,
     pub label: &'static str,
     pub detail: String,
+}
+
+fn target_runner_id(target: CliTool) -> Option<&'static str> {
+    match target {
+        CliTool::Codex => Some("codex"),
+        CliTool::Claude => Some("claude"),
+        CliTool::Hermes => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -2444,12 +2452,22 @@ impl App {
     }
 
     fn open_skill_picker(&mut self) {
-        self.pending_compiler = self
-            .selected_compiler
-            .min(self.data.compilers.len().saturating_sub(1));
+        let candidates = self.skill_picker_candidate_indices();
+        self.pending_compiler = if candidates.contains(&self.selected_compiler) {
+            self.selected_compiler
+        } else {
+            candidates
+                .iter()
+                .copied()
+                .find(|candidate| {
+                    self.compiler_selection_matches(*candidate, self.selected_compiler)
+                })
+                .or_else(|| candidates.first().copied())
+                .unwrap_or(0)
+        };
         self.show_skill_picker = true;
         self.modal_scroll = 0;
-        self.set_status("Choose compiler skill");
+        self.set_status("Choose handoff skill");
         self.pending_g = false;
     }
 
@@ -2469,37 +2487,123 @@ impl App {
     }
 
     fn move_skill_picker(&mut self, forward: bool) {
-        if self.data.compilers.is_empty() {
+        let candidates = self.skill_picker_candidate_indices();
+        if candidates.is_empty() {
             self.pending_compiler = 0;
             self.set_status("No compiler skills configured");
             return;
         }
-        if forward {
-            self.pending_compiler = (self.pending_compiler + 1) % self.data.compilers.len();
+        let position = candidates
+            .iter()
+            .position(|candidate| *candidate == self.pending_compiler)
+            .unwrap_or(0);
+        let next_position = if forward {
+            (position + 1) % candidates.len()
+        } else if position == 0 {
+            candidates.len() - 1
         } else {
-            self.pending_compiler = if self.pending_compiler == 0 {
-                self.data.compilers.len() - 1
-            } else {
-                self.pending_compiler - 1
-            };
-        }
+            position - 1
+        };
+        self.pending_compiler = candidates[next_position];
         self.set_status(format!(
             "Skill candidate: {}",
-            self.data.compilers[self.pending_compiler]
+            self.skill_picker_candidate_label(self.pending_compiler)
         ));
     }
 
+    pub(crate) fn skill_picker_candidate_indices(&self) -> Vec<usize> {
+        let mut candidates = Vec::new();
+        let mut seen_agent_skills: Vec<String> = Vec::new();
+        for (index, compiler_id) in self.data.compilers.iter().enumerate() {
+            if let Some(spec) = handoff::parse_compiler_id(compiler_id) {
+                if seen_agent_skills
+                    .iter()
+                    .any(|skill_id| skill_id == &spec.skill_id)
+                {
+                    continue;
+                }
+                seen_agent_skills.push(spec.skill_id.clone());
+                candidates.push(
+                    self.preferred_agent_compiler_index(&spec.skill_id)
+                        .unwrap_or(index),
+                );
+            } else {
+                candidates.push(index);
+            }
+        }
+        candidates
+    }
+
+    fn preferred_agent_compiler_index(&self, skill_id: &str) -> Option<usize> {
+        let matching_indices = self
+            .data
+            .compilers
+            .iter()
+            .enumerate()
+            .filter_map(|(index, compiler_id)| {
+                handoff::parse_compiler_id(compiler_id)
+                    .filter(|spec| spec.skill_id == skill_id)
+                    .map(|spec| (index, spec))
+            })
+            .collect::<Vec<_>>();
+        if let Some(target_runner_id) = target_runner_id(self.data.target)
+            && let Some((index, _)) = matching_indices
+                .iter()
+                .find(|(_, spec)| spec.runner.id() == target_runner_id)
+        {
+            return Some(*index);
+        }
+        if matching_indices
+            .iter()
+            .any(|(index, _)| *index == self.selected_compiler)
+        {
+            return Some(self.selected_compiler);
+        }
+        matching_indices.first().map(|(index, _)| *index)
+    }
+
+    pub(crate) fn compiler_selection_matches(&self, candidate: usize, selected: usize) -> bool {
+        let Some(candidate_id) = self.data.compilers.get(candidate) else {
+            return false;
+        };
+        let Some(selected_id) = self.data.compilers.get(selected) else {
+            return false;
+        };
+        match (
+            handoff::parse_compiler_id(candidate_id),
+            handoff::parse_compiler_id(selected_id),
+        ) {
+            (Some(candidate), Some(selected)) => candidate.skill_id == selected.skill_id,
+            _ => candidate == selected,
+        }
+    }
+
+    fn skill_picker_candidate_label(&self, index: usize) -> String {
+        self.data
+            .compilers
+            .get(index)
+            .and_then(|compiler_id| handoff::parse_compiler_id(compiler_id))
+            .map(|spec| spec.skill_id)
+            .or_else(|| self.data.compilers.get(index).cloned())
+            .unwrap_or_else(|| "unknown".into())
+    }
+
     fn confirm_skill_picker(&mut self) {
-        if self.data.compilers.is_empty() {
+        let candidates = self.skill_picker_candidate_indices();
+        if candidates.is_empty() {
             self.show_skill_picker = false;
             self.set_status("No compiler skills configured");
             return;
         }
-        self.selected_compiler = self.pending_compiler.min(self.data.compilers.len() - 1);
+        if !candidates.contains(&self.pending_compiler) {
+            self.pending_compiler = candidates[0];
+        }
+        self.selected_compiler = self.pending_compiler;
         self.data.capsule.compiler = self.data.compilers[self.selected_compiler].clone();
+        let selected_label = self.skill_picker_candidate_label(self.selected_compiler);
         self.show_skill_picker = false;
         self.modal_scroll = 0;
-        self.set_status(format!("Skill: {}", self.data.capsule.compiler));
+        self.set_status(format!("Skill: {selected_label}"));
         self.pending_g = false;
     }
 
@@ -2512,10 +2616,13 @@ impl App {
             .into_iter()
             .find(|entry| entry.id == *skill);
         let copied = info
-            .and_then(|entry| compiler::compiler_setup_clipboard_reference(&entry))
-            .unwrap_or_else(|| skill.clone());
+            .and_then(|entry| compiler::compiler_skill_clipboard_reference(&entry))
+            .unwrap_or_else(|| self.skill_picker_candidate_label(self.pending_compiler));
         self.clipboard_text = Some(copied);
-        self.set_status(format!("Copied skill setup reference: {skill}"));
+        self.set_status(format!(
+            "Copied skill reference: {}",
+            self.skill_picker_candidate_label(self.pending_compiler)
+        ));
         self.pending_g = false;
     }
 
@@ -4337,6 +4444,31 @@ mod tests {
     }
 
     #[test]
+    fn skill_picker_collapses_agent_runners_into_one_skill_choice() {
+        let mut app = new_app(CliTool::Codex, CliTool::Claude);
+        app.data.target = CliTool::Claude;
+        app.data.compilers = vec![
+            "agent:codex:handoff".into(),
+            "agent:claude:handoff".into(),
+            "engineering-handoff".into(),
+        ];
+        app.selected_compiler = 0;
+        app.data.capsule.compiler = "agent:codex:handoff".into();
+
+        let candidates = app.skill_picker_candidate_indices();
+
+        assert_eq!(candidates, vec![1, 2]);
+        assert!(app.compiler_selection_matches(candidates[0], app.selected_compiler));
+
+        app.handle_key(key('S'));
+        assert_eq!(app.pending_compiler, 1);
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+
+        assert_eq!(app.data.capsule.compiler, "agent:claude:handoff");
+        assert_eq!(app.status_message, "Skill: handoff");
+    }
+
+    #[test]
     fn zoom_shortcuts_expand_restore_and_follow_focus() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.focus = Focus::Timeline;
@@ -5639,7 +5771,7 @@ Host devbox
 
         assert!(!app.command_mode);
         assert!(app.show_skill_picker);
-        assert_eq!(app.status_message, "Choose compiler skill");
+        assert_eq!(app.status_message, "Choose handoff skill");
     }
 
     #[test]

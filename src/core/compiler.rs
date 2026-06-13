@@ -642,18 +642,21 @@ pub fn compiler_is_builtin(id: &str) -> bool {
     FIXTURE_COMPILER_IDS.contains(&id)
 }
 
-pub fn compiler_setup_clipboard_reference(info: &CompilerPresetInfo) -> Option<String> {
-    let reason = info.reason.as_str();
-    if reason.contains("skill_not_installed") {
-        return info.homepage.clone();
-    }
-    if reason.contains("install the Codex SDK") {
-        return Some("pip install openai-codex".into());
-    }
-    if reason.contains("install the Claude Agent SDK") {
-        return Some("pip install claude-agent-sdk".into());
-    }
-    info.homepage.clone().or_else(|| info.command.clone())
+pub fn compiler_skill_path(info: &CompilerPresetInfo) -> Option<&str> {
+    info.args
+        .iter()
+        .find_map(|arg| arg.strip_prefix("skill="))
+        .filter(|path| !path.trim().is_empty() && *path != "not-installed")
+}
+
+pub fn compiler_skill_clipboard_reference(info: &CompilerPresetInfo) -> Option<String> {
+    compiler_skill_path(info).map(str::to_owned).or_else(|| {
+        if info.reason.contains("skill_not_installed") {
+            info.homepage.clone()
+        } else {
+            info.homepage.clone().or_else(|| info.command.clone())
+        }
+    })
 }
 
 pub fn compile_with_configured_runner(
@@ -1227,14 +1230,14 @@ sleep 1
     }
 
     #[test]
-    fn setup_clipboard_reference_prefers_sdk_install_command() {
+    fn skill_clipboard_reference_prefers_installed_skill_path() {
         let info = CompilerPresetInfo {
             id: "agent:codex:handoff".into(),
             kind: CompilerPresetKind::Agent,
             status: CompilerPresetStatus::Warning,
             score: 30,
             command: Some("python3".into()),
-            args: Vec::new(),
+            args: vec!["skill=/skills/handoff/SKILL.md".into()],
             timeout_ms: None,
             reason: "not_installed: install the Codex SDK with `pip install openai-codex`".into(),
             description: None,
@@ -1243,17 +1246,17 @@ sleep 1
         };
 
         assert_eq!(
-            compiler_setup_clipboard_reference(&info).as_deref(),
-            Some("pip install openai-codex")
+            compiler_skill_clipboard_reference(&info).as_deref(),
+            Some("/skills/handoff/SKILL.md")
         );
     }
 
     #[test]
-    fn setup_clipboard_reference_prefers_handoff_skill_install_link() {
+    fn skill_clipboard_reference_prefers_handoff_skill_install_link() {
         let info = missing_handoff_skill_info(AgentRunner::Claude);
 
         assert_eq!(
-            compiler_setup_clipboard_reference(&info).as_deref(),
+            compiler_skill_clipboard_reference(&info).as_deref(),
             info.homepage.as_deref()
         );
     }

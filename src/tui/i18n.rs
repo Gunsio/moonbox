@@ -188,9 +188,9 @@ fn english(key: Text) -> &'static str {
         Text::Data => "Data",
         Text::Skill => "Skill",
         Text::SkillPicker => "Skill Picker",
-        Text::ChooseCompilerSkill => "Choose compiler skill",
+        Text::ChooseCompilerSkill => "Choose handoff skill",
         Text::SkillPickerSubtitle => {
-            "Compression and compatibility live in replaceable compiler skills."
+            "Pick the handoff skill; runner setup is checked before launch."
         }
         Text::Tokens => "Tokens",
         Text::Preflight => "Pre-flight",
@@ -243,7 +243,7 @@ fn english(key: Text) -> &'static str {
         Text::AgentKind => "Skill",
         Text::Active => "active",
         Text::NoCompilerSkillsConfigured => "No compiler skills configured.",
-        Text::CopyLinkCommand => "copy setup/link",
+        Text::CopyLinkCommand => "copy skill ref",
         Text::Toggle => "Toggle",
         Text::Save => "Save",
         Text::Cancel => "Cancel",
@@ -365,8 +365,8 @@ fn zh_hans(key: Text) -> &'static str {
         Text::Data => "数据",
         Text::Skill => "技能",
         Text::SkillPicker => "Skill 选择器",
-        Text::ChooseCompilerSkill => "选择编译 Skill",
-        Text::SkillPickerSubtitle => "压缩与兼容性由可替换的编译 skill 提供。",
+        Text::ChooseCompilerSkill => "选择 Handoff Skill",
+        Text::SkillPickerSubtitle => "这里只选择 handoff skill；执行器配置会在启动前预检。",
         Text::Tokens => "Tokens",
         Text::Preflight => "预检",
         Text::MoonboxCli => "Moonbox CLI",
@@ -416,7 +416,7 @@ fn zh_hans(key: Text) -> &'static str {
         Text::AgentKind => "Skill",
         Text::Active => "已启用",
         Text::NoCompilerSkillsConfigured => "未配置 compiler skill。",
-        Text::CopyLinkCommand => "复制配置/链接",
+        Text::CopyLinkCommand => "复制 Skill 引用",
         Text::Toggle => "切换",
         Text::Save => "保存",
         Text::Cancel => "取消",
