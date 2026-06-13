@@ -1106,26 +1106,82 @@ fn python_candidates_for_runner(runner: AgentRunner) -> Vec<String> {
     if let Some(configured) = configured_runner_command(runner) {
         return vec![configured];
     }
-    python_candidates()
+    python_candidates(runner)
 }
 
-fn python_candidates() -> Vec<String> {
+fn python_candidates(runner: AgentRunner) -> Vec<String> {
     let mut seen = BTreeSet::new();
     let mut candidates = Vec::new();
-    for command in [
+    if let Some(path) = managed_sdk_python_path_from_env(runner) {
+        push_python_candidate(&mut candidates, &mut seen, path);
+    }
+    for command in common_python_candidates() {
+        push_python_candidate(&mut candidates, &mut seen, PathBuf::from(command));
+    }
+    candidates
+}
+
+fn push_python_candidate(candidates: &mut Vec<String>, seen: &mut BTreeSet<String>, path: PathBuf) {
+    let command = path.to_string_lossy().to_string();
+    if seen.insert(command.clone()) && command_available(&command) {
+        candidates.push(command);
+    }
+}
+
+fn common_python_candidates() -> [&'static str; 5] {
+    [
         "python3",
         "python",
         "/opt/homebrew/bin/python3",
         "/usr/local/bin/python3",
         "/usr/bin/python3",
-    ] {
-        if seen.insert(command.to_string()) && command_available(command) {
-            candidates.push(command.to_string());
-        }
-    }
-    candidates
+    ]
 }
 
+fn managed_sdk_python_path_from_env(runner: AgentRunner) -> Option<PathBuf> {
+    let home = env::var_os("MOONBOX_HOME")
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".moonbox")))?;
+    Some(managed_sdk_python_path(&home, runner))
+}
+
+fn managed_sdk_python_path(moonbox_home: &Path, runner: AgentRunner) -> PathBuf {
+    moonbox_home
+        .join("venvs")
+        .join(match runner {
+            AgentRunner::Codex => "codex-sdk",
+            AgentRunner::Claude => "claude-sdk",
+        })
+        .join("bin")
+        .join("python")
+}
+
+fn managed_sdk_setup_hint(runner: AgentRunner) -> Option<String> {
+    let python = common_python_candidates()
+        .into_iter()
+        .find(|command| command.starts_with("/opt/homebrew/") && command_available(command))
+        .or_else(|| {
+            common_python_candidates()
+                .into_iter()
+                .find(|command| command.starts_with("/usr/local/") && command_available(command))
+        })
+        .or_else(|| {
+            common_python_candidates()
+                .into_iter()
+                .find(|command| command_available(command))
+        })?;
+    let moonbox_home = env::var_os("MOONBOX_HOME")
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".moonbox")))?;
+    let managed_python = managed_sdk_python_path(&moonbox_home, runner);
+    let venv_root = managed_python.parent()?.parent()?;
+    Some(format!(
+        "{python} -m venv {} && {} -m pip install {}",
+        venv_root.display(),
+        managed_python.display(),
+        runner.sdk_package()
+    ))
+}
 fn runner_python_missing_reason(runner: AgentRunner, command: &str) -> String {
     format!(
         "python_command_not_found: runner={}; cli={}; command={}; env={}",
@@ -1163,6 +1219,9 @@ fn checked_python_label(candidates: &[String]) -> String {
 }
 
 fn sdk_install_hint(runner: AgentRunner, candidates: &[String]) -> String {
+    if let Some(hint) = managed_sdk_setup_hint(runner) {
+        return hint;
+    }
     let python = candidates
         .iter()
         .find(|command| command.starts_with("/opt/homebrew/"))
@@ -1551,6 +1610,20 @@ mod tests {
         assert_eq!(spec.runner, AgentRunner::Codex);
         assert_eq!(spec.skill_id, "handoff");
         assert!(parse_compiler_id("engineering-handoff").is_none());
+    }
+
+    #[test]
+    fn managed_sdk_python_paths_are_runner_specific() {
+        let home = PathBuf::from("/moonbox-home");
+
+        assert_eq!(
+            managed_sdk_python_path(&home, AgentRunner::Codex),
+            PathBuf::from("/moonbox-home/venvs/codex-sdk/bin/python")
+        );
+        assert_eq!(
+            managed_sdk_python_path(&home, AgentRunner::Claude),
+            PathBuf::from("/moonbox-home/venvs/claude-sdk/bin/python")
+        );
     }
 
     #[test]
