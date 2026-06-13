@@ -843,7 +843,9 @@ the review at the bottom where the executable actions live. The loading panel
 shows the selected compiler, current job stage, elapsed time, and last progress
 message; closing the panel keeps the in-process handoff job running, and opening
 the target picker again restores the pending or ready review unless Moonbox has
-exited. `G` jumps back to the bottom and `gg` jumps to the top. Pressing `r`
+exited. If generation fails, the Launch panel stays open with the attempted
+skill/compiler, elapsed time, failure reason, and `Enter` retry / `S` choose
+skill actions. `G` jumps back to the bottom and `gg` jumps to the top. Pressing `r`
 in that review restores the terminal first, launches the local target CLI, then
 returns to Moonbox with a
 three-action result panel: run again, copy command, or return. For real sessions
@@ -1356,6 +1358,11 @@ Stable interfaces matter more than any single framework:
   / `S` opens Skill Picker, real-session Skill Picker hides built-in draft
   templates, and only ready agent handoff compilers can be auto-selected ahead
   of the built-in fallback.
+- M96.5: Persistent Handoff Review failure panel; if background skill generation
+  fails, Launch keeps a visible failure state with target, selected
+  skill/compiler, elapsed time, exact reason, retry, and choose-skill actions
+  instead of flashing a transient popup and dropping the user back into an
+  unclear blocked state.
 - M92: Remote / SSH Session Detail Parity; SSH data spaces now hydrate selected
   session details from the remote `compile-request --json` response, preserving
   remote-computed bounded anatomy in the same Details / Zoom Details rendering
