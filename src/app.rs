@@ -652,6 +652,14 @@ pub struct TargetLaunchResult {
     pub plan: Box<LaunchPlan>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LaunchReviewErrorState {
+    pub target: CliTool,
+    pub compiler_id: String,
+    pub message: String,
+    pub elapsed_ms: u128,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OriginalResumeMode {
     Suspend,
@@ -979,6 +987,7 @@ pub struct App {
     pub show_data_space_config: bool,
     pub show_timeline_detail: bool,
     pub target_launch_result: Option<TargetLaunchResult>,
+    launch_review_error: Option<LaunchReviewErrorState>,
     pub timeline_image_previews: Vec<TimelineImagePreview>,
     pub saved_capsules: Vec<CapsuleSummary>,
     pub saved_capsule_error: Option<String>,
@@ -1085,6 +1094,7 @@ impl App {
             show_data_space_config: false,
             show_timeline_detail: false,
             target_launch_result: None,
+            launch_review_error: None,
             timeline_image_previews: Vec::new(),
             saved_capsules: Vec::new(),
             saved_capsule_error: None,
@@ -1219,6 +1229,7 @@ impl App {
         });
         self.show_launch = true;
         self.launch_review = false;
+        self.launch_review_error = None;
         self.modal_scroll = 0;
         self.clear_handoff_trail();
         self.set_status(outcome);
@@ -1328,6 +1339,15 @@ impl App {
                 compiler_id: pending.compiler_id.clone(),
                 elapsed_ms: pending.started_at.elapsed().as_millis(),
             })
+    }
+
+    pub fn launch_review_error(&self) -> Option<&LaunchReviewErrorState> {
+        self.launch_review_error.as_ref()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_launch_review_error_for_test(&mut self, error: LaunchReviewErrorState) {
+        self.launch_review_error = Some(error);
     }
 
     #[cfg(test)]
@@ -1685,7 +1705,21 @@ impl App {
                 }
                 Err(TryRecvError::Disconnected) => {
                     self.compile_status = "FAILED";
+                    self.verify_passed = false;
+                    self.pending_target = pending.target;
+                    self.show_launch = self.show_launch || self.launch_review;
                     self.launch_review = false;
+                    self.target_launch_result = None;
+                    self.launch_review_error = Some(LaunchReviewErrorState {
+                        target: pending.target,
+                        compiler_id: pending.compiler_id,
+                        message: format!(
+                            "worker disconnected while {}: {}",
+                            pending.stage.label(),
+                            pending.stage_detail
+                        ),
+                        elapsed_ms: pending.started_at.elapsed().as_millis(),
+                    });
                     self.clear_handoff_trail();
                     self.set_status("Handoff review failed: worker disconnected");
                     return true;
@@ -2022,6 +2056,49 @@ impl App {
             return;
         }
 
+        if self.launch_review_error.is_some() {
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    self.show_launch = false;
+                    self.launch_review_error = None;
+                    self.modal_scroll = 0;
+                    self.set_status("Handoff review error closed");
+                }
+                KeyCode::Enter => self.confirm_launch_target(),
+                KeyCode::Char('S') => {
+                    self.open_skill_picker();
+                    self.show_launch = true;
+                    self.set_status("Choose handoff skill");
+                }
+                KeyCode::Char('y') | KeyCode::Char('r') => self
+                    .set_status("Handoff review failed; press Enter to retry or S to choose skill"),
+                KeyCode::Char('G') => {
+                    self.modal_scroll = u16::MAX;
+                    self.pending_g = false;
+                    self.set_status("Review bottom");
+                }
+                KeyCode::Char('g') => self.handle_modal_g(),
+                KeyCode::PageDown => self.scroll_modal(true, 6),
+                KeyCode::PageUp => self.scroll_modal(false, 6),
+                KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.scroll_modal(true, 6)
+                }
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.scroll_modal(false, 6)
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    self.scroll_modal(true, 1);
+                    self.pending_g = false;
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    self.scroll_modal(false, 1);
+                    self.pending_g = false;
+                }
+                _ => self.pending_g = false,
+            }
+            return;
+        }
+
         if self.launch_review {
             let validation = self.validate_launch_for_target(self.pending_target);
             let needs_handoff_skill = self.launch_requires_handoff_skill(self.pending_target);
@@ -2096,6 +2173,7 @@ impl App {
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.show_launch = false;
                 self.launch_review = false;
+                self.launch_review_error = None;
                 self.modal_scroll = 0;
                 self.clear_handoff_trail();
                 self.set_status("Launch cancelled");
@@ -2637,6 +2715,7 @@ impl App {
         self.data.capsule.compiler = self.data.compilers[self.selected_compiler].clone();
         let selected_label = self.skill_picker_candidate_label(self.selected_compiler);
         self.show_skill_picker = false;
+        self.launch_review_error = None;
         self.modal_scroll = 0;
         self.set_status(format!("Skill: {selected_label}"));
         self.pending_g = false;
@@ -3245,6 +3324,7 @@ impl App {
         } else {
             self.pending_target.previous()
         };
+        self.launch_review_error = None;
         self.set_status(format!("Target: {}", self.pending_target));
     }
 
@@ -3260,6 +3340,15 @@ impl App {
                 "Handoff job still running: {}",
                 self.pending_target
             ));
+            self.pending_g = false;
+            return;
+        }
+        if self.launch_review_error.is_some() {
+            self.show_launch = true;
+            self.launch_review = false;
+            self.target_launch_result = None;
+            self.modal_scroll = 0;
+            self.set_status(format!("Handoff review failed: {}", self.pending_target));
             self.pending_g = false;
             return;
         }
@@ -3332,6 +3421,7 @@ impl App {
         if self.launch_requires_handoff_skill(target) {
             self.open_skill_picker();
             self.show_launch = true;
+            self.launch_review_error = None;
             self.set_status("Choose an AI handoff skill before Handoff Review");
             return;
         }
@@ -3433,6 +3523,7 @@ impl App {
         self.show_launch = true;
         self.launch_review = false;
         self.target_launch_result = None;
+        self.launch_review_error = None;
         self.start_handoff_trail_for_review();
         self.modal_scroll = 0;
         if launch_validation_can_regenerate_handoff(&validation) {
@@ -3729,6 +3820,7 @@ impl App {
         match result {
             Ok(data) => {
                 self.data = data;
+                self.launch_review_error = None;
                 self.refresh_visible_sessions();
                 self.selected_session = self
                     .data
@@ -3783,7 +3875,18 @@ impl App {
             Err(error) => {
                 self.compile_status = "FAILED";
                 self.verify_passed = false;
+                self.pending_target = pending.target;
+                self.show_launch = review_was_visible;
                 self.launch_review = false;
+                self.target_launch_result = None;
+                self.launch_review_error = Some(LaunchReviewErrorState {
+                    target: pending.target,
+                    compiler_id: pending.compiler_id,
+                    message: error.to_string(),
+                    elapsed_ms: elapsed.as_millis(),
+                });
+                self.modal_scroll = 0;
+                self.pending_g = false;
                 self.clear_handoff_trail();
                 self.set_status(format!(
                     "Handoff review failed: {error} ({} ms)",
@@ -5150,6 +5253,48 @@ Host devbox
         assert!(app.launch_review);
         assert_eq!(app.data.capsule.compiler, "design-review");
         assert!(!app.validate_launch_for_target(CliTool::Hermes).is_blocked());
+    }
+
+    #[test]
+    fn failed_launch_review_stays_visible_with_retry_actions() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.data
+            .compilers
+            .insert(0, "agent:codex:missing-skill".into());
+        app.selected_compiler = 0;
+
+        app.handle_key(key('H'));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(app.show_launch);
+        assert!(app.is_launch_review_pending());
+        assert!(!app.launch_review);
+
+        settle_launch_review(&mut app);
+
+        let error = app.launch_review_error().expect("launch review error");
+        assert_eq!(error.target, CliTool::Hermes);
+        assert_eq!(error.compiler_id, "agent:codex:missing-skill");
+        assert!(error.message.contains("skill_not_found"));
+        assert!(app.show_launch);
+        assert!(!app.launch_review);
+        assert!(app.target_launch_result.is_none());
+        assert_eq!(app.compile_status, "FAILED");
+        assert!(!app.verify_passed);
+        assert!(
+            app.status_message
+                .starts_with("Handoff review failed: invalid compiler config")
+        );
+
+        app.handle_key(key('y'));
+        assert_eq!(
+            app.status_message,
+            "Handoff review failed; press Enter to retry or S to choose skill"
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+        assert!(!app.show_launch);
+        assert!(app.launch_review_error().is_none());
     }
 
     #[test]

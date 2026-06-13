@@ -2321,6 +2321,15 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
                 ("Esc/q", i18n::text(language, Text::Back)),
             ];
         }
+        if app.launch_review_error().is_some() {
+            return vec![
+                ("enter", i18n::text(language, Text::Retry)),
+                ("S", i18n::text(language, Text::Skill)),
+                ("y/r", i18n::text(language, Text::Unavailable)),
+                ("PgUp/Dn", i18n::text(language, Text::Scroll)),
+                ("Esc/q", i18n::text(language, Text::Back)),
+            ];
+        }
         if app.launch_review {
             let capsule = app.launch_capsule_for_target(app.pending_target);
             let validation = app.validate_launch_for_target(app.pending_target);
@@ -4584,6 +4593,113 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         );
         return;
     }
+    if let Some(error) = app.launch_review_error() {
+        let lines = vec![
+            Line::from(Span::styled(
+                localized(language, "Handoff Review Failed", "Handoff Review 失败"),
+                Style::default()
+                    .fg(theme::red())
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::raw(""),
+            Line::from(vec![
+                Span::styled(
+                    format!("{}: ", i18n::text(language, Text::Session)),
+                    Style::default().fg(theme::blue()),
+                ),
+                Span::raw(session),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    format!("{}: ", i18n::text(language, Text::Target)),
+                    Style::default().fg(theme::blue()),
+                ),
+                Span::styled(
+                    error.target.to_string(),
+                    Style::default()
+                        .fg(theme::cyan())
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    format!("{}: ", i18n::text(language, Text::Skill)),
+                    Style::default().fg(theme::blue()),
+                ),
+                Span::styled(
+                    error.compiler_id.clone(),
+                    Style::default().fg(theme::cyan()),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    format!("{}: ", i18n::text(language, Text::Runtime)),
+                    Style::default().fg(theme::blue()),
+                ),
+                Span::raw(format!("{} ms", error.elapsed_ms)),
+            ]),
+            Line::raw(""),
+            Line::from(vec![
+                Span::styled(
+                    format!("{}: ", i18n::text(language, Text::Action)),
+                    Style::default().fg(theme::blue()),
+                ),
+                Span::styled(
+                    localized(
+                        language,
+                        "The handoff was not generated; target launch is disabled.",
+                        "handoff 没有生成，目标启动已禁用。",
+                    ),
+                    Style::default()
+                        .fg(theme::red())
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::raw(""),
+            Line::from(Span::styled(
+                localized(language, "Reason", "原因"),
+                Style::default()
+                    .fg(theme::gold())
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::raw(error.message.clone())),
+            Line::raw(""),
+            Line::from(Span::styled(
+                localized(
+                    language,
+                    "Next: press Enter to retry with the current skill, or S to choose another handoff skill.",
+                    "下一步：按 Enter 用当前 skill 重试，或按 S 选择其他 handoff skill。",
+                ),
+                Style::default().fg(theme::gold()),
+            )),
+            Line::raw(""),
+            Line::from(vec![
+                action_button("Enter", i18n::text(language, Text::Retry)),
+                Span::raw("  "),
+                action_button("S", i18n::text(language, Text::Skill)),
+                Span::raw("  "),
+                disabled_action_button("y/r", i18n::text(language, Text::Unavailable)),
+                Span::raw("  "),
+                action_button("Esc", i18n::text(language, Text::Back)),
+            ]),
+            Line::from(Span::styled(
+                i18n::text(language, Text::ScrollOnlyKeys),
+                Style::default().fg(theme::muted()),
+            )),
+        ];
+        let scroll = modal_scroll_offset(app.modal_scroll, &lines, area);
+        frame.render_widget(
+            Paragraph::new(lines)
+                .block(panel_block(
+                    localized(language, " Handoff Review Failed ", " Handoff Review 失败 "),
+                    true,
+                ))
+                .scroll((scroll, 0))
+                .wrap(Wrap { trim: true }),
+            area,
+        );
+        return;
+    }
     let pending_validation = app.validate_launch_for_target(app.pending_target);
     let pending_report = app.launch_verification_for_target(app.pending_target);
     if let Some(result) = &app.target_launch_result {
@@ -5850,7 +5966,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        app::App,
+        app::{App, LaunchReviewErrorState},
         core::{
             dataspace,
             model::{
@@ -7444,6 +7560,35 @@ mod tests {
         assert_screen_contains(&screen, "waiting for background handoff worker");
         assert_screen_contains(&screen, "Esc hides this panel");
         assert_screen_contains(&screen, "wait background job");
+    }
+
+    #[test]
+    fn launch_review_error_renders_persistent_retry_panel() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.set_ui_preferences_for_test(crate::core::config::UiPreferencesConfig {
+            language: crate::core::config::UiLanguage::ZhHans,
+            theme: crate::core::config::UiThemeName::Moonbox,
+        });
+        app.show_launch = true;
+        app.pending_target = CliTool::Hermes;
+        app.set_launch_review_error_for_test(LaunchReviewErrorState {
+            target: CliTool::Hermes,
+            compiler_id: "agent:claude:handoff".into(),
+            message: "invalid compiler config agent:claude:handoff: not_installed: install the Claude Agent SDK".into(),
+            elapsed_ms: 42,
+        });
+
+        let screen = render_text(&app, 140, 42);
+
+        assert_screen_contains(&screen, "Handoff Review 失败");
+        assert_screen_contains(&screen, "handoff 没有生成，目标启动已禁用。");
+        assert_screen_contains(&screen, "原因");
+        assert_screen_contains(&screen, "agent:claude:handoff");
+        assert_screen_contains(&screen, "not_installed");
+        assert_screen_contains(&screen, "下一步：按 Enter 用当前 skill 重试");
+        assert_screen_contains(&screen, "Enter 重试");
+        assert_screen_contains(&screen, "S 技能");
+        assert_screen_contains(&screen, "y/r 不可用");
     }
 
     #[test]
