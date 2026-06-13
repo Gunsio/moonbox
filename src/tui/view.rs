@@ -22,7 +22,7 @@ use crate::{
         SourceAdapterReport, SourceFidelityStatus, SourceProvenance, TimelineAttachment,
         TimelineEvent, TimelineKind, VerificationReport, VerificationStatus, WorkCapsule,
     },
-    core::{compiler, hooks},
+    core::{compiler, handoff, hooks},
 };
 
 use super::{
@@ -3537,7 +3537,7 @@ fn render_skill_picker(frame: &mut Frame, root: Rect, app: &App) {
             ),
             Span::styled("  ", row_style),
             Span::styled(
-                format!("{:<11}", compiler_kind_label(info.kind, language)),
+                format!("{:<15}", compiler_kind_label(info.kind, language)),
                 row_style,
             ),
             Span::styled("  ", row_style),
@@ -3547,25 +3547,7 @@ fn render_skill_picker(frame: &mut Frame, root: Rect, app: &App) {
             Span::raw("    "),
             Span::styled(compiler_description(&info, language), muted_style),
         ]));
-        lines.push(Line::from(vec![
-            Span::raw("    "),
-            Span::styled(
-                format!("{}: ", i18n::text(language, Text::Stars)),
-                Style::default().fg(theme::muted()),
-            ),
-            Span::styled(
-                format_star_count(&info, language),
-                Style::default().fg(theme::gold()),
-            ),
-            Span::styled(
-                format!("  {}: ", i18n::text(language, Text::Link)),
-                Style::default().fg(theme::muted()),
-            ),
-            Span::styled(
-                compiler_reference(&info, language),
-                Style::default().fg(theme::cyan()),
-            ),
-        ]));
+        lines.extend(compiler_detail_lines(&info, language, muted_style));
         lines.push(Line::raw(""));
     }
 
@@ -4061,6 +4043,259 @@ fn compiler_kind_label(
     }
 }
 
+fn compiler_detail_lines(
+    info: &CompilerPresetInfo,
+    language: crate::core::config::UiLanguage,
+    muted_style: Style,
+) -> Vec<Line<'static>> {
+    if let Some(spec) = handoff::parse_compiler_id(&info.id) {
+        return agent_skill_detail_lines(info, spec, language, muted_style);
+    }
+
+    match info.kind {
+        CompilerPresetKind::Builtin => vec![compiler_detail_line(
+            language,
+            "Use",
+            "用途",
+            localized(
+                language,
+                "Built-in fallback draft; it does not call an AI skill. Prefer a Skill above for production handoff.",
+                "内置 fallback 草稿，不调用 AI skill；正式 handoff 请选上方 Skill。",
+            )
+            .into(),
+            muted_style,
+        )],
+        CompilerPresetKind::Environment | CompilerPresetKind::Config => {
+            let mut lines = Vec::new();
+            if let Some(command) = compiler_command(info) {
+                lines.push(compiler_detail_line(
+                    language,
+                    "Command",
+                    "命令",
+                    command,
+                    Style::default().fg(theme::cyan()),
+                ));
+            }
+            lines.push(compiler_detail_line(
+                language,
+                "Status",
+                "状态",
+                compiler_status_detail(info, language),
+                compiler_status_detail_style(info),
+            ));
+            if let Some(homepage) = &info.homepage {
+                lines.push(compiler_detail_line(
+                    language,
+                    "Link",
+                    "链接",
+                    homepage.clone(),
+                    Style::default().fg(theme::cyan()),
+                ));
+            }
+            if let Some(stars) = info.github_stars {
+                lines.push(compiler_detail_line(
+                    language,
+                    "Stars",
+                    "热度",
+                    format_stars(stars),
+                    Style::default().fg(theme::gold()),
+                ));
+            }
+            lines
+        }
+        CompilerPresetKind::Agent => Vec::new(),
+    }
+}
+
+fn agent_skill_detail_lines(
+    info: &CompilerPresetInfo,
+    spec: handoff::AgentCompilerSpec,
+    language: crate::core::config::UiLanguage,
+    _muted_style: Style,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from(vec![
+        compiler_detail_label(language, "Runner", "执行器"),
+        Span::styled(
+            spec.runner.label().to_string(),
+            Style::default().fg(theme::cyan()),
+        ),
+        Span::raw("  "),
+        compiler_detail_label(language, "Skill", "Skill"),
+        Span::styled(spec.skill_id.clone(), Style::default().fg(theme::text())),
+    ])];
+
+    if info.status == CompilerPresetStatus::Ready {
+        lines.push(compiler_detail_line(
+            language,
+            "Status",
+            "状态",
+            localized(language, "Ready to run", "可运行").into(),
+            Style::default().fg(theme::green()),
+        ));
+    } else {
+        lines.push(compiler_detail_line(
+            language,
+            "Needs",
+            "需要",
+            compiler_setup_hint(info, language),
+            compiler_status_detail_style(info),
+        ));
+    }
+
+    if let Some(command) = info.command.as_deref() {
+        lines.push(compiler_detail_line(
+            language,
+            "Command",
+            "命令",
+            command.into(),
+            Style::default().fg(theme::cyan()),
+        ));
+    }
+
+    if info.reason.contains("skill_not_installed")
+        && let Some(homepage) = &info.homepage
+    {
+        lines.push(compiler_detail_line(
+            language,
+            "Install",
+            "安装",
+            homepage.clone(),
+            Style::default().fg(theme::cyan()),
+        ));
+    }
+
+    lines
+}
+
+fn compiler_detail_line(
+    language: crate::core::config::UiLanguage,
+    english_label: &'static str,
+    zh_label: &'static str,
+    value: String,
+    value_style: Style,
+) -> Line<'static> {
+    Line::from(vec![
+        compiler_detail_label(language, english_label, zh_label),
+        Span::styled(value, value_style),
+    ])
+}
+
+fn compiler_detail_label(
+    language: crate::core::config::UiLanguage,
+    english_label: &'static str,
+    zh_label: &'static str,
+) -> Span<'static> {
+    Span::styled(
+        format!("    {}: ", localized(language, english_label, zh_label)),
+        Style::default()
+            .fg(theme::blue())
+            .add_modifier(Modifier::BOLD),
+    )
+}
+
+fn compiler_status_detail(
+    info: &CompilerPresetInfo,
+    language: crate::core::config::UiLanguage,
+) -> String {
+    if info.status == CompilerPresetStatus::Ready {
+        return localized(language, "Ready to run", "可运行").into();
+    }
+    compiler_setup_hint(info, language)
+}
+
+fn compiler_status_detail_style(info: &CompilerPresetInfo) -> Style {
+    Style::default().fg(compiler_status_color(info.status))
+}
+
+fn compiler_setup_hint(
+    info: &CompilerPresetInfo,
+    language: crate::core::config::UiLanguage,
+) -> String {
+    let reason = info.reason.as_str();
+    if reason.contains("skill_not_installed") {
+        return localized(
+            language,
+            "Install a generic handoff skill; press y to copy the install link.",
+            "安装通用 handoff skill；按 y 复制安装链接。",
+        )
+        .into();
+    }
+    if reason.contains("install the Codex SDK") {
+        return localized(
+            language,
+            "Install Codex SDK: pip install openai-codex",
+            "安装 Codex SDK：pip install openai-codex",
+        )
+        .into();
+    }
+    if reason.contains("install the Claude Agent SDK") {
+        return localized(
+            language,
+            "Install Claude Agent SDK: pip install claude-agent-sdk",
+            "安装 Claude Agent SDK：pip install claude-agent-sdk",
+        )
+        .into();
+    }
+    if reason.contains("Codex SDK runner not installed")
+        || reason.contains("Codex SDK runner command was not found")
+    {
+        return localized(
+            language,
+            "Install Codex SDK or set MOONBOX_CODEX_SDK_PYTHON.",
+            "安装 Codex SDK，或设置 MOONBOX_CODEX_SDK_PYTHON。",
+        )
+        .into();
+    }
+    if reason.contains("Claude SDK runner not installed")
+        || reason.contains("Claude SDK runner command was not found")
+    {
+        return localized(
+            language,
+            "Install Claude Agent SDK or set MOONBOX_CLAUDE_AGENT_SDK_PYTHON.",
+            "安装 Claude Agent SDK，或设置 MOONBOX_CLAUDE_AGENT_SDK_PYTHON。",
+        )
+        .into();
+    }
+    if reason.contains("auth_required: Codex") {
+        return localized(
+            language,
+            "Sign in to Codex or provide OPENAI_API_KEY.",
+            "登录 Codex，或提供 OPENAI_API_KEY。",
+        )
+        .into();
+    }
+    if reason.contains("auth_required: Claude") {
+        return localized(
+            language,
+            "Sign in to Claude or provide ANTHROPIC_API_KEY.",
+            "登录 Claude，或提供 ANTHROPIC_API_KEY。",
+        )
+        .into();
+    }
+    localize_compiler_reason(language, &review_snippet(reason, 120))
+}
+
+fn localized(
+    language: crate::core::config::UiLanguage,
+    english: &'static str,
+    zh_hans: &'static str,
+) -> &'static str {
+    match language {
+        crate::core::config::UiLanguage::English => english,
+        crate::core::config::UiLanguage::ZhHans => zh_hans,
+    }
+}
+
+fn compiler_command(info: &CompilerPresetInfo) -> Option<String> {
+    info.command.as_ref().map(|command| {
+        if info.args.is_empty() {
+            command.clone()
+        } else {
+            format!("{} {}", command, info.args.join(" "))
+        }
+    })
+}
+
 fn compiler_description(
     info: &CompilerPresetInfo,
     language: crate::core::config::UiLanguage,
@@ -4124,16 +4359,6 @@ fn localize_compiler_reason(language: crate::core::config::UiLanguage, reason: &
     reason.into()
 }
 
-fn compiler_reference(
-    info: &CompilerPresetInfo,
-    language: crate::core::config::UiLanguage,
-) -> String {
-    info.homepage
-        .clone()
-        .or_else(|| info.command.clone())
-        .unwrap_or_else(|| i18n::text(language, Text::BuiltInReference).into())
-}
-
 fn action_button<'a>(key: &'a str, label: &'a str) -> Span<'a> {
     Span::styled(
         format!(" {key} {label} "),
@@ -4168,18 +4393,7 @@ fn modal_scroll_offset(requested: u16, lines: &[Line<'_>], area: Rect) -> u16 {
     rows.saturating_sub(height).min(usize::from(u16::MAX - 1)) as u16
 }
 
-fn format_star_count(
-    info: &CompilerPresetInfo,
-    language: crate::core::config::UiLanguage,
-) -> String {
-    let Some(stars) = info.github_stars else {
-        return match info.kind {
-            CompilerPresetKind::Builtin => i18n::text(language, Text::NotApplicable).into(),
-            CompilerPresetKind::Environment
-            | CompilerPresetKind::Config
-            | CompilerPresetKind::Agent => i18n::text(language, Text::NotConfigured).into(),
-        };
-    };
+fn format_stars(stars: u64) -> String {
     if stars >= 1_000 {
         format!("{:.1}k", stars as f64 / 1_000.0)
     } else {
@@ -6467,16 +6681,24 @@ mod tests {
     fn skill_picker_renders_compiler_metadata() {
         let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
         app.show_skill_picker = true;
+        app.data.compilers = vec!["agent:codex:handoff".into(), "engineering-handoff".into()];
+        app.pending_compiler = 0;
+        app.selected_compiler = 0;
 
         let screen = render_text(&app, 140, 40);
 
         assert_screen_contains(&screen, "Skill Picker");
         assert_screen_contains(&screen, "Choose compiler skill");
+        assert_screen_contains(&screen, "agent:codex:handoff");
+        assert_screen_contains(&screen, "Skill");
+        assert_screen_contains(&screen, "Runner:");
+        assert_screen_contains(&screen, "Skill: handoff");
         assert_screen_contains(&screen, "engineering-handoff");
-        assert_screen_contains(&screen, "stars:");
-        assert_screen_contains(&screen, "n/a");
-        assert_screen_contains(&screen, "https://github.com/Gunsio/moonbox");
+        assert_screen_contains(&screen, "draft template");
+        assert_screen_contains(&screen, "Built-in fallback draft");
         assert_screen_contains(&screen, "j/k Choose");
+        assert!(!screen.contains("stars:"), "{screen}");
+        assert!(!screen.contains("n/a"), "{screen}");
     }
 
     #[test]
@@ -6487,22 +6709,29 @@ mod tests {
             theme: crate::core::config::UiThemeName::Moonbox,
         });
         app.show_skill_picker = true;
+        app.data.compilers = vec!["agent:codex:handoff".into(), "engineering-handoff".into()];
+        app.pending_compiler = 0;
+        app.selected_compiler = 0;
 
         let screen = render_text(&app, 140, 40);
 
         assert_screen_contains(&screen, "Skill 选择器");
         assert_screen_contains(&screen, "选择编译 Skill");
         assert_screen_contains(&screen, "压缩与兼容性由可替换的编译 skill 提供");
+        assert_screen_contains(&screen, "agent:codex:handoff");
+        assert_screen_contains(&screen, "Skill: handoff");
+        assert_screen_contains(&screen, "执行器:");
         assert_screen_contains(&screen, "engineering-handoff");
         assert_screen_contains(&screen, "警告");
-        assert_screen_contains(&screen, "内置");
+        assert_screen_contains(&screen, "草稿模板");
+        assert_screen_contains(&screen, "用途:");
+        assert_screen_contains(&screen, "内置 fallback 草稿");
         assert_screen_contains(&screen, "已启用");
-        assert_screen_contains(&screen, "热度:");
-        assert_screen_contains(&screen, "不适用");
-        assert_screen_contains(&screen, "链接:");
         assert_screen_contains(&screen, "j/k 选择");
         assert!(!screen.contains("Choose compiler skill"), "{screen}");
         assert!(!screen.contains("stars:"), "{screen}");
+        assert!(!screen.contains("热度:"), "{screen}");
+        assert!(!screen.contains("不适用"), "{screen}");
     }
 
     #[test]

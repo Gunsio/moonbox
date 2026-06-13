@@ -630,15 +630,18 @@ Catalog entries include their source (`Environment`, `Config`, `Agent`, or
 `Builtin`), status (`Ready`, `Warning`, or `Disabled`), score, command,
 arguments, timeout, and the reason behind the quality signal.
 
-Agent-backed handoff skills appear in the same catalog with source `Agent`.
-Moonbox discovers generic `handoff` skills from `MOONBOX_SKILLS_DIRS`,
-`CODEX_HOME` / `MOONBOX_CODEX_HOME` `skills`, and the user's local Codex /
-agent skill homes. The Skill Picker shows Codex and Claude runner entries for
-each discovered handoff skill, plus install-hint placeholders when no handoff
-skill is installed. Agent runners are never selected implicitly as the default
-compiler; choose one in the TUI Skill Picker, pass its `--compiler
-agent:<runner>:<skill>` id, or set it as `default_compiler` after reviewing the
-preflight state. Codex handoff generation uses the official `openai-codex`
+Agent-backed handoff skills appear in the same catalog with source `Agent` for
+CLI/JSON compatibility. In the TUI Skill Picker they are presented as `Skill`
+entries, with runner, skill id, readiness, missing setup, command, and install
+link shown as separate fields. Moonbox discovers generic `handoff` skills from
+`MOONBOX_SKILLS_DIRS`, `CODEX_HOME` / `MOONBOX_CODEX_HOME` `skills`, and the
+user's local Codex / agent skill homes. The Skill Picker shows Codex and Claude
+runner entries for each discovered handoff skill, plus install-hint
+placeholders when no handoff skill is installed. Agent runners are never
+selected implicitly as the default compiler; choose one in the TUI Skill Picker,
+pass its `--compiler agent:<runner>:<skill>` id, or set it as
+`default_compiler` after reviewing the preflight state. Codex handoff generation
+uses the official `openai-codex`
 Python SDK with `Sandbox.read_only`; install it with `pip install openai-codex`,
 set `MOONBOX_CODEX_SDK_PYTHON` when the SDK lives outside `python3`, and use
 `MOONBOX_CODEX_BIN` only to intentionally point the SDK at a specific Codex
@@ -655,9 +658,9 @@ as runnable.
 
 The production handoff path is skill-first: pick a source session, target
 executor, handoff skill, and runner SDK, then review the generated handoff
-before launching. Community handoff skills and built-in Moonbox skill presets
-must use the same runner path and Review UX. Deterministic built-in compiler
-output is a draft/fallback surface only, not a hidden production handoff path.
+before launching. Community handoff skills use the same runner path and Review
+UX. Deterministic built-in compiler output is a draft/fallback surface only,
+listed in the TUI as draft templates rather than production skills.
 
 Environment variables remain the highest-priority one-off override:
 
@@ -821,6 +824,9 @@ Moonbox has two separate actions for a selected session:
   original CLI, then press `enter` to use the same suspend-and-return flow.
 - `x`: choose a target CLI, then review a `target_handoff` command before
   launching or copying it. `H` and `t` remain compatibility aliases.
+- `S`: open Skill Picker. Agent-backed handoff rows show the runner and skill
+  separately plus the next setup step; built-in fallback rows are labeled as
+  draft templates. Press `y` to copy the relevant setup command or install link.
 - `,`: open Settings. M95 exposes Smart Enter / tmux jump there with preview and
   persistence; hooks install/uninstall remains a CLI command.
 
@@ -1079,7 +1085,7 @@ Stable interfaces matter more than any single framework:
   large empty gap before `Cdx` / `Clu` / `Hms` source badges.
 - M49.2: timeline and skill-picker polish; folded assistant groups now name the
   source CLI instead of generic `AI`, `S` opens a metadata-rich Skill Picker
-  with status, description, stars / `n/a`, and link/command reference, and
+  with status, description, setup guidance, and command/link reference, and
   `Action Path` shows the selected cwd plus per-tool session counts.
 - M50: panel zoom and focus layout; `+` / `=` zooms the focused Sessions,
   Timeline, Details, or Action Path panel, `-` restores the normal layout, and
@@ -1326,6 +1332,11 @@ Stable interfaces matter more than any single framework:
   Settings, Skill Picker, Launch, and Handoff Review labels while preserving
   source session transcripts, prompts, agent output, tool output, code, paths,
   cwd, branch names, metadata, and handoff content byte-for-byte.
+- M96.1: Skill Picker product copy correction; the picker now presents
+  agent-backed handoff options as `Skill` rows with runner, skill id, setup
+  need, and command separated, labels built-in fallback compilers as draft
+  templates, removes `n/a` / `not configured` metadata noise, and makes `y`
+  copy the actionable SDK install command or handoff skill link.
 - M92: Remote / SSH Session Detail Parity; SSH data spaces now hydrate selected
   session details from the remote `compile-request --json` response, preserving
   remote-computed bounded anatomy in the same Details / Zoom Details rendering
