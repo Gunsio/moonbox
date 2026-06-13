@@ -16,9 +16,9 @@ use time::OffsetDateTime;
 use super::{
     adapter::AdapterError,
     local_jsonl::{
-        display_time, event_id, human_timestamp, is_provider_context_text, push_timeline_event,
-        stable_text_digest, stable_value_digest, text_from_value, title_case, truncate,
-        truncate_timeline_detail,
+        display_time, event_id, human_timestamp, is_moonbox_handoff_control_text,
+        is_provider_context_text, push_timeline_event, stable_text_digest, stable_value_digest,
+        text_from_value, title_case, truncate, truncate_timeline_detail,
     },
     model::{
         CanonicalTimeline, CliTool, SessionRuntimeStatus, SessionStatus, SessionSummary,
@@ -294,7 +294,7 @@ pub(crate) fn app_thread_summary(thread: CodexAppThread) -> SessionSummary {
         Some(thread.preview.as_str()),
         thread.path.as_deref(),
     ])
-    .filter(|title| !is_provider_context_text(title))
+    .filter(|title| !is_provider_context_text(title) && !is_moonbox_handoff_control_text(title))
     .map(|title| truncate(&title.split_whitespace().collect::<Vec<_>>().join(" "), 160))
     .unwrap_or_else(|| format!("Codex thread {}", short_id(&thread.id)));
     let status_type = thread_status_type(&thread.status);
@@ -565,7 +565,9 @@ fn app_thread_item_event(
         ),
         _ => return None,
     };
-    if kind == TimelineKind::User && is_provider_context_text(&detail) {
+    if kind == TimelineKind::User
+        && (is_provider_context_text(&detail) || is_moonbox_handoff_control_text(&detail))
+    {
         return None;
     }
     Some(TimelineEvent {

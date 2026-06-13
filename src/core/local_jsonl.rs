@@ -476,12 +476,25 @@ pub fn is_provider_context_text(text: &str) -> bool {
         || trimmed.starts_with("<system_context>")
         || trimmed.starts_with("<developer_context>")
         || trimmed.starts_with("# AGENTS.md instructions for")
+        || (trimmed.starts_with("<skill>") && trimmed.contains("</skill>"))
+        || (trimmed.starts_with("<turn_aborted>") && trimmed.contains("</turn_aborted>"))
         || (trimmed.contains("<environment_context>")
             && trimmed.contains("</environment_context>")
             && (trimmed.contains("<INSTRUCTIONS>")
                 || trimmed.contains("</INSTRUCTIONS>")
                 || trimmed.contains("<permission_profile")
                 || trimmed.contains("<cwd>")))
+}
+
+pub fn is_moonbox_handoff_control_text(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    trimmed.starts_with("$handoff You are running a Moonbox continuation handoff job")
+        || trimmed.starts_with("You are running a Moonbox continuation handoff job.")
+        || trimmed.starts_with("The following is the Codex agent history whose request action")
+        || trimmed.starts_with("<selected_skill")
+        || (trimmed.contains("Moonbox continuation handoff job")
+            && trimmed.contains("<selected_skill")
+            && trimmed.contains("TRANSCRIPT START"))
 }
 
 pub fn title_case(value: &str) -> String {

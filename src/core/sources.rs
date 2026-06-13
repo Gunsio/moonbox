@@ -148,7 +148,7 @@ pub fn load_timeline(session: &SessionSummary) -> Result<CanonicalTimeline, Core
 }
 
 pub fn load_timeline_preview(session: &SessionSummary) -> Result<CanonicalTimeline, CoreError> {
-    load_timeline_with_limit(session, configured_timeline_event_limit())
+    load_timeline_with_limit(session, preview_timeline_event_limit(session))
 }
 
 pub fn configured_timeline_event_limit() -> Option<usize> {
@@ -161,6 +161,14 @@ pub fn configured_timeline_event_limit() -> Option<usize> {
             .filter(|limit| *limit > 0)
             .or(Some(DEFAULT_TIMELINE_EVENT_LIMIT)),
         Err(_) => Some(DEFAULT_TIMELINE_EVENT_LIMIT),
+    }
+}
+
+fn preview_timeline_event_limit(session: &SessionSummary) -> Option<usize> {
+    let configured = configured_timeline_event_limit();
+    match (configured, session.event_count) {
+        (Some(limit), known_count) if known_count > 0 => Some(limit.min(known_count)),
+        _ => configured,
     }
 }
 

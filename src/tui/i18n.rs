@@ -5,6 +5,7 @@ pub enum Text {
     Filter,
     Data,
     Skill,
+    HandoffSkill,
     SkillPicker,
     ChooseCompilerSkill,
     SkillPickerSubtitle,
@@ -191,6 +192,7 @@ fn english(key: Text) -> &'static str {
         Text::Filter => "Filter",
         Text::Data => "Data",
         Text::Skill => "Skill",
+        Text::HandoffSkill => "Handoff Skill",
         Text::SkillPicker => "Skill Picker",
         Text::ChooseCompilerSkill => "Choose handoff skill",
         Text::SkillPickerSubtitle => {
@@ -376,6 +378,7 @@ fn zh_hans(key: Text) -> &'static str {
         Text::Filter => "筛选",
         Text::Data => "数据",
         Text::Skill => "技能",
+        Text::HandoffSkill => "Handoff Skill",
         Text::SkillPicker => "Skill 选择器",
         Text::ChooseCompilerSkill => "选择 Handoff Skill",
         Text::SkillPickerSubtitle => "这里只选择 handoff skill；执行器配置会在启动前预检。",

@@ -26,6 +26,14 @@ pub fn workbench_data(source: CliTool, target: CliTool) -> Result<WorkbenchData,
         .find(|session| session.cli == source)
         .cloned()
         .unwrap_or_else(|| fallback_session(source));
+    if source_session.source_provenance == SourceProvenance::Real {
+        return Ok(workbench_data_from_readonly_inventory(
+            source_session,
+            sessions,
+            source_adapters,
+            target,
+        ));
+    }
     let source_session = ensure_session_anatomy(source_session);
     let source_session_id = source_session.id.clone();
     let timeline = preview_timeline_for_workbench(&source_session)?;
@@ -102,13 +110,7 @@ pub fn workbench_data_from_timeline_snapshot(
     let source_session_id = source_session.id.clone();
     let rewind_event_id = rewind_event_id_for_timeline(&source_session_id, &timeline);
     let compiler = default_compiler_id();
-    let capsule = workbench_capsule_for_session(
-        &source_session,
-        target,
-        &timeline,
-        &rewind_event_id,
-        &compiler,
-    )?;
+    let capsule = pending_work_capsule(&source_session, target, &rewind_event_id, &compiler);
     Ok(build_workbench_data(
         source_session.cli,
         target,

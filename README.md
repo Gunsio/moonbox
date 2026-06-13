@@ -541,14 +541,17 @@ latest AI outcome, not a recovered historical error preserved in the timeline.
 The right Session Details panel keeps the raw title, cwd, event count, token
 count, source health, and source path. Session movement, source filtering, and
 `/` search move the selected row immediately and keep the UI responsive while
-the selected timeline/capsule preview hydrates
-in the background from the current session index snapshot.
+the selected timeline preview hydrates after a short debounce from the current
+session index snapshot. Browsing does not rebuild the workbench, start immediate
+timeline IO, or generate handoff output.
 
 Session switching uses a bounded timeline preview by default, so very large
-JSONL sessions do not freeze navigation. When the preview reaches
-`MOONBOX_TIMELINE_EVENT_LIMIT`, Moonbox adds a `Timeline preview truncated`
-event to the timeline. Set `MOONBOX_TIMELINE_EVENT_LIMIT=0` only when you
-explicitly want full timeline previews in the TUI. Individual event bodies use
+JSONL sessions do not freeze navigation. Preview uses the read-only inventory
+event count as an additional stop point when it is smaller than
+`MOONBOX_TIMELINE_EVENT_LIMIT`; when the configured limit is reached, Moonbox
+adds a `Timeline preview truncated` event to the timeline. Set
+`MOONBOX_TIMELINE_EVENT_LIMIT=0` only when you explicitly want full timeline
+previews in the TUI. Individual event bodies use
 `MOONBOX_TIMELINE_DETAIL_CHAR_LIMIT`, which defaults to 4000 characters so
 expanded Timeline panels can show substantially more than the compact list
 snippet while still protecting large-session navigation.
@@ -662,6 +665,19 @@ approval evidence, file changes, attachments, raw references, and redaction
 report; the runner does not get permission to scan or mutate source session
 stores. Empty agent artifacts fail validation before Moonbox shows the Review
 as runnable.
+
+The TUI keeps agent handoff generation to one background worker at a time.
+Handoff generation is always an explicit user action: choosing a skill in the
+Skill Picker only saves the selected handoff skill, and pressing `Enter` in the
+Launch picker starts generation. When a Review job is already running, opening
+the launch flow or pressing `Enter` returns to that job's progress panel instead
+of starting another SDK process. The panel shows the selected target,
+skill/compiler id, current stage, elapsed time, and configured timeout; `Esc`
+hides the panel while the job continues in the background until it finishes or
+Moonbox exits. Entering the Skill Picker or retrying a failed Review refreshes
+the compiler catalog and SDK preflight state, so installing a runner SDK while
+Moonbox is open can be recovered by pressing `r` to retry instead of restarting
+the app.
 
 The production handoff path is skill-first: pick a source session, target
 executor, handoff skill, and runner SDK, then review the generated handoff
@@ -844,16 +860,30 @@ tagged by source CLI. Source filtering is controlled by `f` or `[` / `]` and
 starts at `All`. Target is not shown as a global mode on the main screen; it is
 chosen only in the launch picker. In the target picker, `j/k` moves the pending
 selection, `enter` confirms and persists it, and `Esc` / `q` cancels without
-changing the saved target. Confirming a ready or warning target prepares the
-Handoff Review in the background, shows a cancellable loading panel, and opens
-the review at the bottom where the executable actions live. The loading panel
-shows the selected compiler, current job stage, elapsed time, and last progress
-message; closing the panel keeps the in-process handoff job running, and opening
-the target picker again restores the pending or ready review unless Moonbox has
+changing the saved target. If the selected session row is still hydrating,
+`H` / `x` still opens the target picker immediately; the selected session
+context is loaded when Review starts. Confirming a ready or warning target
+prepares the Handoff Review in the background, shows a cancellable loading
+panel, and opens the review at the bottom where the executable actions live.
+Moving through the session list, changing filters, or typing search changes
+selection only; after a short debounce Moonbox may start a bounded background
+timeline preview for the selected row. It does not rebuild the workbench,
+compile handoff output, start immediate timeline IO, or start an SDK runner;
+Review is the explicit boundary that loads handoff context and runs the
+selected skill. This keeps browsing large real session stores responsive while
+still making the source-read boundary visible.
+The handoff loading panel shows the selected skill / runner, localized job
+stage, elapsed time, timeout limit, and last progress message;
+closing the panel keeps the in-process handoff job running, and opening the
+target picker again restores the pending or ready review unless Moonbox has
 exited. If generation fails, the Launch panel stays open with the attempted
-skill/compiler, elapsed time, failure reason, and `Enter` retry / `S` choose
-skill actions. When Skill Picker is opened from Launch, `enter` applies the
-selected handoff skill and starts background review generation immediately.
+skill/compiler, elapsed time, failure reason, and explicit `r` retry / `S`
+choose-skill actions; `Enter` does not retry a failed AI generation. When Skill
+Picker is opened from Launch, `Enter` applies the selected handoff skill only;
+return to Launch and press `Enter` again to start background Review generation.
+Community skill Markdown artifacts are reviewed as handoff artifacts: missing
+Moonbox-specific semantic refs warn instead of blocking launch, while hard
+source / target / rewind mismatches still block.
 `G` jumps back to the bottom and `gg` jumps to the top. Pressing `r`
 in that review restores the terminal first, launches the local target CLI, then
 returns to Moonbox with a
@@ -885,11 +915,15 @@ command, `j/k` selection before typing, arrow-key selection while typing, and
 `Esc` close. Search stays separate on `/` and remains a lightweight live filter.
 
 Session search matches id, title/raw title, cwd, source path, source, branch,
-and health reason. When a different session becomes selected by movement, source filter, or search,
-Moonbox immediately marks the selected session as loading, then hydrates that
-session's timeline, capsule preview, branch preview, and recommended rewind
-point in the background. Timeline rendering hides provider-injected context
-rows such as `<environment_context>`, folds low-signal tool rows by default,
+and health reason. When a different session becomes selected by movement,
+source filter, or search, Moonbox changes selection first and only starts a
+bounded timeline preview after a short debounce; capsule preview, branch
+preview, and handoff context wait for an explicit action such as Review or
+Details. Timeline and handoff loading states redraw with a lightweight spinner
+so background work is visibly alive without blocking keyboard navigation.
+Timeline rendering hides provider-injected context rows such as
+`<environment_context>`, `<skill>...</skill>`, and
+`<turn_aborted>...</turn_aborted>`, folds low-signal tool rows by default,
 groups consecutive AI output into one readable block, right-aligns event times,
 and scrolls by wrapped row height so the selected event stays visible.
 
@@ -1373,9 +1407,41 @@ Stable interfaces matter more than any single framework:
   instead of flashing a transient popup and dropping the user back into an
   unclear blocked state.
 - M96.6: Skill Picker selection flow; the picker now receives keys while it is
-  layered above Launch, so `Enter` selects the handoff skill and immediately
-  starts background Review generation. Installed community `handoff` skills show
-  the third-party provider and GitHub source link alongside the local path.
+  layered above Launch, so `Enter` selects the handoff skill before returning to
+  Launch. Installed community `handoff` skills show the third-party provider
+  and GitHub source link alongside the local path.
+- M96.7: Handoff runner preflight refresh; Launch, Skill Picker, and Review
+  retry refresh the compiler catalog and SDK preflight state, while Python SDK
+  module checks cache only successful imports. Installing `openai-codex` or
+  `claude-agent-sdk` while Moonbox is open can recover on the next retry instead
+  of leaving a stale missing-SDK failure on screen.
+- M96.8: Launch target picker no longer waits on selected-session hydration;
+  pressing `H` / `x` opens target selection immediately, shows a warning that
+  context will load when Review starts, and lets `Enter` start the background
+  handoff job instead of waiting on the details pane preload.
+- M96.9: Startup now builds only the read-only session inventory for real source
+  stores; timeline, anatomy, and handoff capsule context hydrate on the first
+  action that needs them. This keeps the TUI from sitting on the loading screen
+  because the newest session is large.
+- M96.10: Handoff Review artifact readiness now treats community skill Markdown
+  output as an agent handoff artifact: missing Moonbox-only semantic refs warn
+  instead of blocking run/copy, hard source / target / rewind mismatches still
+  block, and the pending panel labels stage, elapsed time, timeout limit, and
+  blocker reasons in user-facing language.
+- M96.11: Handoff worker lifecycle P0 fix; Handoff generation is now strictly
+  user-confirmed from Launch, Skill Picker selection no longer starts AI work,
+  failed Review panels use explicit `r` retry, ready artifacts are reused
+  instead of regenerated, SDK runner child process groups are reaped after
+  success or timeout, Moonbox-generated handoff worker sessions are hidden from
+  the main inventory unless explicitly searched, and loading timelines keep a
+  non-empty placeholder while selected-session details hydrate.
+- M96.12: Session browsing hydration P0 fix; startup remains inventory-only,
+  moving through the session list changes selection without rebuilding
+  `WorkbenchData`, and the selected session's bounded timeline preview starts
+  only after a short navigation debounce. Filtering and search keep the UI
+  responsive, never compile handoff output, never start immediate timeline IO,
+  and never run SDK workers; Review remains the explicit boundary for AI
+  handoff generation.
 - M92: Remote / SSH Session Detail Parity; SSH data spaces now hydrate selected
   session details from the remote `compile-request --json` response, preserving
   remote-computed bounded anatomy in the same Details / Zoom Details rendering

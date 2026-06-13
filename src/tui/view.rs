@@ -13,7 +13,7 @@ use ratatui::{
 use crate::{
     app::{
         App, CommandPaletteEntry, DATA_SPACE_CONFIG_FIELD_COUNT, EnterRouteKind, Focus,
-        HandoffTrailFrame, HookWaitingItem, SessionFilter, SettingsField,
+        HandoffTrailFrame, HookWaitingItem, LaunchReviewStage, SessionFilter, SettingsField,
     },
     core::image_preview::{ImagePreviewStatus, PreviewCell, PreviewRgb, TimelineImagePreview},
     core::model::{
@@ -107,7 +107,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
 }
 
-pub fn render_loading(frame: &mut Frame, tick: usize) {
+pub fn render_loading(frame: &mut Frame, tick: usize, language: crate::core::config::UiLanguage) {
     let area = frame.area();
     frame.render_widget(
         Block::default().style(Style::default().fg(theme::text())),
@@ -125,18 +125,31 @@ pub fn render_loading(frame: &mut Frame, tick: usize) {
         Line::raw(""),
         Line::from(vec![
             Span::styled(spinner, Style::default().fg(theme::gold())),
-            Span::raw(" indexing source sessions"),
+            Span::raw(format!(
+                " {}",
+                localized(
+                    language,
+                    "starting read-only session index",
+                    "正在启动只读会话索引"
+                )
+            )),
         ]),
         Line::from(vec![
-            Span::raw("   bounded scan "),
-            Span::styled("active", Style::default().fg(theme::green())),
+            Span::raw(format!(
+                "   {} ",
+                localized(language, "bounded startup scan", "有限启动扫描")
+            )),
+            Span::styled(
+                localized(language, "active", "进行中"),
+                Style::default().fg(theme::green()),
+            ),
         ]),
         Line::raw(""),
         Line::from(vec![
             Span::styled("q", Style::default().fg(theme::blue())),
-            Span::raw(" quit   "),
+            Span::raw(format!(" {}   ", localized(language, "quit", "退出"))),
             Span::styled("ctrl-c", Style::default().fg(theme::blue())),
-            Span::raw(" quit"),
+            Span::raw(format!(" {}", localized(language, "quit", "退出"))),
         ]),
     ];
     frame.render_widget(
@@ -145,6 +158,28 @@ pub fn render_loading(frame: &mut Frame, tick: usize) {
             .alignment(Alignment::Left),
         root,
     );
+}
+
+fn spinner_frame(tick: usize) -> &'static str {
+    ["|", "/", "-", "\\"][tick % 4]
+}
+
+fn loading_heading(app: &App, text: &'static str) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(
+            spinner_frame(app.animation_tick()),
+            Style::default()
+                .fg(theme::gold())
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            text,
+            Style::default()
+                .fg(theme::gold())
+                .add_modifier(Modifier::BOLD),
+        ),
+    ])
 }
 
 fn render_header(frame: &mut Frame, area: Rect, app: &App) {
@@ -165,7 +200,7 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
         ),
         Span::raw(format!("   {}: ", i18n::text(language, Text::Data))),
         Span::styled(data_space_header_label(app), data_space_header_style(app)),
-        Span::raw(format!("   {}: ", i18n::text(language, Text::Skill))),
+        Span::raw(format!("   {}: ", i18n::text(language, Text::HandoffSkill))),
         Span::styled(
             selected_skill_label(app),
             Style::default().fg(theme::cyan()),
@@ -1146,7 +1181,13 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
         lines.push(Line::raw(""));
     }
 
-    if lines.is_empty() {
+    if lines.is_empty() && app.is_session_load_pending() {
+        lines.extend(session_loading_timeline_lines(language, app));
+    } else if lines.is_empty() && app.is_session_preview_pending() {
+        lines.extend(session_preview_loading_timeline_lines(language, app));
+    } else if lines.is_empty() && !app.selected_session_timeline_loaded() {
+        lines.extend(session_deferred_timeline_lines(language, app));
+    } else if lines.is_empty() {
         lines.push(Line::from(Span::styled(
             i18n::text(language, Text::NoTimelineLoaded),
             Style::default().fg(theme::muted()),
@@ -1162,6 +1203,109 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
             .scroll((timeline_scroll(app, area), 0)),
         area,
     );
+}
+
+fn session_preview_loading_timeline_lines(
+    language: crate::core::config::UiLanguage,
+    app: &App,
+) -> Vec<Line<'static>> {
+    let session_label = app
+        .current_session()
+        .map(|session| format!("{} / {}", session.cli, review_snippet(&session.title, 72)))
+        .unwrap_or_else(|| i18n::text(language, Text::NoSelectedSession).into());
+    vec![
+        loading_heading(
+            app,
+            localized(
+                language,
+                "Loading timeline preview",
+                "正在加载 timeline 预览",
+            ),
+        ),
+        Line::raw(""),
+        review_label_line(
+            localized(language, "Session", "会话"),
+            session_label,
+            theme::blue(),
+        ),
+        Line::from(Span::styled(
+            localized(
+                language,
+                "Preview runs in the background; handoff generation waits for an explicit Review action.",
+                "预览在后台加载；handoff 生成只会在明确打开 Review 后执行。",
+            ),
+            Style::default().fg(theme::muted()),
+        )),
+    ]
+}
+
+fn session_deferred_timeline_lines(
+    language: crate::core::config::UiLanguage,
+    app: &App,
+) -> Vec<Line<'static>> {
+    let session_label = app
+        .current_session()
+        .map(|session| format!("{} / {}", session.cli, review_snippet(&session.title, 72)))
+        .unwrap_or_else(|| i18n::text(language, Text::NoSelectedSession).into());
+    vec![
+        Line::from(Span::styled(
+            localized(language, "Timeline not loaded yet", "Timeline 尚未加载"),
+            Style::default()
+                .fg(theme::gold())
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::raw(""),
+        review_label_line(
+            localized(language, "Session", "会话"),
+            session_label,
+            theme::blue(),
+        ),
+        Line::from(Span::styled(
+            localized(
+                language,
+                "Moonbox could not start a local preview for this session; details and Review can still load context on demand.",
+                "Moonbox 未能为这个 session 启动本地预览；详情与 Review 仍可按需加载上下文。",
+            ),
+            Style::default().fg(theme::muted()),
+        )),
+        Line::from(Span::styled(
+            localized(
+                language,
+                "No handoff worker is started from this browse state.",
+                "这个浏览状态不会启动 handoff worker。",
+            ),
+            Style::default().fg(theme::muted()),
+        )),
+    ]
+}
+
+fn session_loading_timeline_lines(
+    language: crate::core::config::UiLanguage,
+    app: &App,
+) -> Vec<Line<'static>> {
+    vec![
+        loading_heading(
+            app,
+            localized(language, "Loading selected session", "正在加载选中 session"),
+        ),
+        Line::raw(""),
+        Line::from(Span::styled(
+            localized(
+                language,
+                "Loading timeline context in the background.",
+                "正在后台加载 timeline 上下文。",
+            ),
+            Style::default().fg(theme::text()),
+        )),
+        Line::from(Span::styled(
+            localized(
+                language,
+                "No source session is opened or resumed; Moonbox is only reading its index.",
+                "不会打开或 resume source session；Moonbox 只读取索引内容。",
+            ),
+            Style::default().fg(theme::muted()),
+        )),
+    ]
 }
 
 fn timeline_scroll(app: &App, area: Rect) -> u16 {
@@ -1555,6 +1699,9 @@ fn timeline_group_time(group: &TimelineGroup<'_>) -> String {
 }
 
 fn visible_timeline_events(app: &App) -> Vec<(usize, &TimelineEvent)> {
+    if !app.selected_session_timeline_loaded() {
+        return Vec::new();
+    }
     app.data
         .timeline
         .iter()
@@ -1570,18 +1717,101 @@ fn render_capsule(frame: &mut Frame, area: Rect, app: &App) {
 
     if app.is_session_load_pending() {
         lines.push(Line::raw(""));
+        lines.push(loading_heading(
+            app,
+            localized(language, "Loading", "正在加载"),
+        ));
         lines.push(Line::from(Span::styled(
-            "Loading",
+            localized(
+                language,
+                "  Loading timeline context for the selected session.",
+                "  正在加载选中 session 的 timeline 上下文。",
+            ),
+            Style::default().fg(theme::text()),
+        )));
+        lines.push(Line::from(Span::styled(
+            localized(
+                language,
+                "  Handoff generation still waits for an explicit Review action.",
+                "  handoff 生成仍会等待明确的 Review 动作。",
+            ),
+            Style::default().fg(theme::muted()),
+        )));
+        frame.render_widget(
+            Paragraph::new(lines)
+                .block(dynamic_panel_block(
+                    format!(" {} ", i18n::text(language, Text::SessionDetailsTitle)),
+                    app.focus == Focus::Capsule,
+                ))
+                .scroll((app.capsule_scroll, 0))
+                .wrap(Wrap { trim: true }),
+            area,
+        );
+        return;
+    }
+
+    if app.is_session_preview_pending() {
+        lines.push(Line::raw(""));
+        lines.push(loading_heading(
+            app,
+            localized(language, "Timeline Preview Loading", "Timeline 预览加载中"),
+        ));
+        lines.push(Line::from(Span::styled(
+            localized(
+                language,
+                "Session browsing remains active while the preview loads.",
+                "预览加载期间仍可继续浏览 session。",
+            ),
+            Style::default().fg(theme::muted()),
+        )));
+        frame.render_widget(
+            Paragraph::new(lines)
+                .block(dynamic_panel_block(
+                    format!(" {} ", i18n::text(language, Text::SessionDetailsTitle)),
+                    app.focus == Focus::Capsule,
+                ))
+                .scroll((app.capsule_scroll, 0))
+                .wrap(Wrap { trim: true }),
+            area,
+        );
+        return;
+    }
+
+    if !app.selected_session_context_loaded() {
+        let preview_detail = if app.selected_session_timeline_loaded() {
+            localized(
+                language,
+                "Timeline preview is available; handoff output has not been generated.",
+                "Timeline 预览已可用；handoff 输出尚未生成。",
+            )
+        } else {
+            localized(
+                language,
+                "Session metadata is from the read-only inventory.",
+                "当前只展示只读 inventory 中的 session metadata。",
+            )
+        };
+        lines.push(Line::raw(""));
+        lines.push(Line::from(Span::styled(
+            localized(
+                language,
+                "Handoff Snapshot Pending",
+                "Handoff Snapshot 待加载",
+            ),
             Style::default()
                 .fg(theme::gold())
                 .add_modifier(Modifier::BOLD),
         )));
         lines.push(Line::from(Span::styled(
-            "  Hydrating timeline and capsule preview for the selected session.",
+            preview_detail,
             Style::default().fg(theme::text()),
         )));
         lines.push(Line::from(Span::styled(
-            "  Launch, verify, compile, and rewind wait until this completes.",
+            localized(
+                language,
+                "Open Review to run the selected AI handoff skill.",
+                "打开 Review 后才会运行所选 AI handoff skill。",
+            ),
             Style::default().fg(theme::muted()),
         )));
         frame.render_widget(
@@ -1685,6 +1915,33 @@ fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
             Style::default().fg(theme::cyan()),
         ),
     ];
+
+    if !app.selected_session_context_loaded() {
+        let context_detail = if app.selected_session_timeline_loaded() {
+            localized(
+                language,
+                "timeline preview loaded; Review generates handoff",
+                "timeline 预览已加载；Review 才生成 handoff",
+            )
+        } else if app.is_session_preview_pending() {
+            localized(
+                language,
+                "loading timeline preview",
+                "正在加载 timeline 预览",
+            )
+        } else {
+            localized(
+                language,
+                "inventory only; preview pending",
+                "仅 inventory；预览待加载",
+            )
+        };
+        lines.push(metadata_line(
+            localized(language, "Context", "上下文"),
+            context_detail,
+            Style::default().fg(theme::gold()),
+        ));
+    }
 
     lines.extend(session_anatomy_summary_lines(session));
 
@@ -4429,6 +4686,33 @@ fn localized(
     }
 }
 
+fn format_duration_ms(ms: u128) -> String {
+    if ms >= 1000 {
+        #[allow(clippy::manual_is_multiple_of)]
+        if ms % 1000 == 0 {
+            return format!("{}s", ms / 1000);
+        }
+        format!("{:.1}s", ms as f64 / 1000.0)
+    } else {
+        format!("{ms}ms")
+    }
+}
+
+fn launch_review_stage_label(
+    language: crate::core::config::UiLanguage,
+    stage: LaunchReviewStage,
+) -> &'static str {
+    match stage {
+        LaunchReviewStage::Queued => localized(language, "Queued", "排队中"),
+        LaunchReviewStage::PreparingContext => {
+            localized(language, "Preparing context", "准备上下文")
+        }
+        LaunchReviewStage::StartingRunner => localized(language, "Starting runner", "启动执行器"),
+        LaunchReviewStage::RunningSkill => localized(language, "Running skill", "执行 Skill"),
+        LaunchReviewStage::Verifying => localized(language, "Verifying output", "校验输出"),
+    }
+}
+
 fn compiler_command(info: &CompilerPresetInfo) -> Option<String> {
     info.command.as_ref().map(|command| {
         if info.args.is_empty() {
@@ -4692,13 +4976,17 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         .unwrap_or_else(|| "No session selected".into());
     let handoff_label = app.launch_handoff_label();
     if app.is_launch_review_pending() {
+        let status = app.launch_review_job_status();
+        let target = status
+            .as_ref()
+            .map(|status| status.target)
+            .unwrap_or(app.pending_target);
+        let session = status
+            .as_ref()
+            .map(|status| format!("{} / {}", app.data.source, status.session_id))
+            .unwrap_or_else(|| session.clone());
         let mut lines = vec![
-            Line::from(Span::styled(
-                i18n::text(language, Text::GeneratingReview),
-                Style::default()
-                    .fg(theme::gold())
-                    .add_modifier(Modifier::BOLD),
-            )),
+            loading_heading(app, i18n::text(language, Text::GeneratingReview)),
             Line::raw(""),
             Line::from(vec![
                 Span::styled(
@@ -4713,31 +5001,54 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                     Style::default().fg(theme::blue()),
                 ),
                 Span::styled(
-                    app.pending_target.to_string(),
+                    target.to_string(),
                     Style::default()
                         .fg(theme::cyan())
                         .add_modifier(Modifier::BOLD),
                 ),
             ]),
         ];
-        if let Some(status) = app.launch_review_job_status() {
+        if let Some(status) = status {
             lines.extend([
                 Line::from(vec![
-                    Span::styled("Compiler: ", Style::default().fg(theme::blue())),
+                    Span::styled(
+                        format!(
+                            "{}: ",
+                            localized(language, "Skill / Runner", "技能 / 执行器")
+                        ),
+                        Style::default().fg(theme::blue()),
+                    ),
                     Span::styled(status.compiler_id, Style::default().fg(theme::cyan())),
                 ]),
                 Line::from(vec![
-                    Span::styled("Stage: ", Style::default().fg(theme::blue())),
                     Span::styled(
-                        status.stage_label,
+                        format!("{}: ", localized(language, "Stage", "阶段")),
+                        Style::default().fg(theme::blue()),
+                    ),
+                    Span::styled(
+                        launch_review_stage_label(language, status.stage),
                         Style::default()
                             .fg(theme::green())
                             .add_modifier(Modifier::BOLD),
                     ),
-                    Span::raw(format!("  {} ms", status.elapsed_ms)),
                 ]),
                 Line::from(vec![
-                    Span::styled("Last: ", Style::default().fg(theme::blue())),
+                    Span::styled(
+                        format!("{}: ", localized(language, "Elapsed", "已用时间")),
+                        Style::default().fg(theme::blue()),
+                    ),
+                    Span::raw(format_duration_ms(status.elapsed_ms)),
+                    Span::styled(
+                        format!("   {}: ", localized(language, "Timeout limit", "超时上限")),
+                        Style::default().fg(theme::blue()),
+                    ),
+                    Span::raw(format_duration_ms(status.timeout_ms)),
+                ]),
+                Line::from(vec![
+                    Span::styled(
+                        format!("{}: ", localized(language, "Last update", "最近更新")),
+                        Style::default().fg(theme::blue()),
+                    ),
                     Span::raw(status.detail),
                 ]),
             ]);
@@ -4745,26 +5056,42 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         lines.extend([
             Line::from(Span::styled(
                 if app.current_data_space().is_local() {
-                    "Reading local source timeline and running the selected handoff skill..."
+                    localized(
+                        language,
+                        "Reading the selected local session and running the handoff skill.",
+                        "正在读取选中的本地 session，并执行 handoff skill。",
+                    )
                 } else {
-                    "Reading SSH source timeline in read-only mode and running the local handoff skill..."
+                    localized(
+                        language,
+                        "Reading the selected SSH session in read-only mode, then running the local handoff skill.",
+                        "正在以只读方式读取选中的 SSH session，然后执行本地 handoff skill。",
+                    )
                 },
                 Style::default().fg(theme::text()),
             )),
             Line::raw(""),
         ]);
-        if let Some(trail) = app.handoff_trail_frame() {
-            lines.push(handoff_trail_line(trail));
-        } else {
-            lines.push(Line::from(Span::styled(
-                "   source --> rewind --> target   Review",
-                Style::default().fg(theme::muted()),
-            )));
-        }
+        lines.push(Line::from(Span::styled(
+            localized(
+                language,
+                "Progress is approximate; the job fails with a reason if the timeout is reached.",
+                "进度是阶段状态；到达超时上限后会失败并显示原因。",
+            ),
+            Style::default().fg(theme::muted()),
+        )));
         lines.extend([
             Line::raw(""),
             Line::from(Span::styled(
                 i18n::text(language, Text::LoadingHiddenJob),
+                Style::default().fg(theme::muted()),
+            )),
+            Line::from(Span::styled(
+                localized(
+                    language,
+                    "Enter only returns to this running job; it will not start another SDK process.",
+                    "Enter 只回到当前任务；不会再启动新的 SDK 进程。",
+                ),
                 Style::default().fg(theme::muted()),
             )),
         ]);
@@ -4852,18 +5179,18 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             Line::from(Span::styled(
                 localized(
                     language,
-                    "Next: press Enter to retry with the current skill, or S to choose another handoff skill.",
-                    "下一步：按 Enter 用当前 skill 重试，或按 S 选择其他 handoff skill。",
+                    "Next: press r to retry with the current skill, or S to choose another handoff skill.",
+                    "下一步：按 r 用当前 skill 重试，或按 S 选择其他 handoff skill。",
                 ),
                 Style::default().fg(theme::gold()),
             )),
             Line::raw(""),
             Line::from(vec![
-                action_button("Enter", i18n::text(language, Text::Retry)),
+                action_button("r", i18n::text(language, Text::Retry)),
                 Span::raw("  "),
                 action_button("S", i18n::text(language, Text::Skill)),
                 Span::raw("  "),
-                disabled_action_button("y/r", i18n::text(language, Text::Unavailable)),
+                disabled_action_button("Enter/y", i18n::text(language, Text::Unavailable)),
                 Span::raw("  "),
                 action_button("Esc", i18n::text(language, Text::Back)),
             ]),
@@ -5289,50 +5616,62 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             )),
         ]);
         lines.extend(target_prompt_lines(app));
-        lines.extend([
-            Line::raw(""),
-            if launch_blocked {
-                Line::from(vec![
-                    disabled_action_button("r", i18n::text(language, Text::CannotRun)),
-                    Span::raw("  "),
-                    disabled_action_button("y", i18n::text(language, Text::CannotCopy)),
-                    Span::raw("  "),
-                    action_button("Esc", i18n::text(language, Text::Back)),
-                    Span::styled(
-                        format!("  {}", i18n::text(language, Text::ValidationFailed)),
-                        Style::default().fg(theme::red()),
-                    ),
-                ])
-            } else if draft_run_blocked {
-                Line::from(vec![
-                    disabled_action_button("r", i18n::text(language, Text::DraftCannotRun)),
-                    Span::raw("  "),
-                    action_button("y", i18n::text(language, Text::CopyCommand)),
-                    Span::raw("  "),
-                    action_button("Esc", i18n::text(language, Text::Back)),
-                    Span::styled(
-                        format!("  {}", i18n::text(language, Text::ChooseAiSkillToRun)),
-                        Style::default().fg(theme::muted()),
-                    ),
-                ])
+        lines.push(Line::raw(""));
+        if launch_blocked && let Some(reason) = pending_validation.reasons.first() {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{}: ", localized(language, "Blocked reason", "阻塞原因")),
+                    Style::default()
+                        .fg(theme::red())
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    localize_validation_detail(language, reason),
+                    Style::default().fg(theme::text()),
+                ),
+            ]));
+        }
+        lines.push(if launch_blocked {
+            Line::from(vec![
+                disabled_action_button("r", i18n::text(language, Text::CannotRun)),
+                Span::raw("  "),
+                disabled_action_button("y", i18n::text(language, Text::CannotCopy)),
+                Span::raw("  "),
+                action_button("Esc", i18n::text(language, Text::Back)),
+                Span::styled(
+                    format!("  {}", i18n::text(language, Text::ValidationFailed)),
+                    Style::default().fg(theme::red()),
+                ),
+            ])
+        } else if draft_run_blocked {
+            Line::from(vec![
+                disabled_action_button("r", i18n::text(language, Text::DraftCannotRun)),
+                Span::raw("  "),
+                action_button("y", i18n::text(language, Text::CopyCommand)),
+                Span::raw("  "),
+                action_button("Esc", i18n::text(language, Text::Back)),
+                Span::styled(
+                    format!("  {}", i18n::text(language, Text::ChooseAiSkillToRun)),
+                    Style::default().fg(theme::muted()),
+                ),
+            ])
+        } else {
+            Line::from(vec![
+                action_button("r", i18n::text(language, Text::RunLocalTarget)),
+                Span::raw("  "),
+                action_button("y", i18n::text(language, Text::CopyCommand)),
+                Span::raw("  "),
+                action_button("Esc", i18n::text(language, Text::Back)),
+            ])
+        });
+        lines.push(Line::from(Span::styled(
+            if run_blocked {
+                i18n::text(language, Text::ScrollOnlyKeys)
             } else {
-                Line::from(vec![
-                    action_button("r", i18n::text(language, Text::RunLocalTarget)),
-                    Span::raw("  "),
-                    action_button("y", i18n::text(language, Text::CopyCommand)),
-                    Span::raw("  "),
-                    action_button("Esc", i18n::text(language, Text::Back)),
-                ])
+                i18n::text(language, Text::ReviewActionKeys)
             },
-            Line::from(Span::styled(
-                if run_blocked {
-                    i18n::text(language, Text::ScrollOnlyKeys)
-                } else {
-                    i18n::text(language, Text::ReviewActionKeys)
-                },
-                Style::default().fg(theme::muted()),
-            )),
-        ]);
+            Style::default().fg(theme::muted()),
+        )));
         let scroll = modal_scroll_offset(app.modal_scroll, &lines, area);
         frame.render_widget(
             Paragraph::new(lines)
@@ -5760,6 +6099,14 @@ fn validation_summary_text(
 }
 
 fn localize_validation_detail(language: crate::core::config::UiLanguage, detail: &str) -> String {
+    if detail == "selected session context loads when review starts" {
+        return localized(
+            language,
+            "Selected session context will load when Review starts.",
+            "选中会话的上下文会在开始 Review 时加载。",
+        )
+        .to_string();
+    }
     if is_stale_handoff_compiler_mismatch(detail) {
         return i18n::text(language, Text::HandoffRegenerateRequired).to_string();
     }
@@ -6182,11 +6529,16 @@ mod tests {
             .unwrap_or_else(|| panic!("missing {needle:?} in screen:\n{screen}"))
     }
 
-    fn render_loading_text(tick: usize, width: u16, height: u16) -> String {
+    fn render_loading_text(
+        tick: usize,
+        width: u16,
+        height: u16,
+        language: crate::core::config::UiLanguage,
+    ) -> String {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).expect("terminal");
         terminal
-            .draw(|frame| render_loading(frame, tick))
+            .draw(|frame| render_loading(frame, tick, language))
             .expect("draw");
         format!("{}", terminal.backend())
     }
@@ -6219,12 +6571,29 @@ mod tests {
 
     #[test]
     fn loading_screen_renders_animated_state() {
-        let first = render_loading_text(0, 100, 30);
-        let second = render_loading_text(1, 100, 30);
+        let first = render_loading_text(0, 100, 30, crate::core::config::UiLanguage::English);
+        let second = render_loading_text(1, 100, 30, crate::core::config::UiLanguage::English);
+        let zh = render_loading_text(0, 100, 30, crate::core::config::UiLanguage::ZhHans);
 
         assert_screen_contains(&first, "MOONBOX");
-        assert_screen_contains(&first, "indexing source sessions");
-        assert_screen_contains(&first, "bounded scan");
+        assert_screen_contains(&first, "starting read-only session index");
+        assert_screen_contains(&first, "bounded startup scan");
+        assert_screen_contains(&zh, "正在启动只读会话索引");
+        assert_screen_contains(&zh, "有限启动扫描");
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn main_loading_states_render_animated_spinner() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+
+        app.handle_key(key('j'));
+        let first = render_text(&app, 120, 36);
+        app.advance_animation();
+        let second = render_text(&app, 120, 36);
+
+        assert_screen_contains(&first, "| Loading timeline preview");
+        assert_screen_contains(&second, "/ Loading timeline preview");
         assert_ne!(first, second);
     }
 
@@ -6487,7 +6856,7 @@ mod tests {
 
         assert_screen_contains(&screen, "筛选");
         assert_screen_contains(&screen, "数据:");
-        assert_screen_contains(&screen, "技能:");
+        assert_screen_contains(&screen, "Handoff Skill:");
         assert_screen_contains(&screen, "本地");
         assert_screen_contains(&screen, "会话 · 全部");
         assert_screen_contains(&screen, "时间线");
@@ -7653,6 +8022,40 @@ mod tests {
     }
 
     #[test]
+    fn launch_overlay_renders_target_picker_while_selected_session_loads() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+
+        app.handle_key(key('j'));
+        app.handle_key(key('H'));
+        let screen = render_text(&app, 120, 36);
+
+        assert_screen_contains(&screen, "Launch");
+        assert_screen_contains(&screen, "Choose target CLI");
+        assert_screen_contains(&screen, "WARN");
+        assert_screen_contains(&screen, "context will load when Review starts");
+        assert_screen_contains(&screen, "enter Review");
+        assert!(!screen.contains("Loading selected session"), "{screen}");
+        assert!(!screen.contains("Enter waits"), "{screen}");
+    }
+
+    #[test]
+    fn session_navigation_loads_timeline_preview_without_showing_stale_context() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+
+        app.handle_key(key('j'));
+        let screen = render_text(&app, 120, 36);
+
+        assert_screen_contains(&screen, "Loading timeline preview");
+        assert_screen_contains(&screen, "Preview runs in the background");
+        assert_screen_contains(&screen, "Context: loading timeline");
+        assert_screen_contains(&screen, "preview");
+        assert!(!screen.contains("Define canonical timeline"), "{screen}");
+        assert!(!screen.contains("Handoff Snapshot\nState:"), "{screen}");
+        assert!(!app.is_session_load_pending());
+        assert!(app.is_session_preview_pending());
+    }
+
+    #[test]
     fn launch_overlay_explains_stale_handoff_compiler_mismatch() {
         let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
         app.set_ui_preferences_for_test(crate::core::config::UiPreferencesConfig {
@@ -7696,7 +8099,7 @@ mod tests {
         assert_screen_contains(&screen, "重新生成 Handoff Review");
         assert_screen_contains(&screen, "当前 handoff 由其他 skill/compiler 生成");
         assert_screen_contains(&screen, "按 Enter 用当前 skill 重新生成 handoff");
-        assert_screen_contains(&screen, "技能:");
+        assert_screen_contains(&screen, "Handoff Skill:");
         assert_screen_contains(&screen, "handoff");
         assert!(!screen.contains("agent:codex:handoff"), "{screen}");
         assert!(!screen.contains("Draft Handoff"), "{screen}");
@@ -7804,11 +8207,13 @@ mod tests {
         let screen = render_text(&app, 120, 36);
 
         assert_screen_contains(&screen, "Generating Handoff Review");
-        assert_screen_contains(&screen, "Compiler:");
+        assert_screen_contains(&screen, "Skill / Runner:");
         assert_screen_contains(&screen, "Stage:");
-        assert_screen_contains(&screen, "queued");
+        assert_screen_contains(&screen, "Queued");
+        assert_screen_contains(&screen, "Timeout limit: 180s");
         assert_screen_contains(&screen, "waiting for background handoff worker");
         assert_screen_contains(&screen, "Esc hides this panel");
+        assert_screen_contains(&screen, "will not start another SDK process");
         assert_screen_contains(&screen, "wait background job");
     }
 
@@ -7842,10 +8247,10 @@ mod tests {
             "/opt/homebrew/bin/python3 -m pip install claude-agent-sdk",
         );
         assert_screen_contains(&screen, "仅安装 Claude CLI 还不足以运行当前 SDK runner。");
-        assert_screen_contains(&screen, "下一步：按 Enter 用当前 skill 重试");
-        assert_screen_contains(&screen, "Enter 重试");
+        assert_screen_contains(&screen, "下一步：按 r 用当前 skill 重试");
+        assert_screen_contains(&screen, "r 重试");
         assert_screen_contains(&screen, "S 技能");
-        assert_screen_contains(&screen, "y/r 不可用");
+        assert_screen_contains(&screen, "Enter/y 不可用");
     }
 
     #[test]
