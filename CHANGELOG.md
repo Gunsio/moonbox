@@ -106,6 +106,10 @@ and this project uses semantic versioning once tagged releases start.
   missing Python SDK modules, scans common Python interpreters before warning,
   and keeps the Handoff Review failure panel visible with checked interpreters,
   install commands, and `MOONBOX_*_SDK_PYTHON` override hints.
+- Agent runner preflight now also discovers Moonbox-managed SDK venvs at
+  `~/.moonbox/venvs/codex-sdk/bin/python` and
+  `~/.moonbox/venvs/claude-sdk/bin/python`, and recommends venv setup commands
+  instead of direct installs into externally managed Homebrew Python.
 - Agent handoff generation now sends a bounded context pack with rewind-window
   bounds, session index, compact frontier, tool/approval evidence, file changes,
   attachments, raw references, and redaction details instead of handing the

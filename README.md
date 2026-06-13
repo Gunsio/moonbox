@@ -644,17 +644,19 @@ CLI still accepts explicit `--compiler agent:<runner>:<skill>` ids and
 `default_compiler` values for automation after reviewing preflight state. Codex
 handoff generation uses the official `openai-codex`
 Python SDK with `Sandbox.read_only`; the `codex` CLI alone is not the Python
-SDK. Moonbox scans common Python interpreters for `openai_codex`, recommends a
-Python 3.10+ install command when missing, and supports
-`MOONBOX_CODEX_SDK_PYTHON` when the SDK lives in a venv or non-default Python.
-Use `MOONBOX_CODEX_BIN` only to intentionally point the SDK at a specific Codex
-runtime. Claude handoff generation uses the Claude Agent SDK through a temporary
+SDK. Moonbox scans common Python interpreters plus the managed
+`~/.moonbox/venvs/codex-sdk/bin/python` environment for `openai_codex`,
+recommends a Python 3.10+ venv setup command when missing, and supports
+`MOONBOX_CODEX_SDK_PYTHON` when the SDK lives in another venv or non-default
+Python. Use `MOONBOX_CODEX_BIN` only to intentionally point the SDK at a
+specific Codex runtime. Claude handoff generation uses the Claude Agent SDK through a temporary
 local plugin bridge, filters the run to the selected `plugin:skill`, and uses
 `permission_mode="dontAsk"` with only the Skill tool allowed. The `claude` CLI
-alone is likewise not the Python SDK; Moonbox scans for `claude_agent_sdk` and
-supports `MOONBOX_CLAUDE_AGENT_SDK_PYTHON` for explicit interpreter selection.
-Claude requires SDK/provider credentials such as `ANTHROPIC_API_KEY`, Bedrock,
-or Vertex configuration. In both cases Moonbox builds a bounded read-only context pack
+alone is likewise not the Python SDK; Moonbox scans common Python interpreters
+plus `~/.moonbox/venvs/claude-sdk/bin/python` for `claude_agent_sdk` and supports
+`MOONBOX_CLAUDE_AGENT_SDK_PYTHON` for explicit interpreter selection. Claude
+requires SDK/provider credentials such as `ANTHROPIC_API_KEY`, Bedrock, or
+Vertex configuration. In both cases Moonbox builds a bounded read-only context pack
 from the selected rewind window, session index, compact frontier, tool and
 approval evidence, file changes, attachments, raw references, and redaction
 report; the runner does not get permission to scan or mutate source session
