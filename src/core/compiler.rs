@@ -642,6 +642,20 @@ pub fn compiler_is_builtin(id: &str) -> bool {
     FIXTURE_COMPILER_IDS.contains(&id)
 }
 
+pub fn compiler_setup_clipboard_reference(info: &CompilerPresetInfo) -> Option<String> {
+    let reason = info.reason.as_str();
+    if reason.contains("skill_not_installed") {
+        return info.homepage.clone();
+    }
+    if reason.contains("install the Codex SDK") {
+        return Some("pip install openai-codex".into());
+    }
+    if reason.contains("install the Claude Agent SDK") {
+        return Some("pip install claude-agent-sdk".into());
+    }
+    info.homepage.clone().or_else(|| info.command.clone())
+}
+
 pub fn compile_with_configured_runner(
     request: &CapsuleCompileRequest,
 ) -> Result<CapsuleCompileOutput, CompilerError> {
@@ -1209,6 +1223,38 @@ sleep 1
         assert_eq!(
             info.homepage.as_deref(),
             Some("https://github.com/mattpocock/skills/tree/main/skills/productivity/handoff")
+        );
+    }
+
+    #[test]
+    fn setup_clipboard_reference_prefers_sdk_install_command() {
+        let info = CompilerPresetInfo {
+            id: "agent:codex:handoff".into(),
+            kind: CompilerPresetKind::Agent,
+            status: CompilerPresetStatus::Warning,
+            score: 30,
+            command: Some("python3".into()),
+            args: Vec::new(),
+            timeout_ms: None,
+            reason: "not_installed: install the Codex SDK with `pip install openai-codex`".into(),
+            description: None,
+            homepage: None,
+            github_stars: None,
+        };
+
+        assert_eq!(
+            compiler_setup_clipboard_reference(&info).as_deref(),
+            Some("pip install openai-codex")
+        );
+    }
+
+    #[test]
+    fn setup_clipboard_reference_prefers_handoff_skill_install_link() {
+        let info = missing_handoff_skill_info(AgentRunner::Claude);
+
+        assert_eq!(
+            compiler_setup_clipboard_reference(&info).as_deref(),
+            info.homepage.as_deref()
         );
     }
 

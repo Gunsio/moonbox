@@ -2512,10 +2512,10 @@ impl App {
             .into_iter()
             .find(|entry| entry.id == *skill);
         let copied = info
-            .and_then(|entry| entry.homepage.or(entry.command))
+            .and_then(|entry| compiler::compiler_setup_clipboard_reference(&entry))
             .unwrap_or_else(|| skill.clone());
         self.clipboard_text = Some(copied);
-        self.set_status(format!("Copied skill reference: {skill}"));
+        self.set_status(format!("Copied skill setup reference: {skill}"));
         self.pending_g = false;
     }
 
@@ -4848,10 +4848,10 @@ Host devbox
             app.status_message
                 .starts_with("Preparing handoff review: Codex")
         );
+        assert!(app.handoff_trail_frame().is_some());
         settle_launch_review(&mut app);
         assert!(app.launch_review);
         assert_eq!(app.data.target, CliTool::Codex);
-        assert!(app.handoff_trail_frame().is_some());
         assert!(
             app.status_message
                 .starts_with("Handoff review ready: Codex")
