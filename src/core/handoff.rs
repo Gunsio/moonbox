@@ -1,8 +1,10 @@
 use std::{
+    collections::{BTreeMap, BTreeSet},
     env, fs, io,
     io::{Read, Write},
     path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
+    sync::{Mutex, OnceLock},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -25,6 +27,7 @@ const MAX_CONTEXT_COMPACTS: usize = 5;
 const MAX_CONTEXT_EVIDENCE: usize = 40;
 const MAX_CONTEXT_EXCERPT_CHARS: usize = 480;
 const CLAUDE_PLUGIN_NAME: &str = "moonbox-handoff";
+static PYTHON_MODULE_CACHE: OnceLock<Mutex<BTreeMap<(String, String), bool>>> = OnceLock::new();
 const CODEX_PYTHON_BRIDGE: &str = r#"
 import json
 import sys
@@ -174,6 +177,27 @@ impl AgentRunner {
             Self::Claude => "MOONBOX_CLAUDE_AGENT_SDK_PYTHON",
         }
     }
+
+    pub fn sdk_module(self) -> &'static str {
+        match self {
+            Self::Codex => "openai_codex",
+            Self::Claude => "claude_agent_sdk",
+        }
+    }
+
+    pub fn sdk_package(self) -> &'static str {
+        match self {
+            Self::Codex => "openai-codex",
+            Self::Claude => "claude-agent-sdk",
+        }
+    }
+
+    pub fn cli_command(self) -> &'static str {
+        match self {
+            Self::Codex => "codex",
+            Self::Claude => "claude",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -235,57 +259,60 @@ pub fn find_handoff_skill(skill_id: &str) -> Option<HandoffSkill> {
 }
 
 pub fn runner_preflight(runner: AgentRunner) -> RunnerPreflight {
-    let Some(command) = runner_command(runner) else {
+    let candidates = python_candidates_for_runner(runner);
+    if candidates.is_empty() {
         return RunnerPreflight {
             status: CompilerPresetStatus::Warning,
-            reason: format!("{} SDK runner not installed or not on PATH", runner.label()),
+            reason: runner_sdk_missing_reason(runner, &[]),
             command: None,
         };
-    };
-    if !command_available(&command) {
+    }
+
+    let configured = configured_runner_command(runner);
+    for command in &candidates {
+        if !command_available(command) {
+            continue;
+        }
+        if python_module_available(command, runner.sdk_module()) {
+            let auth_reason = match runner {
+                AgentRunner::Codex => codex_auth_reason(),
+                AgentRunner::Claude => claude_auth_reason(),
+            };
+            if let Some(reason) = auth_reason {
+                return RunnerPreflight {
+                    status: CompilerPresetStatus::Warning,
+                    reason,
+                    command: Some(command.clone()),
+                };
+            }
+            return RunnerPreflight {
+                status: CompilerPresetStatus::Ready,
+                reason: format!(
+                    "{} Python SDK is installed in {command}; auth preflight passed",
+                    runner.label()
+                ),
+                command: Some(command.clone()),
+            };
+        }
+    }
+
+    if configured
+        .as_deref()
+        .is_some_and(|command| !command_available(command))
+    {
         return RunnerPreflight {
             status: CompilerPresetStatus::Warning,
-            reason: format!(
-                "{} SDK runner command was not found: {command}",
-                runner.label()
-            ),
-            command: Some(command),
+            reason: runner_python_missing_reason(runner, configured.as_deref().unwrap_or_default()),
+            command: configured,
         };
     }
-    if runner == AgentRunner::Claude && !python_module_available(&command, "claude_agent_sdk") {
-        return RunnerPreflight {
-            status: CompilerPresetStatus::Warning,
-            reason:
-                "not_installed: install the Claude Agent SDK with `pip install claude-agent-sdk`"
-                    .into(),
-            command: Some(command),
-        };
-    }
-    if runner == AgentRunner::Codex && !python_module_available(&command, "openai_codex") {
-        return RunnerPreflight {
-            status: CompilerPresetStatus::Warning,
-            reason: "not_installed: install the Codex SDK with `pip install openai-codex`".into(),
-            command: Some(command),
-        };
-    }
-    let auth_reason = match runner {
-        AgentRunner::Codex => codex_auth_reason(),
-        AgentRunner::Claude => claude_auth_reason(),
-    };
-    if let Some(reason) = auth_reason {
-        return RunnerPreflight {
-            status: CompilerPresetStatus::Warning,
-            reason,
-            command: Some(command),
-        };
-    }
+
     RunnerPreflight {
-        status: CompilerPresetStatus::Ready,
-        reason: format!(
-            "{} SDK runner is installed and auth preflight passed",
-            runner.label()
-        ),
-        command: Some(command),
+        status: CompilerPresetStatus::Warning,
+        reason: runner_sdk_missing_reason(runner, &candidates),
+        command: candidates
+            .into_iter()
+            .find(|command| command_available(command)),
     }
 }
 
@@ -1057,15 +1084,114 @@ fn run_child_with_input(
 }
 
 fn runner_command(runner: AgentRunner) -> Option<String> {
+    configured_runner_command(runner)
+        .or_else(|| {
+            python_candidates_for_runner(runner)
+                .into_iter()
+                .find(|command| {
+                    command_available(command)
+                        && python_module_available(command, runner.sdk_module())
+                })
+        })
+        .or_else(|| Some("python3".into()))
+}
+
+fn configured_runner_command(runner: AgentRunner) -> Option<String> {
     env::var(runner.bin_env())
         .ok()
         .filter(|value| !value.trim().is_empty())
+}
+
+fn python_candidates_for_runner(runner: AgentRunner) -> Vec<String> {
+    if let Some(configured) = configured_runner_command(runner) {
+        return vec![configured];
+    }
+    python_candidates()
+}
+
+fn python_candidates() -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    let mut candidates = Vec::new();
+    for command in [
+        "python3",
+        "python",
+        "/opt/homebrew/bin/python3",
+        "/usr/local/bin/python3",
+        "/usr/bin/python3",
+    ] {
+        if seen.insert(command.to_string()) && command_available(command) {
+            candidates.push(command.to_string());
+        }
+    }
+    candidates
+}
+
+fn runner_python_missing_reason(runner: AgentRunner, command: &str) -> String {
+    format!(
+        "python_command_not_found: runner={}; cli={}; command={}; env={}",
+        runner.label(),
+        runner_cli_state(runner),
+        command,
+        runner.bin_env()
+    )
+}
+
+fn runner_sdk_missing_reason(runner: AgentRunner, candidates: &[String]) -> String {
+    format!(
+        "sdk_not_found: runner={}; cli={}; module={}; checked={}; install={}; env={}",
+        runner.label(),
+        runner_cli_state(runner),
+        runner.sdk_module(),
+        checked_python_label(candidates),
+        sdk_install_hint(runner, candidates),
+        runner.bin_env()
+    )
+}
+
+fn runner_cli_state(runner: AgentRunner) -> String {
+    executable_path(runner.cli_command())
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "not_found".into())
+}
+
+fn checked_python_label(candidates: &[String]) -> String {
+    if candidates.is_empty() {
+        "none".into()
+    } else {
+        candidates.join(",")
+    }
+}
+
+fn sdk_install_hint(runner: AgentRunner, candidates: &[String]) -> String {
+    let python = candidates
+        .iter()
+        .find(|command| command.starts_with("/opt/homebrew/"))
         .or_else(|| {
-            Some(match runner {
-                AgentRunner::Codex => "python3".into(),
-                AgentRunner::Claude => "python3".into(),
-            })
+            candidates
+                .iter()
+                .find(|command| command.starts_with("/usr/local/"))
         })
+        .or_else(|| {
+            candidates
+                .iter()
+                .find(|command| command.as_str() != "/usr/bin/python3")
+        })
+        .or_else(|| candidates.first())
+        .map(String::as_str)
+        .unwrap_or("python3");
+    format!("{python} -m pip install {}", runner.sdk_package())
+}
+
+fn executable_path(command: &str) -> Option<PathBuf> {
+    let path = Path::new(command);
+    if path.components().count() > 1 {
+        return command_is_executable(path).then(|| path.to_path_buf());
+    }
+    env::var_os("PATH").and_then(|paths| {
+        env::split_paths(&paths)
+            .map(|dir| dir.join(command))
+            .find(|path| command_is_executable(path))
+    })
 }
 
 fn skill_roots() -> Vec<PathBuf> {
@@ -1253,6 +1379,22 @@ fn command_is_executable(path: &Path) -> bool {
 }
 
 fn python_module_available(python: &str, module: &str) -> bool {
+    let key = (python.to_string(), module.to_string());
+    let cache = PYTHON_MODULE_CACHE.get_or_init(|| Mutex::new(BTreeMap::new()));
+    if let Ok(cache) = cache.lock()
+        && let Some(available) = cache.get(&key).copied()
+    {
+        return available;
+    }
+
+    let available = python_module_available_uncached(python, module);
+    if let Ok(mut cache) = cache.lock() {
+        cache.insert(key, available);
+    }
+    available
+}
+
+fn python_module_available_uncached(python: &str, module: &str) -> bool {
     let mut child = match Command::new(python)
         .arg("-c")
         .arg(format!("import {module}"))

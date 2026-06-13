@@ -2307,6 +2307,19 @@ type KeyHint = (&'static str, &'static str);
 
 fn active_key_hints(app: &App) -> Vec<KeyHint> {
     let language = app.effective_language();
+    if app.show_skill_picker {
+        let apply = if app.show_launch {
+            localized(language, "Apply + generate", "应用并生成")
+        } else {
+            i18n::text(language, Text::Apply)
+        };
+        return vec![
+            ("j/k", i18n::text(language, Text::Skill)),
+            ("enter", apply),
+            ("y", i18n::text(language, Text::CopyRef)),
+            ("q", i18n::text(language, Text::Close)),
+        ];
+    }
     if app.show_launch {
         if app.is_launch_review_pending() {
             return vec![
@@ -2411,14 +2424,6 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("j/k", i18n::text(language, Text::Scroll)),
             ("PgUp/Dn", i18n::text(language, Text::Scroll)),
             ("Esc", i18n::text(language, Text::Close)),
-        ];
-    }
-    if app.show_skill_picker {
-        return vec![
-            ("j/k", i18n::text(language, Text::Skill)),
-            ("enter", i18n::text(language, Text::Apply)),
-            ("y", i18n::text(language, Text::CopyRef)),
-            ("q", i18n::text(language, Text::Close)),
         ];
     }
     if app.show_doctor {
@@ -3606,11 +3611,16 @@ fn render_skill_picker(frame: &mut Frame, root: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         )));
     }
+    let apply_label = if app.show_launch {
+        localized(language, "Apply + generate", "应用并生成")
+    } else {
+        i18n::text(language, Text::Apply)
+    };
     lines.push(Line::from(Span::styled(
         format!(
             "j/k {}   enter {}   y {}   q {}",
             i18n::text(language, Text::Choose),
-            i18n::text(language, Text::Apply),
+            apply_label,
             i18n::text(language, Text::CopyLinkCommand),
             i18n::text(language, Text::Close)
         ),
@@ -4188,7 +4198,26 @@ fn agent_skill_detail_lines(
     language: crate::core::config::UiLanguage,
 ) -> Vec<Line<'static>> {
     if let Some(path) = compiler::compiler_skill_path(info) {
-        return vec![
+        let mut lines = Vec::new();
+        if let Some(provider) = skill_provider_label(info, language) {
+            lines.push(compiler_detail_line(
+                language,
+                "Provider",
+                "提供方",
+                provider,
+                Style::default().fg(theme::gold()),
+            ));
+        }
+        if let Some(homepage) = &info.homepage {
+            lines.push(compiler_detail_line(
+                language,
+                "Link",
+                "链接",
+                homepage.clone(),
+                Style::default().fg(theme::cyan()),
+            ));
+        }
+        lines.extend([
             compiler_detail_line(
                 language,
                 "Status",
@@ -4203,16 +4232,27 @@ fn agent_skill_detail_lines(
                 path.into(),
                 Style::default().fg(theme::cyan()),
             ),
-        ];
+        ]);
+        return lines;
     }
 
-    let mut lines = vec![compiler_detail_line(
+    let mut lines = Vec::new();
+    if let Some(provider) = skill_provider_label(info, language) {
+        lines.push(compiler_detail_line(
+            language,
+            "Provider",
+            "提供方",
+            provider,
+            Style::default().fg(theme::gold()),
+        ));
+    }
+    lines.push(compiler_detail_line(
         language,
         "Status",
         "状态",
         localized(language, "Skill not installed", "Skill 未安装").into(),
         Style::default().fg(theme::gold()),
-    )];
+    ));
     if let Some(homepage) = &info.homepage {
         lines.push(compiler_detail_line(
             language,
@@ -4223,6 +4263,28 @@ fn agent_skill_detail_lines(
         ));
     }
     lines
+}
+
+fn skill_provider_label(
+    info: &CompilerPresetInfo,
+    language: crate::core::config::UiLanguage,
+) -> Option<String> {
+    let homepage = info.homepage.as_deref()?;
+    if let Some(provider) = github_provider_label(homepage) {
+        return Some(match language {
+            crate::core::config::UiLanguage::English => format!("{provider} (third-party)"),
+            crate::core::config::UiLanguage::ZhHans => format!("{provider}（三方）"),
+        });
+    }
+    Some(localized(language, "Third-party skill", "三方 Skill").into())
+}
+
+fn github_provider_label(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("https://github.com/")?;
+    let mut parts = rest.split('/').filter(|part| !part.is_empty());
+    let owner = parts.next()?;
+    let repo = parts.next()?;
+    Some(format!("{owner}/{repo}"))
 }
 
 fn compiler_detail_line(
@@ -4277,6 +4339,29 @@ fn compiler_setup_hint(
             "安装通用 handoff skill；按 y 复制安装链接。",
         )
         .into();
+    }
+    if reason.contains("sdk_not_found:") {
+        let install = compiler_reason_field(reason, "install").unwrap_or_else(|| {
+            if reason.contains("runner=Claude") {
+                "python3 -m pip install claude-agent-sdk".into()
+            } else {
+                "python3 -m pip install openai-codex".into()
+            }
+        });
+        return if language == crate::core::config::UiLanguage::ZhHans {
+            format!("CLI 已安装，但 Python SDK 未被 Moonbox 找到。执行：{install}")
+        } else {
+            format!("CLI is installed, but the Python SDK is not visible. Run: {install}")
+        };
+    }
+    if reason.contains("python_command_not_found:") {
+        let env =
+            compiler_reason_field(reason, "env").unwrap_or_else(|| "MOONBOX_*_SDK_PYTHON".into());
+        return if language == crate::core::config::UiLanguage::ZhHans {
+            format!("配置的 Python 找不到；请修正 {env}。")
+        } else {
+            format!("Configured Python was not found; fix {env}.")
+        };
     }
     if reason.contains("install the Codex SDK") {
         return localized(
@@ -4456,6 +4541,104 @@ fn localize_compiler_reason(language: crate::core::config::UiLanguage, reason: &
     reason.into()
 }
 
+fn launch_failure_reason_lines(
+    language: crate::core::config::UiLanguage,
+    message: &str,
+) -> Vec<Line<'static>> {
+    if message.contains("sdk_not_found:") {
+        let runner = compiler_reason_field(message, "runner").unwrap_or_else(|| "Agent".into());
+        let cli = compiler_reason_field(message, "cli").unwrap_or_else(|| "not_found".into());
+        let module = compiler_reason_field(message, "module").unwrap_or_else(|| "SDK".into());
+        let checked = compiler_reason_field(message, "checked").unwrap_or_else(|| "none".into());
+        let install = compiler_reason_field(message, "install")
+            .unwrap_or_else(|| "python3 -m pip install <sdk>".into());
+        let env =
+            compiler_reason_field(message, "env").unwrap_or_else(|| "MOONBOX_*_SDK_PYTHON".into());
+
+        return vec![
+            reason_kv_line(
+                localized(language, "CLI", "CLI"),
+                if cli == "not_found" {
+                    localized(language, "not found", "未找到").into()
+                } else {
+                    cli
+                },
+            ),
+            reason_kv_line(
+                localized(language, "Missing SDK module", "缺少 SDK 模块"),
+                module,
+            ),
+            reason_kv_line(
+                localized(language, "Checked Python", "已检查 Python"),
+                checked.replace(',', ", "),
+            ),
+            reason_kv_line(localized(language, "Install", "安装"), install),
+            reason_kv_line(
+                localized(language, "Other venv", "其他 venv"),
+                if language == crate::core::config::UiLanguage::ZhHans {
+                    format!("设置 {env}=/path/to/python")
+                } else {
+                    format!("set {env}=/path/to/python")
+                },
+            ),
+            Line::from(Span::styled(
+                if language == crate::core::config::UiLanguage::ZhHans {
+                    format!("仅安装 {runner} CLI 还不足以运行当前 SDK runner。")
+                } else {
+                    format!("{runner} CLI alone is not enough for this SDK runner.")
+                },
+                Style::default().fg(theme::muted()),
+            )),
+        ];
+    }
+
+    if message.contains("python_command_not_found:") {
+        let command = compiler_reason_field(message, "command").unwrap_or_else(|| "python".into());
+        let env =
+            compiler_reason_field(message, "env").unwrap_or_else(|| "MOONBOX_*_SDK_PYTHON".into());
+        return vec![
+            reason_kv_line(
+                localized(language, "Configured Python", "配置的 Python"),
+                command,
+            ),
+            reason_kv_line(
+                localized(language, "Fix", "修复"),
+                if language == crate::core::config::UiLanguage::ZhHans {
+                    format!("安装该 Python，或更新 {env}")
+                } else {
+                    format!("install that Python or update {env}")
+                },
+            ),
+        ];
+    }
+
+    vec![Line::from(Span::raw(localize_compiler_reason(
+        language, message,
+    )))]
+}
+
+fn compiler_reason_field(reason: &str, key: &str) -> Option<String> {
+    let needle = format!("{key}=");
+    reason.split(';').find_map(|part| {
+        let part = part.trim();
+        let start = part.find(&needle)? + needle.len();
+        let value = part[start..].trim();
+        (!value.is_empty()).then(|| value.to_string())
+    })
+}
+
+fn reason_kv_line(label: &str, value: String) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(
+            format!("{label}: "),
+            Style::default()
+                .fg(theme::blue())
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(value),
+    ])
+}
+
 fn action_button<'a>(key: &'a str, label: &'a str) -> Span<'a> {
     Span::styled(
         format!(" {key} {label} "),
@@ -4594,7 +4777,7 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         return;
     }
     if let Some(error) = app.launch_review_error() {
-        let lines = vec![
+        let mut lines = vec![
             Line::from(Span::styled(
                 localized(language, "Handoff Review Failed", "Handoff Review 失败"),
                 Style::default()
@@ -4662,7 +4845,9 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                     .fg(theme::gold())
                     .add_modifier(Modifier::BOLD),
             )),
-            Line::from(Span::raw(error.message.clone())),
+        ];
+        lines.extend(launch_failure_reason_lines(language, &error.message));
+        lines.extend([
             Line::raw(""),
             Line::from(Span::styled(
                 localized(
@@ -4686,7 +4871,7 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                 i18n::text(language, Text::ScrollOnlyKeys),
                 Style::default().fg(theme::muted()),
             )),
-        ];
+        ]);
         let scroll = modal_scroll_offset(app.modal_scroll, &lines, area);
         frame.render_widget(
             Paragraph::new(lines)
@@ -5983,6 +6168,13 @@ mod tests {
         format!("{}", terminal.backend())
     }
 
+    fn line_text(line: &Line<'_>) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>()
+    }
+
     fn screen_column(screen: &str, needle: &str) -> usize {
         screen
             .lines()
@@ -7147,6 +7339,64 @@ mod tests {
     }
 
     #[test]
+    fn installed_agent_skill_details_highlight_provider_and_link() {
+        let info = crate::core::model::CompilerPresetInfo {
+            id: "agent:codex:handoff".into(),
+            kind: crate::core::model::CompilerPresetKind::Agent,
+            status: crate::core::model::CompilerPresetStatus::Ready,
+            score: 95,
+            command: Some("python3".into()),
+            args: vec!["skill=/Users/example/.codex/skills/handoff/SKILL.md".into()],
+            timeout_ms: None,
+            reason: "Codex SDK runner is installed and auth preflight passed".into(),
+            description: Some(
+                "Codex runner using community handoff skill: Compact the current conversation into a handoff document for another agent to pick up.".into(),
+            ),
+            homepage: Some(
+                "https://github.com/mattpocock/skills/tree/main/skills/productivity/handoff"
+                    .into(),
+            ),
+            github_stars: None,
+        };
+
+        let text = agent_skill_detail_lines(&info, crate::core::config::UiLanguage::ZhHans)
+            .iter()
+            .map(line_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("提供方: mattpocock/skills（三方）"), "{text}");
+        assert!(
+            text.contains("链接: https://github.com/mattpocock/skills"),
+            "{text}"
+        );
+        assert!(text.contains("状态: 本机已安装"), "{text}");
+        assert!(
+            text.contains("路径: /Users/example/.codex/skills/handoff/SKILL.md"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn skill_picker_over_launch_shows_apply_and_generate_hint() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.set_ui_preferences_for_test(crate::core::config::UiPreferencesConfig {
+            language: crate::core::config::UiLanguage::ZhHans,
+            theme: crate::core::config::UiThemeName::Moonbox,
+        });
+        app.show_launch = true;
+        app.show_skill_picker = true;
+        app.data.compilers = vec!["agent:codex:handoff".into()];
+        app.pending_compiler = 0;
+        app.selected_compiler = 0;
+
+        let screen = render_text(&app, 140, 40);
+
+        assert_screen_contains(&screen, "enter 应用并生成");
+        assert_screen_contains(&screen, "y 复制 Skill 引用");
+    }
+
+    #[test]
     fn skill_picker_uses_simplified_chinese_chrome_when_configured() {
         let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
         app.set_ui_preferences_for_test(crate::core::config::UiPreferencesConfig {
@@ -7574,7 +7824,7 @@ mod tests {
         app.set_launch_review_error_for_test(LaunchReviewErrorState {
             target: CliTool::Hermes,
             compiler_id: "agent:claude:handoff".into(),
-            message: "invalid compiler config agent:claude:handoff: not_installed: install the Claude Agent SDK".into(),
+            message: "invalid compiler config agent:claude:handoff: sdk_not_found: runner=Claude; cli=/opt/homebrew/bin/claude; module=claude_agent_sdk; checked=python3,/opt/homebrew/bin/python3; install=/opt/homebrew/bin/python3 -m pip install claude-agent-sdk; env=MOONBOX_CLAUDE_AGENT_SDK_PYTHON".into(),
             elapsed_ms: 42,
         });
 
@@ -7584,7 +7834,14 @@ mod tests {
         assert_screen_contains(&screen, "handoff 没有生成，目标启动已禁用。");
         assert_screen_contains(&screen, "原因");
         assert_screen_contains(&screen, "agent:claude:handoff");
-        assert_screen_contains(&screen, "not_installed");
+        assert_screen_contains(&screen, "缺少 SDK 模块");
+        assert_screen_contains(&screen, "claude_agent_sdk");
+        assert_screen_contains(&screen, "已检查 Python");
+        assert_screen_contains(
+            &screen,
+            "/opt/homebrew/bin/python3 -m pip install claude-agent-sdk",
+        );
+        assert_screen_contains(&screen, "仅安装 Claude CLI 还不足以运行当前 SDK runner。");
         assert_screen_contains(&screen, "下一步：按 Enter 用当前 skill 重试");
         assert_screen_contains(&screen, "Enter 重试");
         assert_screen_contains(&screen, "S 技能");
