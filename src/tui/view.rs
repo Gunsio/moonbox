@@ -2324,6 +2324,15 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
         if app.launch_review {
             let capsule = app.launch_capsule_for_target(app.pending_target);
             let validation = app.validate_launch_for_target(app.pending_target);
+            if app.launch_requires_handoff_skill(app.pending_target) {
+                return vec![
+                    ("S/enter", i18n::text(language, Text::Skill)),
+                    ("y/r", i18n::text(language, Text::Unavailable)),
+                    ("gg/G", i18n::text(language, Text::Jump)),
+                    ("PgUp/Dn", i18n::text(language, Text::Scroll)),
+                    ("Esc/q", i18n::text(language, Text::Back)),
+                ];
+            }
             if validation_can_regenerate_handoff(&validation) {
                 return vec![
                     ("enter", i18n::text(language, Text::RegenerateHandoffReview)),
@@ -2353,6 +2362,15 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ];
         }
         let target_validation = app.validate_launch_for_target(app.pending_target);
+        if app.launch_requires_handoff_skill(app.pending_target) {
+            return vec![
+                ("j/k", i18n::text(language, Text::Target)),
+                ("S/enter", i18n::text(language, Text::Skill)),
+                ("y", i18n::text(language, Text::Unavailable)),
+                ("PgUp/Dn", i18n::text(language, Text::Scroll)),
+                ("Esc", i18n::text(language, Text::Cancel)),
+            ];
+        }
         if target_validation.state == LaunchValidationState::Blocked {
             if validation_can_regenerate_handoff(&target_validation) {
                 return vec![
@@ -4647,6 +4665,88 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
     if app.launch_review {
         let capsule = app.launch_capsule_for_target(app.pending_target);
         let launch_blocked = pending_validation.state == LaunchValidationState::Blocked;
+        let needs_handoff_skill = app.launch_requires_handoff_skill(app.pending_target);
+        if needs_handoff_skill {
+            let lines = vec![
+                Line::from(Span::styled(
+                    "Handoff Review",
+                    Style::default()
+                        .fg(theme::gold())
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::raw(""),
+                Line::from(vec![
+                    Span::styled(
+                        format!("{}: ", i18n::text(language, Text::Action)),
+                        Style::default().fg(theme::blue()),
+                    ),
+                    Span::styled(
+                        i18n::text(language, Text::HandoffSkillRequired),
+                        Style::default()
+                            .fg(theme::gold())
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+                Line::from(Span::styled(
+                    i18n::text(language, Text::BuiltinDraftReviewRemoved),
+                    Style::default().fg(theme::text()),
+                )),
+                Line::from(Span::styled(
+                    i18n::text(language, Text::OpenSkillPickerBeforeReview),
+                    Style::default().fg(theme::gold()),
+                )),
+                Line::raw(""),
+                handoff_review_path_line(app),
+                handoff_review_portrait_line(app),
+                Line::from(vec![
+                    Span::styled(
+                        format!("{}: ", i18n::text(language, Text::Session)),
+                        Style::default().fg(theme::blue()),
+                    ),
+                    Span::raw(session),
+                ]),
+                Line::from(vec![
+                    Span::styled(
+                        format!("{}: ", i18n::text(language, Text::Target)),
+                        Style::default().fg(theme::blue()),
+                    ),
+                    Span::raw(app.pending_target.to_string()),
+                ]),
+                Line::from(vec![
+                    Span::styled(
+                        format!("{}: ", i18n::text(language, Text::Skill)),
+                        Style::default().fg(theme::blue()),
+                    ),
+                    Span::styled(
+                        selected_skill_label(app),
+                        Style::default().fg(theme::cyan()),
+                    ),
+                ]),
+                Line::raw(""),
+                Line::from(vec![
+                    action_button("S", i18n::text(language, Text::Skill)),
+                    Span::raw("  "),
+                    action_button("Enter", i18n::text(language, Text::SkillPicker)),
+                    Span::raw("  "),
+                    disabled_action_button("y/r", i18n::text(language, Text::Unavailable)),
+                    Span::raw("  "),
+                    action_button("Esc", i18n::text(language, Text::Back)),
+                ]),
+                Line::from(Span::styled(
+                    i18n::text(language, Text::ScrollOnlyKeys),
+                    Style::default().fg(theme::muted()),
+                )),
+            ];
+            let scroll = modal_scroll_offset(app.modal_scroll, &lines, area);
+            frame.render_widget(
+                Paragraph::new(lines)
+                    .block(panel_block(" Handoff Review ", true))
+                    .scroll((scroll, 0))
+                    .wrap(Wrap { trim: true }),
+                area,
+            );
+            return;
+        }
         let can_regenerate_handoff = validation_can_regenerate_handoff(&pending_validation);
         if can_regenerate_handoff {
             let selected_skill = selected_skill_label(app);
@@ -4947,18 +5047,24 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
     for target in CliTool::ALL {
         let selected = target == app.pending_target;
         let validation = app.validate_launch_for_target(target);
+        let needs_handoff_skill = app.launch_requires_handoff_skill(target);
+        let validation_state = if needs_handoff_skill {
+            LaunchValidationState::Blocked
+        } else {
+            validation.state
+        };
         let style = if selected {
             Style::default()
                 .fg(ratatui::style::Color::Black)
-                .bg(validation_color(validation.state))
+                .bg(validation_color(validation_state))
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(validation_color(validation.state))
+            Style::default().fg(validation_color(validation_state))
         };
         let muted_style = if selected {
             Style::default()
                 .fg(ratatui::style::Color::Black)
-                .bg(validation_color(validation.state))
+                .bg(validation_color(validation_state))
         } else {
             Style::default().fg(theme::muted())
         };
@@ -4967,13 +5073,20 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         target_lines.push(Line::from(vec![
             Span::styled(format!("{cursor} {mark} {target:<6}"), style),
             Span::styled(
-                format!("  {}", validation_label(language, validation.state)),
+                format!("  {}", validation_label(language, validation_state)),
                 style,
             ),
         ]));
         target_lines.push(Line::from(vec![
             Span::raw("    "),
-            Span::styled(validation_summary_text(language, &validation), muted_style),
+            Span::styled(
+                if needs_handoff_skill {
+                    i18n::text(language, Text::HandoffSkillRequired).to_string()
+                } else {
+                    validation_summary_text(language, &validation)
+                },
+                muted_style,
+            ),
         ]));
     }
     let mut lines = vec![
@@ -5000,6 +5113,12 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         )),
     ];
     lines.extend(target_lines);
+    let pending_needs_handoff_skill = app.launch_requires_handoff_skill(app.pending_target);
+    let pending_validation_state = if pending_needs_handoff_skill {
+        LaunchValidationState::Blocked
+    } else {
+        pending_validation.state
+    };
     lines.extend([
         Line::raw(""),
         Line::from(vec![
@@ -5015,29 +5134,59 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                 Style::default().fg(theme::blue()),
             ),
             Span::styled(
-                validation_label(language, pending_validation.state),
+                validation_label(language, pending_validation_state),
                 Style::default()
-                    .fg(validation_color(pending_validation.state))
+                    .fg(validation_color(pending_validation_state))
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw("  "),
             Span::styled(
-                validation_summary_text(language, &pending_validation),
+                if pending_needs_handoff_skill {
+                    i18n::text(language, Text::HandoffSkillRequired).to_string()
+                } else {
+                    validation_summary_text(language, &pending_validation)
+                },
                 Style::default().fg(theme::muted()),
             ),
         ]),
         Line::raw(""),
-        Line::from(Span::styled(
+    ]);
+    if pending_needs_handoff_skill {
+        lines.extend([
+            Line::from(Span::styled(
+                i18n::text(language, Text::HandoffSkillRequired),
+                Style::default()
+                    .fg(theme::gold())
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(
+                i18n::text(language, Text::BuiltinDraftReviewRemoved),
+                Style::default().fg(theme::text()),
+            )),
+            Line::from(Span::styled(
+                i18n::text(language, Text::OpenSkillPickerBeforeReview),
+                Style::default().fg(theme::gold()),
+            )),
+        ]);
+    } else {
+        lines.push(Line::from(Span::styled(
             i18n::text(language, Text::Readiness),
             Style::default()
                 .fg(theme::blue())
                 .add_modifier(Modifier::BOLD),
-        )),
-    ]);
-    lines.extend(readiness_lines(pending_report.as_ref(), 6, language));
+        )));
+        lines.extend(readiness_lines(pending_report.as_ref(), 6, language));
+    }
     let can_regenerate_handoff = validation_can_regenerate_handoff(&pending_validation);
     lines.extend([
-        if pending_validation.state == LaunchValidationState::Blocked {
+        if pending_needs_handoff_skill {
+            Line::from(Span::styled(
+                i18n::text(language, Text::HandoffSkillRequired),
+                Style::default()
+                    .fg(theme::gold())
+                    .add_modifier(Modifier::BOLD),
+            ))
+        } else if pending_validation.state == LaunchValidationState::Blocked {
             Line::from(Span::styled(
                 if can_regenerate_handoff {
                     i18n::text(language, Text::RegenerateBeforeLaunch)
@@ -5060,7 +5209,13 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         },
         Line::raw(""),
         Line::from(Span::styled(
-            if pending_validation.state == LaunchValidationState::Blocked {
+            if pending_needs_handoff_skill {
+                if language == crate::core::config::UiLanguage::ZhHans {
+                    "j/k 选择目标   S/enter 选择 Skill   y 不可用   Esc 取消"
+                } else {
+                    "j/k choose target   S/enter choose skill   y unavailable   Esc cancel"
+                }
+            } else if pending_validation.state == LaunchValidationState::Blocked {
                 if can_regenerate_handoff && language == crate::core::config::UiLanguage::ZhHans {
                     "j/k 选择目标   enter 重新生成   y 不可用   Esc 取消"
                 } else if can_regenerate_handoff {
@@ -7185,6 +7340,45 @@ mod tests {
             !screen.contains("Production handoff should use"),
             "{screen}"
         );
+    }
+
+    #[test]
+    fn real_builtin_draft_launch_requires_skill_without_rendering_draft_review() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.set_ui_preferences_for_test(crate::core::config::UiPreferencesConfig {
+            language: crate::core::config::UiLanguage::ZhHans,
+            theme: crate::core::config::UiThemeName::Moonbox,
+        });
+        app.data.sessions[app.selected_session].source_provenance = SourceProvenance::Real;
+        app.selected_compiler = app
+            .data
+            .compilers
+            .iter()
+            .position(|compiler| compiler == "engineering-handoff")
+            .expect("engineering-handoff compiler");
+        app.data.capsule.compiler = "engineering-handoff".into();
+        app.show_launch = true;
+        app.pending_target = CliTool::Hermes;
+
+        let target_screen = render_text(&app, 140, 48);
+        assert_screen_contains(&target_screen, "先选择 AI handoff skill");
+        assert_screen_contains(&target_screen, "真实 session 不再进入草稿 Review");
+        assert_screen_contains(&target_screen, "S/enter 选择 Skill");
+        assert!(
+            !target_screen.contains("engineering-handoff is a built-in"),
+            "{target_screen}"
+        );
+
+        app.launch_review = true;
+        let review_screen = render_text(&app, 140, 48);
+        assert_screen_contains(&review_screen, "先选择 AI handoff skill");
+        assert_screen_contains(&review_screen, "内置草稿模板不会调用 AI skill");
+        assert!(!review_screen.contains("Draft Handoff"), "{review_screen}");
+        assert!(
+            !review_screen.contains("This preview uses the built-in deterministic draft compiler"),
+            "{review_screen}"
+        );
+        assert!(!review_screen.contains("草稿不可运行"), "{review_screen}");
     }
 
     #[test]

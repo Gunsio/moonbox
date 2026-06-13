@@ -2024,6 +2024,7 @@ impl App {
 
         if self.launch_review {
             let validation = self.validate_launch_for_target(self.pending_target);
+            let needs_handoff_skill = self.launch_requires_handoff_skill(self.pending_target);
             let can_regenerate_handoff = launch_validation_can_regenerate_handoff(&validation);
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => {
@@ -2034,21 +2035,28 @@ impl App {
                     self.set_status("Launch review closed");
                 }
                 KeyCode::Char('y') => {
-                    if can_regenerate_handoff {
+                    if needs_handoff_skill {
+                        self.set_status("Choose an AI handoff skill before copying");
+                    } else if can_regenerate_handoff {
                         self.set_status("Regenerate handoff with Enter before copying");
                     } else {
                         self.copy_launch_command();
                     }
                 }
                 KeyCode::Char('r') => {
-                    if can_regenerate_handoff {
+                    if needs_handoff_skill {
+                        self.set_status("Choose an AI handoff skill before running");
+                    } else if can_regenerate_handoff {
                         self.set_status("Regenerate handoff with Enter before running");
                     } else {
                         self.queue_target_handoff();
                     }
                 }
                 KeyCode::Enter => {
-                    if can_regenerate_handoff {
+                    if needs_handoff_skill {
+                        self.open_skill_picker();
+                        self.set_status("Choose an AI handoff skill before Handoff Review");
+                    } else if can_regenerate_handoff {
                         self.confirm_launch_target();
                     } else {
                         self.set_status(format!(
@@ -2092,6 +2100,7 @@ impl App {
                 self.clear_handoff_trail();
                 self.set_status("Launch cancelled");
             }
+            KeyCode::Char('S') => self.open_skill_picker(),
             KeyCode::Enter => self.confirm_launch_target(),
             KeyCode::Char('y') => self.copy_launch_command(),
             KeyCode::PageDown => self.scroll_modal(true, 6),
@@ -2534,7 +2543,13 @@ impl App {
     pub(crate) fn skill_picker_candidate_indices(&self) -> Vec<usize> {
         let mut candidates = Vec::new();
         let mut seen_agent_skills: Vec<String> = Vec::new();
+        let hide_builtin_drafts = self
+            .current_session()
+            .is_some_and(|session| session.source_provenance != SourceProvenance::Fixture);
         for (index, compiler_id) in self.data.compilers.iter().enumerate() {
+            if hide_builtin_drafts && compiler::compiler_is_builtin(compiler_id) {
+                continue;
+            }
             if let Some(spec) = handoff::parse_compiler_id(compiler_id) {
                 if seen_agent_skills
                     .iter()
@@ -3314,6 +3329,12 @@ impl App {
     fn confirm_launch_target(&mut self) {
         let target = self.pending_target;
         let validation = self.validate_launch_for_target(target);
+        if self.launch_requires_handoff_skill(target) {
+            self.open_skill_picker();
+            self.show_launch = true;
+            self.set_status("Choose an AI handoff skill before Handoff Review");
+            return;
+        }
         if validation.is_blocked() && !launch_validation_can_regenerate_handoff(&validation) {
             self.set_status(format!("Target blocked: {}", validation.summary()));
             self.pending_g = false;
@@ -3819,6 +3840,10 @@ impl App {
     }
 
     fn copy_launch_command(&mut self) {
+        if self.launch_requires_handoff_skill(self.pending_target) {
+            self.set_status("Choose an AI handoff skill before copying");
+            return;
+        }
         let validation = self.validate_launch_for_target(self.pending_target);
         if validation.is_blocked() {
             if launch_validation_can_regenerate_handoff(&validation) {
@@ -3865,6 +3890,10 @@ impl App {
     }
 
     fn queue_target_handoff(&mut self) {
+        if self.launch_requires_handoff_skill(self.pending_target) {
+            self.set_status("Choose an AI handoff skill before running");
+            return;
+        }
         let validation = self.validate_launch_for_target(self.pending_target);
         if validation.is_blocked() {
             if launch_validation_can_regenerate_handoff(&validation) {
@@ -4073,6 +4102,14 @@ impl App {
             target,
             &continuation,
         ))
+    }
+
+    pub fn launch_requires_handoff_skill(&self, target: CliTool) -> bool {
+        let Some(session) = self.current_session() else {
+            return false;
+        };
+        session.source_provenance != SourceProvenance::Fixture
+            && compiler::compiler_is_builtin(&self.launch_capsule_for_target(target).compiler)
     }
 
     pub(crate) fn launch_capsule_for_target(&self, target: CliTool) -> WorkCapsule {
@@ -5369,7 +5406,27 @@ Host devbox
         assert!(app.take_pending_launch().is_none());
         assert_eq!(
             app.status_message,
-            "Draft handoff cannot run; press y to copy or choose an AI skill"
+            "Choose an AI handoff skill before running"
+        );
+    }
+
+    #[test]
+    fn real_builtin_draft_enter_opens_skill_picker_not_review() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.data.sessions[app.selected_session].source_provenance = SourceProvenance::Real;
+        app.selected_compiler = compiler_index_for_id(&app.data, "engineering-handoff", 0);
+        app.data.capsule.compiler = "engineering-handoff".into();
+
+        app.handle_key(key('H'));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(app.show_launch);
+        assert!(app.show_skill_picker);
+        assert!(!app.launch_review);
+        assert!(!app.is_launch_review_pending());
+        assert_eq!(
+            app.status_message,
+            "Choose an AI handoff skill before Handoff Review"
         );
     }
 

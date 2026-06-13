@@ -913,6 +913,12 @@ fn select_default_compiler(
                 && compiler.kind != CompilerPresetKind::Agent
                 && compiler.status == CompilerPresetStatus::Ready
         })
+        .or_else(|| {
+            catalog.iter().find(|compiler| {
+                compiler.kind == CompilerPresetKind::Agent
+                    && compiler.status == CompilerPresetStatus::Ready
+            })
+        })
         .map(|compiler| compiler.id.clone())
         .unwrap_or_else(|| DEFAULT_COMPILER_ID.into())
 }
@@ -1282,7 +1288,7 @@ sleep 1
     }
 
     #[test]
-    fn default_compiler_does_not_auto_select_agent_runner() {
+    fn default_compiler_prefers_agent_handoff_before_builtin_draft() {
         let agent = CompilerPresetInfo {
             id: "agent:codex:handoff".into(),
             kind: CompilerPresetKind::Agent,
@@ -1298,7 +1304,10 @@ sleep 1
         };
         let catalog = vec![agent, builtin_info(DEFAULT_COMPILER_ID)];
 
-        assert_eq!(select_default_compiler(None, &catalog), DEFAULT_COMPILER_ID);
+        assert_eq!(
+            select_default_compiler(None, &catalog),
+            "agent:codex:handoff"
+        );
         assert_eq!(
             select_default_compiler(Some("agent:codex:handoff".into()), &catalog),
             "agent:codex:handoff"

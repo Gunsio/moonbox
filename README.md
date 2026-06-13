@@ -1350,6 +1350,12 @@ Stable interfaces matter more than any single framework:
   regenerates with the current skill, `r` / `y` stay disabled until regeneration
   finishes, and the header shows the selected skill label instead of the stale
   capsule compiler or internal agent runner id.
+- M96.4: Built-in draft Review removal from the real-session path; draft
+  templates such as `engineering-handoff` no longer open Handoff Review for real
+  sessions. The target picker blocks them with a skill-required state, `Enter`
+  / `S` opens Skill Picker, real-session Skill Picker hides built-in draft
+  templates, and only ready agent handoff compilers can be auto-selected ahead
+  of the built-in fallback.
 - M92: Remote / SSH Session Detail Parity; SSH data spaces now hydrate selected
   session details from the remote `compile-request --json` response, preserving
   remote-computed bounded anatomy in the same Details / Zoom Details rendering
