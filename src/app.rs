@@ -3187,7 +3187,7 @@ impl App {
     fn confirm_launch_target(&mut self) {
         let target = self.pending_target;
         let validation = self.validate_launch_for_target(target);
-        if validation.is_blocked() {
+        if validation.is_blocked() && !launch_validation_can_regenerate_handoff(&validation) {
             self.set_status(format!("Target blocked: {}", validation.summary()));
             self.pending_g = false;
             return;
@@ -3287,7 +3287,9 @@ impl App {
         self.target_launch_result = None;
         self.start_handoff_trail_for_review();
         self.modal_scroll = 0;
-        if validation.state == LaunchValidationState::Warning {
+        if launch_validation_can_regenerate_handoff(&validation) {
+            self.set_status(format!("Regenerating handoff review: {target}"));
+        } else if validation.state == LaunchValidationState::Warning {
             self.set_status(format!(
                 "Preparing handoff review: {target} ({})",
                 validation.summary()
@@ -3982,6 +3984,21 @@ fn compiler_index_for_id(data: &WorkbenchData, compiler_id: &str, fallback: usiz
         .position(|candidate| candidate == compiler_id)
         .unwrap_or(fallback)
         .min(data.compilers.len().saturating_sub(1))
+}
+
+fn launch_validation_can_regenerate_handoff(validation: &LaunchValidation) -> bool {
+    validation.is_blocked()
+        && !validation.reasons.is_empty()
+        && validation
+            .reasons
+            .iter()
+            .all(|reason| is_stale_handoff_compiler_mismatch(reason))
+}
+
+fn is_stale_handoff_compiler_mismatch(reason: &str) -> bool {
+    reason.contains("raw source map mismatch")
+        && reason.contains("generated_by ")
+        && reason.contains(" vs compiler ")
 }
 
 fn timeline_event_is_visible(data: &WorkbenchData, rewind_event_id: &str, index: usize) -> bool {
@@ -4875,6 +4892,35 @@ Host devbox
             app.status_message
                 .starts_with("Handoff review ready: Hermes")
         );
+    }
+
+    #[test]
+    fn stale_handoff_after_skill_change_regenerates_on_launch_enter() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        let compiler_index = app
+            .data
+            .compilers
+            .iter()
+            .position(|compiler| compiler == "design-review")
+            .expect("design-review compiler");
+        app.selected_compiler = compiler_index;
+        app.data.capsule.compiler = "design-review".into();
+
+        let validation = app.validate_launch_for_target(CliTool::Hermes);
+        assert!(validation.is_blocked());
+        assert!(validation.summary().contains("generated_by"));
+
+        app.handle_key(key('H'));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(app.show_launch);
+        assert!(app.is_launch_review_pending());
+        assert_eq!(app.status_message, "Regenerating handoff review: Hermes");
+
+        settle_launch_review(&mut app);
+        assert!(app.launch_review);
+        assert_eq!(app.data.capsule.compiler, "design-review");
+        assert!(!app.validate_launch_for_target(CliTool::Hermes).is_blocked());
     }
 
     #[test]
