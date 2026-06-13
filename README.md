@@ -1344,6 +1344,12 @@ Stable interfaces matter more than any single framework:
   local skill paths or install sources, hides runner IDs and SDK package
   commands from the skill-selection surface, and leaves runner setup / login /
   package-manager decisions to launch preflight.
+- M96.3: Handoff Review stale-skill correction; when the selected handoff skill
+  differs from the review artifact currently on screen, the Review now shows a
+  regenerate-only state instead of rendering stale built-in draft content. Enter
+  regenerates with the current skill, `r` / `y` stay disabled until regeneration
+  finishes, and the header shows the selected skill label instead of the stale
+  capsule compiler or internal agent runner id.
 - M92: Remote / SSH Session Detail Parity; SSH data spaces now hydrate selected
   session details from the remote `compile-request --json` response, preserving
   remote-computed bounded anatomy in the same Details / Zoom Details rendering

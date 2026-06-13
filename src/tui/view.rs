@@ -167,7 +167,7 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
         Span::styled(data_space_header_label(app), data_space_header_style(app)),
         Span::raw(format!("   {}: ", i18n::text(language, Text::Skill))),
         Span::styled(
-            &app.data.capsule.compiler,
+            selected_skill_label(app),
             Style::default().fg(theme::cyan()),
         ),
     ]);
@@ -223,6 +223,16 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
             .alignment(Alignment::Left),
         area,
     );
+}
+
+fn selected_skill_label(app: &App) -> String {
+    app.data
+        .compilers
+        .get(app.selected_compiler)
+        .and_then(|compiler_id| handoff::parse_compiler_id(compiler_id))
+        .map(|spec| spec.skill_id)
+        .or_else(|| app.data.compilers.get(app.selected_compiler).cloned())
+        .unwrap_or_else(|| app.data.capsule.compiler.clone())
 }
 
 fn data_space_header_label(app: &App) -> String {
@@ -2313,10 +2323,17 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
         }
         if app.launch_review {
             let capsule = app.launch_capsule_for_target(app.pending_target);
-            let run_hint = if app
-                .validate_launch_for_target(app.pending_target)
-                .is_blocked()
-            {
+            let validation = app.validate_launch_for_target(app.pending_target);
+            if validation_can_regenerate_handoff(&validation) {
+                return vec![
+                    ("enter", i18n::text(language, Text::RegenerateHandoffReview)),
+                    ("y/r", i18n::text(language, Text::Unavailable)),
+                    ("gg/G", i18n::text(language, Text::Jump)),
+                    ("PgUp/Dn", i18n::text(language, Text::Scroll)),
+                    ("Esc/q", i18n::text(language, Text::Back)),
+                ];
+            }
+            let run_hint = if validation.is_blocked() {
                 i18n::text(language, Text::CannotRun)
             } else if compiler::compiler_is_builtin(&capsule.compiler)
                 && app
@@ -4630,6 +4647,103 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
     if app.launch_review {
         let capsule = app.launch_capsule_for_target(app.pending_target);
         let launch_blocked = pending_validation.state == LaunchValidationState::Blocked;
+        let can_regenerate_handoff = validation_can_regenerate_handoff(&pending_validation);
+        if can_regenerate_handoff {
+            let selected_skill = selected_skill_label(app);
+            let lines = vec![
+                Line::from(Span::styled(
+                    "Handoff Review",
+                    Style::default()
+                        .fg(theme::gold())
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::raw(""),
+                Line::from(vec![
+                    Span::styled(
+                        format!("{}: ", i18n::text(language, Text::Action)),
+                        Style::default().fg(theme::blue()),
+                    ),
+                    Span::styled(
+                        i18n::text(language, Text::RegenerateHandoffReview),
+                        Style::default()
+                            .fg(theme::gold())
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+                Line::from(Span::styled(
+                    i18n::text(language, Text::HandoffRegenerateRequired),
+                    Style::default().fg(theme::text()),
+                )),
+                Line::from(Span::styled(
+                    i18n::text(language, Text::RegenerateBeforeLaunch),
+                    Style::default()
+                        .fg(theme::gold())
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::raw(""),
+                handoff_review_path_line(app),
+                handoff_review_portrait_line(app),
+                Line::from(vec![
+                    Span::styled(
+                        format!("{}: ", i18n::text(language, Text::Session)),
+                        Style::default().fg(theme::blue()),
+                    ),
+                    Span::raw(session),
+                ]),
+                Line::from(vec![
+                    Span::styled(
+                        format!("{}: ", i18n::text(language, Text::Target)),
+                        Style::default().fg(theme::blue()),
+                    ),
+                    Span::raw(app.pending_target.to_string()),
+                ]),
+                Line::from(vec![
+                    Span::styled(
+                        format!("{}: ", i18n::text(language, Text::Skill)),
+                        Style::default().fg(theme::blue()),
+                    ),
+                    Span::styled(selected_skill, Style::default().fg(theme::cyan())),
+                ]),
+                Line::from(vec![
+                    Span::styled(
+                        format!("{}: ", i18n::text(language, Text::Validation)),
+                        Style::default().fg(theme::blue()),
+                    ),
+                    Span::styled(
+                        validation_label(language, pending_validation.state),
+                        Style::default()
+                            .fg(validation_color(pending_validation.state))
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(
+                        validation_summary_text(language, &pending_validation),
+                        Style::default().fg(theme::muted()),
+                    ),
+                ]),
+                Line::raw(""),
+                Line::from(vec![
+                    action_button("Enter", i18n::text(language, Text::RegenerateHandoffReview)),
+                    Span::raw("  "),
+                    disabled_action_button("y/r", i18n::text(language, Text::Unavailable)),
+                    Span::raw("  "),
+                    action_button("Esc", i18n::text(language, Text::Back)),
+                ]),
+                Line::from(Span::styled(
+                    i18n::text(language, Text::ScrollOnlyKeys),
+                    Style::default().fg(theme::muted()),
+                )),
+            ];
+            let scroll = modal_scroll_offset(app.modal_scroll, &lines, area);
+            frame.render_widget(
+                Paragraph::new(lines)
+                    .block(panel_block(" Handoff Review ", true))
+                    .scroll((scroll, 0))
+                    .wrap(Wrap { trim: true }),
+                area,
+            );
+            return;
+        }
         let draft_run_blocked = compiler::compiler_is_builtin(&capsule.compiler)
             && app
                 .current_session()
@@ -7024,7 +7138,9 @@ mod tests {
             language: crate::core::config::UiLanguage::ZhHans,
             theme: crate::core::config::UiThemeName::Moonbox,
         });
-        app.data.capsule.compiler = "agent:codex:handoff".into();
+        let compiler = "agent:codex:handoff".to_string();
+        app.data.compilers.insert(0, compiler);
+        app.selected_compiler = 0;
         app.show_launch = true;
         app.pending_target = CliTool::Hermes;
 
@@ -7037,6 +7153,38 @@ mod tests {
         assert_screen_contains(&screen, "enter 重新生成");
         assert!(!screen.contains("generated_by"), "{screen}");
         assert!(!screen.contains(" vs compiler "), "{screen}");
+    }
+
+    #[test]
+    fn launch_review_stale_skill_prompts_regeneration_not_draft_run() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.set_ui_preferences_for_test(crate::core::config::UiPreferencesConfig {
+            language: crate::core::config::UiLanguage::ZhHans,
+            theme: crate::core::config::UiThemeName::Moonbox,
+        });
+        let compiler = "agent:codex:handoff".to_string();
+        app.data.compilers.insert(0, compiler);
+        app.selected_compiler = 0;
+        app.show_launch = true;
+        app.launch_review = true;
+        app.pending_target = CliTool::Hermes;
+
+        let screen = render_text(&app, 140, 52);
+
+        assert_screen_contains(&screen, "Handoff Review");
+        assert_screen_contains(&screen, "重新生成 Handoff Review");
+        assert_screen_contains(&screen, "当前 handoff 由其他 skill/compiler 生成");
+        assert_screen_contains(&screen, "按 Enter 用当前 skill 重新生成 handoff");
+        assert_screen_contains(&screen, "技能:");
+        assert_screen_contains(&screen, "handoff");
+        assert!(!screen.contains("agent:codex:handoff"), "{screen}");
+        assert!(!screen.contains("Draft Handoff"), "{screen}");
+        assert!(!screen.contains("草稿不可运行"), "{screen}");
+        assert!(!screen.contains("选择 AI skill 后可运行"), "{screen}");
+        assert!(
+            !screen.contains("Production handoff should use"),
+            "{screen}"
+        );
     }
 
     #[test]

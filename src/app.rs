@@ -2023,6 +2023,8 @@ impl App {
         }
 
         if self.launch_review {
+            let validation = self.validate_launch_for_target(self.pending_target);
+            let can_regenerate_handoff = launch_validation_can_regenerate_handoff(&validation);
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => {
                     self.show_launch = false;
@@ -2031,12 +2033,30 @@ impl App {
                     self.clear_handoff_trail();
                     self.set_status("Launch review closed");
                 }
-                KeyCode::Char('y') => self.copy_launch_command(),
-                KeyCode::Char('r') => self.queue_target_handoff(),
-                KeyCode::Enter => self.set_status(format!(
-                    "Review only - press r to run local {}",
-                    self.pending_target
-                )),
+                KeyCode::Char('y') => {
+                    if can_regenerate_handoff {
+                        self.set_status("Regenerate handoff with Enter before copying");
+                    } else {
+                        self.copy_launch_command();
+                    }
+                }
+                KeyCode::Char('r') => {
+                    if can_regenerate_handoff {
+                        self.set_status("Regenerate handoff with Enter before running");
+                    } else {
+                        self.queue_target_handoff();
+                    }
+                }
+                KeyCode::Enter => {
+                    if can_regenerate_handoff {
+                        self.confirm_launch_target();
+                    } else {
+                        self.set_status(format!(
+                            "Review only - press r to run local {}",
+                            self.pending_target
+                        ));
+                    }
+                }
                 KeyCode::Char('G') => {
                     self.modal_scroll = u16::MAX;
                     self.pending_g = false;
@@ -3801,7 +3821,11 @@ impl App {
     fn copy_launch_command(&mut self) {
         let validation = self.validate_launch_for_target(self.pending_target);
         if validation.is_blocked() {
-            self.set_status(format!("Target blocked: {}", validation.summary()));
+            if launch_validation_can_regenerate_handoff(&validation) {
+                self.set_status("Regenerate handoff with Enter before copying");
+            } else {
+                self.set_status(format!("Target blocked: {}", validation.summary()));
+            }
             return;
         }
         if !self.launch_review {
@@ -3843,7 +3867,11 @@ impl App {
     fn queue_target_handoff(&mut self) {
         let validation = self.validate_launch_for_target(self.pending_target);
         if validation.is_blocked() {
-            self.set_status(format!("Target blocked: {}", validation.summary()));
+            if launch_validation_can_regenerate_handoff(&validation) {
+                self.set_status("Regenerate handoff with Enter before running");
+            } else {
+                self.set_status(format!("Target blocked: {}", validation.summary()));
+            }
             return;
         }
         let Some(session) = self.current_session().cloned() else {
@@ -4049,6 +4077,9 @@ impl App {
 
     pub(crate) fn launch_capsule_for_target(&self, target: CliTool) -> WorkCapsule {
         let mut capsule = self.data.capsule.clone();
+        if let Some(selected_compiler) = self.data.compilers.get(self.selected_compiler) {
+            capsule.compiler = selected_compiler.clone();
+        }
         capsule.target_cli = target;
         capsule.handoff_label = format!("moonbox/{}-rewind-{}", target.id(), self.rewind_event_id);
         capsule
@@ -5046,6 +5077,35 @@ Host devbox
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
         assert!(app.show_launch);
+        assert!(app.is_launch_review_pending());
+        assert_eq!(app.status_message, "Regenerating handoff review: Hermes");
+
+        settle_launch_review(&mut app);
+        assert!(app.launch_review);
+        assert_eq!(app.data.capsule.compiler, "design-review");
+        assert!(!app.validate_launch_for_target(CliTool::Hermes).is_blocked());
+    }
+
+    #[test]
+    fn stale_launch_review_enter_regenerates_with_selected_skill() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        let compiler_index = app
+            .data
+            .compilers
+            .iter()
+            .position(|compiler| compiler == "design-review")
+            .expect("design-review compiler");
+        app.selected_compiler = compiler_index;
+        app.show_launch = true;
+        app.launch_review = true;
+        app.pending_target = CliTool::Hermes;
+
+        assert!(app.validate_launch_for_target(CliTool::Hermes).is_blocked());
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(app.show_launch);
+        assert!(!app.launch_review);
         assert!(app.is_launch_review_pending());
         assert_eq!(app.status_message, "Regenerating handoff review: Hermes");
 
