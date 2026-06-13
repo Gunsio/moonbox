@@ -2335,9 +2335,17 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
                 ("Esc/q", i18n::text(language, Text::Back)),
             ];
         }
-        if app.validate_launch_for_target(app.pending_target).state
-            == LaunchValidationState::Blocked
-        {
+        let target_validation = app.validate_launch_for_target(app.pending_target);
+        if target_validation.state == LaunchValidationState::Blocked {
+            if validation_can_regenerate_handoff(&target_validation) {
+                return vec![
+                    ("j/k", i18n::text(language, Text::Target)),
+                    ("enter", i18n::text(language, Text::RegenerateHandoffReview)),
+                    ("y", i18n::text(language, Text::Unavailable)),
+                    ("PgUp/Dn", i18n::text(language, Text::Scroll)),
+                    ("Esc", i18n::text(language, Text::Cancel)),
+                ];
+            }
             return vec![
                 ("j/k", i18n::text(language, Text::Target)),
                 ("enter/y", i18n::text(language, Text::Blocked)),
@@ -2577,6 +2585,18 @@ fn localized_status_message(app: &App) -> String {
     }
     if app.status_message == "Settings opened" {
         return i18n::text(language, Text::SettingsOpened).to_string();
+    }
+    if app.status_message == "Choose compiler skill" {
+        return i18n::text(language, Text::ChooseCompilerSkill).to_string();
+    }
+    if let Some(target) = app
+        .status_message
+        .strip_prefix("Regenerating handoff review: ")
+    {
+        return format!(
+            "{}: {target}",
+            i18n::text(language, Text::RegenerateHandoffReview)
+        );
     }
     if let Some(reason) = app.status_message.strip_prefix("Target blocked: ") {
         return format!(
@@ -3459,16 +3479,17 @@ fn verify_detail_text(report: Option<&VerificationReport>, reviewed: bool) -> St
 fn render_skill_picker(frame: &mut Frame, root: Rect, app: &App) {
     let area = modal_area(root, 78, 72);
     frame.render_widget(Clear, area);
+    let language = app.effective_language();
     let catalog = compiler::compiler_catalog_entries();
     let mut lines = vec![
         Line::from(Span::styled(
-            "Choose compiler skill",
+            i18n::text(language, Text::ChooseCompilerSkill),
             Style::default()
                 .fg(theme::gold())
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
-            "Compression and compatibility live in replaceable compiler skills.",
+            i18n::text(language, Text::SkillPickerSubtitle),
             Style::default().fg(theme::muted()),
         )),
         Line::raw(""),
@@ -3501,31 +3522,47 @@ fn render_skill_picker(frame: &mut Frame, root: Rect, app: &App) {
             Style::default().fg(theme::muted())
         };
         let cursor = if pending { ">" } else { " " };
-        let active_mark = if active { "active" } else { "      " };
+        let active_mark = if active {
+            i18n::text(language, Text::Active)
+        } else {
+            ""
+        };
         lines.push(Line::from(vec![
             Span::styled(format!("{cursor} "), row_style),
             Span::styled(format!("{:<24}", info.id), row_style),
             Span::styled("  ", row_style),
             Span::styled(
-                format!("{:<7}", compiler_status_label(info.status)),
+                format!("{:<7}", compiler_status_label(info.status, language)),
                 row_style,
             ),
             Span::styled("  ", row_style),
-            Span::styled(format!("{:<11}", compiler_kind_label(info.kind)), row_style),
+            Span::styled(
+                format!("{:<11}", compiler_kind_label(info.kind, language)),
+                row_style,
+            ),
             Span::styled("  ", row_style),
             Span::styled(active_mark, row_style),
         ]));
         lines.push(Line::from(vec![
             Span::raw("    "),
-            Span::styled(compiler_description(&info), muted_style),
+            Span::styled(compiler_description(&info, language), muted_style),
         ]));
         lines.push(Line::from(vec![
             Span::raw("    "),
-            Span::styled("stars: ", Style::default().fg(theme::muted())),
-            Span::styled(format_star_count(&info), Style::default().fg(theme::gold())),
-            Span::styled("  link: ", Style::default().fg(theme::muted())),
             Span::styled(
-                compiler_reference(&info),
+                format!("{}: ", i18n::text(language, Text::Stars)),
+                Style::default().fg(theme::muted()),
+            ),
+            Span::styled(
+                format_star_count(&info, language),
+                Style::default().fg(theme::gold()),
+            ),
+            Span::styled(
+                format!("  {}: ", i18n::text(language, Text::Link)),
+                Style::default().fg(theme::muted()),
+            ),
+            Span::styled(
+                compiler_reference(&info, language),
                 Style::default().fg(theme::cyan()),
             ),
         ]));
@@ -3534,20 +3571,29 @@ fn render_skill_picker(frame: &mut Frame, root: Rect, app: &App) {
 
     if app.data.compilers.is_empty() {
         lines.push(Line::from(Span::styled(
-            "No compiler skills configured.",
+            i18n::text(language, Text::NoCompilerSkillsConfigured),
             Style::default()
                 .fg(theme::red())
                 .add_modifier(Modifier::BOLD),
         )));
     }
     lines.push(Line::from(Span::styled(
-        "j/k choose   enter apply   y copy link/command   q close",
+        format!(
+            "j/k {}   enter {}   y {}   q {}",
+            i18n::text(language, Text::Choose),
+            i18n::text(language, Text::Apply),
+            i18n::text(language, Text::CopyLinkCommand),
+            i18n::text(language, Text::Close)
+        ),
         Style::default().fg(theme::muted()),
     )));
 
     frame.render_widget(
         Paragraph::new(lines)
-            .block(panel_block(" Skill Picker ", true))
+            .block(dynamic_panel_block(
+                format!(" {} ", i18n::text(language, Text::SkillPicker)),
+                true,
+            ))
             .scroll((app.modal_scroll, 0))
             .wrap(Wrap { trim: true }),
         area,
@@ -3984,11 +4030,14 @@ fn fallback_compiler_info(id: &str) -> CompilerPresetInfo {
     }
 }
 
-fn compiler_status_label(status: CompilerPresetStatus) -> &'static str {
+fn compiler_status_label(
+    status: CompilerPresetStatus,
+    language: crate::core::config::UiLanguage,
+) -> &'static str {
     match status {
-        CompilerPresetStatus::Ready => "READY",
-        CompilerPresetStatus::Warning => "WARN",
-        CompilerPresetStatus::Disabled => "DISABLE",
+        CompilerPresetStatus::Ready => i18n::text(language, Text::Ready),
+        CompilerPresetStatus::Warning => i18n::text(language, Text::Warning),
+        CompilerPresetStatus::Disabled => i18n::text(language, Text::DisabledStatus),
     }
 }
 
@@ -4000,26 +4049,89 @@ fn compiler_status_color(status: CompilerPresetStatus) -> Color {
     }
 }
 
-fn compiler_kind_label(kind: CompilerPresetKind) -> &'static str {
+fn compiler_kind_label(
+    kind: CompilerPresetKind,
+    language: crate::core::config::UiLanguage,
+) -> &'static str {
     match kind {
-        CompilerPresetKind::Builtin => "builtin",
-        CompilerPresetKind::Environment => "env",
-        CompilerPresetKind::Config => "config",
-        CompilerPresetKind::Agent => "agent",
+        CompilerPresetKind::Builtin => i18n::text(language, Text::BuiltinKind),
+        CompilerPresetKind::Environment => i18n::text(language, Text::EnvironmentKind),
+        CompilerPresetKind::Config => i18n::text(language, Text::ConfigKind),
+        CompilerPresetKind::Agent => i18n::text(language, Text::AgentKind),
     }
 }
 
-fn compiler_description(info: &CompilerPresetInfo) -> String {
+fn compiler_description(
+    info: &CompilerPresetInfo,
+    language: crate::core::config::UiLanguage,
+) -> String {
+    if language == crate::core::config::UiLanguage::ZhHans
+        && let Some(description) = localized_compiler_description(info)
+    {
+        return description;
+    }
     info.description
         .clone()
-        .unwrap_or_else(|| review_snippet(&info.reason, 96))
+        .unwrap_or_else(|| localize_compiler_reason(language, &review_snippet(&info.reason, 96)))
 }
 
-fn compiler_reference(info: &CompilerPresetInfo) -> String {
+fn localized_compiler_description(info: &CompilerPresetInfo) -> Option<String> {
+    let description = info.description.as_deref()?;
+    let localized = match info.id.as_str() {
+        "engineering-handoff" => "通用跨 CLI continuation 的草稿 handoff capsule。".to_string(),
+        "bugfix-continuation" => "从选定 rewind point 继续 bugfix 工作的草稿 capsule。".to_string(),
+        "design-review" => "用于设计评审和架构跟进的草稿 capsule。".to_string(),
+        _ if description == "Environment-provided compiler skill." => {
+            "由环境变量提供的 compiler skill。".to_string()
+        }
+        _ if description.ends_with(" runner placeholder for the community `handoff` skill.") => {
+            let runner = description
+                .strip_suffix(" runner placeholder for the community `handoff` skill.")
+                .unwrap_or("Agent");
+            format!("{runner} runner 的社区 `handoff` skill 占位项。")
+        }
+        _ if description.contains(" runner using community handoff skill: ") => {
+            let (runner, skill_description) =
+                description.split_once(" runner using community handoff skill: ")?;
+            format!(
+                "{runner} runner 使用社区 handoff skill：{}",
+                localized_external_skill_description(skill_description)
+            )
+        }
+        _ => return None,
+    };
+    Some(localized)
+}
+
+fn localized_external_skill_description(description: &str) -> String {
+    match description {
+        "Compact the current conversation into a handoff document for another agent to pick up." => {
+            "将当前对话压缩成 handoff 文档，交给另一个 agent 接手。".into()
+        }
+        other => other.into(),
+    }
+}
+
+fn localize_compiler_reason(language: crate::core::config::UiLanguage, reason: &str) -> String {
+    if language == crate::core::config::UiLanguage::ZhHans {
+        if reason == "compiler id is listed but missing from catalog" {
+            return "配置中列出了这个 compiler id，但 catalog 中找不到。".into();
+        }
+        if reason == "compiler command was not found on disk or PATH" {
+            return "compiler 命令在磁盘或 PATH 中找不到。".into();
+        }
+    }
+    reason.into()
+}
+
+fn compiler_reference(
+    info: &CompilerPresetInfo,
+    language: crate::core::config::UiLanguage,
+) -> String {
     info.homepage
         .clone()
         .or_else(|| info.command.clone())
-        .unwrap_or_else(|| "built-in".into())
+        .unwrap_or_else(|| i18n::text(language, Text::BuiltInReference).into())
 }
 
 fn action_button<'a>(key: &'a str, label: &'a str) -> Span<'a> {
@@ -4056,13 +4168,16 @@ fn modal_scroll_offset(requested: u16, lines: &[Line<'_>], area: Rect) -> u16 {
     rows.saturating_sub(height).min(usize::from(u16::MAX - 1)) as u16
 }
 
-fn format_star_count(info: &CompilerPresetInfo) -> String {
+fn format_star_count(
+    info: &CompilerPresetInfo,
+    language: crate::core::config::UiLanguage,
+) -> String {
     let Some(stars) = info.github_stars else {
         return match info.kind {
-            CompilerPresetKind::Builtin => "n/a".into(),
+            CompilerPresetKind::Builtin => i18n::text(language, Text::NotApplicable).into(),
             CompilerPresetKind::Environment
             | CompilerPresetKind::Config
-            | CompilerPresetKind::Agent => "not configured".into(),
+            | CompilerPresetKind::Agent => i18n::text(language, Text::NotConfigured).into(),
         };
     };
     if stars >= 1_000 {
@@ -4539,12 +4654,21 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         )),
     ]);
     lines.extend(readiness_lines(pending_report.as_ref(), 6, language));
+    let can_regenerate_handoff = validation_can_regenerate_handoff(&pending_validation);
     lines.extend([
         if pending_validation.state == LaunchValidationState::Blocked {
             Line::from(Span::styled(
-                i18n::text(language, Text::LaunchReviewDisabled),
+                if can_regenerate_handoff {
+                    i18n::text(language, Text::RegenerateBeforeLaunch)
+                } else {
+                    i18n::text(language, Text::LaunchReviewDisabled)
+                },
                 Style::default()
-                    .fg(theme::red())
+                    .fg(if can_regenerate_handoff {
+                        theme::gold()
+                    } else {
+                        theme::red()
+                    })
                     .add_modifier(Modifier::BOLD),
             ))
         } else {
@@ -4556,7 +4680,11 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         Line::raw(""),
         Line::from(Span::styled(
             if pending_validation.state == LaunchValidationState::Blocked {
-                if language == crate::core::config::UiLanguage::ZhHans {
+                if can_regenerate_handoff && language == crate::core::config::UiLanguage::ZhHans {
+                    "j/k 选择目标   enter 重新生成   y 不可用   Esc 取消"
+                } else if can_regenerate_handoff {
+                    "j/k choose target   enter regenerate   y unavailable   Esc cancel"
+                } else if language == crate::core::config::UiLanguage::ZhHans {
                     "j/k 选择目标   enter/y 已阻塞   Esc 取消"
                 } else {
                     "j/k choose target   enter/y blocked   Esc cancel"
@@ -4795,13 +4923,25 @@ fn validation_summary_text(
 }
 
 fn localize_validation_detail(language: crate::core::config::UiLanguage, detail: &str) -> String {
-    if detail.contains("raw source map mismatch")
-        && detail.contains("generated_by ")
-        && detail.contains(" vs compiler ")
-    {
+    if is_stale_handoff_compiler_mismatch(detail) {
         return i18n::text(language, Text::HandoffRegenerateRequired).to_string();
     }
     detail.to_string()
+}
+
+fn validation_can_regenerate_handoff(validation: &crate::core::model::LaunchValidation) -> bool {
+    validation.state == LaunchValidationState::Blocked
+        && !validation.reasons.is_empty()
+        && validation
+            .reasons
+            .iter()
+            .all(|reason| is_stale_handoff_compiler_mismatch(reason))
+}
+
+fn is_stale_handoff_compiler_mismatch(reason: &str) -> bool {
+    reason.contains("raw source map mismatch")
+        && reason.contains("generated_by ")
+        && reason.contains(" vs compiler ")
 }
 
 fn validation_color(state: LaunchValidationState) -> Color {
@@ -6336,7 +6476,33 @@ mod tests {
         assert_screen_contains(&screen, "stars:");
         assert_screen_contains(&screen, "n/a");
         assert_screen_contains(&screen, "https://github.com/Gunsio/moonbox");
-        assert_screen_contains(&screen, "j/k choose");
+        assert_screen_contains(&screen, "j/k Choose");
+    }
+
+    #[test]
+    fn skill_picker_uses_simplified_chinese_chrome_when_configured() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.set_ui_preferences_for_test(crate::core::config::UiPreferencesConfig {
+            language: crate::core::config::UiLanguage::ZhHans,
+            theme: crate::core::config::UiThemeName::Moonbox,
+        });
+        app.show_skill_picker = true;
+
+        let screen = render_text(&app, 140, 40);
+
+        assert_screen_contains(&screen, "Skill 选择器");
+        assert_screen_contains(&screen, "选择编译 Skill");
+        assert_screen_contains(&screen, "压缩与兼容性由可替换的编译 skill 提供");
+        assert_screen_contains(&screen, "engineering-handoff");
+        assert_screen_contains(&screen, "警告");
+        assert_screen_contains(&screen, "内置");
+        assert_screen_contains(&screen, "已启用");
+        assert_screen_contains(&screen, "热度:");
+        assert_screen_contains(&screen, "不适用");
+        assert_screen_contains(&screen, "链接:");
+        assert_screen_contains(&screen, "j/k 选择");
+        assert!(!screen.contains("Choose compiler skill"), "{screen}");
+        assert!(!screen.contains("stars:"), "{screen}");
     }
 
     #[test]
@@ -6571,7 +6737,8 @@ mod tests {
         assert_screen_contains(&screen, "选择目标 CLI");
         assert_screen_contains(&screen, "当前 handoff 由其他 skill/compiler 生成");
         assert_screen_contains(&screen, "请用当前 skill 重新生成后再启动");
-        assert_screen_contains(&screen, "校验通过后才能进入启动确认");
+        assert_screen_contains(&screen, "按 Enter 用当前 skill 重新生成 handoff");
+        assert_screen_contains(&screen, "enter 重新生成");
         assert!(!screen.contains("generated_by"), "{screen}");
         assert!(!screen.contains(" vs compiler "), "{screen}");
     }

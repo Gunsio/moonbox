@@ -783,7 +783,8 @@ can be switched to Simplified Chinese; themes are Moonbox, Tokyo Night, and
 Gruvbox. Settings previews language and theme changes before saving, marks
 unsaved rows, supports reset, and persists only to Moonbox config. UI
 translation covers Moonbox chrome such as the header, session inventory,
-timeline/details/action panels, Settings, Launch, and Handoff Review labels;
+timeline/details/action panels, Settings, Skill Picker, Launch, and Handoff
+Review labels;
 session transcripts, prompts, agent output, tool output, code, paths, cwd,
 branch names, source metadata, and generated handoff content are never
 translated or rewritten.
@@ -1322,9 +1323,9 @@ Stable interfaces matter more than any single framework:
   semantic themes. The Settings panel supports row focus, h/l or space changes,
   reset, unsaved indicators, and persistence to Moonbox config only. UI i18n
   covers the header, session inventory, timeline/details/action panels,
-  Settings, Launch, and Handoff Review labels while preserving source session
-  transcripts, prompts, agent output, tool output, code, paths, cwd, branch
-  names, metadata, and handoff content byte-for-byte.
+  Settings, Skill Picker, Launch, and Handoff Review labels while preserving
+  source session transcripts, prompts, agent output, tool output, code, paths,
+  cwd, branch names, metadata, and handoff content byte-for-byte.
 - M92: Remote / SSH Session Detail Parity; SSH data spaces now hydrate selected
   session details from the remote `compile-request --json` response, preserving
   remote-computed bounded anatomy in the same Details / Zoom Details rendering
