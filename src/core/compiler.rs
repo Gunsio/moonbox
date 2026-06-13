@@ -102,6 +102,8 @@ pub const DEFAULT_COMPILER_ID: &str = "engineering-handoff";
 pub const FIXTURE_COMPILER_IDS: [&str; 3] =
     [DEFAULT_COMPILER_ID, "bugfix-continuation", "design-review"];
 const DEFAULT_PROCESS_TIMEOUT_MS: u64 = 30_000;
+const COMMUNITY_HANDOFF_SKILL_HOMEPAGE: &str =
+    "https://github.com/mattpocock/skills/tree/main/skills/productivity/handoff";
 
 pub trait CapsuleCompiler {
     fn compile(
@@ -595,7 +597,7 @@ pub fn compiler_catalog_entries() -> Vec<CompilerPresetInfo> {
                                 skill.description.as_str()
                             }
                         )),
-                        homepage: None,
+                        homepage: handoff_skill_homepage(&skill),
                         github_stars: None,
                     },
                 );
@@ -631,11 +633,13 @@ fn missing_handoff_skill_info(runner: AgentRunner) -> CompilerPresetInfo {
             "{} runner placeholder for the community `handoff` skill.",
             runner.label()
         )),
-        homepage: Some(
-            "https://github.com/mattpocock/skills/tree/main/skills/productivity/handoff".into(),
-        ),
+        homepage: Some(COMMUNITY_HANDOFF_SKILL_HOMEPAGE.into()),
         github_stars: None,
     }
+}
+
+fn handoff_skill_homepage(skill: &handoff::HandoffSkill) -> Option<String> {
+    (skill.id == "handoff").then(|| COMMUNITY_HANDOFF_SKILL_HOMEPAGE.into())
 }
 
 pub fn compiler_is_builtin(id: &str) -> bool {
@@ -1233,6 +1237,27 @@ sleep 1
             info.homepage.as_deref(),
             Some("https://github.com/mattpocock/skills/tree/main/skills/productivity/handoff")
         );
+    }
+
+    #[test]
+    fn installed_generic_handoff_skill_keeps_community_homepage() {
+        let skill = handoff::HandoffSkill {
+            id: "handoff".into(),
+            name: "handoff".into(),
+            description: "Compact the current conversation into a handoff document.".into(),
+            path: PathBuf::from("/skills/handoff/SKILL.md"),
+        };
+
+        assert_eq!(
+            handoff_skill_homepage(&skill).as_deref(),
+            Some(COMMUNITY_HANDOFF_SKILL_HOMEPAGE)
+        );
+
+        let custom = handoff::HandoffSkill {
+            id: "custom-handoff".into(),
+            ..skill
+        };
+        assert_eq!(handoff_skill_homepage(&custom), None);
     }
 
     #[test]

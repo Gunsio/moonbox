@@ -643,14 +643,18 @@ single install-hint skill row rather than Codex / Claude runner choices. The
 CLI still accepts explicit `--compiler agent:<runner>:<skill>` ids and
 `default_compiler` values for automation after reviewing preflight state. Codex
 handoff generation uses the official `openai-codex`
-Python SDK with `Sandbox.read_only`; install it with `pip install openai-codex`,
-set `MOONBOX_CODEX_SDK_PYTHON` when the SDK lives outside `python3`, and use
-`MOONBOX_CODEX_BIN` only to intentionally point the SDK at a specific Codex
+Python SDK with `Sandbox.read_only`; the `codex` CLI alone is not the Python
+SDK. Moonbox scans common Python interpreters for `openai_codex`, recommends a
+Python 3.10+ install command when missing, and supports
+`MOONBOX_CODEX_SDK_PYTHON` when the SDK lives in a venv or non-default Python.
+Use `MOONBOX_CODEX_BIN` only to intentionally point the SDK at a specific Codex
 runtime. Claude handoff generation uses the Claude Agent SDK through a temporary
 local plugin bridge, filters the run to the selected `plugin:skill`, and uses
-`permission_mode="dontAsk"` with only the Skill tool allowed. Claude requires
-SDK/provider credentials such as `ANTHROPIC_API_KEY`, Bedrock, or Vertex
-configuration. In both cases Moonbox builds a bounded read-only context pack
+`permission_mode="dontAsk"` with only the Skill tool allowed. The `claude` CLI
+alone is likewise not the Python SDK; Moonbox scans for `claude_agent_sdk` and
+supports `MOONBOX_CLAUDE_AGENT_SDK_PYTHON` for explicit interpreter selection.
+Claude requires SDK/provider credentials such as `ANTHROPIC_API_KEY`, Bedrock,
+or Vertex configuration. In both cases Moonbox builds a bounded read-only context pack
 from the selected rewind window, session index, compact frontier, tool and
 approval evidence, file changes, attachments, raw references, and redaction
 report; the runner does not get permission to scan or mutate source session
@@ -826,9 +830,10 @@ Moonbox has two separate actions for a selected session:
 - `x`: choose a target CLI, then review a `target_handoff` command before
   launching or copying it. `H` and `t` remain compatibility aliases.
 - `S`: open Skill Picker. Agent-backed handoff rows are collapsed by skill and
-  show installed/local path or install source; runner SDK setup is checked
-  before launch. Built-in fallback rows are labeled as draft templates. Press
-  `y` to copy the skill path or install source.
+  show installed/local path, third-party provider/source link when known, or
+  install source; runner SDK setup is checked before launch. Built-in fallback
+  rows are labeled as draft templates. Press `y` to copy the skill path or
+  install source.
 - `,`: open Settings. M95 exposes Smart Enter / tmux jump there with preview and
   persistence; hooks install/uninstall remains a CLI command.
 
@@ -845,7 +850,9 @@ message; closing the panel keeps the in-process handoff job running, and opening
 the target picker again restores the pending or ready review unless Moonbox has
 exited. If generation fails, the Launch panel stays open with the attempted
 skill/compiler, elapsed time, failure reason, and `Enter` retry / `S` choose
-skill actions. `G` jumps back to the bottom and `gg` jumps to the top. Pressing `r`
+skill actions. When Skill Picker is opened from Launch, `enter` applies the
+selected handoff skill and starts background review generation immediately.
+`G` jumps back to the bottom and `gg` jumps to the top. Pressing `r`
 in that review restores the terminal first, launches the local target CLI, then
 returns to Moonbox with a
 three-action result panel: run again, copy command, or return. For real sessions
@@ -1363,6 +1370,10 @@ Stable interfaces matter more than any single framework:
   skill/compiler, elapsed time, exact reason, retry, and choose-skill actions
   instead of flashing a transient popup and dropping the user back into an
   unclear blocked state.
+- M96.6: Skill Picker selection flow; the picker now receives keys while it is
+  layered above Launch, so `Enter` selects the handoff skill and immediately
+  starts background Review generation. Installed community `handoff` skills show
+  the third-party provider and GitHub source link alongside the local path.
 - M92: Remote / SSH Session Detail Parity; SSH data spaces now hydrate selected
   session details from the remote `compile-request --json` response, preserving
   remote-computed bounded anatomy in the same Details / Zoom Details rendering

@@ -1739,12 +1739,12 @@ impl App {
             return;
         }
 
-        if self.show_launch {
-            self.handle_launch_key(key);
-            return;
-        }
         if self.has_overlay() {
             self.handle_overlay_key(key);
+            return;
+        }
+        if self.show_launch {
+            self.handle_launch_key(key);
             return;
         }
 
@@ -2714,11 +2714,15 @@ impl App {
         self.selected_compiler = self.pending_compiler;
         self.data.capsule.compiler = self.data.compilers[self.selected_compiler].clone();
         let selected_label = self.skill_picker_candidate_label(self.selected_compiler);
+        let continue_launch = self.show_launch;
         self.show_skill_picker = false;
         self.launch_review_error = None;
         self.modal_scroll = 0;
         self.set_status(format!("Skill: {selected_label}"));
         self.pending_g = false;
+        if continue_launch {
+            self.confirm_launch_target();
+        }
     }
 
     fn copy_pending_skill_reference(&mut self) {
@@ -5573,6 +5577,31 @@ Host devbox
             app.status_message,
             "Choose an AI handoff skill before Handoff Review"
         );
+    }
+
+    #[test]
+    fn skill_picker_enter_from_launch_applies_skill_and_starts_review() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.data.sessions[app.selected_session].source_provenance = SourceProvenance::Real;
+        app.selected_compiler = compiler_index_for_id(&app.data, "engineering-handoff", 0);
+        app.data.capsule.compiler = "engineering-handoff".into();
+
+        app.handle_key(key('H'));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(app.show_launch);
+        assert!(app.show_skill_picker);
+        let pending_compiler = app.pending_compiler;
+        let pending_id = app.data.compilers[pending_compiler].clone();
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(!app.show_skill_picker);
+        assert!(app.show_launch);
+        assert_eq!(app.selected_compiler, pending_compiler);
+        assert_eq!(app.data.capsule.compiler, pending_id);
+        assert!(app.is_launch_review_pending());
+        assert!(!app.launch_review);
     }
 
     #[test]
