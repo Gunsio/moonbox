@@ -5,6 +5,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+use crate::moonbox_theme;
+
 use super::model::{CliTool, TimelineKind};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -105,30 +107,79 @@ pub enum UiThemeName {
     Moonbox,
     TokyoNight,
     Gruvbox,
+    LuoshenSwan,
+    LuoshenDragon,
+    LuoshenChrysanthemum,
+    LuoshenPine,
 }
 
 impl UiThemeName {
+    const SELECTABLE: [Self; 5] = [
+        Self::Moonbox,
+        Self::LuoshenSwan,
+        Self::LuoshenDragon,
+        Self::LuoshenChrysanthemum,
+        Self::LuoshenPine,
+    ];
+
     pub fn label(self) -> &'static str {
+        moonbox_theme::ThemeId::from(self).label()
+    }
+
+    pub fn ascii_icon(self) -> &'static str {
+        moonbox_theme::ThemeId::from(self).ascii_icon()
+    }
+
+    pub fn normalized_for_ui(self) -> Self {
         match self {
-            Self::Moonbox => "Moonbox",
-            Self::TokyoNight => "Tokyo Night",
-            Self::Gruvbox => "Gruvbox",
+            Self::TokyoNight | Self::Gruvbox => Self::Moonbox,
+            theme => theme,
         }
     }
 
     pub fn next(self) -> Self {
-        match self {
-            Self::Moonbox => Self::TokyoNight,
-            Self::TokyoNight => Self::Gruvbox,
-            Self::Gruvbox => Self::Moonbox,
-        }
+        let current = self.normalized_for_ui();
+        let index = Self::SELECTABLE
+            .iter()
+            .position(|theme| *theme == current)
+            .unwrap_or_default();
+        Self::SELECTABLE[(index + 1) % Self::SELECTABLE.len()]
     }
 
     pub fn previous(self) -> Self {
-        match self {
-            Self::Moonbox => Self::Gruvbox,
-            Self::TokyoNight => Self::Moonbox,
-            Self::Gruvbox => Self::TokyoNight,
+        let current = self.normalized_for_ui();
+        let index = Self::SELECTABLE
+            .iter()
+            .position(|theme| *theme == current)
+            .unwrap_or_default();
+        Self::SELECTABLE[(index + Self::SELECTABLE.len() - 1) % Self::SELECTABLE.len()]
+    }
+}
+
+impl From<UiThemeName> for moonbox_theme::ThemeId {
+    fn from(theme: UiThemeName) -> Self {
+        match theme {
+            UiThemeName::Moonbox => Self::Moonbox,
+            UiThemeName::TokyoNight => Self::TokyoNight,
+            UiThemeName::Gruvbox => Self::Gruvbox,
+            UiThemeName::LuoshenSwan => Self::LuoshenSwan,
+            UiThemeName::LuoshenDragon => Self::LuoshenDragon,
+            UiThemeName::LuoshenChrysanthemum => Self::LuoshenChrysanthemum,
+            UiThemeName::LuoshenPine => Self::LuoshenPine,
+        }
+    }
+}
+
+impl From<moonbox_theme::ThemeId> for UiThemeName {
+    fn from(theme: moonbox_theme::ThemeId) -> Self {
+        match theme {
+            moonbox_theme::ThemeId::Moonbox => Self::Moonbox,
+            moonbox_theme::ThemeId::TokyoNight => Self::TokyoNight,
+            moonbox_theme::ThemeId::Gruvbox => Self::Gruvbox,
+            moonbox_theme::ThemeId::LuoshenSwan => Self::LuoshenSwan,
+            moonbox_theme::ThemeId::LuoshenDragon => Self::LuoshenDragon,
+            moonbox_theme::ThemeId::LuoshenChrysanthemum => Self::LuoshenChrysanthemum,
+            moonbox_theme::ThemeId::LuoshenPine => Self::LuoshenPine,
         }
     }
 }
@@ -139,6 +190,15 @@ pub struct UiPreferencesConfig {
     pub language: UiLanguage,
     #[serde(default)]
     pub theme: UiThemeName,
+}
+
+impl UiPreferencesConfig {
+    fn normalized_for_ui(self) -> Self {
+        Self {
+            language: self.language,
+            theme: self.theme.normalized_for_ui(),
+        }
+    }
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -265,7 +325,7 @@ pub fn load_hooks_config() -> HooksConfig {
 #[cfg(not(test))]
 pub fn load_ui_preferences_config() -> UiPreferencesConfig {
     load_user_config()
-        .map(|config| config.ui)
+        .map(|config| config.ui.normalized_for_ui())
         .unwrap_or_default()
 }
 
@@ -282,7 +342,7 @@ fn save_ui_preferences_config_to_path(
     ui: UiPreferencesConfig,
 ) -> Result<UiPreferencesConfig, Box<dyn std::error::Error>> {
     let mut user_config = load_user_config_from_path(path).unwrap_or_default();
-    user_config.ui = ui;
+    user_config.ui = ui.normalized_for_ui();
     save_user_config_to_path(path, &user_config)?;
     Ok(user_config.ui)
 }
@@ -301,7 +361,7 @@ fn save_ui_preferences_and_smart_enter_to_path(
     smart_enter_tmux: bool,
 ) -> Result<(UiPreferencesConfig, HooksConfig), Box<dyn std::error::Error>> {
     let mut user_config = load_user_config_from_path(path).unwrap_or_default();
-    user_config.ui = ui;
+    user_config.ui = ui.normalized_for_ui();
     user_config.hooks.smart_enter_tmux = smart_enter_tmux;
     save_user_config_to_path(path, &user_config)?;
     Ok((user_config.ui, user_config.hooks))
@@ -420,6 +480,7 @@ mod tests {
         assert_eq!(config.hooks.spool_max_bytes, default_hook_spool_max_bytes());
         assert_eq!(config.ui.language, UiLanguage::ZhHans);
         assert_eq!(config.ui.theme, UiThemeName::TokyoNight);
+        assert_eq!(config.ui.theme.normalized_for_ui(), UiThemeName::Moonbox);
         assert_eq!(config.compiler_presets[0].args, ["--mode", "handoff"]);
         assert_eq!(
             config.compiler_presets[0].description.as_deref(),
@@ -433,6 +494,22 @@ mod tests {
         assert_eq!(config.ssh_hosts[0].name, "dev");
         assert_eq!(config.ssh_hosts[0].host, "dev.example.com");
         assert_eq!(config.starred_sessions, ["codex:session-1"]);
+    }
+
+    #[test]
+    fn parses_luoshen_theme_ids() {
+        let config = serde_json::from_str::<UserConfig>(
+            r#"{
+  "ui": {"language": "english", "theme": "luoshen-chrysanthemum"}
+}"#,
+        )
+        .expect("config");
+
+        assert_eq!(config.ui.language, UiLanguage::English);
+        assert_eq!(config.ui.theme, UiThemeName::LuoshenChrysanthemum);
+        assert_eq!(config.ui.theme.label(), "荣曜秋菊 / Radiant Chrysanthemum");
+        assert_eq!(config.ui.theme.next(), UiThemeName::LuoshenPine);
+        assert_eq!(config.ui.theme.previous(), UiThemeName::LuoshenDragon);
     }
 
     #[test]
@@ -474,6 +551,7 @@ mod tests {
         assert_eq!(saved.hooks.spool_max_files, 2);
         assert_eq!(saved.ui.language, UiLanguage::ZhHans);
         assert_eq!(saved.ui.theme, UiThemeName::Gruvbox);
+        assert_eq!(saved.ui.theme.normalized_for_ui(), UiThemeName::Moonbox);
         assert_eq!(saved.compiler_presets.len(), 1);
         assert!(!saved.compiler_presets[0].enabled);
         assert_eq!(saved.ssh_hosts.len(), 1);
@@ -541,7 +619,7 @@ mod tests {
             &path,
             UiPreferencesConfig {
                 language: UiLanguage::ZhHans,
-                theme: UiThemeName::TokyoNight,
+                theme: UiThemeName::LuoshenSwan,
             },
             true,
         )
@@ -557,7 +635,7 @@ mod tests {
             Some("/tmp/moonbox/events.jsonl")
         );
         assert_eq!(saved.ui.language, UiLanguage::ZhHans);
-        assert_eq!(saved.ui.theme, UiThemeName::TokyoNight);
+        assert_eq!(saved.ui.theme, UiThemeName::LuoshenSwan);
         assert_eq!(saved.ssh_hosts[0].name, "prod");
         assert_eq!(saved.starred_sessions, ["codex:abc"]);
     }
@@ -588,14 +666,14 @@ mod tests {
             &path,
             UiPreferencesConfig {
                 language: UiLanguage::ZhHans,
-                theme: UiThemeName::TokyoNight,
+                theme: UiThemeName::LuoshenDragon,
             },
         )
         .expect("save ui preferences");
         let saved = load_user_config_from_path(&path).expect("saved");
 
         assert_eq!(ui.language, UiLanguage::ZhHans);
-        assert_eq!(ui.theme, UiThemeName::TokyoNight);
+        assert_eq!(ui.theme, UiThemeName::LuoshenDragon);
         assert!(saved.hooks.enabled);
         assert!(saved.hooks.smart_enter_tmux);
         assert_eq!(
@@ -633,7 +711,7 @@ mod tests {
             &path,
             UiPreferencesConfig {
                 language: UiLanguage::ZhHans,
-                theme: UiThemeName::Gruvbox,
+                theme: UiThemeName::LuoshenPine,
             },
             true,
         )
@@ -641,11 +719,11 @@ mod tests {
         let saved = load_user_config_from_path(&path).expect("saved");
 
         assert_eq!(ui.language, UiLanguage::ZhHans);
-        assert_eq!(ui.theme, UiThemeName::Gruvbox);
+        assert_eq!(ui.theme, UiThemeName::LuoshenPine);
         assert!(hooks.enabled);
         assert!(hooks.smart_enter_tmux);
         assert_eq!(saved.ui.language, UiLanguage::ZhHans);
-        assert_eq!(saved.ui.theme, UiThemeName::Gruvbox);
+        assert_eq!(saved.ui.theme, UiThemeName::LuoshenPine);
         assert_eq!(saved.compiler_presets[0].id, "handoff");
         assert_eq!(saved.ssh_hosts[0].name, "prod");
         assert_eq!(saved.starred_sessions, ["codex:abc"]);

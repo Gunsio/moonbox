@@ -1448,6 +1448,42 @@ mod tests {
     }
 
     #[test]
+    fn timeline_hides_wrapped_skill_context_blocks() {
+        let root = test_root("timeline-skill-context");
+        write_session(
+            &root,
+            "2026/06/06/rollout-2026-06-06T08-00-00-skill-context.jsonl",
+            r#"{"timestamp":"2026-06-06T08:00:00.000Z","type":"session_meta","payload":{"id":"codex-skill-context","cwd":"/repo"}}
+{"timestamp":"2026-06-06T08:01:00.000Z","type":"event_msg","payload":{"type":"user_message","message":"[ <skill> <name>qc-login</name> <path>/Users/me/.codex/skills/qc-login/SKILL.md</path> --- name: qc-login description: prepare browser state"}}
+{"timestamp":"2026-06-06T08:02:00.000Z","type":"event_msg","payload":{"type":"user_message","message":"Open the target page and capture evidence"}}
+"#,
+        );
+
+        let timeline = CodexSourceAdapter::new(&root)
+            .load_timeline("codex-skill-context")
+            .expect("timeline");
+
+        let user_events = timeline
+            .events
+            .iter()
+            .filter(|event| event.kind == TimelineKind::User)
+            .collect::<Vec<_>>();
+        assert_eq!(user_events.len(), 1);
+        assert_eq!(
+            user_events[0].detail,
+            "Open the target page and capture evidence"
+        );
+        assert!(
+            timeline
+                .events
+                .iter()
+                .all(|event| !event.detail.contains("<skill>")),
+            "{:?}",
+            timeline.events
+        );
+    }
+
+    #[test]
     fn timeline_detail_keeps_longer_assistant_body_for_zoomed_review() {
         let root = test_root("timeline-long-detail");
         let long_detail = format!(

@@ -172,11 +172,21 @@ and this project uses semantic versioning once tagged releases start.
   to the guarded resume/handoff path without creating panes, sending input, or
   mutating source stores.
 - TUI UI preferences in Settings: English is the default language, Simplified
-  Chinese is optional, and Moonbox / Tokyo Night / Gruvbox themes are backed by
-  semantic color tokens. Settings previews language and theme drafts before
-  saving, supports reset and unsaved row indicators, persists only to Moonbox
-  config, and keeps session transcripts, prompts, agent output, tool output,
-  code, paths, cwd, branch names, metadata, and handoff content unmodified.
+  Chinese is optional, and Moonbox plus the four Luoshen product themes are
+  backed by semantic color tokens and compact image-linked ASCII sigils: `~>`
+  for startled swan flight, `S~` for the coursing dragon curve, `*o` for the
+  radiant chrysanthemum bloom, and `/\` for the lush pine crown. Settings
+  previews language and theme values before saving, supports reset and unsaved
+  row indicators, persists only to Moonbox config, and keeps session
+  transcripts, prompts, agent output, tool output, code, paths, cwd, branch
+  names, metadata, and handoff content unmodified. Deprecated Tokyo Night /
+  Gruvbox palettes stay in the reusable theme crate for compatibility but are no
+  longer Moonbox Settings choices.
+- M97 Luoshen TUI Theme Pack: Moonbox's semantic theme layer now lives in the
+  reusable `moonbox-theme` workspace crate with stable theme ids, metadata,
+  provenance, Ratatui adapters, image-linked ASCII sigils, and truecolor / ANSI
+  / `NO_COLOR` fallback behavior. The TUI ships the first-party Luoshen family:
+  Startled Swan, Coursing Dragon, Radiant Chrysanthemum, and Lush Pine.
 - SSH data-space selected-session details now use the remote
   `compile-request --json` response as the detail source, preserving bounded
   anatomy computed on the remote host instead of trying to read remote paths on

@@ -977,6 +977,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "moonbox-theme"
+version = "0.1.2"
+dependencies = [
+ "ratatui",
+]
+
+[[package]]
 name = "moxcms"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
