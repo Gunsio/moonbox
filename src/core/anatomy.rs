@@ -8,7 +8,9 @@ use std::{
 use serde_json::Value;
 
 use super::{
-    local_jsonl::find_token_count,
+    local_jsonl::{
+        find_token_count, is_moonbox_handoff_control_text, is_skill_context_text, text_from_value,
+    },
     model::{
         AnatomyMetric, AnatomySignal, CliTool, CompactFrontier, SessionAnatomy,
         SessionAnatomyStatus, SessionSidecarSummary, SessionSummary, TokenBreakdown,
@@ -316,10 +318,40 @@ fn event_key(cli: CliTool, value: &Value, record_type: &str) -> String {
 }
 
 fn content_keys(cli: CliTool, value: &Value, record_type: &str) -> Vec<String> {
-    match cli {
+    let mut keys = match cli {
         CliTool::Codex => codex_content_keys(value),
         CliTool::Claude => claude_content_keys(value, record_type),
         CliTool::Hermes => Vec::new(),
+    };
+    if let Some(text) = record_text_for_context_profile(cli, value) {
+        if is_skill_context_text(&text) {
+            push_unique(&mut keys, "control:skill");
+        }
+        if is_moonbox_handoff_control_text(&text) {
+            push_unique(&mut keys, "control:handoff");
+        }
+    }
+    keys
+}
+
+fn record_text_for_context_profile(cli: CliTool, value: &Value) -> Option<String> {
+    match cli {
+        CliTool::Codex => value
+            .get("payload")
+            .and_then(text_from_value)
+            .or_else(|| text_from_value(value)),
+        CliTool::Claude => value
+            .get("message")
+            .and_then(|message| message.get("content"))
+            .and_then(text_from_value)
+            .or_else(|| text_from_value(value)),
+        CliTool::Hermes => text_from_value(value),
+    }
+}
+
+fn push_unique(keys: &mut Vec<String>, key: &str) {
+    if !keys.iter().any(|existing| existing == key) {
+        keys.push(key.into());
     }
 }
 
@@ -813,6 +845,36 @@ mod tests {
         assert_eq!(
             anatomy.token_profile.as_ref().map(|tokens| tokens.total),
             Some(150)
+        );
+
+        cleanup(root);
+    }
+
+    #[test]
+    fn codex_anatomy_counts_skill_control_blocks_without_timeline_exposure() {
+        let root = temp_root("codex-skill-control");
+        fs::create_dir_all(&root).expect("temp root");
+        let source_path = root.join("session.jsonl");
+        fs::write(
+            &source_path,
+            [
+                r#"{"type":"session_meta","payload":{"id":"codex-1","cwd":"/repo"}}"#,
+                r#"{"type":"event_msg","payload":{"type":"user_message","message":"[ <skill> <name>qc-login</name> <path>/Users/me/.codex/skills/qc-login/SKILL.md</path> --- name: qc-login description: prepare browser state"}}"#,
+                r#"{"type":"event_msg","payload":{"type":"user_message","message":"real user request"}}"#,
+            ]
+            .join("\n"),
+        )
+        .expect("write codex fixture");
+
+        let anatomy = analyze_session(&test_session(CliTool::Codex, &source_path));
+
+        assert!(
+            anatomy
+                .content_profile
+                .iter()
+                .any(|metric| metric.label == "control:skill" && metric.count == 1),
+            "{:?}",
+            anatomy.content_profile
         );
 
         cleanup(root);

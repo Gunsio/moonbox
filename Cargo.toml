@@ -11,6 +11,20 @@ readme = "README.md"
 keywords = ["cli", "tui", "ai", "handoff", "session"]
 categories = ["command-line-utilities", "development-tools"]
 rust-version = "1.88"
+include = [
+  "/Cargo.lock",
+  "/Cargo.toml",
+  "/CHANGELOG.md",
+  "/LICENSE",
+  "/README.md",
+  "/fixtures/**",
+  "/src/**",
+  "/tests/**",
+]
+
+[workspace]
+members = ["crates/moonbox-theme"]
+resolver = "3"
 
 [[bin]]
 name = "moon"

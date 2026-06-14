@@ -596,7 +596,8 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     let title = if app.search_query.is_empty() {
-        stable_panel_title(
+        themed_session_panel_title(
+            app,
             format!(
                 "{} · {} {}",
                 i18n::text(language, Text::SessionsTitle),
@@ -606,7 +607,8 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
             area,
         )
     } else if area.width < 28 {
-        stable_panel_title(
+        themed_session_panel_title(
+            app,
             format!(
                 "{} /{}",
                 i18n::text(language, Text::SessionsTitle),
@@ -615,7 +617,8 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
             area,
         )
     } else {
-        stable_panel_title(
+        themed_session_panel_title(
+            app,
             format!(
                 "{} · {} {}",
                 i18n::text(language, Text::SessionsTitle),
@@ -2040,6 +2043,17 @@ fn session_anatomy_summary_lines(
             anatomy_status_style(anatomy.status),
         ));
     }
+    if let Some(metric) = anatomy
+        .content_profile
+        .iter()
+        .find(|metric| metric.label == "control:skill")
+    {
+        lines.push(metadata_line(
+            "Skill Usage",
+            &control_block_count(metric.count),
+            Style::default().fg(theme::cyan()),
+        ));
+    }
     lines
 }
 
@@ -2257,6 +2271,14 @@ fn plural_rows(count: usize) -> String {
         "1 row".into()
     } else {
         format!("{count} rows")
+    }
+}
+
+fn control_block_count(count: usize) -> String {
+    if count == 1 {
+        "1 control block".into()
+    } else {
+        format!("{count} control blocks")
     }
 }
 
@@ -2918,6 +2940,7 @@ fn render_settings(frame: &mut Frame, root: Rect, app: &App) {
     let area = modal_area(root, 70, 58);
     frame.render_widget(Clear, area);
     let language = app.effective_language();
+    let row_width = usize::from(area.width.saturating_sub(4));
     let route = app.settings_enter_route_preview();
     let hooks = if app.hooks_enabled() {
         (i18n::text(language, Text::Enabled), theme::green())
@@ -2952,33 +2975,36 @@ fn render_settings(frame: &mut Frame, root: Rect, app: &App) {
                 Style::default().fg(theme::muted()),
             ),
         ]),
-        settings_row(
+        settings_row(SettingsRow {
             app,
             language,
-            SettingsField::Language,
-            i18n::text(language, Text::Language),
-            i18n::language_name(language, app.settings_language),
-            i18n::language_name(language, app.ui_language()),
-            app.settings_language_dirty(),
-        ),
-        settings_row(
+            row_width,
+            field: SettingsField::Language,
+            label: i18n::text(language, Text::Language),
+            draft: i18n::language_name(language, app.settings_language),
+            saved: i18n::language_name(language, app.ui_language()),
+            dirty: app.settings_language_dirty(),
+        }),
+        settings_row(SettingsRow {
             app,
             language,
-            SettingsField::Theme,
-            i18n::text(language, Text::Theme),
-            app.settings_theme.label(),
-            app.ui_theme().label(),
-            app.settings_theme_dirty(),
-        ),
-        settings_row(
+            row_width,
+            field: SettingsField::Theme,
+            label: i18n::text(language, Text::Theme),
+            draft: app.settings_theme.label(),
+            saved: app.ui_theme().label(),
+            dirty: app.settings_theme_dirty(),
+        }),
+        settings_row(SettingsRow {
             app,
             language,
-            SettingsField::SmartEnter,
-            i18n::text(language, Text::SmartEnterTmux),
-            i18n::on_off(language, app.settings_smart_enter_tmux),
-            i18n::on_off(language, app.smart_enter_tmux_enabled()),
-            app.settings_smart_enter_dirty(),
-        ),
+            row_width,
+            field: SettingsField::SmartEnter,
+            label: i18n::text(language, Text::SmartEnterTmux),
+            draft: i18n::on_off(language, app.settings_smart_enter_tmux),
+            saved: i18n::on_off(language, app.smart_enter_tmux_enabled()),
+            dirty: app.settings_smart_enter_dirty(),
+        }),
         Line::raw(""),
         Line::from(Span::styled(
             i18n::text(language, Text::CurrentEnterRoute),
@@ -3039,16 +3065,19 @@ fn render_settings(frame: &mut Frame, root: Rect, app: &App) {
     );
 }
 
-fn settings_row(
-    app: &App,
+struct SettingsRow<'a> {
+    app: &'a App,
     language: crate::core::config::UiLanguage,
+    row_width: usize,
     field: SettingsField,
-    label: &str,
-    draft: &str,
-    saved: &str,
+    label: &'a str,
+    draft: &'a str,
+    saved: &'a str,
     dirty: bool,
-) -> Line<'static> {
-    let focused = app.settings_field_is_focused(field);
+}
+
+fn settings_row(row: SettingsRow<'_>) -> Line<'static> {
+    let focused = row.app.settings_field_is_focused(row.field);
     let marker = if focused { ">" } else { " " };
     let marker_color = if focused {
         theme::gold()
@@ -3060,38 +3089,122 @@ fn settings_row(
     } else {
         theme::blue()
     };
-    let state_color = if dirty { theme::gold() } else { theme::green() };
+    let state_color = if row.dirty {
+        theme::gold()
+    } else {
+        theme::green()
+    };
+    let state_label = if row.dirty {
+        i18n::text(row.language, Text::Unsaved)
+    } else {
+        i18n::text(row.language, Text::Saved)
+    };
+    let label_width = 22;
+    let marker_width = 2;
+    let gap_width = 2;
+    let status_width = display_width(i18n::text(row.language, Text::Unsaved))
+        .max(display_width(i18n::text(row.language, Text::Saved)))
+        .max(6);
+    let value_width = row
+        .row_width
+        .saturating_sub(marker_width + label_width + (gap_width * 3) + status_width);
+    let draft_preferred_width = 42;
+    let saved_preferred_width = 24;
+    let (draft_width, saved_width) =
+        settings_value_widths(value_width, draft_preferred_width, saved_preferred_width);
     Line::from(vec![
-        Span::styled(marker, Style::default().fg(marker_color)),
-        Span::raw(" "),
+        Span::styled(format!("{marker} "), Style::default().fg(marker_color)),
         Span::styled(
-            format!("{label:<22}"),
+            fit_display_width(row.label, label_width),
             Style::default().fg(label_color).add_modifier(if focused {
                 Modifier::BOLD
             } else {
                 Modifier::empty()
             }),
         ),
+        Span::raw(" ".repeat(gap_width)),
         Span::styled(
-            format!("{} {draft}", i18n::text(language, Text::Draft)),
-            Style::default().fg(if dirty { theme::gold() } else { theme::text() }),
+            fit_display_width(
+                &format!("{} {}", i18n::text(row.language, Text::Draft), row.draft),
+                draft_width,
+            ),
+            Style::default().fg(if row.dirty {
+                theme::gold()
+            } else {
+                theme::text()
+            }),
         ),
+        Span::raw(" ".repeat(gap_width)),
         Span::styled(
-            format!("   {} {saved}", i18n::text(language, Text::Saved)),
+            fit_display_width(
+                &format!("{} {}", i18n::text(row.language, Text::Saved), row.saved),
+                saved_width,
+            ),
             Style::default().fg(theme::muted()),
         ),
+        Span::raw(" ".repeat(gap_width)),
         Span::styled(
-            format!(
-                "   {}",
-                if dirty {
-                    i18n::text(language, Text::Unsaved)
-                } else {
-                    i18n::text(language, Text::Saved)
-                }
-            ),
+            fit_display_width(state_label, status_width),
             Style::default().fg(state_color),
         ),
     ])
+}
+
+fn settings_value_widths(
+    available: usize,
+    draft_preferred: usize,
+    saved_preferred: usize,
+) -> (usize, usize) {
+    if available >= draft_preferred + saved_preferred {
+        return (draft_preferred, available - draft_preferred);
+    }
+
+    let saved_minimum = saved_preferred.min(14);
+    let draft_minimum = draft_preferred.min(18);
+    if available >= draft_minimum + saved_minimum {
+        let saved = saved_preferred.min(available - draft_minimum);
+        return (available - saved, saved);
+    }
+
+    let saved = available.min(saved_minimum);
+    (available.saturating_sub(saved), saved)
+}
+
+fn fit_display_width(text: &str, width: usize) -> String {
+    let current_width = display_width(text);
+    if current_width <= width {
+        return pad_display_width(text.to_owned(), width);
+    }
+    if width == 0 {
+        return String::new();
+    }
+
+    let ellipsis = if width >= 3 {
+        "...".to_string()
+    } else {
+        ".".repeat(width)
+    };
+    let target_width = width.saturating_sub(display_width(&ellipsis));
+    let mut output = String::new();
+    let mut used = 0;
+    for character in text.chars() {
+        let character_width = character_display_width(character);
+        if used + character_width > target_width {
+            break;
+        }
+        output.push(character);
+        used += character_width;
+    }
+    output.push_str(&ellipsis);
+    pad_display_width(output, width)
+}
+
+fn pad_display_width(mut text: String, width: usize) -> String {
+    let current_width = display_width(&text);
+    if current_width < width {
+        text.push_str(&" ".repeat(width - current_width));
+    }
+    text
 }
 
 fn settings_effect(app: &App, language: crate::core::config::UiLanguage) -> &'static str {
@@ -6452,6 +6565,13 @@ fn stable_panel_title(content: String, area: Rect) -> String {
     format!(" {clipped:<width$} ")
 }
 
+fn themed_session_panel_title(app: &App, content: String, area: Rect) -> String {
+    stable_panel_title(
+        format!("{} {content}", app.effective_theme().ascii_icon()),
+        area,
+    )
+}
+
 fn key(label: &'static str) -> Span<'static> {
     Span::styled(
         format!(" {label} "),
@@ -6805,14 +6925,14 @@ mod tests {
         assert_screen_contains(&off_screen, "Settings");
         assert_screen_contains(&off_screen, "Language");
         assert_screen_contains(&off_screen, "Theme");
-        assert_screen_contains(&off_screen, "Draft Off");
+        assert_screen_contains(&off_screen, "Preview Off");
         assert_screen_contains(&off_screen, "Resume");
 
         app.handle_key(key('j'));
         app.handle_key(key('j'));
         app.handle_key(key(' '));
         let on_screen = render_text(&app, 150, 36);
-        assert_screen_contains(&on_screen, "Draft On");
+        assert_screen_contains(&on_screen, "Preview On");
         assert_screen_contains(&on_screen, "Unsaved");
         assert_screen_contains(&on_screen, "Jump");
         assert_screen_contains(&on_screen, "never translates session content");
@@ -6840,7 +6960,7 @@ mod tests {
         app.handle_key(key('j'));
         app.handle_key(key(' '));
         let theme_screen = render_text(&app, 150, 36);
-        assert_screen_contains(&theme_screen, "Tokyo Night");
+        assert_screen_contains(&theme_screen, "翩若惊鸿 / Startled Swan");
         assert_screen_contains(&theme_screen, "看下这个问题");
     }
 
@@ -6858,7 +6978,7 @@ mod tests {
         assert_screen_contains(&screen, "数据:");
         assert_screen_contains(&screen, "Handoff Skill:");
         assert_screen_contains(&screen, "本地");
-        assert_screen_contains(&screen, "会话 · 全部");
+        assert_screen_contains(&screen, "[] 会话 · 全部");
         assert_screen_contains(&screen, "时间线");
         assert_screen_contains(&screen, "会话详情");
         assert_screen_contains(&screen, "真实会话元数据");
@@ -6874,17 +6994,52 @@ mod tests {
         let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
         app.handle_key(key(','));
 
-        let moonbox = render_text(&app, 150, 36);
-        assert_screen_contains(&moonbox, "Moonbox");
+        let expected = [
+            "Moonbox",
+            "翩若惊鸿 / Startled Swan",
+            "婉若游龙 / Coursing Dragon",
+            "荣曜秋菊 / Radiant Chrysanthemum",
+            "华茂春松 / Lush Pine",
+        ];
+        app.handle_key(key('j'));
 
+        for (index, theme_name) in expected.iter().enumerate() {
+            if index > 0 {
+                app.handle_key(key(' '));
+            }
+            let screen = render_text(&app, 180, 36);
+            assert_screen_contains(&screen, theme_name);
+        }
+    }
+
+    #[test]
+    fn settings_overlay_aligns_long_theme_status_columns() {
+        let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.set_ui_preferences_for_test(crate::core::config::UiPreferencesConfig {
+            language: crate::core::config::UiLanguage::ZhHans,
+            theme: crate::core::config::UiThemeName::LuoshenDragon,
+        });
+        app.handle_key(key(','));
         app.handle_key(key('j'));
         app.handle_key(key(' '));
-        let tokyo = render_text(&app, 150, 36);
-        assert_screen_contains(&tokyo, "Tokyo Night");
 
-        app.handle_key(key(' '));
-        let gruvbox = render_text(&app, 150, 36);
-        assert_screen_contains(&gruvbox, "Gruvbox");
+        let screen = render_text(&app, 150, 36);
+        let theme_line = screen
+            .lines()
+            .find(|line| line.contains("主题") && line.contains("荣曜秋菊"))
+            .unwrap_or_else(|| panic!("missing theme settings row:\n{screen}"));
+
+        assert!(theme_line.contains("已保存 婉若游龙"), "{theme_line}");
+        assert!(theme_line.contains("未保存"), "{theme_line}");
+
+        let saved_index = theme_line.find("已保存 婉若游龙").expect("saved column");
+        let state_index = theme_line.rfind("未保存").expect("state column");
+        let saved_column = display_width(&theme_line[..saved_index]);
+        let state_column = display_width(&theme_line[..state_index]);
+        assert!(
+            state_column >= saved_column + display_width("已保存 婉若游龙") + 2,
+            "state column should stay separate from saved column: {theme_line}"
+        );
     }
 
     #[test]
@@ -7182,6 +7337,28 @@ mod tests {
         assert_screen_contains(&screen, "user 1 / assistant 1 / tool");
         assert_screen_contains(&screen, "4 / rewind 1");
         assert!(!screen.contains("shape U"), "{screen}");
+    }
+
+    #[test]
+    fn session_details_summary_surfaces_skill_control_usage() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.data.sessions[app.selected_session].anatomy =
+            Some(crate::core::model::SessionAnatomy {
+                status: SessionAnatomyStatus::Ready,
+                scan_scope: "full".into(),
+                analyzed_bytes: 4_096,
+                content_profile: vec![AnatomyMetric {
+                    label: "control:skill".into(),
+                    count: 1,
+                    bytes: 2_048,
+                }],
+                ..crate::core::model::SessionAnatomy::default()
+            });
+
+        let screen = render_text(&app, 140, 64);
+
+        assert_screen_contains(&screen, "Skill Usage");
+        assert_screen_contains(&screen, "1 control block");
     }
 
     #[test]

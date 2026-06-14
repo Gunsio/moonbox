@@ -8,7 +8,10 @@ use ratatui::{
 
 use crate::{
     app::App,
-    core::model::{CliTool, DoctorReport, VerificationStatus},
+    core::{
+        config::{UiLanguage, UiPreferencesConfig, UiThemeName},
+        model::{CliTool, DoctorReport, VerificationStatus},
+    },
 };
 
 use super::view;
@@ -21,6 +24,10 @@ const PADDING: usize = 28;
 
 pub fn docs_screenshot_svg(width: u16, height: u16) -> Result<String> {
     let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes)?;
+    app.set_ui_preferences_for_render(UiPreferencesConfig {
+        language: UiLanguage::English,
+        theme: UiThemeName::Moonbox,
+    });
     app.show_launch = true;
     app.launch_review = true;
     app.pending_target = CliTool::Hermes;

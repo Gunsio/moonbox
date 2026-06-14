@@ -20,6 +20,9 @@
 mod app;
 mod cli;
 pub(crate) mod core;
+#[allow(dead_code)]
+#[path = "theme_pack.rs"]
+pub(crate) mod moonbox_theme;
 mod tui;
 
 use clap::{CommandFactory, Parser};
