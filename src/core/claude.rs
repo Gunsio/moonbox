@@ -15,9 +15,9 @@ use super::{
         collect_project_jsonl_files, configured_session_limit, configured_session_scan_entry_limit,
         configured_session_summary_line_limit, discover_project_jsonl_files, display_time,
         event_id, extract_timeline_image_markup, find_token_count, human_timestamp,
-        is_provider_context_text, max_timestamp, open_reader, push_timeline_event, read_error,
-        sort_paths_by_modified_desc, stable_text_digest, stable_value_digest, text_from_value,
-        title_case, truncate, truncate_timeline_detail,
+        is_moonbox_handoff_control_text, is_provider_context_text, max_timestamp, open_reader,
+        push_timeline_event, read_error, sort_paths_by_modified_desc, stable_text_digest,
+        stable_value_digest, text_from_value, title_case, truncate, truncate_timeline_detail,
     },
     model::{
         CanonicalTimeline, CliTool, SessionRuntimeStatus, SessionStatus, SessionSummary,
@@ -627,6 +627,7 @@ fn history_display_title(display: &str) -> Option<String> {
     if title.is_empty()
         || title.starts_with('/')
         || is_provider_context_text(title)
+        || is_moonbox_handoff_control_text(title)
         || is_claude_internal_event_text(title)
     {
         None
@@ -793,6 +794,7 @@ impl SummaryBuilder {
             && !has_tool_result(&record)
             && let Some(text) = message_text(&record)
             && !is_provider_context_text(&text)
+            && !is_moonbox_handoff_control_text(&text)
             && !is_claude_internal_event_text(&text)
         {
             self.title = Some(truncate(&text, 160));
@@ -885,7 +887,9 @@ fn timeline_event(
     {
         return None;
     }
-    if kind == TimelineKind::User && is_provider_context_text(&detail) {
+    if kind == TimelineKind::User
+        && (is_provider_context_text(&detail) || is_moonbox_handoff_control_text(&detail))
+    {
         return None;
     }
     let mut metadata = timeline_metadata(&record, session_id, path, line_number, kind);

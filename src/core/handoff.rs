@@ -9,6 +9,9 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+
 use serde_json::{Value, json};
 
 use super::{
@@ -27,6 +30,7 @@ const MAX_CONTEXT_COMPACTS: usize = 5;
 const MAX_CONTEXT_EVIDENCE: usize = 40;
 const MAX_CONTEXT_EXCERPT_CHARS: usize = 480;
 const CLAUDE_PLUGIN_NAME: &str = "moonbox-handoff";
+const AGENT_CHILD_TERM_GRACE_MS: u64 = 80;
 static PYTHON_MODULE_CACHE: OnceLock<Mutex<BTreeMap<(String, String), bool>>> = OnceLock::new();
 const CODEX_PYTHON_BRIDGE: &str = r#"
 import json
@@ -1010,17 +1014,18 @@ fn run_child_with_input(
     input: Vec<u8>,
     timeout: Duration,
 ) -> Result<(String, String), CompilerError> {
-    let mut child = Command::new(program)
+    let mut command = Command::new(program);
+    command
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| CompilerError::Spawn {
-            compiler: compiler.into(),
-            program: program.into(),
-            reason: error.to_string(),
-        })?;
+        .stderr(Stdio::piped());
+    configure_agent_child_process_group(&mut command);
+    let mut child = command.spawn().map_err(|error| CompilerError::Spawn {
+        compiler: compiler.into(),
+        program: program.into(),
+        reason: error.to_string(),
+    })?;
     let stdin = child.stdin.take().ok_or_else(|| CompilerError::Io {
         compiler: compiler.into(),
         stream: "stdin",
@@ -1044,11 +1049,7 @@ fn run_child_with_input(
         stream: "process",
         reason: error.to_string(),
     })?;
-    join_io_thread(writer, compiler, "stdin")?.map_err(|error| CompilerError::Io {
-        compiler: compiler.into(),
-        stream: "stdin",
-        reason: error.to_string(),
-    })?;
+    let stdin_result = join_io_thread(writer, compiler, "stdin")?;
     let stdout = join_io_thread_bytes(stdout_reader, compiler, "stdout")?.map_err(|error| {
         CompilerError::Io {
             compiler: compiler.into(),
@@ -1074,12 +1075,23 @@ fn run_child_with_input(
             status: status_label(status),
             stderr: truncate(&stderr_text, 500),
         }),
-        WaitOutcome::Exited(_) => String::from_utf8(stdout)
-            .map(|stdout| (stdout, stderr_text))
-            .map_err(|error| CompilerError::InvalidOutput {
-                compiler: compiler.into(),
-                reason: error.to_string(),
-            }),
+        WaitOutcome::Exited(_) => {
+            if let Err(error) = stdin_result
+                && error.kind() != io::ErrorKind::BrokenPipe
+            {
+                return Err(CompilerError::Io {
+                    compiler: compiler.into(),
+                    stream: "stdin",
+                    reason: error.to_string(),
+                });
+            }
+            String::from_utf8(stdout)
+                .map(|stdout| (stdout, stderr_text))
+                .map_err(|error| CompilerError::InvalidOutput {
+                    compiler: compiler.into(),
+                    reason: error.to_string(),
+                })
+        }
     }
 }
 
@@ -1441,14 +1453,18 @@ fn python_module_available(python: &str, module: &str) -> bool {
     let key = (python.to_string(), module.to_string());
     let cache = PYTHON_MODULE_CACHE.get_or_init(|| Mutex::new(BTreeMap::new()));
     if let Ok(cache) = cache.lock()
-        && let Some(available) = cache.get(&key).copied()
+        && cache.get(&key).copied().unwrap_or(false)
     {
-        return available;
+        return true;
     }
 
     let available = python_module_available_uncached(python, module);
     if let Ok(mut cache) = cache.lock() {
-        cache.insert(key, available);
+        if available {
+            cache.insert(key, true);
+        } else {
+            cache.remove(&key);
+        }
     }
     available
 }
@@ -1483,10 +1499,7 @@ fn python_module_available_uncached(python: &str, module: &str) -> bool {
 }
 
 fn agent_timeout() -> Result<Duration, CompilerError> {
-    let timeout = env::var("MOONBOX_AGENT_HANDOFF_TIMEOUT_MS")
-        .ok()
-        .and_then(|value| value.trim().parse::<u64>().ok())
-        .unwrap_or(DEFAULT_TIMEOUT_MS);
+    let timeout = configured_agent_timeout_ms_raw().unwrap_or(DEFAULT_TIMEOUT_MS);
     if timeout == 0 {
         return Err(CompilerError::InvalidConfig {
             name: "MOONBOX_AGENT_HANDOFF_TIMEOUT_MS".into(),
@@ -1494,6 +1507,18 @@ fn agent_timeout() -> Result<Duration, CompilerError> {
         });
     }
     Ok(Duration::from_millis(timeout))
+}
+
+pub(crate) fn configured_agent_timeout_ms() -> u64 {
+    configured_agent_timeout_ms_raw()
+        .filter(|timeout| *timeout > 0)
+        .unwrap_or(DEFAULT_TIMEOUT_MS)
+}
+
+fn configured_agent_timeout_ms_raw() -> Option<u64> {
+    env::var("MOONBOX_AGENT_HANDOFF_TIMEOUT_MS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
 }
 
 enum WaitOutcome {
@@ -1505,16 +1530,55 @@ fn wait_for_child(child: &mut Child, timeout: Duration) -> io::Result<WaitOutcom
     let started = Instant::now();
     loop {
         if let Some(status) = child.try_wait()? {
+            cleanup_agent_child_process_group(child.id());
             return Ok(WaitOutcome::Exited(status));
         }
         if started.elapsed() >= timeout {
-            let _ = child.kill();
+            terminate_agent_child_process_group(child.id());
+            thread::sleep(Duration::from_millis(AGENT_CHILD_TERM_GRACE_MS));
+            kill_agent_child_process_group(child.id());
             let _ = child.wait();
             return Ok(WaitOutcome::TimedOut);
         }
         thread::sleep(Duration::from_millis(20));
     }
 }
+
+fn configure_agent_child_process_group(command: &mut Command) {
+    #[cfg(unix)]
+    {
+        command.process_group(0);
+    }
+}
+
+fn cleanup_agent_child_process_group(pid: u32) {
+    terminate_agent_child_process_group(pid);
+    thread::sleep(Duration::from_millis(AGENT_CHILD_TERM_GRACE_MS));
+    kill_agent_child_process_group(pid);
+}
+
+fn terminate_agent_child_process_group(pid: u32) {
+    signal_agent_child_process_group(pid, "TERM");
+}
+
+fn kill_agent_child_process_group(pid: u32) {
+    signal_agent_child_process_group(pid, "KILL");
+}
+
+#[cfg(unix)]
+fn signal_agent_child_process_group(pid: u32, signal: &str) {
+    let group = format!("-{pid}");
+    let _ = Command::new("/bin/kill")
+        .arg(format!("-{signal}"))
+        .arg(group)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+#[cfg(not(unix))]
+fn signal_agent_child_process_group(_pid: u32, _signal: &str) {}
 
 fn write_child_stdin(
     mut stdin: impl Write + Send + 'static,
@@ -1624,6 +1688,119 @@ mod tests {
             managed_sdk_python_path(&home, AgentRunner::Claude),
             PathBuf::from("/moonbox-home/venvs/claude-sdk/bin/python")
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn python_module_negative_result_is_not_sticky() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let root = env::temp_dir().join(format!(
+            "moonbox-python-module-cache-{}-{nonce}",
+            std::process::id()
+        ));
+        let marker = root.join("module-ready");
+        let python = root.join("python");
+        fs::create_dir_all(&root).expect("test dir");
+        let marker_literal = marker.to_string_lossy().replace('\'', "'\\''");
+        fs::write(
+            &python,
+            format!("#!/bin/sh\nif [ -f '{marker_literal}' ]; then exit 0; fi\nexit 1\n"),
+        )
+        .expect("fake python");
+        let mut permissions = fs::metadata(&python).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&python, permissions).expect("permissions");
+
+        let command = python.to_string_lossy().to_string();
+        assert!(!python_module_available(&command, "openai_codex"));
+
+        fs::write(&marker, "ready").expect("marker");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !python_module_available(&command, "openai_codex") && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(python_module_available(&command, "openai_codex"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn agent_child_success_reaps_sdk_helper_process_group() {
+        let root = env::temp_dir().join(format!(
+            "moonbox-agent-child-group-{}-{}",
+            std::process::id(),
+            unique_suffix()
+        ));
+        fs::create_dir_all(&root).expect("test dir");
+        let pid_file = root.join("helper.pid");
+        let pid_file_literal = pid_file.to_string_lossy().replace('\'', "'\\''");
+        let script = executable_script(
+            &root,
+            "agent-child-group",
+            &format!(
+                "#!/bin/sh\nsleep 30 &\necho $! > '{pid_file_literal}'\nprintf '{{\"artifact\":\"ok\"}}\\n'\n"
+            ),
+        );
+
+        let (stdout, _stderr) = run_child_with_input(
+            "agent:codex:handoff",
+            &script.to_string_lossy(),
+            &[],
+            b"{}".to_vec(),
+            Duration::from_secs(5),
+        )
+        .expect("success");
+
+        assert!(stdout.contains("\"artifact\":\"ok\""));
+        let pid = fs::read_to_string(&pid_file)
+            .expect("pid file")
+            .trim()
+            .parse::<u32>()
+            .expect("pid");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while process_exists(pid) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            !process_exists(pid),
+            "helper process {pid} survived timeout"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn agent_child_success_ignores_closed_stdin_pipe() {
+        let root = env::temp_dir().join(format!(
+            "moonbox-agent-closed-stdin-{}-{}",
+            std::process::id(),
+            unique_suffix()
+        ));
+        fs::create_dir_all(&root).expect("test dir");
+        let script = executable_script(
+            &root,
+            "agent-closed-stdin",
+            "#!/bin/sh\nexec 0<&-\nprintf '{\"artifact\":\"ok\"}\\n'\n",
+        );
+
+        let (stdout, _stderr) = run_child_with_input(
+            "agent:codex:handoff",
+            &script.to_string_lossy(),
+            &[],
+            vec![b'x'; 1024 * 1024],
+            Duration::from_secs(5),
+        )
+        .expect("success");
+
+        assert!(stdout.contains("\"artifact\":\"ok\""));
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -1782,6 +1959,30 @@ Write the handoff.
         let error = validate_agent_artifact(&request, " \n\t ".into()).expect_err("empty artifact");
 
         assert!(error.to_string().contains("empty handoff artifact"));
+    }
+
+    #[cfg(unix)]
+    fn executable_script(root: &Path, name: &str, contents: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = root.join(name);
+        fs::write(&path, contents).expect("script");
+        let mut permissions = fs::metadata(&path).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&path, permissions).expect("permissions");
+        path
+    }
+
+    #[cfg(unix)]
+    fn process_exists(pid: u32) -> bool {
+        Command::new("/bin/kill")
+            .arg("-0")
+            .arg(pid.to_string())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
     }
 
     #[test]

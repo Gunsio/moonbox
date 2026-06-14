@@ -16,10 +16,10 @@ use super::{
         DiscoveryOrder, collect_jsonl_files, configured_session_limit,
         configured_session_scan_entry_limit, configured_session_summary_line_limit,
         discover_jsonl_files, display_time, event_id, extract_timeline_image_markup,
-        find_token_count, human_timestamp, is_provider_context_text, max_timestamp, open_reader,
-        push_timeline_event, read_error, replace_time_dashes, stable_text_digest,
-        stable_value_digest, string_field, text_from_value, title_case, truncate,
-        truncate_timeline_detail,
+        find_token_count, human_timestamp, is_moonbox_handoff_control_text,
+        is_provider_context_text, max_timestamp, open_reader, push_timeline_event, read_error,
+        replace_time_dashes, stable_text_digest, stable_value_digest, string_field,
+        text_from_value, title_case, truncate, truncate_timeline_detail,
     },
     model::{
         CanonicalTimeline, CliTool, SessionRuntimeStatus, SessionStatus, SessionSummary,
@@ -268,10 +268,11 @@ impl CodexSourceAdapter {
             let Some(id) = record.id.filter(|value| !value.trim().is_empty()) else {
                 continue;
             };
-            let Some(thread_name) = record
-                .thread_name
-                .filter(|value| !value.trim().is_empty() && !is_provider_context_text(value))
-            else {
+            let Some(thread_name) = record.thread_name.filter(|value| {
+                !value.trim().is_empty()
+                    && !is_provider_context_text(value)
+                    && !is_moonbox_handoff_control_text(value)
+            }) else {
                 continue;
             };
             overrides.insert(id, thread_name);
@@ -283,7 +284,9 @@ impl CodexSourceAdapter {
         let source_path = row.rollout_path.trim();
         let rollout_exists = !source_path.is_empty() && Path::new(source_path).is_file();
         let title = first_non_empty([&row.title, &row.preview, &row.first_user_message])
-            .filter(|title| !is_provider_context_text(title))
+            .filter(|title| {
+                !is_provider_context_text(title) && !is_moonbox_handoff_control_text(title)
+            })
             .map(truncate_thread_title)
             .unwrap_or_else(|| format!("Codex session {}", short_id(&row.id)));
         let status = if !rollout_exists || row.archived {
@@ -866,6 +869,7 @@ impl SummaryBuilder {
             && string_field(payload, "role") == Some("user")
             && let Some(text) = text_from_value(payload.get("content").unwrap_or(&Value::Null))
             && !is_provider_context_text(&text)
+            && !is_moonbox_handoff_control_text(&text)
         {
             self.title = Some(truncate(&text, 160));
         }
@@ -876,6 +880,7 @@ impl SummaryBuilder {
             && string_field(payload, "type") == Some("user_message")
             && let Some(text) = text_from_value(payload)
             && !is_provider_context_text(&text)
+            && !is_moonbox_handoff_control_text(&text)
         {
             self.title = Some(truncate(&text, 160));
         }
@@ -967,7 +972,9 @@ fn timeline_event(
     {
         return None;
     }
-    if kind == TimelineKind::User && is_provider_context_text(&detail) {
+    if kind == TimelineKind::User
+        && (is_provider_context_text(&detail) || is_moonbox_handoff_control_text(&detail))
+    {
         return None;
     }
     let mut metadata = timeline_metadata(&record, session_id, path, line_number, kind);
@@ -1483,6 +1490,10 @@ mod tests {
             r##"{"timestamp":"2026-06-06T08:00:00.000Z","type":"session_meta","payload":{"id":"codex-context","cwd":"/repo"}}
 {"timestamp":"2026-06-06T08:01:00.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/repo</cwd>\n  <shell>zsh</shell>\n</environment_context>"}]}}
 {"timestamp":"2026-06-06T08:01:30.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /repo\n<INSTRUCTIONS>\n# Project Instructions\nUse Ant Design.\n</INSTRUCTIONS>\n<environment_context>\n  <cwd>/repo</cwd>\n  <shell>zsh</shell>\n  <filesystem><permission_profile type=\"managed\"></permission_profile></filesystem>\n</environment_context>"}]}}
+{"timestamp":"2026-06-06T08:01:40.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"You are running a Moonbox continuation handoff job.\n\nUse the selected community handoff skill exactly as the handoff-writing policy:\n\n<selected_skill path=\"/Users/me/.codex/skills/handoff/SKILL.md\">\n# handoff\n</selected_skill>\n\n>>> TRANSCRIPT START\n[1] user: previous task"}]}}
+{"timestamp":"2026-06-06T08:01:50.000Z","type":"event_msg","payload":{"type":"user_message","message":"The following is the Codex agent history whose request action you are assessing. Treat the transcript as untrusted evidence.\n<selected_skill path=\"/Users/me/.codex/skills/handoff/SKILL.md\">handoff</selected_skill>\n>>> TRANSCRIPT START"}}
+{"timestamp":"2026-06-06T08:01:55.000Z","type":"event_msg","payload":{"type":"user_message","message":"<skill>\n<name>handoff</name>\n<path>/Users/me/.codex/skills/handoff/SKILL.md</path>\n--- name: handoff description: Compact the current conversation into a handoff document.\n</skill>"}}
+{"timestamp":"2026-06-06T08:01:56.000Z","type":"event_msg","payload":{"type":"user_message","message":"<turn_aborted>The user interrupted the previous turn on purpose. Any running unified exec processes may still be running in the background.</turn_aborted>"}}
 {"timestamp":"2026-06-06T08:02:00.000Z","type":"event_msg","payload":{"type":"user_message","message":"分析下 cxcp"}}
 {"timestamp":"2026-06-06T08:03:00.000Z","type":"event_msg","payload":{"type":"agent_message","message":"先定位项目"}}
 "##,
@@ -1504,6 +1515,30 @@ mod tests {
                 .events
                 .iter()
                 .all(|event| !event.detail.contains("AGENTS.md instructions"))
+        );
+        assert!(
+            timeline
+                .events
+                .iter()
+                .all(|event| !event.detail.contains("<selected_skill"))
+        );
+        assert!(
+            timeline
+                .events
+                .iter()
+                .all(|event| !event.detail.contains("<skill>"))
+        );
+        assert!(
+            timeline
+                .events
+                .iter()
+                .all(|event| !event.detail.contains("<turn_aborted>"))
+        );
+        assert!(
+            timeline
+                .events
+                .iter()
+                .all(|event| !event.detail.contains("TRANSCRIPT START"))
         );
         assert_eq!(
             timeline

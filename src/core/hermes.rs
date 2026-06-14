@@ -15,9 +15,9 @@ use super::{
     },
     local_jsonl::{
         configured_session_limit, display_time, event_id, human_timestamp,
-        is_provider_context_text, push_timeline_event, read_error, stable_text_digest,
-        text_from_value, timeline_preview_truncated_event, title_case, truncate,
-        truncate_timeline_detail,
+        is_moonbox_handoff_control_text, is_provider_context_text, push_timeline_event, read_error,
+        stable_text_digest, text_from_value, timeline_preview_truncated_event, title_case,
+        truncate, truncate_timeline_detail,
     },
     model::{
         CanonicalTimeline, CliTool, ProviderContinuationPoint, ProviderHandoffMetadata,
@@ -390,8 +390,10 @@ impl HermesSourceAdapter {
             .or_else(|| supplement.and_then(display_name))
             .or_else(|| {
                 let preview = row.preview.trim();
-                (!preview.is_empty() && !is_provider_context_text(preview))
-                    .then(|| truncate(preview, 160))
+                (!preview.is_empty()
+                    && !is_provider_context_text(preview)
+                    && !is_moonbox_handoff_control_text(preview))
+                .then(|| truncate(preview, 160))
             })
             .unwrap_or_else(|| format!("Hermes {} session {}", row.source, short_id(&row.id)));
 
@@ -1216,7 +1218,9 @@ fn timeline_event(row: HermesMessageRow, number: usize, session_id: &str) -> Opt
     if detail.is_empty() && !matches!(kind, TimelineKind::Error) {
         return None;
     }
-    if kind == TimelineKind::User && is_provider_context_text(&detail) {
+    if kind == TimelineKind::User
+        && (is_provider_context_text(&detail) || is_moonbox_handoff_control_text(&detail))
+    {
         return None;
     }
 

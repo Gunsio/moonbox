@@ -24,12 +24,14 @@ use crate::core::{
 };
 
 type SessionLoadResult = Result<WorkbenchData, CoreError>;
+type SessionPreviewResult = Result<WorkbenchData, CoreError>;
 type DataSpaceLoadResult = Result<WorkbenchData, CoreError>;
 type LaunchReviewResult = Result<WorkbenchData, CoreError>;
 type LaunchReviewReceiver = mpsc::Receiver<LaunchReviewMessage>;
 
 pub const HANDOFF_TRAIL_DURATION_MS: u64 = 720;
 const HANDOFF_TRAIL_FRAME_COUNT: usize = 6;
+const SESSION_PREVIEW_DEBOUNCE_MS: u64 = 180;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HandoffTrailPhase {
@@ -130,6 +132,20 @@ struct PendingSessionLoad {
     receiver: mpsc::Receiver<SessionLoadResult>,
 }
 
+struct PendingSessionPreview {
+    request_id: u64,
+    session_id: String,
+    target: CliTool,
+    started_at: Instant,
+    receiver: mpsc::Receiver<SessionPreviewResult>,
+}
+
+#[derive(Debug, Clone)]
+struct DeferredSessionPreview {
+    session_id: String,
+    due_at: Instant,
+}
+
 struct PendingDataSpaceLoad {
     request_id: u64,
     index: usize,
@@ -146,6 +162,7 @@ struct PendingLaunchReview {
     compiler_id: String,
     rewind_event_id: String,
     started_at: Instant,
+    timeout_ms: u128,
     stage: LaunchReviewStage,
     stage_detail: String,
     receiver: LaunchReviewReceiver,
@@ -179,8 +196,11 @@ pub struct LaunchReviewJobStatus {
     pub stage: LaunchReviewStage,
     pub stage_label: &'static str,
     pub detail: String,
+    pub target: CliTool,
+    pub session_id: String,
     pub compiler_id: String,
     pub elapsed_ms: u128,
+    pub timeout_ms: u128,
 }
 
 #[derive(Debug, Clone)]
@@ -545,6 +565,16 @@ impl fmt::Debug for PendingDataSpaceLoad {
 impl fmt::Debug for PendingSessionLoad {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PendingSessionLoad")
+            .field("request_id", &self.request_id)
+            .field("session_id", &self.session_id)
+            .field("target", &self.target)
+            .finish_non_exhaustive()
+    }
+}
+
+impl fmt::Debug for PendingSessionPreview {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PendingSessionPreview")
             .field("request_id", &self.request_id)
             .field("session_id", &self.session_id)
             .field("target", &self.target)
@@ -1017,8 +1047,12 @@ pub struct App {
     pub doctor_report: DoctorReport,
     pub compile_status: &'static str,
     pub pending_g: bool,
+    animation_tick: usize,
     session_load_request_id: u64,
     pending_session_load: Option<PendingSessionLoad>,
+    session_preview_request_id: u64,
+    pending_session_preview: Option<PendingSessionPreview>,
+    deferred_session_preview: Option<DeferredSessionPreview>,
     data_space_load_request_id: u64,
     pending_data_space_load: Option<PendingDataSpaceLoad>,
     launch_review_request_id: u64,
@@ -1071,6 +1105,8 @@ impl App {
         let settings_language = ui_preferences.language;
         let settings_theme = ui_preferences.theme;
 
+        let session_details_loaded =
+            !data.timeline.is_empty() && data.capsule.state != "pending_rewind";
         let mut app = Self {
             data,
             focus: Focus::Sessions,
@@ -1115,16 +1151,28 @@ impl App {
             settings_smart_enter_tmux,
             pending_target: target,
             pending_compiler: selected_compiler,
-            status_message: "Ready".into(),
+            status_message: if session_details_loaded {
+                "Ready".into()
+            } else {
+                "Ready: session details load on demand".into()
+            },
             rewind_event_id,
             capsule_scroll: 0,
             modal_scroll: 0,
-            verify_passed: true,
+            verify_passed: session_details_loaded,
             doctor_report,
-            compile_status: "ACTIVE",
+            compile_status: if session_details_loaded {
+                "ACTIVE"
+            } else {
+                "PENDING"
+            },
             pending_g: false,
+            animation_tick: 0,
             session_load_request_id: 0,
             pending_session_load: None,
+            session_preview_request_id: 0,
+            pending_session_preview: None,
+            deferred_session_preview: None,
             data_space_load_request_id: 0,
             pending_data_space_load: None,
             launch_review_request_id: 0,
@@ -1144,11 +1192,22 @@ impl App {
         if let Some(hook_live) = app.hook_live.as_mut() {
             hook_live.replay_existing();
         }
+        if let Some(session) = app.current_session() {
+            app.schedule_selected_session_preview(session.id.clone());
+        }
         app
     }
 
     pub fn should_quit(&self) -> bool {
         self.should_quit
+    }
+
+    pub fn advance_animation(&mut self) {
+        self.animation_tick = self.animation_tick.wrapping_add(1);
+    }
+
+    pub fn animation_tick(&self) -> usize {
+        self.animation_tick
     }
 
     pub fn take_clipboard_text(&mut self) -> Option<String> {
@@ -1325,6 +1384,26 @@ impl App {
         self.pending_session_load.is_some()
     }
 
+    pub fn is_session_preview_pending(&self) -> bool {
+        self.pending_session_preview.is_some() || self.deferred_session_preview.is_some()
+    }
+
+    pub fn selected_session_timeline_loaded(&self) -> bool {
+        self.current_session().is_some_and(|session| {
+            self.data.capsule.source_session == session.id
+                && self.data.capsule.source_cli == session.cli
+                && !self.data.timeline.is_empty()
+        })
+    }
+
+    pub fn selected_session_context_loaded(&self) -> bool {
+        self.current_session().is_some_and(|session| {
+            self.data.capsule.source_session == session.id
+                && self.data.capsule.source_cli == session.cli
+                && self.data.capsule.state != "pending_rewind"
+        })
+    }
+
     pub fn is_launch_review_pending(&self) -> bool {
         self.pending_launch_review.is_some()
     }
@@ -1336,8 +1415,11 @@ impl App {
                 stage: pending.stage,
                 stage_label: pending.stage.label(),
                 detail: pending.stage_detail.clone(),
+                target: pending.target,
+                session_id: pending.session_id.clone(),
                 compiler_id: pending.compiler_id.clone(),
                 elapsed_ms: pending.started_at.elapsed().as_millis(),
+                timeout_ms: pending.timeout_ms,
             })
     }
 
@@ -1571,6 +1653,10 @@ impl App {
     pub fn poll_background(&mut self) -> bool {
         let mut changed = self.prune_handoff_trail();
 
+        if self.start_deferred_session_preview_if_due() {
+            changed = true;
+        }
+
         if let Some(pending) = self.pending_session_load.take() {
             match pending.receiver.try_recv() {
                 Ok(result) => {
@@ -1583,6 +1669,22 @@ impl App {
                 Err(TryRecvError::Disconnected) => {
                     self.compile_status = "FAILED";
                     self.set_status(format!("Session load failed: {}", pending.session_id));
+                    changed = true;
+                }
+            }
+        }
+
+        if let Some(pending) = self.pending_session_preview.take() {
+            match pending.receiver.try_recv() {
+                Ok(result) => {
+                    self.apply_session_preview_result(pending, result);
+                    changed = true;
+                }
+                Err(TryRecvError::Empty) => {
+                    self.pending_session_preview = Some(pending);
+                }
+                Err(TryRecvError::Disconnected) => {
+                    self.set_status(format!("Timeline preview failed: {}", pending.session_id));
                     changed = true;
                 }
             }
@@ -1926,13 +2028,15 @@ impl App {
             self.search_query = query.trim().to_string();
             self.refresh_visible_sessions();
             self.clamp_selected_session();
-            self.request_selected_session_details();
+            self.defer_selected_session_context();
         }
     }
 
     fn set_search_status(&mut self) {
         let suffix = if self.is_session_load_pending() {
             " - loading selected session"
+        } else if self.is_session_preview_pending() {
+            " - loading preview"
         } else {
             ""
         };
@@ -2064,14 +2168,18 @@ impl App {
                     self.modal_scroll = 0;
                     self.set_status("Handoff review error closed");
                 }
-                KeyCode::Enter => self.confirm_launch_target(),
+                KeyCode::Enter => {
+                    self.set_status("Handoff review failed; press r to retry or S to choose skill")
+                }
+                KeyCode::Char('r') => self.confirm_launch_target(),
                 KeyCode::Char('S') => {
                     self.open_skill_picker();
                     self.show_launch = true;
                     self.set_status("Choose handoff skill");
                 }
-                KeyCode::Char('y') | KeyCode::Char('r') => self
-                    .set_status("Handoff review failed; press Enter to retry or S to choose skill"),
+                KeyCode::Char('y') => {
+                    self.set_status("Handoff review failed; press r to retry or S to choose skill")
+                }
                 KeyCode::Char('G') => {
                     self.modal_scroll = u16::MAX;
                     self.pending_g = false;
@@ -2496,8 +2604,7 @@ impl App {
         match self.focus {
             Focus::Sessions => {
                 if let Some(first) = self.visible_session_indices.first().copied() {
-                    self.selected_session = first;
-                    self.request_selected_session_details();
+                    self.select_session_index(first);
                 }
             }
             Focus::Timeline => {
@@ -2514,8 +2621,7 @@ impl App {
         match self.focus {
             Focus::Sessions => {
                 if let Some(last) = self.visible_session_indices.last().copied() {
-                    self.selected_session = last;
-                    self.request_selected_session_details();
+                    self.select_session_index(last);
                 }
             }
             Focus::Timeline => {
@@ -2558,7 +2664,52 @@ impl App {
         self.pending_g = false;
     }
 
+    fn refresh_compiler_catalog(&mut self) {
+        let selected_id = self
+            .data
+            .compilers
+            .get(self.selected_compiler)
+            .cloned()
+            .unwrap_or_else(|| self.data.capsule.compiler.clone());
+        let pending_id = self.data.compilers.get(self.pending_compiler).cloned();
+        let mut compilers = compiler::compiler_catalog();
+        if compilers.is_empty() {
+            return;
+        }
+        if !selected_id.trim().is_empty()
+            && !compilers.iter().any(|compiler| compiler == &selected_id)
+        {
+            compilers.push(selected_id.clone());
+        }
+        if let Some(pending_id) = pending_id.as_ref()
+            && !pending_id.trim().is_empty()
+            && !compilers.iter().any(|compiler| compiler == pending_id)
+        {
+            compilers.push(pending_id.clone());
+        }
+
+        self.data.compilers = compilers;
+        self.selected_compiler = compiler_index_for_equivalent_id(
+            &self.data,
+            &selected_id,
+            self.data.target,
+            self.selected_compiler,
+        );
+        self.pending_compiler = pending_id
+            .as_deref()
+            .map(|id| {
+                compiler_index_for_equivalent_id(
+                    &self.data,
+                    id,
+                    self.data.target,
+                    self.pending_compiler,
+                )
+            })
+            .unwrap_or(self.selected_compiler);
+    }
+
     fn open_skill_picker(&mut self) {
+        self.refresh_compiler_catalog();
         let candidates = self.skill_picker_candidate_indices();
         self.pending_compiler = if candidates.contains(&self.selected_compiler) {
             self.selected_compiler
@@ -2702,6 +2853,11 @@ impl App {
     }
 
     fn confirm_skill_picker(&mut self) {
+        if self.is_launch_review_pending() {
+            self.show_skill_picker = false;
+            let _ = self.reveal_pending_launch_review();
+            return;
+        }
         let candidates = self.skill_picker_candidate_indices();
         if candidates.is_empty() {
             self.show_skill_picker = false;
@@ -2718,11 +2874,14 @@ impl App {
         self.show_skill_picker = false;
         self.launch_review_error = None;
         self.modal_scroll = 0;
-        self.set_status(format!("Skill: {selected_label}"));
-        self.pending_g = false;
         if continue_launch {
-            self.confirm_launch_target();
+            self.set_status(format!(
+                "Handoff skill: {selected_label}; press Enter to generate Review"
+            ));
+        } else {
+            self.set_status(format!("Handoff skill: {selected_label}"));
         }
+        self.pending_g = false;
     }
 
     fn copy_pending_skill_reference(&mut self) {
@@ -3160,6 +3319,10 @@ impl App {
             .enumerate()
             .filter(|(_, session)| self.session_filter.matches(session, &self.starred_sessions))
             .filter(|(_, session)| session_matches_query(session, &query))
+            .filter(|(_, session)| {
+                !is_moonbox_handoff_worker_session(session)
+                    || query_explicitly_requests_moonbox_handoff_workers(&query)
+            })
             .map(|(index, _)| index)
             .collect();
     }
@@ -3178,8 +3341,37 @@ impl App {
         } else {
             current.saturating_sub(1)
         };
-        self.selected_session = self.visible_session_indices[next];
-        self.request_selected_session_details();
+        self.select_session_index(self.visible_session_indices[next]);
+    }
+
+    fn select_session_index(&mut self, session_index: usize) {
+        if self.selected_session == session_index {
+            return;
+        }
+        self.selected_session = session_index;
+        self.defer_selected_session_context();
+    }
+
+    fn defer_selected_session_context(&mut self) {
+        self.session_load_request_id = self.session_load_request_id.wrapping_add(1);
+        self.pending_session_load = None;
+        self.session_preview_request_id = self.session_preview_request_id.wrapping_add(1);
+        self.pending_session_preview = None;
+        self.deferred_session_preview = None;
+        self.selected_event = 0;
+        self.rewind_event_id.clear();
+        self.capsule_scroll = 0;
+        if self.selected_session_timeline_loaded() {
+            return;
+        }
+        let Some(session) = self.data.sessions.get(self.selected_session).cloned() else {
+            self.compile_status = "PENDING";
+            self.verify_passed = false;
+            return;
+        };
+        self.compile_status = "PENDING";
+        self.verify_passed = false;
+        self.schedule_selected_session_preview(session.id);
     }
 
     fn cycle_session_filter(&mut self, forward: bool) {
@@ -3195,15 +3387,8 @@ impl App {
         self.session_filter = filter;
         self.refresh_visible_sessions();
         self.clamp_selected_session();
-        self.request_selected_session_details();
-        if self.is_session_load_pending() {
-            self.set_status(format!(
-                "Filter: {} - loading selected session",
-                self.session_filter.label()
-            ));
-        } else {
-            self.set_status(format!("Filter: {}", self.session_filter.label()));
-        }
+        self.defer_selected_session_context();
+        self.set_status(format!("Filter: {}", self.session_filter.label()));
         self.pending_g = false;
     }
 
@@ -3212,12 +3397,8 @@ impl App {
         self.search_query.clear();
         self.refresh_visible_sessions();
         self.clamp_selected_session();
-        self.request_selected_session_details();
-        if self.is_session_load_pending() {
-            self.set_status("Filters cleared - loading selected session");
-        } else {
-            self.set_status("Filters cleared");
-        }
+        self.defer_selected_session_context();
+        self.set_status("Filters cleared");
         self.pending_g = false;
     }
 
@@ -3255,6 +3436,9 @@ impl App {
             let _ = sender.send(result);
         });
         self.pending_session_load = None;
+        self.pending_session_preview = None;
+        self.deferred_session_preview = None;
+        self.session_preview_request_id = self.session_preview_request_id.wrapping_add(1);
         self.pending_data_space_load = Some(PendingDataSpaceLoad {
             request_id,
             index,
@@ -3333,20 +3517,10 @@ impl App {
     }
 
     fn open_launch_picker(&mut self) {
-        if !self.ensure_session_details_ready("Launch") {
+        if self.reveal_pending_launch_review() {
             return;
         }
-        if self.is_launch_review_pending() {
-            self.show_launch = true;
-            self.launch_review = false;
-            self.target_launch_result = None;
-            self.set_status(format!(
-                "Handoff job still running: {}",
-                self.pending_target
-            ));
-            self.pending_g = false;
-            return;
-        }
+        self.refresh_compiler_catalog();
         if self.launch_review_error.is_some() {
             self.show_launch = true;
             self.launch_review = false;
@@ -3416,10 +3590,48 @@ impl App {
             self.pending_g = false;
             return false;
         }
+        if !self.selected_session_timeline_loaded() {
+            self.request_selected_session_details();
+            if self.is_session_load_pending() {
+                self.set_status(format!("{action} is loading selected session details"));
+            } else if self.is_session_preview_pending() {
+                self.set_status(format!("{action} is waiting for timeline preview"));
+            } else {
+                self.set_status(format!("{action} needs a loaded session timeline"));
+            }
+            self.pending_g = false;
+            return false;
+        }
+        true
+    }
+
+    fn reveal_pending_launch_review(&mut self) -> bool {
+        let Some(pending) = self.pending_launch_review.as_ref() else {
+            return false;
+        };
+        let target = pending.target;
+        let selected_compiler = pending.selected_compiler;
+        let stage = pending.stage.label();
+        let detail = pending.stage_detail.clone();
+        self.pending_target = target;
+        self.selected_compiler = selected_compiler;
+        self.show_launch = true;
+        self.launch_review = false;
+        self.target_launch_result = None;
+        self.launch_review_error = None;
+        self.modal_scroll = 0;
+        self.set_status(format!(
+            "Handoff job already running: {target} {stage} - {detail}"
+        ));
+        self.pending_g = false;
         true
     }
 
     fn confirm_launch_target(&mut self) {
+        if self.reveal_pending_launch_review() {
+            return;
+        }
+        self.refresh_compiler_catalog();
         let target = self.pending_target;
         let validation = self.validate_launch_for_target(target);
         if self.launch_requires_handoff_skill(target) {
@@ -3439,6 +3651,7 @@ impl App {
             self.pending_g = false;
             return;
         };
+        let session_id = session.id.clone();
         let selected_compiler = self.selected_compiler;
         let compiler_id = self
             .data
@@ -3447,10 +3660,20 @@ impl App {
             .cloned()
             .unwrap_or_else(compiler::default_compiler_id);
         let rewind_event_id = self.rewind_event_id.clone();
+        if self.handoff_review_ready_for(&session_id, target, &compiler_id, &rewind_event_id) {
+            self.pending_target = target;
+            self.show_launch = true;
+            self.launch_review = true;
+            self.target_launch_result = None;
+            self.launch_review_error = None;
+            self.modal_scroll = u16::MAX;
+            self.set_status(format!("Handoff review ready: {target}"));
+            self.pending_g = false;
+            return;
+        }
         let space = self.current_data_space().clone();
         let sessions = self.data.sessions.clone();
         let source_adapters = self.data.source_adapters.clone();
-        let session_id = session.id.clone();
         let worker_session_id = session_id.clone();
         let worker_compiler_id = compiler_id.clone();
         let worker_rewind_event_id = rewind_event_id.clone();
@@ -3519,6 +3742,7 @@ impl App {
             compiler_id,
             rewind_event_id,
             started_at: Instant::now(),
+            timeout_ms: u128::from(handoff::configured_agent_timeout_ms()),
             stage: LaunchReviewStage::Queued,
             stage_detail: "waiting for background handoff worker".into(),
             receiver,
@@ -3541,6 +3765,26 @@ impl App {
             self.set_status(format!("Preparing handoff review: {target}"));
         }
         self.pending_g = false;
+    }
+
+    fn handoff_review_ready_for(
+        &self,
+        session_id: &str,
+        target: CliTool,
+        compiler_id: &str,
+        rewind_event_id: &str,
+    ) -> bool {
+        self.data.capsule.source_session == session_id
+            && self.data.capsule.target_cli == target
+            && self.data.capsule.compiler == compiler_id
+            && self
+                .data
+                .capsule
+                .rewind_point
+                .split_whitespace()
+                .next()
+                .is_some_and(|id| id == rewind_event_id)
+            && (self.launch_review || self.data.capsule.handoff_artifact.is_some())
     }
 
     fn review_capsule(&mut self) {
@@ -3588,6 +3832,84 @@ impl App {
         }
     }
 
+    fn request_selected_session_preview(&mut self) {
+        self.deferred_session_preview = None;
+        if self.selected_session_timeline_loaded() || !self.current_data_space().is_local() {
+            return;
+        }
+        let Some(session) = self.data.sessions.get(self.selected_session).cloned() else {
+            self.pending_session_preview = None;
+            return;
+        };
+        let target = self.data.target;
+        if self
+            .pending_session_preview
+            .as_ref()
+            .is_some_and(|pending| pending.session_id == session.id && pending.target == target)
+        {
+            return;
+        }
+
+        self.session_preview_request_id = self.session_preview_request_id.wrapping_add(1);
+        let request_id = self.session_preview_request_id;
+        let sessions = self.data.sessions.clone();
+        let source_adapters = self.data.source_adapters.clone();
+        let worker_session = session.clone();
+        let worker_session_id = session.id.clone();
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let result = workbench::load_workbench_from_session_snapshot(
+                worker_session,
+                sessions,
+                source_adapters,
+                target,
+            );
+            let _ = sender.send(result);
+        });
+
+        self.pending_session_preview = Some(PendingSessionPreview {
+            request_id,
+            session_id: worker_session_id,
+            target,
+            started_at: Instant::now(),
+            receiver,
+        });
+    }
+
+    fn schedule_selected_session_preview(&mut self, session_id: String) {
+        if self.selected_session_timeline_loaded()
+            || self.is_session_load_pending()
+            || !self.current_data_space().is_local()
+        {
+            self.deferred_session_preview = None;
+            return;
+        }
+        self.deferred_session_preview = Some(DeferredSessionPreview {
+            session_id,
+            due_at: Instant::now() + Duration::from_millis(SESSION_PREVIEW_DEBOUNCE_MS),
+        });
+    }
+
+    fn start_deferred_session_preview_if_due(&mut self) -> bool {
+        let Some(deferred) = self.deferred_session_preview.as_ref() else {
+            return false;
+        };
+        if Instant::now() < deferred.due_at {
+            return false;
+        }
+        let Some(deferred) = self.deferred_session_preview.take() else {
+            return false;
+        };
+        let Some(session) = self.current_session() else {
+            return true;
+        };
+        if session.id != deferred.session_id || self.selected_session_timeline_loaded() {
+            return true;
+        }
+        self.request_selected_session_preview();
+        true
+    }
+
     fn request_selected_session_details(&mut self) {
         let Some(session) = self.data.sessions.get(self.selected_session).cloned() else {
             self.pending_session_load = None;
@@ -3598,14 +3920,14 @@ impl App {
             return;
         }
         let target = self.data.target;
-        if self.data.capsule.source_session == session.id
-            && self.data.target == target
-            && self.pending_session_load.is_none()
-        {
+        if self.selected_session_timeline_loaded() && self.data.target == target {
             return;
         }
 
         self.session_load_request_id = self.session_load_request_id.wrapping_add(1);
+        self.session_preview_request_id = self.session_preview_request_id.wrapping_add(1);
+        self.pending_session_preview = None;
+        self.deferred_session_preview = None;
         let request_id = self.session_load_request_id;
         let selected_session = self.selected_session;
         let selected_compiler = self.selected_compiler;
@@ -3636,7 +3958,7 @@ impl App {
         self.compile_status = "LOADING";
         self.verify_passed = false;
         self.set_status(format!(
-            "Loading session: {} {}",
+            "Loading timeline: {} {}",
             session.cli, session.title
         ));
     }
@@ -3651,6 +3973,7 @@ impl App {
         let target = self.data.target;
         self.session_load_request_id = self.session_load_request_id.wrapping_add(1);
         let request_id = self.session_load_request_id;
+        self.deferred_session_preview = None;
         let selected_compiler = self.selected_compiler;
         let selected_session = self.selected_session;
         let space = self.current_data_space().clone();
@@ -3726,6 +4049,10 @@ impl App {
                 ));
                 if !pending.space.is_local() {
                     self.request_selected_session_details();
+                } else {
+                    if let Some(session) = self.current_session() {
+                        self.schedule_selected_session_preview(session.id.clone());
+                    }
                 }
             }
             Err(error) => {
@@ -3769,6 +4096,11 @@ impl App {
             .unwrap_or_else(|| self.data.capsule.compiler.clone());
         match result {
             Ok(data) => {
+                let launch_was_waiting = self.show_launch
+                    && !self.launch_review
+                    && self.target_launch_result.is_none()
+                    && self.launch_review_error.is_none()
+                    && self.pending_launch_review.is_none();
                 let rewind_event_id = initial_rewind_event_id(&data);
                 let selected_event = rewind_event_index(&data, &rewind_event_id);
                 self.data = data;
@@ -3786,11 +4118,13 @@ impl App {
                 self.data.capsule.compiler = self.data.compilers[self.selected_compiler].clone();
                 self.rewind_event_id = rewind_event_id;
                 self.capsule_scroll = 0;
-                self.compile_status = "ACTIVE";
-                self.verify_passed = true;
-                if let Some(session) = self.current_session() {
+                self.compile_status = "PREVIEW";
+                self.verify_passed = false;
+                if launch_was_waiting {
+                    self.set_status("Choose target CLI");
+                } else if let Some(session) = self.current_session() {
                     self.set_status(format!(
-                        "Session: {} {} ({} events, {} ms)",
+                        "Timeline: {} {} ({} events, {} ms)",
                         session.cli,
                         session.title,
                         self.data.timeline.len(),
@@ -3804,6 +4138,76 @@ impl App {
                 self.compile_status = "FAILED";
                 self.set_status(format!(
                     "Session reload failed: {error} ({} ms)",
+                    elapsed.as_millis()
+                ));
+            }
+        }
+    }
+
+    fn apply_session_preview_result(
+        &mut self,
+        pending: PendingSessionPreview,
+        result: SessionPreviewResult,
+    ) {
+        if self.session_preview_request_id != pending.request_id
+            || self
+                .data
+                .sessions
+                .get(self.selected_session)
+                .is_none_or(|session| session.id != pending.session_id)
+            || self.data.target != pending.target
+            || self.pending_session_load.is_some()
+        {
+            return;
+        }
+
+        let elapsed = pending.started_at.elapsed();
+        let selected_compiler = self.selected_compiler;
+        let selected_compiler_id = self
+            .data
+            .compilers
+            .get(selected_compiler)
+            .cloned()
+            .unwrap_or_else(|| self.data.capsule.compiler.clone());
+        match result {
+            Ok(data) => {
+                let rewind_event_id = initial_rewind_event_id(&data);
+                let selected_event = rewind_event_index(&data, &rewind_event_id);
+                self.data = data;
+                self.refresh_visible_sessions();
+                self.selected_session = self
+                    .data
+                    .sessions
+                    .iter()
+                    .position(|session| session.id == pending.session_id)
+                    .unwrap_or(self.selected_session)
+                    .min(self.data.sessions.len().saturating_sub(1));
+                self.selected_event = selected_event;
+                self.selected_compiler =
+                    compiler_index_for_id(&self.data, &selected_compiler_id, selected_compiler);
+                self.data.capsule.compiler = self.data.compilers[self.selected_compiler].clone();
+                self.rewind_event_id = rewind_event_id;
+                self.capsule_scroll = 0;
+                self.compile_status = "PREVIEW";
+                self.verify_passed = false;
+                if let Some(session) = self.current_session() {
+                    self.set_status(format!(
+                        "Timeline preview: {} {} ({} events, {} ms)",
+                        session.cli,
+                        session.title,
+                        self.data.timeline.len(),
+                        elapsed.as_millis()
+                    ));
+                } else {
+                    self.set_status(format!(
+                        "Timeline preview loaded ({} ms)",
+                        elapsed.as_millis()
+                    ));
+                }
+            }
+            Err(error) => {
+                self.set_status(format!(
+                    "Timeline preview failed: {error} ({} ms)",
                     elapsed.as_millis()
                 ));
             }
@@ -4186,6 +4590,11 @@ impl App {
     }
 
     pub fn validate_launch_for_target(&self, target: CliTool) -> LaunchValidation {
+        if self.is_session_load_pending() || !self.selected_session_context_loaded() {
+            return LaunchValidation::warning(vec![
+                "selected session context loads when review starts".into(),
+            ]);
+        }
         let Some(report) = self.launch_verification_for_target(target) else {
             return LaunchValidation::blocked(vec!["No session selected".into()]);
         };
@@ -4193,6 +4602,9 @@ impl App {
     }
 
     pub fn launch_verification_for_target(&self, target: CliTool) -> Option<VerificationReport> {
+        if !self.selected_session_context_loaded() {
+            return None;
+        }
         let session = self.current_session()?;
         let capsule = self.launch_capsule_for_target(target);
         let continuation = continuation::build_continuation_protocol(
@@ -4264,6 +4676,42 @@ fn compiler_index_for_id(data: &WorkbenchData, compiler_id: &str, fallback: usiz
     data.compilers
         .iter()
         .position(|candidate| candidate == compiler_id)
+        .unwrap_or(fallback)
+        .min(data.compilers.len().saturating_sub(1))
+}
+
+fn compiler_index_for_equivalent_id(
+    data: &WorkbenchData,
+    compiler_id: &str,
+    target: CliTool,
+    fallback: usize,
+) -> usize {
+    if let Some(index) = data
+        .compilers
+        .iter()
+        .position(|candidate| candidate == compiler_id)
+    {
+        return index;
+    }
+    let Some(selected_spec) = handoff::parse_compiler_id(compiler_id) else {
+        return fallback.min(data.compilers.len().saturating_sub(1));
+    };
+    if let Some(target_runner_id) = target_runner_id(target)
+        && let Some(index) = data.compilers.iter().position(|candidate| {
+            handoff::parse_compiler_id(candidate).is_some_and(|candidate_spec| {
+                candidate_spec.skill_id == selected_spec.skill_id
+                    && candidate_spec.runner.id() == target_runner_id
+            })
+        })
+    {
+        return index;
+    }
+    data.compilers
+        .iter()
+        .position(|candidate| {
+            handoff::parse_compiler_id(candidate)
+                .is_some_and(|candidate_spec| candidate_spec.skill_id == selected_spec.skill_id)
+        })
         .unwrap_or(fallback)
         .min(data.compilers.len().saturating_sub(1))
 }
@@ -4422,6 +4870,25 @@ fn session_matches_query(session: &SessionSummary, query: &str) -> bool {
             .is_some_and(|reason| reason.to_ascii_lowercase().contains(query))
 }
 
+fn is_moonbox_handoff_worker_session(session: &SessionSummary) -> bool {
+    let title = session.title.to_ascii_lowercase();
+    crate::core::local_jsonl::is_provider_context_text(&session.title)
+        || crate::core::local_jsonl::is_moonbox_handoff_control_text(&session.title)
+        || title.starts_with("$handoff ")
+        || title.contains("you are running a moonbox continuation handoff job")
+        || title.contains("moonbox continuation handoff job")
+        || title.contains("the following is the codex agent history whose request action")
+        || title.contains("<selected_skill")
+        || title.contains("transcript start")
+}
+
+fn query_explicitly_requests_moonbox_handoff_workers(query: &str) -> bool {
+    !query.is_empty()
+        && (query.contains("$handoff")
+            || query.contains("moonbox continuation handoff")
+            || query.contains("moonbox handoff worker"))
+}
+
 fn original_resume_mode_from_env() -> OriginalResumeMode {
     parse_original_resume_mode(env::var("MOONBOX_RESUME_MODE").ok().as_deref())
 }
@@ -4437,7 +4904,7 @@ fn parse_original_resume_mode(value: Option<&str>) -> OriginalResumeMode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::image_preview::ImagePreviewStatus;
+    use crate::core::{data, image_preview::ImagePreviewStatus};
 
     fn key(ch: char) -> KeyEvent {
         KeyEvent::new(KeyCode::Char(ch), KeyModifiers::empty())
@@ -4448,6 +4915,26 @@ mod tests {
         app.starred_sessions.clear();
         app.refresh_visible_sessions();
         app
+    }
+
+    fn readonly_startup_app() -> App {
+        let fixture = App::new(CliTool::Codex, CliTool::Hermes).expect("fixture app");
+        let mut session = fixture
+            .data
+            .sessions
+            .iter()
+            .find(|session| session.cli == CliTool::Codex)
+            .cloned()
+            .expect("codex fixture session");
+        session.source_provenance = SourceProvenance::Real;
+        session.source_path = Some("/tmp/moonbox-readonly-startup.jsonl".into());
+        let workbench = data::workbench_data_from_readonly_inventory(
+            session.clone(),
+            vec![session],
+            fixture.data.source_adapters,
+            CliTool::Hermes,
+        );
+        App::from_data(workbench, CliTool::Hermes)
     }
 
     fn enable_hook_config(app: &mut App, smart_enter_tmux: bool) {
@@ -4480,7 +4967,7 @@ mod tests {
     }
 
     fn wait_for_background(app: &mut App, mut done: impl FnMut(&App) -> bool) {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(20);
         while Instant::now() < deadline {
             app.poll_background();
             if done(app) {
@@ -4499,6 +4986,14 @@ mod tests {
         );
     }
 
+    fn settle_session_preview(app: &mut App) {
+        wait_for_background(app, |app| !app.is_session_preview_pending());
+        assert!(
+            !app.is_session_preview_pending(),
+            "session preview did not finish"
+        );
+    }
+
     fn settle_data_space_load(app: &mut App) {
         wait_for_background(app, |app| app.pending_data_space_load.is_none());
         assert!(
@@ -4512,6 +5007,56 @@ mod tests {
         assert!(
             !app.is_launch_review_pending(),
             "launch review did not finish"
+        );
+    }
+
+    #[test]
+    fn readonly_startup_app_does_not_preload_session_timeline() {
+        let app = readonly_startup_app();
+
+        assert!(app.data.timeline.is_empty());
+        assert_eq!(app.data.capsule.state, "pending_rewind");
+        assert_eq!(app.compile_status, "PENDING");
+        assert!(!app.verify_passed);
+        assert_eq!(app.status_message, "Ready: session details load on demand");
+        assert!(!app.is_session_load_pending());
+        assert!(app.is_session_preview_pending());
+    }
+
+    #[test]
+    fn readonly_startup_details_load_on_first_timeline_action() {
+        let mut app = readonly_startup_app();
+
+        assert!(!app.ensure_session_details_ready("Review"));
+        assert!(app.is_session_load_pending());
+        assert_eq!(
+            app.status_message,
+            "Review is loading selected session details"
+        );
+
+        settle_session_load(&mut app);
+
+        assert!(!app.data.timeline.is_empty());
+        assert_eq!(app.compile_status, "PREVIEW");
+        assert!(!app.verify_passed);
+        assert!(app.selected_session_timeline_loaded());
+        assert!(!app.selected_session_context_loaded());
+    }
+
+    #[test]
+    fn readonly_startup_preview_loads_timeline_without_compiling_handoff() {
+        let mut app = readonly_startup_app();
+
+        settle_session_preview(&mut app);
+
+        assert!(app.selected_session_timeline_loaded());
+        assert!(!app.selected_session_context_loaded());
+        assert_eq!(app.compile_status, "PREVIEW");
+        assert!(!app.verify_passed);
+        assert!(
+            app.status_message.starts_with("Timeline preview: "),
+            "{}",
+            app.status_message
         );
     }
 
@@ -4640,7 +5185,7 @@ mod tests {
         app.handle_key(KeyEvent::from(KeyCode::Enter));
 
         assert_eq!(app.data.capsule.compiler, "agent:claude:handoff");
-        assert_eq!(app.status_message, "Skill: handoff");
+        assert_eq!(app.status_message, "Handoff skill: handoff");
     }
 
     #[test]
@@ -4897,6 +5442,67 @@ Host devbox
     }
 
     #[test]
+    fn moonbox_handoff_worker_sessions_are_hidden_unless_explicitly_searched() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        let mut worker = app.data.sessions[0].clone();
+        worker.id = "moonbox-worker-session".into();
+        worker.title =
+            "$handoff You are running a Moonbox continuation handoff job. Use the selected community handoff skill."
+                .into();
+        app.data.sessions.insert(0, worker);
+        let mut prompt_worker = app.data.sessions[0].clone();
+        prompt_worker.id = "moonbox-worker-prompt-session".into();
+        prompt_worker.title =
+            "The following is the Codex agent history whose request action you are assessing."
+                .into();
+        app.data.sessions.insert(0, prompt_worker);
+        let mut skill_worker = app.data.sessions[0].clone();
+        skill_worker.id = "moonbox-worker-skill-session".into();
+        skill_worker.title =
+            "<skill><name>handoff</name><path>/Users/me/.codex/skills/handoff/SKILL.md</path></skill>"
+                .into();
+        app.data.sessions.insert(0, skill_worker);
+        let mut aborted_worker = app.data.sessions[0].clone();
+        aborted_worker.id = "moonbox-worker-aborted-session".into();
+        aborted_worker.title =
+            "<turn_aborted>The user interrupted the previous turn on purpose.</turn_aborted>"
+                .into();
+        app.data.sessions.insert(0, aborted_worker);
+
+        app.refresh_visible_sessions();
+
+        assert!(
+            !app.visible_session_indices()
+                .iter()
+                .any(|index| app.data.sessions[*index].id == "moonbox-worker-session")
+        );
+        assert!(
+            !app.visible_session_indices()
+                .iter()
+                .any(|index| app.data.sessions[*index].id == "moonbox-worker-prompt-session")
+        );
+        assert!(
+            !app.visible_session_indices()
+                .iter()
+                .any(|index| app.data.sessions[*index].id == "moonbox-worker-skill-session")
+        );
+        assert!(
+            !app.visible_session_indices()
+                .iter()
+                .any(|index| app.data.sessions[*index].id == "moonbox-worker-aborted-session")
+        );
+
+        app.search_query = "$handoff".into();
+        app.refresh_visible_sessions();
+
+        assert!(
+            app.visible_session_indices()
+                .iter()
+                .any(|index| app.data.sessions[*index].id == "moonbox-worker-session")
+        );
+    }
+
+    #[test]
     fn session_filter_cycles_starred_before_all() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
 
@@ -4963,12 +5569,12 @@ Host devbox
             app.current_session().map(|session| session.id.as_str()),
             Some("hermes-cxcp-502")
         );
-        assert!(app.is_session_load_pending());
-        assert_eq!(app.rewind_event_id, "evt-091");
-        settle_session_load(&mut app);
-        assert_eq!(app.data.source, CliTool::Hermes);
-        assert_eq!(app.data.capsule.source_session, "hermes-cxcp-502");
-        assert_eq!(app.rewind_event_id, "evt-052");
+        assert!(!app.is_session_load_pending());
+        assert!(app.is_session_preview_pending());
+        assert!(!app.selected_session_timeline_loaded());
+        assert_eq!(app.data.source, CliTool::Codex);
+        assert_eq!(app.data.capsule.source_session, "codex-cxcp-design");
+        assert!(!app.data.timeline.is_empty());
     }
 
     #[test]
@@ -5037,11 +5643,8 @@ Host devbox
         assert_eq!(app.session_filter, SessionFilter::All);
         assert!(app.search_query.is_empty());
         assert_eq!(app.visible_session_indices().len(), 3);
-        assert_eq!(
-            app.status_message,
-            "Filters cleared - loading selected session"
-        );
-        settle_session_load(&mut app);
+        assert_eq!(app.status_message, "Filters cleared");
+        assert!(!app.is_session_load_pending());
     }
 
     #[test]
@@ -5052,12 +5655,15 @@ Host devbox
 
         app.handle_key(key(']'));
         assert_eq!(app.session_filter, SessionFilter::Tool(CliTool::Claude));
-        assert!(app.is_session_load_pending());
-        assert_eq!(app.rewind_event_id, "evt-091");
-        settle_session_load(&mut app);
-        assert_eq!(app.data.source, CliTool::Claude);
-        assert_eq!(app.data.capsule.source_session, "claude-qc-platform");
-        assert_eq!(app.rewind_event_id, "evt-074");
+        assert!(!app.is_session_load_pending());
+        assert!(app.is_session_preview_pending());
+        assert_eq!(
+            app.current_session().map(|session| session.id.as_str()),
+            Some("claude-qc-platform")
+        );
+        assert_eq!(app.data.source, CliTool::Codex);
+        assert_eq!(app.data.capsule.source_session, "codex-cxcp-design");
+        assert!(!app.selected_session_timeline_loaded());
         assert!(
             app.visible_session_indices()
                 .iter()
@@ -5069,7 +5675,7 @@ Host devbox
     }
 
     #[test]
-    fn moving_session_reloads_timeline_capsule_and_rewind() {
+    fn moving_session_defers_timeline_context_until_action_needs_it() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
 
         app.handle_key(key('j'));
@@ -5078,22 +5684,32 @@ Host devbox
             app.current_session().map(|session| session.id.as_str()),
             Some("claude-qc-platform")
         );
-        assert!(app.is_session_load_pending());
+        assert!(!app.is_session_load_pending());
+        assert!(app.is_session_preview_pending());
+        assert!(app.pending_session_preview.is_none());
+        assert!(app.deferred_session_preview.is_some());
         assert_eq!(app.data.source, CliTool::Codex);
+        assert_eq!(app.data.capsule.source_cli, CliTool::Codex);
         assert_eq!(app.data.capsule.source_session, "codex-cxcp-design");
-        assert_eq!(app.rewind_event_id, "evt-091");
-        assert_eq!(app.compile_status, "LOADING");
+        assert!(!app.data.timeline.is_empty());
+        assert!(!app.selected_session_timeline_loaded());
+        assert_eq!(app.compile_status, "PENDING");
+        assert!(!app.verify_passed);
+
+        assert!(!app.ensure_session_details_ready("Timeline detail"));
+        assert!(app.is_session_load_pending());
         settle_session_load(&mut app);
-        assert_eq!(app.data.source, CliTool::Claude);
-        assert_eq!(app.data.capsule.source_cli, CliTool::Claude);
+
         assert_eq!(app.data.capsule.source_session, "claude-qc-platform");
         assert_eq!(app.rewind_event_id, "evt-074");
         assert_eq!(app.selected_event, 4);
         assert!(app.data.timeline[0].detail.contains("QC platform"));
         assert!(app.data.branches[1].label.contains("evt-074"));
+        assert_eq!(app.compile_status, "PREVIEW");
+        assert!(!app.verify_passed);
         assert!(
             app.status_message
-                .starts_with("Session: Claude QC platform trace repair (5 events, ")
+                .starts_with("Timeline: Claude QC platform trace repair (5 events, ")
         );
     }
 
@@ -5104,34 +5720,66 @@ Host devbox
         app.handle_key(key('j'));
         app.handle_key(key('k'));
 
-        assert!(app.is_session_load_pending());
+        assert!(!app.is_session_load_pending());
         assert_eq!(
             app.current_session().map(|session| session.id.as_str()),
             Some("codex-cxcp-design")
         );
-        settle_session_load(&mut app);
         assert_eq!(app.data.source, CliTool::Codex);
         assert_eq!(app.data.capsule.source_session, "codex-cxcp-design");
-        assert_eq!(app.rewind_event_id, "evt-091");
+        assert!(app.selected_session_timeline_loaded());
+        assert!(!app.is_session_preview_pending());
+        assert!(!app.data.timeline.is_empty());
     }
 
     #[test]
-    fn launch_waits_for_selected_session_details() {
+    fn rapid_session_scanning_debounces_timeline_preview_worker() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+
+        for _ in 0..16 {
+            app.handle_key(key('j'));
+            app.handle_key(key('k'));
+        }
+        app.handle_key(key('j'));
+
+        assert_eq!(
+            app.current_session().map(|session| session.id.as_str()),
+            Some("claude-qc-platform")
+        );
+        assert!(!app.is_session_load_pending());
+        assert!(app.is_session_preview_pending());
+        assert!(
+            app.pending_session_preview.is_none(),
+            "navigation should not start IO worker before debounce expires"
+        );
+        assert!(app.deferred_session_preview.is_some());
+    }
+
+    #[test]
+    fn launch_picker_starts_review_with_deferred_selected_session_context() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
 
         app.handle_key(key('j'));
         app.handle_key(key('H'));
 
-        assert!(app.is_session_load_pending());
-        assert!(!app.show_launch);
-        assert_eq!(
-            app.status_message,
-            "Launch waits for selected session to load"
-        );
-        settle_session_load(&mut app);
-        app.handle_key(key('H'));
+        assert!(!app.is_session_load_pending());
         assert!(app.show_launch);
         assert_eq!(app.status_message, "Choose target CLI");
+        let validation = app.validate_launch_for_target(app.pending_target);
+        assert_eq!(validation.state, LaunchValidationState::Warning);
+        assert_eq!(
+            validation.summary(),
+            "selected session context loads when review starts"
+        );
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        assert!(app.show_launch);
+        assert!(app.is_launch_review_pending());
+        assert!(
+            app.status_message
+                .starts_with("Preparing handoff review: Hermes"),
+            "{}",
+            app.status_message
+        );
     }
 
     #[test]
@@ -5293,7 +5941,16 @@ Host devbox
         app.handle_key(key('y'));
         assert_eq!(
             app.status_message,
-            "Handoff review failed; press Enter to retry or S to choose skill"
+            "Handoff review failed; press r to retry or S to choose skill"
+        );
+
+        let request_id = app.launch_review_request_id;
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        assert_eq!(app.launch_review_request_id, request_id);
+        assert!(app.launch_review_error().is_some());
+        assert_eq!(
+            app.status_message,
+            "Handoff review failed; press r to retry or S to choose skill"
         );
 
         app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
@@ -5362,6 +6019,57 @@ Host devbox
         app.handle_key(key('x'));
 
         assert!(app.show_launch);
+        assert!(app.launch_review);
+        assert_eq!(app.status_message, "Handoff review ready: Hermes");
+    }
+
+    #[test]
+    fn pending_launch_review_reuses_existing_worker() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+
+        app.handle_key(key('x'));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        assert!(app.is_launch_review_pending());
+        let request_id = app.launch_review_request_id;
+
+        app.handle_key(key('q'));
+        assert!(!app.show_launch);
+        assert!(app.is_launch_review_pending());
+
+        app.handle_key(key('x'));
+        assert!(app.show_launch);
+        assert!(app.is_launch_review_pending());
+        assert_eq!(app.launch_review_request_id, request_id);
+        assert!(
+            app.status_message
+                .starts_with("Handoff job already running: Hermes")
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        assert_eq!(app.launch_review_request_id, request_id);
+        assert!(app.is_launch_review_pending());
+    }
+
+    #[test]
+    fn ready_handoff_review_reuses_existing_artifact_without_new_worker() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        let session_id = app.current_session().expect("session").id.clone();
+        let compiler_id = app.data.compilers[app.selected_compiler].clone();
+        let rewind_event_id = app.rewind_event_id.clone();
+        app.data.capsule.source_session = session_id;
+        app.data.capsule.target_cli = CliTool::Hermes;
+        app.data.capsule.compiler = compiler_id;
+        app.data.capsule.rewind_point = format!("{rewind_event_id} / reviewed");
+        app.data.capsule.handoff_artifact = Some("existing reviewed artifact".into());
+        app.show_launch = true;
+        app.launch_review = false;
+        app.pending_target = CliTool::Hermes;
+        let request_id = app.launch_review_request_id;
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert_eq!(app.launch_review_request_id, request_id);
+        assert!(!app.is_launch_review_pending());
         assert!(app.launch_review);
         assert_eq!(app.status_message, "Handoff review ready: Hermes");
     }
@@ -5580,7 +6288,37 @@ Host devbox
     }
 
     #[test]
-    fn skill_picker_enter_from_launch_applies_skill_and_starts_review() {
+    fn launch_entry_refreshes_agent_skill_catalog_for_real_sessions() {
+        let mut app = new_app(CliTool::Codex, CliTool::Claude);
+        app.data.sessions[app.selected_session].source_provenance = SourceProvenance::Real;
+        app.data.compilers = vec!["engineering-handoff".into()];
+        app.selected_compiler = 0;
+        app.pending_compiler = 0;
+        app.data.capsule.compiler = "engineering-handoff".into();
+
+        app.handle_key(key('H'));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(app.show_launch);
+        assert!(app.show_skill_picker);
+        assert!(
+            app.data
+                .compilers
+                .iter()
+                .any(|compiler| compiler == "agent:claude:handoff")
+        );
+        assert_eq!(
+            app.data.compilers[app.pending_compiler],
+            "agent:claude:handoff"
+        );
+        assert_eq!(
+            app.status_message,
+            "Choose an AI handoff skill before Handoff Review"
+        );
+    }
+
+    #[test]
+    fn skill_picker_enter_from_launch_applies_skill_without_starting_review() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.data.sessions[app.selected_session].source_provenance = SourceProvenance::Real;
         app.selected_compiler = compiler_index_for_id(&app.data, "engineering-handoff", 0);
@@ -5600,6 +6338,15 @@ Host devbox
         assert!(app.show_launch);
         assert_eq!(app.selected_compiler, pending_compiler);
         assert_eq!(app.data.capsule.compiler, pending_id);
+        assert!(!app.is_launch_review_pending());
+        assert!(!app.launch_review);
+        assert_eq!(
+            app.status_message,
+            "Handoff skill: handoff; press Enter to generate Review"
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
         assert!(app.is_launch_review_pending());
         assert!(!app.launch_review);
     }

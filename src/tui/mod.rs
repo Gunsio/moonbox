@@ -20,7 +20,7 @@ use ratatui::DefaultTerminal;
 use crate::{
     app::{App, SessionFilter, TmuxJumpPlan, TuiExitAction},
     core::{
-        launcher,
+        config, launcher,
         model::{CliTool, LaunchExecution, LaunchPlan, OriginalSessionPlan},
         tmux, workbench,
     },
@@ -33,6 +33,7 @@ pub fn docs_screenshot_svg(width: u16, height: u16) -> Result<String> {
 pub fn run(terminal: &mut DefaultTerminal, mut app: App) -> Result<Option<TuiExitAction>> {
     while !app.should_quit() {
         app.poll_background();
+        app.advance_animation();
         terminal.draw(|frame| view::render(frame, &app))?;
         if event::poll(Duration::from_millis(120))?
             && let Event::Key(key) = event::read()?
@@ -79,8 +80,12 @@ pub fn run_with_loading(
     });
 
     let mut tick = 0usize;
+    #[cfg(not(test))]
+    let language = config::load_ui_preferences_config().language;
+    #[cfg(test)]
+    let language = config::UiLanguage::English;
     loop {
-        terminal.draw(|frame| view::render_loading(frame, tick))?;
+        terminal.draw(|frame| view::render_loading(frame, tick, language))?;
         if let Ok(app) = receiver.try_recv() {
             return run(terminal, app?);
         }

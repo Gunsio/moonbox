@@ -120,10 +120,33 @@ and this project uses semantic versioning once tagged releases start.
   background after loading the source timeline, reports queued /
   preparing_context / starting_runner / running_skill / verifying progress, and
   keeps the in-process job alive when the review panel is hidden.
+- Handoff generation is now strictly user-confirmed from the Launch picker:
+  Skill Picker `Enter` only saves the chosen handoff skill, failed Review panels
+  require explicit `r` retry, ready artifacts are reused instead of regenerated,
+  and Moonbox cleans the SDK runner process group after success or timeout so
+  orphaned agent app-server processes cannot keep burning tokens.
+- Session browsing now keeps startup inventory-only, changes selection without
+  rebuilding `WorkbenchData`, then starts the selected session's bounded
+  timeline preview only after a short navigation debounce. Plain navigation,
+  filter changes, and live search never compile handoff output, run SDK
+  workers, or start immediate timeline IO; Review remains the explicit boundary
+  for AI handoff generation.
+- Timeline preview, selected-session load, and Handoff Review pending states
+  now render an animated `| / - \` spinner so long background work no longer
+  looks frozen.
 - Missing community handoff skills now appear as non-default agent placeholders
   with install guidance instead of silently falling back to hidden assumptions;
   ready agent runners must be selected explicitly or configured as the default
   compiler before they run.
+- Moonbox-generated handoff worker sessions are hidden from the main TUI
+  inventory by default and reappear only when explicitly searched, keeping
+  background handoff jobs from flooding the user's normal continuation list.
+- Provider-injected control blocks such as `<skill>...</skill>` and
+  `<turn_aborted>...</turn_aborted>` are no longer rendered as user timeline
+  turns or used as session titles.
+- Agent handoff runners now treat a closed child stdin after successful output
+  as normal process completion, avoiding false `Broken pipe` failures while
+  still surfacing timeouts, non-zero exits, and unreadable stdout.
 - Skill Picker is now skill-first: Codex / Claude agent catalog rows collapse
   into one handoff skill choice, installed local skill paths or install sources
   are shown directly, and runner IDs / SDK package commands are kept out of the
@@ -314,6 +337,29 @@ and this project uses semantic versioning once tagged releases start.
 
 ### Fixed
 
+- Handoff Review now reuses an already-running background generation job instead
+  of spawning duplicate Codex/Claude SDK workers when users reopen Launch or
+  press `enter` again. The pending panel shows target, compiler, stage, elapsed
+  time, timeout, and explicitly says `enter` will not start another SDK process.
+- Handoff Review retry and Skill Picker entry now refresh the compiler catalog
+  and SDK preflight state. Missing Python SDK checks are no longer cached as
+  permanent failures, so installing a runner SDK while Moonbox is open can be
+  recovered by pressing `r` to retry from the failure panel.
+- Pressing `H` / `x` while the selected session is still hydrating now opens the
+  normal Launch target picker immediately. The picker shows a warning that the
+  selected session context will load when Review starts, and `Enter` starts the
+  background handoff job instead of waiting on the preloaded details pane.
+- TUI startup now stops preloading the newest real session's timeline, anatomy,
+  and capsule preview. The loading screen only waits for the read-only inventory;
+  details hydrate on the first action that actually needs session context.
+- Agent Handoff Review now treats community skill Markdown output as a handoff
+  artifact rather than a legacy capsule: missing Moonbox-only semantic refs warn
+  instead of blocking run/copy, while hard source / target / rewind mismatches
+  still block. The pending panel also labels skill / runner, localized stage,
+  elapsed time, timeout limit, and blocker reasons explicitly.
+- The startup loading screen now follows the saved UI language preference and
+  describes the bounded read-only startup index instead of hard-coded English
+  scan text.
 - Simplified Chinese UI preferences now localize the main TUI chrome, including
   the header, session inventory, timeline/details/action panels, status line,
   key hints, and Launch target picker, while preserving source session content
@@ -342,7 +388,7 @@ and this project uses semantic versioning once tagged releases start.
   panel with the attempted skill/compiler, elapsed time, failure reason, and
   explicit retry / choose-skill actions instead of flashing and disappearing.
 - Skill Picker now handles Enter while opened above Launch: selecting a handoff
-  skill applies it and immediately starts background Handoff Review generation.
+  skill applies it and returns to Launch without starting AI generation.
   Installed community `handoff` skills also show the third-party provider and
   GitHub source link, not just the local `SKILL.md` path.
 - Launch target picker now treats stale handoffs generated by a previously
