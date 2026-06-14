@@ -592,6 +592,8 @@ pub struct WorkCapsule {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handoff_artifact: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handoff_artifact_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handoff_runner: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handoff_skill: Option<String>,

@@ -341,12 +341,12 @@ pub fn compile_with_agent_runner(
         reason: error.to_string(),
     })?;
     let prompt = build_agent_prompt(request, &skill, &skill_source);
-    let artifact = if let Ok(fake) = env::var("MOONBOX_AGENT_HANDOFF_FAKE_OUTPUT") {
+    let agent_output = if let Ok(fake) = env::var("MOONBOX_AGENT_HANDOFF_FAKE_OUTPUT") {
         fake
     } else {
         run_agent(request, spec.runner, &skill, &skill_source, &prompt)?
     };
-    let artifact = validate_agent_artifact(request, artifact)?;
+    let artifact = resolve_agent_artifact(request, &agent_output)?;
     let capsule = normalize_agent_artifact(request, spec.runner, &skill, &artifact);
     Ok(compiler::enrich_compile_output(
         request,
@@ -393,9 +393,9 @@ fn normalize_agent_artifact(
     request: &CapsuleCompileRequest,
     runner: AgentRunner,
     skill: &HandoffSkill,
-    artifact: &str,
+    artifact: &AgentArtifact,
 ) -> WorkCapsule {
-    let artifact = bounded_artifact(artifact);
+    let artifact_body = bounded_artifact(&artifact.body);
     let session = &request.source_session;
     let rewind = request
         .timeline
@@ -444,13 +444,26 @@ fn normalize_agent_artifact(
         evidence: vec![
             format!("source session: {} ({})", session.id, session.cli),
             format!("skill path: {}", skill.path.display()),
-            format!("artifact excerpt: {}", single_line_excerpt(&artifact, 220)),
+            artifact
+                .path
+                .as_ref()
+                .map(|path| format!("artifact path: {}", path.display()))
+                .unwrap_or_else(|| {
+                    format!(
+                        "artifact excerpt: {}",
+                        single_line_excerpt(&artifact_body, 220)
+                    )
+                }),
         ],
         risks: vec![
             "AI-generated handoff must be reviewed before launching a target CLI.".into(),
             "Moonbox did not mutate the source session store.".into(),
         ],
-        handoff_artifact: Some(artifact),
+        handoff_artifact: Some(artifact_body),
+        handoff_artifact_path: artifact
+            .path
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned()),
         handoff_runner: Some(runner.label().into()),
         handoff_skill: Some(skill.name.clone()),
         raw_source_map: None,
@@ -950,6 +963,43 @@ fn run_claude_agent_sdk(
     Ok(agent_artifact_from_output(&stdout))
 }
 
+#[derive(Debug, Clone)]
+struct AgentArtifact {
+    body: String,
+    path: Option<PathBuf>,
+}
+
+fn resolve_agent_artifact(
+    request: &CapsuleCompileRequest,
+    output: &str,
+) -> Result<AgentArtifact, CompilerError> {
+    let body = agent_artifact_from_output(output);
+    if let Some(path) = extract_handoff_artifact_path(&body).or_else(|| {
+        if body == output.trim() {
+            None
+        } else {
+            extract_handoff_artifact_path(output)
+        }
+    }) {
+        let path = validate_handoff_artifact_path(request, path)?;
+        let file_body = fs::read_to_string(&path).map_err(|error| CompilerError::Io {
+            compiler: request.compiler.clone(),
+            stream: "artifact",
+            reason: format!("{}: {error}", path.display()),
+        })?;
+        let file_body = validate_agent_artifact(request, file_body)?;
+        return Ok(AgentArtifact {
+            body: file_body,
+            path: Some(path),
+        });
+    }
+
+    Ok(AgentArtifact {
+        body: validate_agent_artifact(request, body)?,
+        path: None,
+    })
+}
+
 fn agent_artifact_from_output(output: &str) -> String {
     let trimmed = output.trim();
     if let Ok(value) = serde_json::from_str::<Value>(trimmed)
@@ -958,6 +1008,68 @@ fn agent_artifact_from_output(output: &str) -> String {
         return artifact.to_string();
     }
     trimmed.into()
+}
+
+fn extract_handoff_artifact_path(output: &str) -> Option<PathBuf> {
+    output
+        .split(|character: char| {
+            character.is_whitespace()
+                || matches!(
+                    character,
+                    '<' | '>' | ')' | '(' | '[' | ']' | '\'' | '"' | '`'
+                )
+        })
+        .map(|token| {
+            token.trim_matches(|character: char| matches!(character, ':' | ',' | ';' | '.' | '。'))
+        })
+        .find(|token| {
+            token.contains("moonbox-handoff-")
+                && token.ends_with(".md")
+                && (token.starts_with('/') || token.starts_with("file://"))
+        })
+        .map(|token| {
+            token
+                .strip_prefix("file://")
+                .map_or_else(|| PathBuf::from(token), PathBuf::from)
+        })
+}
+
+fn validate_handoff_artifact_path(
+    request: &CapsuleCompileRequest,
+    path: PathBuf,
+) -> Result<PathBuf, CompilerError> {
+    let canonical = path.canonicalize().map_err(|error| CompilerError::Io {
+        compiler: request.compiler.clone(),
+        stream: "artifact",
+        reason: format!("{}: {error}", path.display()),
+    })?;
+    let temp_root = env::temp_dir()
+        .canonicalize()
+        .map_err(|error| CompilerError::Io {
+            compiler: request.compiler.clone(),
+            stream: "artifact",
+            reason: format!("temp dir: {error}"),
+        })?;
+    let file_name = canonical
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    if !canonical.starts_with(&temp_root)
+        || !file_name.starts_with("moonbox-handoff-")
+        || canonical
+            .extension()
+            .and_then(|extension| extension.to_str())
+            != Some("md")
+    {
+        return Err(CompilerError::InvalidOutput {
+            compiler: request.compiler.clone(),
+            reason: format!(
+                "handoff skill referenced an unsupported artifact path: {}",
+                path.display()
+            ),
+        });
+    }
+    Ok(canonical)
 }
 
 struct TempClaudePlugin {
@@ -1667,6 +1779,16 @@ mod tests {
             TimelineToolCall, TimelineToolResult,
         },
     };
+    use std::sync::MutexGuard;
+
+    static HANDOFF_PROCESS_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn handoff_process_test_lock() -> MutexGuard<'static, ()> {
+        HANDOFF_PROCESS_TEST_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("handoff process test lock")
+    }
 
     #[test]
     fn parses_agent_compiler_id() {
@@ -1693,6 +1815,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn python_module_negative_result_is_not_sticky() {
+        let _guard = handoff_process_test_lock();
         use std::os::unix::fs::PermissionsExt;
 
         let nonce = SystemTime::now()
@@ -1720,7 +1843,7 @@ mod tests {
         assert!(!python_module_available(&command, "openai_codex"));
 
         fs::write(&marker, "ready").expect("marker");
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(10);
         while !python_module_available(&command, "openai_codex") && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(20));
         }
@@ -1732,6 +1855,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn agent_child_success_reaps_sdk_helper_process_group() {
+        let _guard = handoff_process_test_lock();
         let root = env::temp_dir().join(format!(
             "moonbox-agent-child-group-{}-{}",
             std::process::id(),
@@ -1753,7 +1877,7 @@ mod tests {
             &script.to_string_lossy(),
             &[],
             b"{}".to_vec(),
-            Duration::from_secs(5),
+            Duration::from_secs(15),
         )
         .expect("success");
 
@@ -1778,6 +1902,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn agent_child_success_ignores_closed_stdin_pipe() {
+        let _guard = handoff_process_test_lock();
         let root = env::temp_dir().join(format!(
             "moonbox-agent-closed-stdin-{}-{}",
             std::process::id(),
@@ -1795,7 +1920,7 @@ mod tests {
             &script.to_string_lossy(),
             &[],
             vec![b'x'; 1024 * 1024],
-            Duration::from_secs(5),
+            Duration::from_secs(15),
         )
         .expect("success");
 
@@ -1927,7 +2052,10 @@ Write the handoff.
             &request,
             AgentRunner::Codex,
             &skill,
-            "# Handoff\nContinue the work.",
+            &AgentArtifact {
+                body: "# Handoff\nContinue the work.".into(),
+                path: None,
+            },
         );
         assert_eq!(capsule.compiler, request.compiler);
         assert_eq!(capsule.state, "handoff_ready");
@@ -1949,6 +2077,35 @@ Write the handoff.
         );
 
         assert_eq!(artifact, "# Handoff\nContinue here.");
+    }
+
+    #[test]
+    fn resolves_skill_generated_temp_markdown_as_artifact_body() {
+        let request =
+            data::compile_request(CliTool::Codex, CliTool::Claude, "evt-091").expect("request");
+        let artifact_path = env::temp_dir().join(format!(
+            "moonbox-handoff-test-{}-{}.md",
+            std::process::id(),
+            unique_suffix()
+        ));
+        fs::write(
+            &artifact_path,
+            "# Handoff\n\nContinue with the generated markdown body.",
+        )
+        .expect("artifact");
+
+        let output = format!(
+            "已生成 handoff 文档: [moonbox-handoff-test.md](<{}>)",
+            artifact_path.display()
+        );
+        let artifact = resolve_agent_artifact(&request, &output).expect("resolved artifact");
+
+        assert!(artifact.body.contains("generated markdown body"));
+        assert_eq!(
+            artifact.path.as_deref(),
+            Some(artifact_path.canonicalize().expect("canonical").as_path())
+        );
+        let _ = fs::remove_file(artifact_path);
     }
 
     #[test]

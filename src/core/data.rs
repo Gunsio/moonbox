@@ -515,6 +515,7 @@ fn pending_work_capsule(
             "Launch and verify remain blocked until a real rewind event is selected.".into(),
         ],
         handoff_artifact: None,
+        handoff_artifact_path: None,
         handoff_runner: None,
         handoff_skill: None,
         raw_source_map: None,
