@@ -1,0 +1,11 @@
+[package]
+name = "moonbox-theme"
+version = "0.1.2"
+edition = "2024"
+description = "Semantic TUI theme tokens for Moonbox and related Ratatui apps"
+license = "MIT"
+repository = "https://github.com/Gunsio/moonbox"
+rust-version = "1.88"
+
+[dependencies]
+ratatui = "0.30"

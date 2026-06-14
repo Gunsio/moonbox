@@ -471,12 +471,12 @@ pub fn truncate(text: &str, max_chars: usize) -> String {
 }
 
 pub fn is_provider_context_text(text: &str) -> bool {
-    let trimmed = text.trim_start();
+    let trimmed = context_text_start(text);
     trimmed.starts_with("<environment_context>")
         || trimmed.starts_with("<system_context>")
         || trimmed.starts_with("<developer_context>")
         || trimmed.starts_with("# AGENTS.md instructions for")
-        || (trimmed.starts_with("<skill>") && trimmed.contains("</skill>"))
+        || trimmed.starts_with("<skill>")
         || (trimmed.starts_with("<turn_aborted>") && trimmed.contains("</turn_aborted>"))
         || (trimmed.contains("<environment_context>")
             && trimmed.contains("</environment_context>")
@@ -487,7 +487,7 @@ pub fn is_provider_context_text(text: &str) -> bool {
 }
 
 pub fn is_moonbox_handoff_control_text(text: &str) -> bool {
-    let trimmed = text.trim_start();
+    let trimmed = context_text_start(text);
     trimmed.starts_with("$handoff You are running a Moonbox continuation handoff job")
         || trimmed.starts_with("You are running a Moonbox continuation handoff job.")
         || trimmed.starts_with("The following is the Codex agent history whose request action")
@@ -495,6 +495,36 @@ pub fn is_moonbox_handoff_control_text(text: &str) -> bool {
         || (trimmed.contains("Moonbox continuation handoff job")
             && trimmed.contains("<selected_skill")
             && trimmed.contains("TRANSCRIPT START"))
+}
+
+pub fn is_skill_context_text(text: &str) -> bool {
+    let trimmed = context_text_start(text);
+    trimmed.starts_with("<skill>") || trimmed.starts_with("<selected_skill")
+}
+
+fn context_text_start(text: &str) -> &str {
+    let mut trimmed = text.trim_start();
+    loop {
+        let next = strip_context_prefix(trimmed).trim_start();
+        if next.len() == trimmed.len() {
+            return trimmed;
+        }
+        trimmed = next;
+    }
+}
+
+fn strip_context_prefix(text: &str) -> &str {
+    for prefix in ["[", "]", ">", "|"] {
+        if let Some(rest) = text.strip_prefix(prefix) {
+            return rest;
+        }
+    }
+    for prefix in ["- ", "* ", "+ "] {
+        if let Some(rest) = text.strip_prefix(prefix) {
+            return rest;
+        }
+    }
+    text
 }
 
 pub fn title_case(value: &str) -> String {
@@ -680,6 +710,22 @@ mod tests {
             markup.attachments[0].mime_type.as_deref(),
             Some("image/unknown")
         );
+    }
+
+    #[test]
+    fn provider_context_detects_wrapped_or_truncated_skill_blocks() {
+        assert!(is_provider_context_text(
+            "[ <skill> <name>qc-login</name> <path>/Users/me/.codex/skills/qc-login/SKILL.md</path>"
+        ));
+        assert!(is_provider_context_text(
+            "> - <skill> <name>handoff</name> <path>/Users/me/.codex/skills/handoff/SKILL.md</path>"
+        ));
+        assert!(is_skill_context_text(
+            "[ <selected_skill path=\"/Users/me/.codex/skills/handoff/SKILL.md\">"
+        ));
+        assert!(!is_provider_context_text(
+            "Can we add a skill picker that shows provider metadata?"
+        ));
     }
 
     #[test]

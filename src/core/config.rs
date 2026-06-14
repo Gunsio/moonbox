@@ -5,6 +5,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+use crate::moonbox_theme;
+
 use super::model::{CliTool, TimelineKind};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -105,30 +107,68 @@ pub enum UiThemeName {
     Moonbox,
     TokyoNight,
     Gruvbox,
+    LuoshenSwan,
+    LuoshenDragon,
+    LuoshenChrysanthemum,
+    LuoshenPine,
 }
 
 impl UiThemeName {
+    const ALL: [Self; 7] = [
+        Self::Moonbox,
+        Self::TokyoNight,
+        Self::Gruvbox,
+        Self::LuoshenSwan,
+        Self::LuoshenDragon,
+        Self::LuoshenChrysanthemum,
+        Self::LuoshenPine,
+    ];
+
     pub fn label(self) -> &'static str {
-        match self {
-            Self::Moonbox => "Moonbox",
-            Self::TokyoNight => "Tokyo Night",
-            Self::Gruvbox => "Gruvbox",
-        }
+        moonbox_theme::ThemeId::from(self).label()
     }
 
     pub fn next(self) -> Self {
-        match self {
-            Self::Moonbox => Self::TokyoNight,
-            Self::TokyoNight => Self::Gruvbox,
-            Self::Gruvbox => Self::Moonbox,
-        }
+        let index = Self::ALL
+            .iter()
+            .position(|theme| *theme == self)
+            .unwrap_or_default();
+        Self::ALL[(index + 1) % Self::ALL.len()]
     }
 
     pub fn previous(self) -> Self {
-        match self {
-            Self::Moonbox => Self::Gruvbox,
-            Self::TokyoNight => Self::Moonbox,
-            Self::Gruvbox => Self::TokyoNight,
+        let index = Self::ALL
+            .iter()
+            .position(|theme| *theme == self)
+            .unwrap_or_default();
+        Self::ALL[(index + Self::ALL.len() - 1) % Self::ALL.len()]
+    }
+}
+
+impl From<UiThemeName> for moonbox_theme::ThemeId {
+    fn from(theme: UiThemeName) -> Self {
+        match theme {
+            UiThemeName::Moonbox => Self::Moonbox,
+            UiThemeName::TokyoNight => Self::TokyoNight,
+            UiThemeName::Gruvbox => Self::Gruvbox,
+            UiThemeName::LuoshenSwan => Self::LuoshenSwan,
+            UiThemeName::LuoshenDragon => Self::LuoshenDragon,
+            UiThemeName::LuoshenChrysanthemum => Self::LuoshenChrysanthemum,
+            UiThemeName::LuoshenPine => Self::LuoshenPine,
+        }
+    }
+}
+
+impl From<moonbox_theme::ThemeId> for UiThemeName {
+    fn from(theme: moonbox_theme::ThemeId) -> Self {
+        match theme {
+            moonbox_theme::ThemeId::Moonbox => Self::Moonbox,
+            moonbox_theme::ThemeId::TokyoNight => Self::TokyoNight,
+            moonbox_theme::ThemeId::Gruvbox => Self::Gruvbox,
+            moonbox_theme::ThemeId::LuoshenSwan => Self::LuoshenSwan,
+            moonbox_theme::ThemeId::LuoshenDragon => Self::LuoshenDragon,
+            moonbox_theme::ThemeId::LuoshenChrysanthemum => Self::LuoshenChrysanthemum,
+            moonbox_theme::ThemeId::LuoshenPine => Self::LuoshenPine,
         }
     }
 }
@@ -433,6 +473,22 @@ mod tests {
         assert_eq!(config.ssh_hosts[0].name, "dev");
         assert_eq!(config.ssh_hosts[0].host, "dev.example.com");
         assert_eq!(config.starred_sessions, ["codex:session-1"]);
+    }
+
+    #[test]
+    fn parses_luoshen_theme_ids() {
+        let config = serde_json::from_str::<UserConfig>(
+            r#"{
+  "ui": {"language": "english", "theme": "luoshen-chrysanthemum"}
+}"#,
+        )
+        .expect("config");
+
+        assert_eq!(config.ui.language, UiLanguage::English);
+        assert_eq!(config.ui.theme, UiThemeName::LuoshenChrysanthemum);
+        assert_eq!(config.ui.theme.label(), "荣曜秋菊 / Radiant Chrysanthemum");
+        assert_eq!(config.ui.theme.next(), UiThemeName::LuoshenPine);
+        assert_eq!(config.ui.theme.previous(), UiThemeName::LuoshenDragon);
     }
 
     #[test]
