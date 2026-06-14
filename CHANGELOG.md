@@ -347,6 +347,13 @@ and this project uses semantic versioning once tagged releases start.
 
 ### Fixed
 
+- Handoff Review success for agent-backed community skills is now skill-first:
+  Moonbox reads the generated temporary Markdown artifact, shows that Markdown
+  as the default Review body, removes capsule/verifier wrapper text from the
+  user-facing surface, passes only a short Moonbox guard plus the reviewed
+  Markdown to the target agent, hides built-in draft compilers from the TUI
+  Skill Picker, and lets `Enter` confirm the target-agent launch while `y`
+  remains the copy-command path.
 - Handoff Review now reuses an already-running background generation job instead
   of spawning duplicate Codex/Claude SDK workers when users reopen Launch or
   press `enter` again. The pending panel shows target, compiler, stage, elapsed

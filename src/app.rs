@@ -2236,6 +2236,11 @@ impl App {
                         self.copy_launch_command();
                     }
                 }
+                KeyCode::Char('S') => {
+                    self.open_skill_picker();
+                    self.show_launch = true;
+                    self.set_status("Choose handoff skill");
+                }
                 KeyCode::Char('r') => {
                     if needs_handoff_skill {
                         self.set_status("Choose an AI handoff skill before running");
@@ -2252,10 +2257,7 @@ impl App {
                     } else if can_regenerate_handoff {
                         self.confirm_launch_target();
                     } else {
-                        self.set_status(format!(
-                            "Review only - press r to run local {}",
-                            self.pending_target
-                        ));
+                        self.queue_target_handoff();
                     }
                 }
                 KeyCode::Char('G') => {
@@ -2780,11 +2782,8 @@ impl App {
     pub(crate) fn skill_picker_candidate_indices(&self) -> Vec<usize> {
         let mut candidates = Vec::new();
         let mut seen_agent_skills: Vec<String> = Vec::new();
-        let hide_builtin_drafts = self
-            .current_session()
-            .is_some_and(|session| session.source_provenance != SourceProvenance::Fixture);
         for (index, compiler_id) in self.data.compilers.iter().enumerate() {
-            if hide_builtin_drafts && compiler::compiler_is_builtin(compiler_id) {
+            if compiler::compiler_is_builtin(compiler_id) {
                 continue;
             }
             if let Some(spec) = handoff::parse_compiler_id(compiler_id) {
@@ -5185,7 +5184,7 @@ mod tests {
 
         let candidates = app.skill_picker_candidate_indices();
 
-        assert_eq!(candidates, vec![1, 2]);
+        assert_eq!(candidates, vec![1]);
         assert!(app.compiler_selection_matches(candidates[0], app.selected_compiler));
 
         app.handle_key(key('S'));
@@ -5410,9 +5409,10 @@ Host devbox
     #[test]
     fn review_key_refreshes_capsule_and_opens_handoff_review() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
-        app.handle_key(key('S'));
-        app.handle_key(key('j'));
-        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        app.data.compilers = vec!["engineering-handoff".into()];
+        app.selected_compiler = 0;
+        app.pending_compiler = 0;
+        app.data.capsule.compiler = "engineering-handoff".into();
         let compiler = app.data.capsule.compiler.clone();
 
         app.handle_key(key('c'));
@@ -6206,7 +6206,7 @@ Host devbox
     }
 
     #[test]
-    fn launch_review_enter_is_review_only() {
+    fn launch_review_enter_queues_target_handoff_without_executing_in_tests() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.handle_key(key('H'));
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
@@ -6215,12 +6215,14 @@ Host devbox
 
         assert!(!app.should_quit());
         assert!(app.take_exit_action().is_none());
-        assert!(app.take_pending_launch().is_none());
+        let Some(plan) = app.take_pending_launch() else {
+            panic!("expected pending target handoff");
+        };
+        assert_eq!(plan.source_session.id, "codex-cxcp-design");
+        assert_eq!(plan.target_cli, CliTool::Hermes);
+        assert!(plan.dry_run);
         assert!(app.launch_review);
-        assert_eq!(
-            app.status_message,
-            "Review only - press r to run local Hermes"
-        );
+        assert_eq!(app.status_message, "Launching target: Hermes");
     }
 
     #[test]

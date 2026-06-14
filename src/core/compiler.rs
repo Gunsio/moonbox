@@ -354,6 +354,7 @@ impl CapsuleCompiler for FixtureCapsuleCompiler {
                 ],
                 risks,
                 handoff_artifact: None,
+                handoff_artifact_path: None,
                 handoff_runner: None,
                 handoff_skill: None,
                 raw_source_map: None,

@@ -277,6 +277,12 @@ fn handoff_prompt(
     capsule: &WorkCapsule,
     continuation: &ContinuationProtocol,
 ) -> String {
+    if let Some(artifact) = capsule.handoff_artifact.as_deref()
+        && !compiler::compiler_is_builtin(&capsule.compiler)
+    {
+        return skill_handoff_prompt(session, capsule, artifact);
+    }
+
     let prompt_session = redaction::redact_session_for_prompt(session, &capsule.redaction);
     let generated_handoff = capsule
         .handoff_artifact
@@ -354,6 +360,29 @@ Instructions
         bullet_lines(&capsule.risks),
         redaction::prompt_summary(&capsule.redaction),
         generated_handoff
+    )
+}
+
+fn skill_handoff_prompt(session: &SessionSummary, capsule: &WorkCapsule, artifact: &str) -> String {
+    let prompt_session = redaction::redact_session_for_prompt(session, &capsule.redaction);
+    let artifact = artifact.trim();
+    format!(
+        "\
+Moonbox continuation handoff.
+
+Source: {} {}
+Target: {}
+Rewind: {}
+
+Use the selected handoff skill output below as the continuation brief. Treat the source session store as read-only, and do not raw-resume the source session unless explicitly asked.
+
+{}
+",
+        prompt_session.cli,
+        prompt_session.id,
+        capsule.target_cli,
+        capsule.rewind_point,
+        if artifact.is_empty() { "-" } else { artifact }
     )
 }
 
@@ -543,6 +572,36 @@ mod tests {
         assert!(!prompt.contains("\"source_cli\""));
         assert!(!prompt.contains("{\"version\""));
         assert!(!prompt.contains("~/coding/qc-platform"));
+    }
+
+    #[test]
+    fn agent_skill_handoff_prompt_uses_markdown_artifact_without_capsule_wrapper() {
+        let mut data = data::workbench_data(CliTool::Claude, CliTool::Codex).expect("data");
+        let session = data
+            .sessions
+            .iter()
+            .find(|session| session.id == data.capsule.source_session)
+            .expect("session");
+        data.capsule.compiler = "agent:codex:handoff".into();
+        data.capsule.handoff_runner = Some("Codex".into());
+        data.capsule.handoff_skill = Some("handoff".into());
+        data.capsule.handoff_artifact = Some(
+            "# Handoff\n\nContinue with the community skill output.\n\n## Next steps\n- Validate UI copy."
+                .into(),
+        );
+
+        let command = target_command(CliTool::Codex, session, &data.capsule).expect("command");
+        let prompt = command.args.last().expect("prompt");
+
+        assert!(prompt.contains("Moonbox continuation handoff."));
+        assert!(prompt.contains("# Handoff"));
+        assert!(prompt.contains("Continue with the community skill output."));
+        assert!(prompt.contains("## Next steps\n- Validate UI copy."));
+        assert!(!prompt.contains("Work Capsule Summary"));
+        assert!(!prompt.contains("Generated Handoff Artifact"));
+        assert!(!prompt.contains("Privacy / Redaction"));
+        assert!(!prompt.contains("Decisions:\n"));
+        assert!(!prompt.contains("Risks:\n"));
     }
 
     #[test]

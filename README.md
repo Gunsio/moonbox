@@ -682,8 +682,11 @@ the app.
 The production handoff path is skill-first: pick a source session, target
 executor, handoff skill, and runner SDK, then review the generated handoff
 before launching. Community handoff skills use the same runner path and Review
-UX. Deterministic built-in compiler output is a draft/fallback surface only,
-listed in the TUI as draft templates rather than production skills.
+UX. Moonbox acts as the orchestrator: it runs the selected skill, reads the
+generated Markdown artifact, and passes that artifact to the target agent after
+user confirmation. Deterministic built-in compiler output is not a production
+Review path; if a built-in fallback is reintroduced for interactive handoff, it
+must appear as a built-in skill through the same runner / review flow.
 
 Environment variables remain the highest-priority one-off override:
 
@@ -853,9 +856,11 @@ Moonbox has two separate actions for a selected session:
   launching or copying it. `H` and `t` remain compatibility aliases.
 - `S`: open Skill Picker. Agent-backed handoff rows are collapsed by skill and
   show installed/local path, third-party provider/source link when known, or
-  install source; runner SDK setup is checked before launch. Built-in fallback
-  rows are labeled as draft templates. Press `y` to copy the skill path or
-  install source.
+  install source; runner SDK setup is checked before launch. Built-in draft
+  compilers are not handoff skill choices in the TUI. If Moonbox ships a
+  built-in interactive handoff later, it must be a bundled skill invoked through
+  the same agent runner path. Press `y` to copy the skill path or install
+  source.
 - `,`: open Settings. M95 exposes Smart Enter / tmux jump there with preview and
   persistence; hooks install/uninstall remains a CLI command.
 
@@ -887,15 +892,15 @@ Picker is opened from Launch, `Enter` applies the selected handoff skill only;
 return to Launch and press `Enter` again to start background Review generation.
 Community skill Markdown artifacts are reviewed as handoff artifacts: missing
 Moonbox-specific semantic refs warn instead of blocking launch, while hard
-source / target / rewind mismatches still block.
-`G` jumps back to the bottom and `gg` jumps to the top. Pressing `r`
-in that review restores the terminal first, launches the local target CLI, then
-returns to Moonbox with a
-three-action result panel: run again, copy command, or return. For real sessions
-using the built-in draft compiler, `r` is disabled before spawn; copy the
-command with `y`, choose an AI handoff skill, or configure an external compiler
-first. Pressing `enter` in the review is review-only and does not launch.
-Pressing `y` copies the actual target command.
+source / target / rewind mismatches still block. For the community `handoff`
+skill, Moonbox reads the generated temporary Markdown file and shows that body
+as the Review content; Moonbox capsule/verifier details stay out of the default
+Review surface.
+`G` jumps back to the bottom and `gg` jumps to the top. Pressing `Enter` in
+that review restores the terminal first, launches the local target CLI with the
+reviewed skill artifact, then returns to Moonbox with a three-action result
+panel: run again, copy command, or return. Pressing `y` copies the actual target
+command.
 Pressing `y` in the target picker does not copy anything. The picker keeps
 every target visible and annotates each option with `READY`, `WARN`, or
 `BLOCKED`; blocked targets keep launch review disabled until validation passes.
@@ -1458,6 +1463,15 @@ Stable interfaces matter more than any single framework:
   `荣曜秋菊` / Radiant Chrysanthemum, and `华茂春松` / Lush Pine. Deprecated
   reference themes remain crate-level compatibility palettes only, are not shown
   in Moonbox Settings, and source session content is never mutated.
+- M98: Skill-first Handoff Review cleanup; agent-backed handoff success now
+  reads the community skill's generated temporary Markdown file and shows that
+  Markdown as the Review body. Moonbox capsule/verifier wrapper text is removed
+  from the default Review surface, the target agent receives only a short
+  Moonbox guard plus the reviewed Markdown, `Enter` confirms and queues the
+  target agent launch after review, and `y` remains the copy-command path. The
+  TUI Skill Picker no longer exposes built-in draft compilers as skill choices;
+  any future built-in interactive handoff must be exposed as a bundled skill
+  through the same skill-first path.
 - M92: Remote / SSH Session Detail Parity; SSH data spaces now hydrate selected
   session details from the remote `compile-request --json` response, preserving
   remote-computed bounded anatomy in the same Details / Zoom Details rendering
