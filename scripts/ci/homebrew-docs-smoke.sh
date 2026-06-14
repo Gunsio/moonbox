@@ -23,9 +23,9 @@ run() {
 
 run ruby -c "$formula"
 
-grep -Fq 'url "https://github.com/Gunsio/moonbox/releases/download/v0.1.2/moonbox-0.1.2-aarch64-apple-darwin.tar.gz"' "$formula"
-grep -Fq 'url "https://github.com/Gunsio/moonbox/releases/download/v0.1.2/moonbox-0.1.2-source.tar.gz"' "$formula"
-grep -Fq 'root_url "https://github.com/Gunsio/moonbox/releases/download/v0.1.2"' "$formula"
+grep -Fq 'url "https://github.com/Gunsio/moonbox/releases/download/v0.1.3/moonbox-0.1.3-aarch64-apple-darwin.tar.gz"' "$formula"
+grep -Fq 'url "https://github.com/Gunsio/moonbox/releases/download/v0.1.3/moonbox-0.1.3-source.tar.gz"' "$formula"
+grep -Fq 'root_url "https://github.com/Gunsio/moonbox/releases/download/v0.1.3"' "$formula"
 grep -Fq 'sha256 cellar: :any_skip_relocation, arm64_tahoe: "<release-bottle-sha256>"' "$formula"
 grep -Fq 'sha256 cellar: :any_skip_relocation, arm64_sequoia: "<release-bottle-sha256>"' "$formula"
 grep -Fq 'sha256 "<release-binary-sha256>"' "$formula"

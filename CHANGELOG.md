@@ -187,6 +187,10 @@ and this project uses semantic versioning once tagged releases start.
   provenance, Ratatui adapters, image-linked ASCII sigils, and truecolor / ANSI
   / `NO_COLOR` fallback behavior. The TUI ships the first-party Luoshen family:
   Startled Swan, Coursing Dragon, Radiant Chrysanthemum, and Lush Pine.
+- M99 v0.1.3 prerelease packaging: package metadata, lockfile metadata, release
+  artifact staging examples, and Homebrew formula templates now target
+  `0.1.3` / `v0.1.3` so M97 Luoshen themes and M98 skill-first handoff review
+  can ship together through tagged GitHub release artifacts.
 - SSH data-space selected-session details now use the remote
   `compile-request --json` response as the detail source, preserving bounded
   anatomy computed on the remote host instead of trying to read remote paths on
