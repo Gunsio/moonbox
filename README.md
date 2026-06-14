@@ -132,7 +132,7 @@ Release artifact staging is automated:
 
 ```bash
 scripts/ci/release-artifacts-smoke.sh
-scripts/release/stage-artifacts.sh --version 0.1.2
+scripts/release/stage-artifacts.sh --version 0.1.3 --tag v0.1.3
 ```
 
 The staging script writes source, Cargo crate, and host binary archives plus
@@ -1472,6 +1472,10 @@ Stable interfaces matter more than any single framework:
   TUI Skill Picker no longer exposes built-in draft compilers as skill choices;
   any future built-in interactive handoff must be exposed as a bundled skill
   through the same skill-first path.
+- M99: v0.1.3 prerelease packaging; package metadata, lockfile metadata,
+  release artifact staging examples, and Homebrew formula templates now target
+  `0.1.3` / `v0.1.3` so M97 Luoshen themes and M98 skill-first handoff review
+  can ship together through tagged GitHub release artifacts.
 - M92: Remote / SSH Session Detail Parity; SSH data spaces now hydrate selected
   session details from the remote `compile-request --json` response, preserving
   remote-computed bounded anatomy in the same Details / Zoom Details rendering
