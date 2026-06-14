@@ -805,8 +805,10 @@ Opt-in behavior matrix:
   and leaves other user/provider hooks intact.
 
 TUI Settings (`,`) also owns UI preferences. Language defaults to English and
-can be switched to Simplified Chinese; themes are Moonbox, Tokyo Night, and
-Gruvbox. Settings previews language and theme changes before saving, marks
+can be switched to Simplified Chinese; themes are Moonbox, Tokyo Night,
+Gruvbox, and the Luoshen family: `翩若惊鸿` / Startled Swan, `婉若游龙` /
+Coursing Dragon, `荣曜秋菊` / Radiant Chrysanthemum, and `华茂春松` / Lush
+Pine. Settings previews language and theme changes before saving, marks
 unsaved rows, supports reset, and persists only to Moonbox config. UI
 translation covers Moonbox chrome such as the header, session inventory,
 timeline/details/action panels, Settings, Skill Picker, Launch, and Handoff
@@ -1015,6 +1017,8 @@ Stable interfaces matter more than any single framework:
 - `Verifier`: schema, token, capability, continuation protocol, handoff, size, and execution preflight checks; shared by CLI/TUI
 - `SkillRunner`: JSON input/output compiler skill execution through a process runner
 - `TargetLauncher`: target-specific command construction and guarded process execution
+- `moonbox-theme`: reusable semantic TUI theme tokens, metadata, provenance, and
+  Ratatui adapters for Moonbox and sibling Rust TUIs
 
 ## TODO
 
@@ -1442,6 +1446,14 @@ Stable interfaces matter more than any single framework:
   responsive, never compile handoff output, never start immediate timeline IO,
   and never run SDK workers; Review remains the explicit boundary for AI
   handoff generation.
+- M97: Luoshen TUI Theme Pack; Moonbox's semantic color system now lives in the
+  reusable `crates/moonbox-theme` workspace crate with stable theme ids,
+  bilingual metadata, upstream attribution, semantic slots, Ratatui adapters,
+  and truecolor / ANSI / `NO_COLOR` fallback behavior. The TUI Settings preview
+  path now includes the first-party Luoshen family inspired by `翩若惊鸿` /
+  Startled Swan, `婉若游龙` / Coursing Dragon, `荣曜秋菊` / Radiant
+  Chrysanthemum, and `华茂春松` / Lush Pine while preserving Moonbox / Tokyo
+  Night / Gruvbox compatibility and never mutating source session content.
 - M92: Remote / SSH Session Detail Parity; SSH data spaces now hydrate selected
   session details from the remote `compile-request --json` response, preserving
   remote-computed bounded anatomy in the same Details / Zoom Details rendering

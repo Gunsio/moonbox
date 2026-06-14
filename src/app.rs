@@ -1438,11 +1438,15 @@ impl App {
         self.hooks_config = hooks_config;
     }
 
-    #[cfg(test)]
-    pub(crate) fn set_ui_preferences_for_test(&mut self, ui: config::UiPreferencesConfig) {
+    pub(crate) fn set_ui_preferences_for_render(&mut self, ui: config::UiPreferencesConfig) {
         self.ui_preferences = ui;
         self.settings_language = ui.language;
         self.settings_theme = ui.theme;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_ui_preferences_for_test(&mut self, ui: config::UiPreferencesConfig) {
+        self.set_ui_preferences_for_render(ui);
     }
 
     #[cfg(test)]
