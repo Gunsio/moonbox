@@ -6147,7 +6147,119 @@ fn render_skill_handoff_review(
     capsule: &WorkCapsule,
     language: crate::core::config::UiLanguage,
 ) {
+    if app.launch_review_details {
+        render_skill_handoff_details(frame, area, app, capsule, language);
+        return;
+    }
+
     let block = panel_block(" Handoff Review ", true);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let footer_height = if inner.height >= 8 { 3 } else { 2 };
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(footer_height)])
+        .split(inner);
+    let content_area = chunks[0];
+    let footer_area = chunks[1];
+
+    let skill = capsule.handoff_skill.as_deref().unwrap_or("handoff");
+    let artifact = capsule.handoff_artifact.as_deref().unwrap_or_default();
+    let mut lines = vec![
+        Line::from(Span::styled(
+            localized(language, "Handoff ready", "Handoff 已生成"),
+            Style::default()
+                .fg(theme::gold())
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            if language == crate::core::config::UiLanguage::ZhHans {
+                format!("下面是 {} 将读取的完整 handoff 文档。", capsule.target_cli)
+            } else {
+                format!(
+                    "This is the full handoff document {} will be asked to read.",
+                    capsule.target_cli
+                )
+            },
+            Style::default().fg(theme::muted()),
+        )),
+        Line::raw(""),
+        review_label_line(
+            localized(language, "Source", "来源"),
+            handoff_source_summary(app),
+            theme::blue(),
+        ),
+        review_label_line(
+            localized(language, "Target", "目标"),
+            capsule.target_cli.to_string(),
+            theme::blue(),
+        ),
+        review_label_line(
+            i18n::text(language, Text::Skill),
+            skill.to_string(),
+            theme::blue(),
+        ),
+    ];
+    if let Some(path) = &capsule.handoff_artifact_path {
+        lines.push(review_label_line(
+            localized(language, "File", "文件"),
+            path.clone(),
+            theme::blue(),
+        ));
+    }
+    lines.push(Line::raw(""));
+    lines.push(section_rule(localized(
+        language,
+        "Handoff Body",
+        "Handoff 正文",
+    )));
+    lines.extend(handoff_markdown_lines(artifact));
+
+    let scroll = modal_scroll_offset(app.modal_scroll, &lines, content_area);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .scroll((scroll, 0))
+            .wrap(Wrap { trim: false }),
+        content_area,
+    );
+
+    let footer_lines = vec![
+        Line::from(vec![
+            action_button("Enter/r", localized(language, "Start", "启动")),
+            Span::raw("  "),
+            action_button("y", localized(language, "Copy text", "复制全文")),
+            Span::raw("  "),
+            if capsule.handoff_artifact_path.is_some() {
+                action_button("p", localized(language, "Copy path", "复制路径"))
+            } else {
+                disabled_action_button("p", localized(language, "No path", "无路径"))
+            },
+            Span::raw("  "),
+            action_button("d", i18n::text(language, Text::Detail)),
+            Span::raw("  "),
+            action_button("Esc", i18n::text(language, Text::Back)),
+        ]),
+        Line::from(Span::styled(
+            localized(
+                language,
+                "gg/G scroll; Enter starts the target agent with this handoff file.",
+                "gg/G 滚动；Enter 会让目标 agent 读取这份 handoff 文档。",
+            ),
+            Style::default().fg(theme::muted()),
+        )),
+    ];
+    frame.render_widget(Paragraph::new(footer_lines), footer_area);
+}
+
+fn render_skill_handoff_details(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    capsule: &WorkCapsule,
+    language: crate::core::config::UiLanguage,
+) {
+    let block = panel_block(" Handoff Details ", true);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -6161,37 +6273,72 @@ fn render_skill_handoff_review(
 
     let runner = capsule.handoff_runner.as_deref().unwrap_or("agent");
     let skill = capsule.handoff_skill.as_deref().unwrap_or("handoff");
-    let artifact = capsule.handoff_artifact.as_deref().unwrap_or_default();
-    let mut lines = vec![
+    let skill_path = handoff_evidence_value(capsule, "skill path: ").unwrap_or_else(|| "-".into());
+    let file_path = capsule
+        .handoff_artifact_path
+        .as_deref()
+        .unwrap_or("-")
+        .to_string();
+    let redaction = if language == crate::core::config::UiLanguage::ZhHans {
+        format!(
+            "{} 个路径，{} 个疑似 secret，{} 个事件移除",
+            capsule.redaction.paths_redacted,
+            capsule.redaction.secrets_redacted,
+            capsule.redaction.events_removed
+        )
+    } else {
+        format!(
+            "{} paths, {} secret-like values, {} events removed",
+            capsule.redaction.paths_redacted,
+            capsule.redaction.secrets_redacted,
+            capsule.redaction.events_removed
+        )
+    };
+
+    let lines = vec![
         Line::from(Span::styled(
-            localized(language, "Handoff ready", "Handoff 已生成"),
+            localized(language, "Handoff details", "Handoff 详情"),
             Style::default()
                 .fg(theme::gold())
                 .add_modifier(Modifier::BOLD),
         )),
-        Line::from(Span::styled(
-            localized(
-                language,
-                "Generated by the selected agent skill. Review this Markdown, then press Enter to start the target agent.",
-                "由所选 agent skill 生成。请审核这份 Markdown，然后按 Enter 启动目标 agent。",
-            ),
-            Style::default().fg(theme::muted()),
-        )),
+        Line::raw(""),
         review_label_line(
-            i18n::text(language, Text::Skill),
-            format!("{runner} / {skill}"),
+            localized(language, "Runner", "执行器"),
+            runner.into(),
             theme::blue(),
         ),
-    ];
-    if let Some(path) = &capsule.handoff_artifact_path {
-        lines.push(review_label_line(
-            localized(language, "File", "文件"),
-            review_snippet(path, 120),
+        review_label_line(
+            i18n::text(language, Text::Skill),
+            skill.into(),
             theme::blue(),
-        ));
-    }
-    lines.push(Line::raw(""));
-    lines.extend(handoff_markdown_lines(artifact));
+        ),
+        review_label_line(
+            localized(language, "Skill file", "Skill 文件"),
+            skill_path,
+            theme::blue(),
+        ),
+        review_label_line(
+            localized(language, "File", "文件"),
+            file_path,
+            theme::blue(),
+        ),
+        review_label_line(
+            localized(language, "Redaction", "脱敏"),
+            redaction,
+            theme::blue(),
+        ),
+        review_label_line(
+            localized(language, "Safety", "安全"),
+            localized(
+                language,
+                "Source session store was not modified; bounded context only.",
+                "未修改 source session store；只使用 bounded context。",
+            )
+            .into(),
+            theme::green(),
+        ),
+    ];
 
     let scroll = modal_scroll_offset(app.modal_scroll, &lines, content_area);
     frame.render_widget(
@@ -6203,19 +6350,15 @@ fn render_skill_handoff_review(
 
     let footer_lines = vec![
         Line::from(vec![
-            action_button("Enter", i18n::text(language, Text::RunLocalTarget)),
-            Span::raw("  "),
-            action_button("y", i18n::text(language, Text::CopyCommand)),
-            Span::raw("  "),
-            action_button("S", i18n::text(language, Text::Skill)),
+            action_button("d", localized(language, "Body", "正文")),
             Span::raw("  "),
             action_button("Esc", i18n::text(language, Text::Back)),
         ]),
         Line::from(Span::styled(
             localized(
                 language,
-                "gg/G scroll; Enter starts a new target agent with this handoff.",
-                "gg/G 滚动；Enter 会把这份 handoff 带给新的目标 agent。",
+                "Details are not appended to the handoff text.",
+                "详情不会附加到 handoff 正文。",
             ),
             Style::default().fg(theme::muted()),
         )),
@@ -6230,10 +6373,124 @@ fn handoff_markdown_lines(artifact: &str) -> Vec<Line<'static>> {
             Style::default().fg(theme::muted()),
         ))];
     }
+    let mut in_code_block = false;
     artifact
         .lines()
-        .map(|line| Line::from(Span::raw(line.to_string())))
+        .map(|line| {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("```") {
+                in_code_block = !in_code_block;
+                return Line::from(Span::styled(
+                    line.to_string(),
+                    Style::default().fg(theme::muted()),
+                ));
+            }
+            if in_code_block {
+                return Line::from(Span::styled(
+                    line.to_string(),
+                    Style::default().fg(theme::cyan()),
+                ));
+            }
+            if trimmed.is_empty() {
+                return Line::raw("");
+            }
+            if let Some(heading) = markdown_heading(trimmed) {
+                return Line::from(Span::styled(
+                    heading,
+                    Style::default()
+                        .fg(theme::gold())
+                        .add_modifier(Modifier::BOLD),
+                ));
+            }
+            if let Some(quote) = trimmed.strip_prefix('>') {
+                return Line::from(vec![
+                    Span::styled("| ", Style::default().fg(theme::muted())),
+                    Span::styled(
+                        quote.trim_start().to_string(),
+                        Style::default().fg(theme::text()),
+                    ),
+                ]);
+            }
+            if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
+                let indent = line.len().saturating_sub(trimmed.len());
+                return Line::from(vec![
+                    Span::raw(" ".repeat(indent)),
+                    Span::styled("- ", Style::default().fg(theme::gold())),
+                    Span::raw(trimmed[2..].to_string()),
+                ]);
+            }
+            if let Some((marker, rest)) = markdown_numbered_item(trimmed) {
+                let indent = line.len().saturating_sub(trimmed.len());
+                return Line::from(vec![
+                    Span::raw(" ".repeat(indent)),
+                    Span::styled(marker, Style::default().fg(theme::gold())),
+                    Span::raw(rest),
+                ]);
+            }
+            if trimmed == "---" || trimmed == "***" {
+                return section_rule("");
+            }
+            Line::from(Span::raw(line.to_string()))
+        })
         .collect()
+}
+
+fn handoff_source_summary(app: &App) -> String {
+    app.current_session()
+        .map(|session| {
+            format!(
+                "{} · {} · {}",
+                session.cli,
+                short_identifier(&session.id, 8),
+                review_snippet(&session.title, 96)
+            )
+        })
+        .unwrap_or_else(|| "-".into())
+}
+
+fn handoff_evidence_value(capsule: &WorkCapsule, prefix: &str) -> Option<String> {
+    capsule
+        .evidence
+        .iter()
+        .find_map(|line| line.strip_prefix(prefix).map(str::to_string))
+}
+
+fn section_rule(title: &'static str) -> Line<'static> {
+    if title.is_empty() {
+        return Line::from(Span::styled(
+            "----------------------------------------",
+            Style::default().fg(theme::border()),
+        ));
+    }
+    Line::from(vec![
+        Span::styled("-- ", Style::default().fg(theme::border())),
+        Span::styled(
+            title,
+            Style::default()
+                .fg(theme::blue())
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            " ----------------------------------------",
+            Style::default().fg(theme::border()),
+        ),
+    ])
+}
+
+fn markdown_heading(line: &str) -> Option<String> {
+    let level = line.chars().take_while(|ch| *ch == '#').count();
+    if level == 0 || level > 6 || !line.chars().nth(level).is_some_and(char::is_whitespace) {
+        return None;
+    }
+    Some(line[level..].trim().to_string())
+}
+
+fn markdown_numbered_item(line: &str) -> Option<(String, String)> {
+    let dot = line.find(". ")?;
+    if dot == 0 || !line[..dot].chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    Some((format!("{} ", &line[..=dot]), line[dot + 2..].to_string()))
 }
 
 fn target_prompt_lines(app: &App) -> Vec<Line<'static>> {
@@ -8477,17 +8734,61 @@ mod tests {
         let screen = render_text(&app, 140, 48);
 
         assert_screen_contains(&screen, "Handoff ready");
-        assert_screen_contains(&screen, "Generated by the selected agent skill.");
-        assert_screen_contains(&screen, "Codex / handoff");
-        assert_screen_contains(&screen, "# Handoff");
+        assert_screen_contains(
+            &screen,
+            "This is the full handoff document Hermes will be asked to read.",
+        );
+        assert_screen_contains(&screen, "Source:");
+        assert_screen_contains(&screen, "Target: Hermes");
+        assert_screen_contains(&screen, "Skill: handoff");
+        assert_screen_contains(
+            &screen,
+            "File: /var/folders/example/moonbox-handoff-demo.md",
+        );
+        assert_screen_contains(&screen, "Handoff Body");
+        assert_screen_contains(&screen, "Handoff");
         assert_screen_contains(&screen, "Continue the product review");
-        assert_screen_contains(&screen, "Enter Run");
-        assert_screen_contains(&screen, "y Copy command");
+        assert_screen_contains(&screen, "Enter/r Start");
+        assert_screen_contains(&screen, "y Copy text");
+        assert_screen_contains(&screen, "p Copy path");
+        assert_screen_contains(&screen, "d Detail");
         assert!(!screen.contains("Target receives"), "{screen}");
         assert!(!screen.contains("Readiness"), "{screen}");
         assert!(!screen.contains("Content sent to target"), "{screen}");
         assert!(!screen.contains("Generated Handoff Artifact"), "{screen}");
         assert!(!screen.contains("Privacy / Redaction"), "{screen}");
+
+        app.launch_review_details = true;
+        let details = render_text(&app, 140, 48);
+
+        assert_screen_contains(&details, "Handoff details");
+        assert_screen_contains(&details, "Runner: Codex");
+        assert_screen_contains(&details, "Skill: handoff");
+        assert_screen_contains(
+            &details,
+            "File: /var/folders/example/moonbox-handoff-demo.md",
+        );
+        assert_screen_contains(&details, "Redaction:");
+        assert_screen_contains(&details, "bounded context only");
+        assert!(
+            !details.contains("Continue the product review"),
+            "{details}"
+        );
+
+        app.launch_review_details = false;
+        app.set_ui_preferences_for_test(crate::core::config::UiPreferencesConfig {
+            language: crate::core::config::UiLanguage::ZhHans,
+            theme: crate::core::config::UiThemeName::Moonbox,
+        });
+        let zh_screen = render_text(&app, 140, 48);
+
+        assert_screen_contains(&zh_screen, "Handoff 已生成");
+        assert_screen_contains(&zh_screen, "下面是 Hermes 将读取的完整 handoff 文档。");
+        assert_screen_contains(&zh_screen, "来源:");
+        assert_screen_contains(&zh_screen, "目标: Hermes");
+        assert_screen_contains(&zh_screen, "Handoff 正文");
+        assert_screen_contains(&zh_screen, "Enter/r 启动");
+        assert_screen_contains(&zh_screen, "y 复制全文");
     }
 
     #[test]

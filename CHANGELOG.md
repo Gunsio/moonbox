@@ -191,6 +191,15 @@ and this project uses semantic versioning once tagged releases start.
   artifact staging examples, and Homebrew formula templates now target
   `0.1.3` / `v0.1.3` so M97 Luoshen themes and M98 skill-first handoff review
   can ship together through tagged GitHub release artifacts.
+- M100 Exact Handoff Artifact Review: agent-backed Handoff Review now treats
+  the generated Markdown file as the single source of truth. The review body is
+  the full generated handoff document, while `Enter` / `r` starts the target
+  agent with a concise handoff task note, artifact path, and source-session
+  metadata. `y` copies the full handoff text, `p` copies the generated file
+  path, and Moonbox runner, skill path, redaction, and bounded-context details
+  move behind `d` instead of being mixed into the handoff body. Community skill
+  artifacts under either the current `TMPDIR` or `/tmp` are accepted when they
+  keep the Moonbox handoff filename prefix and `.md` extension.
 - SSH data-space selected-session details now use the remote
   `compile-request --json` response as the detail source, preserving bounded
   anatomy computed on the remote host instead of trying to read remote paths on
