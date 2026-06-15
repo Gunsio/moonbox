@@ -132,7 +132,7 @@ Release artifact staging is automated:
 
 ```bash
 scripts/ci/release-artifacts-smoke.sh
-scripts/release/stage-artifacts.sh --version 0.1.3 --tag v0.1.3
+scripts/release/stage-artifacts.sh --version 0.1.4 --tag v0.1.4
 ```
 
 The staging script writes source, Cargo crate, and host binary archives plus
@@ -1489,6 +1489,10 @@ Stable interfaces matter more than any single framework:
   with a concise task note, artifact path, and source-session metadata, `y`
   copies the full handoff, `p` copies the file path, and Moonbox runner / skill
   / redaction details move behind `d`.
+- M101: v0.1.4 release packaging; package metadata, lockfile metadata, release
+  artifact staging examples, and Homebrew formula templates now target
+  `0.1.4` / `v0.1.4` so the M100 exact artifact review flow can ship through
+  tagged GitHub release artifacts.
 - M92: Remote / SSH Session Detail Parity; SSH data spaces now hydrate selected
   session details from the remote `compile-request --json` response, preserving
   remote-computed bounded anatomy in the same Details / Zoom Details rendering

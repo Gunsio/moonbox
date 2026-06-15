@@ -7,6 +7,9 @@ cd "$repo_root"
 formula="docs/release/homebrew/moonbox.rb"
 smoke_home="${MOONBOX_HOMEBREW_SMOKE_HOME:-$repo_root/target/moonbox-homebrew-smoke-home}"
 output_dir="$smoke_home/output"
+version="$(
+  sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1
+)"
 mkdir -p "$output_dir"
 
 export MOONBOX_CODEX_HOME="$smoke_home/codex"
@@ -23,9 +26,9 @@ run() {
 
 run ruby -c "$formula"
 
-grep -Fq 'url "https://github.com/Gunsio/moonbox/releases/download/v0.1.3/moonbox-0.1.3-aarch64-apple-darwin.tar.gz"' "$formula"
-grep -Fq 'url "https://github.com/Gunsio/moonbox/releases/download/v0.1.3/moonbox-0.1.3-source.tar.gz"' "$formula"
-grep -Fq 'root_url "https://github.com/Gunsio/moonbox/releases/download/v0.1.3"' "$formula"
+grep -Fq "url \"https://github.com/Gunsio/moonbox/releases/download/v$version/moonbox-$version-aarch64-apple-darwin.tar.gz\"" "$formula"
+grep -Fq "url \"https://github.com/Gunsio/moonbox/releases/download/v$version/moonbox-$version-source.tar.gz\"" "$formula"
+grep -Fq "root_url \"https://github.com/Gunsio/moonbox/releases/download/v$version\"" "$formula"
 grep -Fq 'sha256 cellar: :any_skip_relocation, arm64_tahoe: "<release-bottle-sha256>"' "$formula"
 grep -Fq 'sha256 cellar: :any_skip_relocation, arm64_sequoia: "<release-bottle-sha256>"' "$formula"
 grep -Fq 'sha256 "<release-binary-sha256>"' "$formula"
