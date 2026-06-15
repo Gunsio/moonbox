@@ -9,6 +9,10 @@ and this project uses semantic versioning once tagged releases start.
 
 ### Added
 
+- Session action roadmap documentation now splits Archive, whole-session Fork,
+  live state, header/footer redesign, deterministic primary action, built-in
+  handoff skill, shortcut rebalancing, settings closure, Luoshen theme polish,
+  and quality audit work into follow-on milestones.
 - Root agent operating rules covering one-milestone-per-PR governance, fixture-safe
   tests, read-only source stores, and documentation sync expectations.
 - Rust + Ratatui TUI workbench with Vim-style navigation.

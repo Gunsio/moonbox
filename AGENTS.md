@@ -15,3 +15,4 @@
 - Ask the user when a decision is uncertain, risky, or not recoverable from repository evidence.
 - If GitHub state and external docs disagree, GitHub main/PR status is the code-availability source of truth until docs are reconciled.
 - Keep documentation sparse: fixed operating rules only, no filler.
+- When generating or updating documents, do not add unsolicited content; only include inferred or expanded material after explicitly stating it as a proposal and getting user approval.
