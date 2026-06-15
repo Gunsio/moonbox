@@ -6,6 +6,7 @@
 - Never open, resume, or launch recent real sessions in tests.
 - Source session stores are read-only.
 - Update README, CHANGELOG, and the Feishu plan document for each completed milestone.
+- Homebrew release updates must publish bottle artifacts and verify `brew install`, `brew reinstall`, `brew upgrade`, and displayed formula version; do not ship tarball-only formula updates.
 - User-reported experience issues interrupt the milestone queue and take priority until resolved or explicitly deferred.
 - Prefer fixture or isolated homes for all contract tests and smoke tests.
 - TUI changes require visual and interaction review, not just a compile pass.
