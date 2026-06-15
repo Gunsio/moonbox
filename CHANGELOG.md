@@ -200,6 +200,10 @@ and this project uses semantic versioning once tagged releases start.
   move behind `d` instead of being mixed into the handoff body. Community skill
   artifacts under either the current `TMPDIR` or `/tmp` are accepted when they
   keep the Moonbox handoff filename prefix and `.md` extension.
+- M101 v0.1.4 release packaging: package metadata, lockfile metadata, release
+  artifact staging examples, and Homebrew formula templates now target
+  `0.1.4` / `v0.1.4` so the M100 exact artifact review flow can ship through
+  tagged GitHub release artifacts.
 - SSH data-space selected-session details now use the remote
   `compile-request --json` response as the detail source, preserving bounded
   anatomy computed on the remote host instead of trying to read remote paths on
