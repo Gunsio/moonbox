@@ -366,24 +366,197 @@ Instructions
 fn skill_handoff_prompt(session: &SessionSummary, capsule: &WorkCapsule, artifact: &str) -> String {
     let prompt_session = redaction::redact_session_for_prompt(session, &capsule.redaction);
     let artifact = artifact.trim();
-    format!(
-        "\
-Moonbox continuation handoff.
+    let path = capsule
+        .handoff_artifact_path
+        .as_deref()
+        .filter(|path| !path.trim().is_empty());
+    if prefers_chinese_handoff_prompt(&prompt_session, artifact) {
+        return skill_handoff_prompt_zh(&prompt_session, capsule, artifact, path);
+    }
+    skill_handoff_prompt_en(&prompt_session, capsule, artifact, path)
+}
 
-Source: {} {}
-Target: {}
-Rewind: {}
+fn skill_handoff_prompt_zh(
+    session: &SessionSummary,
+    capsule: &WorkCapsule,
+    artifact: &str,
+    artifact_path: Option<&str>,
+) -> String {
+    let document = artifact_path
+        .map(|path| {
+            format!(
+                "\
+交接文档：
+- {}
 
-Use the selected handoff skill output below as the continuation brief. Treat the source session store as read-only, and do not raw-resume the source session unless explicitly asked.
+请先读取这份 Markdown，再继续执行。不要把这条启动说明当成交接正文。
+",
+                prompt_value(path)
+            )
+        })
+        .unwrap_or_else(|| {
+            format!(
+                "\
+交接正文：
 
 {}
 ",
-        prompt_session.cli,
-        prompt_session.id,
+                if artifact.is_empty() { "-" } else { artifact }
+            )
+        });
+    format!(
+        "\
+这是一份交接任务。具体交接内容请阅读下面的 handoff 文档。
+
+{}
+
+原 session 摘要：
+- Source CLI: {}
+- Session ID: {}
+- Title: {}
+- Cwd: {}
+- Branch: {}
+- Updated: {}
+- Tokens: {}
+- Source size: {}
+- Rewind: {}
+- Target CLI: {}
+- Handoff skill: {}
+
+执行要求：
+- 只从交接文档继续工作；不要恢复或修改原 source session。
+- 如果无法读取交接文档，请先明确说明文件不可访问，不要凭这条启动说明继续。
+- 开始动手前，先简短复述目标、当前状态、下一步和风险。
+",
+        document.trim(),
+        session.cli,
+        session.id,
+        prompt_value(&session.title),
+        prompt_value(&session.cwd),
+        session.branch.as_deref().unwrap_or("-"),
+        prompt_value(&session.updated),
+        format_token_count_opt(session.token_count),
+        format_source_size_opt(session.source_size_bytes),
+        prompt_value(&capsule.rewind_point),
         capsule.target_cli,
-        capsule.rewind_point,
-        if artifact.is_empty() { "-" } else { artifact }
+        capsule.handoff_skill.as_deref().unwrap_or("handoff"),
     )
+}
+
+fn skill_handoff_prompt_en(
+    session: &SessionSummary,
+    capsule: &WorkCapsule,
+    artifact: &str,
+    artifact_path: Option<&str>,
+) -> String {
+    let document = artifact_path
+        .map(|path| {
+            format!(
+                "\
+Handoff document:
+- {}
+
+Read this Markdown file first, then continue the task. Do not treat this launch note as the handoff body.
+",
+                prompt_value(path)
+            )
+        })
+        .unwrap_or_else(|| {
+            format!(
+                "\
+Handoff body:
+
+{}
+",
+                if artifact.is_empty() {
+                    "-"
+                } else {
+                    artifact
+                }
+            )
+        });
+    format!(
+        "\
+This is a handoff task. Read the handoff document below for the actual continuation content.
+
+{}
+
+Source session:
+- Source CLI: {}
+- Session ID: {}
+- Title: {}
+- Cwd: {}
+- Branch: {}
+- Updated: {}
+- Tokens: {}
+- Source size: {}
+- Rewind: {}
+- Target CLI: {}
+- Handoff skill: {}
+
+Instructions:
+- Continue only from the handoff document; do not resume or mutate the original source session.
+- If the handoff document cannot be read, say so before proceeding instead of relying on this launch note.
+- Before making changes, briefly restate the goal, current state, next step, and risks.
+",
+        document.trim(),
+        session.cli,
+        session.id,
+        prompt_value(&session.title),
+        prompt_value(&session.cwd),
+        session.branch.as_deref().unwrap_or("-"),
+        prompt_value(&session.updated),
+        format_token_count_opt(session.token_count),
+        format_source_size_opt(session.source_size_bytes),
+        prompt_value(&capsule.rewind_point),
+        capsule.target_cli,
+        capsule.handoff_skill.as_deref().unwrap_or("handoff"),
+    )
+}
+
+fn prefers_chinese_handoff_prompt(session: &SessionSummary, artifact: &str) -> bool {
+    contains_cjk(&session.title) || contains_cjk(artifact)
+}
+
+fn contains_cjk(value: &str) -> bool {
+    value.chars().any(|ch| {
+        matches!(
+            ch,
+            '\u{3400}'..='\u{4dbf}' | '\u{4e00}'..='\u{9fff}' | '\u{f900}'..='\u{faff}'
+        )
+    })
+}
+
+fn format_token_count_opt(tokens: Option<usize>) -> String {
+    tokens.map(format_token_count).unwrap_or_else(|| "-".into())
+}
+
+fn format_token_count(tokens: usize) -> String {
+    match tokens {
+        0..=999 => tokens.to_string(),
+        1_000..=999_999 => format!("{:.1}K", tokens as f64 / 1_000.0),
+        _ => format!("{:.1}M", tokens as f64 / 1_000_000.0),
+    }
+}
+
+fn format_source_size_opt(bytes: Option<u64>) -> String {
+    bytes.map(format_source_size).unwrap_or_else(|| "-".into())
+}
+
+fn format_source_size(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = KIB * 1024.0;
+    const GIB: f64 = MIB * 1024.0;
+    let bytes = bytes as f64;
+    if bytes >= GIB {
+        format!("{:.1}GB", bytes / GIB)
+    } else if bytes >= MIB {
+        format!("{:.1}MB", bytes / MIB)
+    } else if bytes >= KIB {
+        format!("{:.1}KB", bytes / KIB)
+    } else {
+        format!("{}B", bytes as u64)
+    }
 }
 
 fn continuation_prompt(continuation: &ContinuationProtocol) -> String {
@@ -585,6 +758,8 @@ mod tests {
         data.capsule.compiler = "agent:codex:handoff".into();
         data.capsule.handoff_runner = Some("Codex".into());
         data.capsule.handoff_skill = Some("handoff".into());
+        data.capsule.handoff_artifact_path =
+            Some("/tmp/moonbox-continuation-handoff-demo.md".into());
         data.capsule.handoff_artifact = Some(
             "# Handoff\n\nContinue with the community skill output.\n\n## Next steps\n- Validate UI copy."
                 .into(),
@@ -593,15 +768,57 @@ mod tests {
         let command = target_command(CliTool::Codex, session, &data.capsule).expect("command");
         let prompt = command.args.last().expect("prompt");
 
-        assert!(prompt.contains("Moonbox continuation handoff."));
-        assert!(prompt.contains("# Handoff"));
-        assert!(prompt.contains("Continue with the community skill output."));
-        assert!(prompt.contains("## Next steps\n- Validate UI copy."));
+        assert!(prompt.contains("This is a handoff task."));
+        assert!(prompt.contains("Read the handoff document below"));
+        assert!(prompt.contains("/tmp/moonbox-continuation-handoff-demo.md"));
+        assert!(prompt.contains("Source session:"));
+        assert!(prompt.contains("Source CLI: Claude"));
+        assert!(prompt.contains("Target CLI: Codex"));
+        assert!(prompt.contains("Handoff skill: handoff"));
+        assert!(prompt.contains("Session ID:"));
+        assert!(!prompt.contains("Continue with the community skill output."));
         assert!(!prompt.contains("Work Capsule Summary"));
         assert!(!prompt.contains("Generated Handoff Artifact"));
+        assert!(!prompt.contains("Moonbox continuation handoff."));
         assert!(!prompt.contains("Privacy / Redaction"));
         assert!(!prompt.contains("Decisions:\n"));
         assert!(!prompt.contains("Risks:\n"));
+    }
+
+    #[test]
+    fn agent_skill_handoff_prompt_points_chinese_targets_to_artifact_file() {
+        let mut data = data::workbench_data(CliTool::Claude, CliTool::Codex).expect("data");
+        let mut session = data
+            .sessions
+            .iter()
+            .find(|session| session.id == data.capsule.source_session)
+            .expect("session")
+            .clone();
+        session.title = "继续 oxlint 版本分析任务".into();
+        session.token_count = Some(81_000);
+        session.source_size_bytes = Some(12_345_678);
+        data.capsule.compiler = "agent:codex:handoff".into();
+        data.capsule.handoff_skill = Some("handoff".into());
+        data.capsule.handoff_artifact_path =
+            Some("/tmp/moonbox-continuation-handoff-6e04f5c0.md".into());
+        data.capsule.handoff_artifact =
+            Some("# Handoff\n\n未完成的 oxlint 版本分析任务，继续动作见本文档。".into());
+
+        let command = target_command(CliTool::Codex, &session, &data.capsule).expect("command");
+        let prompt = command.args.last().expect("prompt");
+
+        assert!(prompt.contains("这是一份交接任务。"));
+        assert!(prompt.contains("交接文档："));
+        assert!(prompt.contains("/tmp/moonbox-continuation-handoff-6e04f5c0.md"));
+        assert!(prompt.contains("原 session 摘要："));
+        assert!(prompt.contains("Source CLI: Claude"));
+        assert!(prompt.contains("Session ID:"));
+        assert!(prompt.contains("Title: 继续 oxlint 版本分析任务"));
+        assert!(prompt.contains("Tokens: 81.0K"));
+        assert!(prompt.contains("Source size: 11.8MB"));
+        assert!(prompt.contains("Handoff skill: handoff"));
+        assert!(!prompt.contains("未完成的 oxlint 版本分析任务，继续动作见本文档。"));
+        assert!(!prompt.contains("Moonbox cross-CLI"));
     }
 
     #[test]

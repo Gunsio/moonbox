@@ -1008,6 +1008,7 @@ pub struct App {
     pub show_help: bool,
     pub show_launch: bool,
     pub launch_review: bool,
+    pub launch_review_details: bool,
     pub show_open_original: bool,
     pub show_doctor: bool,
     pub show_skill_picker: bool,
@@ -1121,6 +1122,7 @@ impl App {
             show_help: false,
             show_launch: false,
             launch_review: false,
+            launch_review_details: false,
             show_open_original: false,
             show_doctor: false,
             show_skill_picker: false,
@@ -1288,6 +1290,7 @@ impl App {
         });
         self.show_launch = true;
         self.launch_review = false;
+        self.launch_review_details = false;
         self.launch_review_error = None;
         self.modal_scroll = 0;
         self.clear_handoff_trail();
@@ -1819,6 +1822,7 @@ impl App {
                     self.pending_target = pending.target;
                     self.show_launch = self.show_launch || self.launch_review;
                     self.launch_review = false;
+                    self.launch_review_details = false;
                     self.target_launch_result = None;
                     self.launch_review_error = Some(LaunchReviewErrorState {
                         target: pending.target,
@@ -2219,10 +2223,19 @@ impl App {
             let validation = self.validate_launch_for_target(self.pending_target);
             let needs_handoff_skill = self.launch_requires_handoff_skill(self.pending_target);
             let can_regenerate_handoff = launch_validation_can_regenerate_handoff(&validation);
+            let skill_handoff_ready = self.skill_handoff_review_ready();
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => {
+                    if self.launch_review_details {
+                        self.launch_review_details = false;
+                        self.modal_scroll = 0;
+                        self.pending_g = false;
+                        self.set_status("Handoff details closed");
+                        return;
+                    }
                     self.show_launch = false;
                     self.launch_review = false;
+                    self.launch_review_details = false;
                     self.modal_scroll = 0;
                     self.clear_handoff_trail();
                     self.set_status("Launch review closed");
@@ -2232,13 +2245,33 @@ impl App {
                         self.set_status("Choose an AI handoff skill before copying");
                     } else if can_regenerate_handoff {
                         self.set_status("Regenerate handoff with Enter before copying");
+                    } else if skill_handoff_ready {
+                        self.copy_handoff_artifact();
                     } else {
                         self.copy_launch_command();
+                    }
+                }
+                KeyCode::Char('p') => {
+                    if skill_handoff_ready {
+                        self.copy_handoff_artifact_path();
+                    } else {
+                        self.set_status("No handoff file path to copy");
+                    }
+                }
+                KeyCode::Char('d') if skill_handoff_ready && key.modifiers.is_empty() => {
+                    self.launch_review_details = !self.launch_review_details;
+                    self.modal_scroll = 0;
+                    self.pending_g = false;
+                    if self.launch_review_details {
+                        self.set_status("Handoff details opened");
+                    } else {
+                        self.set_status("Handoff body opened");
                     }
                 }
                 KeyCode::Char('S') => {
                     self.open_skill_picker();
                     self.show_launch = true;
+                    self.launch_review_details = false;
                     self.set_status("Choose handoff skill");
                 }
                 KeyCode::Char('r') => {
@@ -2247,6 +2280,7 @@ impl App {
                     } else if can_regenerate_handoff {
                         self.set_status("Regenerate handoff with Enter before running");
                     } else {
+                        self.launch_review_details = false;
                         self.queue_target_handoff();
                     }
                 }
@@ -2255,8 +2289,10 @@ impl App {
                         self.open_skill_picker();
                         self.set_status("Choose an AI handoff skill before Handoff Review");
                     } else if can_regenerate_handoff {
+                        self.launch_review_details = false;
                         self.confirm_launch_target();
                     } else {
+                        self.launch_review_details = false;
                         self.queue_target_handoff();
                     }
                 }
@@ -2292,6 +2328,7 @@ impl App {
                 self.show_launch = false;
                 self.launch_review = false;
                 self.launch_review_error = None;
+                self.launch_review_details = false;
                 self.modal_scroll = 0;
                 self.clear_handoff_trail();
                 self.set_status("Launch cancelled");
@@ -3520,6 +3557,7 @@ impl App {
             self.pending_target.previous()
         };
         self.launch_review_error = None;
+        self.launch_review_details = false;
         self.set_status(format!("Target: {}", self.pending_target));
     }
 
@@ -3531,6 +3569,7 @@ impl App {
         if self.launch_review_error.is_some() {
             self.show_launch = true;
             self.launch_review = false;
+            self.launch_review_details = false;
             self.target_launch_result = None;
             self.modal_scroll = 0;
             self.set_status(format!("Handoff review failed: {}", self.pending_target));
@@ -3540,6 +3579,7 @@ impl App {
         if self.launch_review {
             self.show_launch = true;
             self.target_launch_result = None;
+            self.launch_review_details = false;
             self.modal_scroll = u16::MAX;
             self.set_status(format!("Handoff review ready: {}", self.pending_target));
             self.pending_g = false;
@@ -3554,6 +3594,7 @@ impl App {
         self.pending_target = self.data.target;
         self.show_launch = true;
         self.launch_review = false;
+        self.launch_review_details = false;
         self.target_launch_result = None;
         self.clear_handoff_trail();
         self.modal_scroll = 0;
@@ -3624,6 +3665,7 @@ impl App {
         self.selected_compiler = selected_compiler;
         self.show_launch = true;
         self.launch_review = false;
+        self.launch_review_details = false;
         self.target_launch_result = None;
         self.launch_review_error = None;
         self.modal_scroll = 0;
@@ -3645,6 +3687,7 @@ impl App {
             self.open_skill_picker();
             self.show_launch = true;
             self.launch_review_error = None;
+            self.launch_review_details = false;
             self.set_status("Choose an AI handoff skill before Handoff Review");
             return;
         }
@@ -3671,6 +3714,7 @@ impl App {
             self.pending_target = target;
             self.show_launch = true;
             self.launch_review = true;
+            self.launch_review_details = false;
             self.target_launch_result = None;
             self.launch_review_error = None;
             self.modal_scroll = u16::MAX;
@@ -3757,6 +3801,7 @@ impl App {
         let _ = config::save_last_target(target);
         self.show_launch = true;
         self.launch_review = false;
+        self.launch_review_details = false;
         self.target_launch_result = None;
         self.launch_review_error = None;
         self.start_handoff_trail_for_review();
@@ -3799,6 +3844,7 @@ impl App {
             self.pending_target = self.data.target;
             self.show_launch = true;
             self.launch_review = true;
+            self.launch_review_details = false;
             self.modal_scroll = 0;
             self.set_status("Capsule refreshed");
         }
@@ -4268,6 +4314,7 @@ impl App {
                 self.pending_target = pending.target;
                 self.show_launch = review_was_visible;
                 self.launch_review = true;
+                self.launch_review_details = false;
                 self.target_launch_result = None;
                 self.compile_status = "ACTIVE";
                 self.verify_passed = true;
@@ -4293,6 +4340,7 @@ impl App {
                 self.pending_target = pending.target;
                 self.show_launch = review_was_visible;
                 self.launch_review = false;
+                self.launch_review_details = false;
                 self.target_launch_result = None;
                 self.launch_review_error = Some(LaunchReviewErrorState {
                     target: pending.target,
@@ -4376,6 +4424,31 @@ impl App {
             return;
         }
         self.copy_text("launch", self.launch_copy_command());
+    }
+
+    fn skill_handoff_review_ready(&self) -> bool {
+        let capsule = self.launch_capsule_for_target(self.pending_target);
+        capsule.handoff_artifact.is_some() && !compiler::compiler_is_builtin(&capsule.compiler)
+    }
+
+    fn copy_handoff_artifact(&mut self) {
+        let capsule = self.launch_capsule_for_target(self.pending_target);
+        let Some(artifact) = capsule.handoff_artifact else {
+            self.set_status("No handoff content to copy");
+            return;
+        };
+        self.clipboard_text = Some(artifact);
+        self.set_status("Copied handoff text");
+    }
+
+    fn copy_handoff_artifact_path(&mut self) {
+        let capsule = self.launch_capsule_for_target(self.pending_target);
+        let Some(path) = capsule.handoff_artifact_path else {
+            self.set_status("No handoff file path to copy");
+            return;
+        };
+        self.clipboard_text = Some(path);
+        self.set_status("Copied handoff path");
     }
 
     fn copy_target_launch_result_command(&mut self) {
@@ -6080,6 +6153,53 @@ Host devbox
         assert!(!app.is_launch_review_pending());
         assert!(app.launch_review);
         assert_eq!(app.status_message, "Handoff review ready: Hermes");
+    }
+
+    #[test]
+    fn skill_handoff_review_copies_exact_artifact_and_details() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.data.compilers.insert(0, "agent:codex:handoff".into());
+        app.selected_compiler = 0;
+        app.data.capsule.compiler = "agent:codex:handoff".into();
+        if let Some(raw_source_map) = &mut app.data.capsule.raw_source_map {
+            raw_source_map.generated_by = "agent:codex:handoff".into();
+        }
+        app.data.capsule.handoff_artifact = Some("# Handoff\n\nContinue exactly.".into());
+        app.data.capsule.handoff_artifact_path =
+            Some("/tmp/moonbox-continuation-handoff-demo.md".into());
+        app.data.capsule.handoff_runner = Some("Codex".into());
+        app.data.capsule.handoff_skill = Some("handoff".into());
+        app.show_launch = true;
+        app.launch_review = true;
+        app.pending_target = CliTool::Hermes;
+
+        app.handle_key(key('y'));
+
+        assert_eq!(
+            app.take_clipboard_text().as_deref(),
+            Some("# Handoff\n\nContinue exactly.")
+        );
+        assert_eq!(app.status_message, "Copied handoff text");
+
+        app.handle_key(key('p'));
+
+        assert_eq!(
+            app.take_clipboard_text().as_deref(),
+            Some("/tmp/moonbox-continuation-handoff-demo.md")
+        );
+        assert_eq!(app.status_message, "Copied handoff path");
+
+        app.handle_key(key('d'));
+
+        assert!(app.launch_review_details);
+        assert_eq!(app.status_message, "Handoff details opened");
+
+        app.handle_key(key('q'));
+
+        assert!(app.show_launch);
+        assert!(app.launch_review);
+        assert!(!app.launch_review_details);
+        assert_eq!(app.status_message, "Handoff details closed");
     }
 
     #[test]

@@ -894,13 +894,20 @@ Community skill Markdown artifacts are reviewed as handoff artifacts: missing
 Moonbox-specific semantic refs warn instead of blocking launch, while hard
 source / target / rewind mismatches still block. For the community `handoff`
 skill, Moonbox reads the generated temporary Markdown file and shows that body
-as the Review content; Moonbox capsule/verifier details stay out of the default
-Review surface.
+as the complete Review content. `Enter` / `r` starts the target agent with a
+short handoff task note, the artifact path, and source-session metadata; the
+target agent reads the generated Markdown file as the source of truth. Moonbox
+capsule/verifier details stay behind the details toggle instead of being
+appended to the handoff text.
+Generated handoff files may live under the current `TMPDIR` or `/tmp`, but
+Moonbox still requires a canonical system temp path, a Moonbox handoff filename
+prefix, and a `.md` extension before reading the artifact.
 `G` jumps back to the bottom and `gg` jumps to the top. Pressing `Enter` in
 that review restores the terminal first, launches the local target CLI with the
 reviewed skill artifact, then returns to Moonbox with a three-action result
-panel: run again, copy command, or return. Pressing `y` copies the actual target
-command.
+panel: run again, copy command, or return. Pressing `y` in Review copies the
+full handoff text; `p` copies the temporary handoff file path; `d` opens
+Moonbox's runner, skill path, redaction, and bounded-context details.
 Pressing `y` in the target picker does not copy anything. The picker keeps
 every target visible and annotates each option with `READY`, `WARN`, or
 `BLOCKED`; blocked targets keep launch review disabled until validation passes.
@@ -988,9 +995,10 @@ commands, remains available through the dry-run JSON surfaces and
 
 | Key | Action |
 | --- | --- |
-| `r` | Restore terminal, launch local target CLI, then return to Moonbox |
-| `y` | Copy actual target command |
-| `enter` | Review-only; does not launch |
+| `enter` / `r` | Start the target CLI with a handoff task note that points to the generated Markdown file |
+| `y` | Copy the full handoff text |
+| `p` | Copy the generated handoff file path when available |
+| `d` | Toggle Moonbox runner / skill / redaction details |
 | `gg` / `G` | Jump to top / bottom of the review |
 | `q` / `Esc` | Close review |
 
@@ -1466,9 +1474,8 @@ Stable interfaces matter more than any single framework:
 - M98: Skill-first Handoff Review cleanup; agent-backed handoff success now
   reads the community skill's generated temporary Markdown file and shows that
   Markdown as the Review body. Moonbox capsule/verifier wrapper text is removed
-  from the default Review surface, the target agent receives only a short
-  Moonbox guard plus the reviewed Markdown, `Enter` confirms and queues the
-  target agent launch after review, and `y` remains the copy-command path. The
+  from the default Review surface, `Enter` confirms and queues the target agent
+  launch after review, and `y` remains the copy-command path. The
   TUI Skill Picker no longer exposes built-in draft compilers as skill choices;
   any future built-in interactive handoff must be exposed as a bundled skill
   through the same skill-first path.
@@ -1476,6 +1483,12 @@ Stable interfaces matter more than any single framework:
   release artifact staging examples, and Homebrew formula templates now target
   `0.1.3` / `v0.1.3` so M97 Luoshen themes and M98 skill-first handoff review
   can ship together through tagged GitHub release artifacts.
+- M100: Exact Handoff Artifact Review; agent-backed Handoff Review now treats
+  the generated Markdown file as the single source of truth. The Review body is
+  the full generated handoff document, `Enter` / `r` launches the target agent
+  with a concise task note, artifact path, and source-session metadata, `y`
+  copies the full handoff, `p` copies the file path, and Moonbox runner / skill
+  / redaction details move behind `d`.
 - M92: Remote / SSH Session Detail Parity; SSH data spaces now hydrate selected
   session details from the remote `compile-request --json` response, preserving
   remote-computed bounded anatomy in the same Details / Zoom Details rendering

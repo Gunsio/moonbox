@@ -1023,7 +1023,7 @@ fn extract_handoff_artifact_path(output: &str) -> Option<PathBuf> {
             token.trim_matches(|character: char| matches!(character, ':' | ',' | ';' | '.' | '。'))
         })
         .find(|token| {
-            token.contains("moonbox-handoff-")
+            (token.contains("moonbox-handoff-") || token.contains("moonbox-continuation-handoff-"))
                 && token.ends_with(".md")
                 && (token.starts_with('/') || token.starts_with("file://"))
         })
@@ -1043,19 +1043,15 @@ fn validate_handoff_artifact_path(
         stream: "artifact",
         reason: format!("{}: {error}", path.display()),
     })?;
-    let temp_root = env::temp_dir()
-        .canonicalize()
-        .map_err(|error| CompilerError::Io {
-            compiler: request.compiler.clone(),
-            stream: "artifact",
-            reason: format!("temp dir: {error}"),
-        })?;
+    let temp_roots = handoff_artifact_temp_roots(request)?;
     let file_name = canonical
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or_default();
-    if !canonical.starts_with(&temp_root)
-        || !file_name.starts_with("moonbox-handoff-")
+    let allowed_name = file_name.starts_with("moonbox-handoff-")
+        || file_name.starts_with("moonbox-continuation-handoff-");
+    if !temp_roots.iter().any(|root| canonical.starts_with(root))
+        || !allowed_name
         || canonical
             .extension()
             .and_then(|extension| extension.to_str())
@@ -1070,6 +1066,31 @@ fn validate_handoff_artifact_path(
         });
     }
     Ok(canonical)
+}
+
+fn handoff_artifact_temp_roots(
+    request: &CapsuleCompileRequest,
+) -> Result<Vec<PathBuf>, CompilerError> {
+    let mut roots = Vec::new();
+    for path in [
+        env::temp_dir(),
+        PathBuf::from("/tmp"),
+        PathBuf::from("/private/tmp"),
+    ] {
+        if let Ok(canonical) = path.canonicalize()
+            && !roots.iter().any(|root| root == &canonical)
+        {
+            roots.push(canonical);
+        }
+    }
+    if roots.is_empty() {
+        return Err(CompilerError::Io {
+            compiler: request.compiler.clone(),
+            stream: "artifact",
+            reason: "no writable system temp dir found".into(),
+        });
+    }
+    Ok(roots)
 }
 
 struct TempClaudePlugin {
@@ -2084,7 +2105,7 @@ Write the handoff.
         let request =
             data::compile_request(CliTool::Codex, CliTool::Claude, "evt-091").expect("request");
         let artifact_path = env::temp_dir().join(format!(
-            "moonbox-handoff-test-{}-{}.md",
+            "moonbox-continuation-handoff-test-{}-{}.md",
             std::process::id(),
             unique_suffix()
         ));
@@ -2095,12 +2116,38 @@ Write the handoff.
         .expect("artifact");
 
         let output = format!(
-            "已生成 handoff 文档: [moonbox-handoff-test.md](<{}>)",
+            "已生成 handoff 文档: [moonbox-continuation-handoff-test.md](<{}>)",
             artifact_path.display()
         );
         let artifact = resolve_agent_artifact(&request, &output).expect("resolved artifact");
 
         assert!(artifact.body.contains("generated markdown body"));
+        assert_eq!(
+            artifact.path.as_deref(),
+            Some(artifact_path.canonicalize().expect("canonical").as_path())
+        );
+        let _ = fs::remove_file(artifact_path);
+    }
+
+    #[test]
+    fn resolves_skill_generated_slash_tmp_markdown_as_artifact_body() {
+        let request =
+            data::compile_request(CliTool::Claude, CliTool::Codex, "evt-092").expect("request");
+        let artifact_path = PathBuf::from("/tmp").join(format!(
+            "moonbox-continuation-handoff-test-{}-{}.md",
+            std::process::id(),
+            unique_suffix()
+        ));
+        fs::write(
+            &artifact_path,
+            "# Handoff\n\nContinue with the slash tmp markdown body.",
+        )
+        .expect("/tmp artifact");
+
+        let output = format!("handoff skill wrote `{}`", artifact_path.display());
+        let artifact = resolve_agent_artifact(&request, &output).expect("resolved artifact");
+
+        assert!(artifact.body.contains("slash tmp markdown body"));
         assert_eq!(
             artifact.path.as_deref(),
             Some(artifact_path.canonicalize().expect("canonical").as_path())
