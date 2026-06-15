@@ -103,6 +103,7 @@ pub enum Text {
     SettingsSubtitle,
     Language,
     Theme,
+    HandoffRunner,
     HooksEventChannel,
     HooksManagedByCli,
     SmartEnterTmux,
@@ -195,9 +196,7 @@ fn english(key: Text) -> &'static str {
         Text::HandoffSkill => "Handoff Skill",
         Text::SkillPicker => "Skill Picker",
         Text::ChooseCompilerSkill => "Choose handoff skill",
-        Text::SkillPickerSubtitle => {
-            "Pick the handoff skill; runner setup is checked before launch."
-        }
+        Text::SkillPickerSubtitle => "Pick the handoff skill only; choose the runner in Settings.",
         Text::Tokens => "Tokens",
         Text::Preflight => "Pre-flight",
         Text::MoonboxCli => "Moonbox CLI",
@@ -298,10 +297,11 @@ fn english(key: Text) -> &'static str {
         Text::Help => "Help",
         Text::SettingsTitle => "Settings",
         Text::SettingsSubtitle => {
-            "Preview first. Saved settings apply to Moonbox UI only, not source session stores."
+            "Preview first. Saved settings affect Moonbox UI and the local handoff runner, never source session stores."
         }
         Text::Language => "Language",
         Text::Theme => "Theme",
+        Text::HandoffRunner => "Handoff Runner",
         Text::HooksEventChannel => "Hooks event channel",
         Text::HooksManagedByCli => "install/uninstall is managed by `moonbox hooks`",
         Text::SmartEnterTmux => "Smart Enter / tmux",
@@ -381,7 +381,7 @@ fn zh_hans(key: Text) -> &'static str {
         Text::HandoffSkill => "Handoff Skill",
         Text::SkillPicker => "Skill 选择器",
         Text::ChooseCompilerSkill => "选择 Handoff Skill",
-        Text::SkillPickerSubtitle => "这里只选择 handoff skill；执行器配置会在启动前预检。",
+        Text::SkillPickerSubtitle => "这里只选择 handoff skill；执行器在设置里切换。",
         Text::Tokens => "Tokens",
         Text::Preflight => "预检",
         Text::MoonboxCli => "Moonbox CLI",
@@ -480,10 +480,11 @@ fn zh_hans(key: Text) -> &'static str {
         Text::Help => "帮助",
         Text::SettingsTitle => "设置",
         Text::SettingsSubtitle => {
-            "先预览再保存。设置只影响 Moonbox UI，不影响 source session store。"
+            "先预览再保存。设置影响 Moonbox UI 和本地 handoff 执行器，不影响 source session store。"
         }
         Text::Language => "语言",
         Text::Theme => "主题",
+        Text::HandoffRunner => "Handoff 执行器",
         Text::HooksEventChannel => "Hooks 事件通道",
         Text::HooksManagedByCli => "安装/卸载由 `moonbox hooks` 管理",
         Text::SmartEnterTmux => "Smart Enter / tmux",

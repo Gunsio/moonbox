@@ -2999,6 +2999,16 @@ fn render_settings(frame: &mut Frame, root: Rect, app: &App) {
             app,
             language,
             row_width,
+            field: SettingsField::HandoffRunner,
+            label: i18n::text(language, Text::HandoffRunner),
+            draft: app.settings_handoff_runner.label(),
+            saved: app.handoff_runner_preference().label(),
+            dirty: app.settings_handoff_runner_dirty(),
+        }),
+        settings_row(SettingsRow {
+            app,
+            language,
+            row_width,
             field: SettingsField::SmartEnter,
             label: i18n::text(language, Text::SmartEnterTmux),
             draft: i18n::on_off(language, app.settings_smart_enter_tmux),
@@ -3208,6 +3218,16 @@ fn pad_display_width(mut text: String, width: usize) -> String {
 }
 
 fn settings_effect(app: &App, language: crate::core::config::UiLanguage) -> &'static str {
+    if app.settings_field_is_focused(SettingsField::HandoffRunner) {
+        return match language {
+            crate::core::config::UiLanguage::English => {
+                "Handoff Review runs the selected skill through this local runner. The target agent you choose in Launch stays independent."
+            }
+            crate::core::config::UiLanguage::ZhHans => {
+                "Handoff Review 会用这个本地执行器运行当前 skill；Launch 里选择的接手 agent 与它独立。"
+            }
+        };
+    }
     match language {
         crate::core::config::UiLanguage::English => {
             if !app.hooks_enabled() {
@@ -5057,17 +5077,17 @@ fn disabled_action_button<'a>(key: &'a str, label: &'a str) -> Span<'a> {
 }
 
 fn modal_scroll_offset(requested: u16, lines: &[Line<'_>], area: Rect) -> u16 {
-    if requested != u16::MAX {
-        return requested;
-    }
-
     let width = usize::from(area.width.saturating_sub(2).max(1));
     let height = usize::from(area.height.saturating_sub(2).max(1));
     let rows = lines
         .iter()
         .map(|line| line.width().max(1).div_ceil(width))
         .sum::<usize>();
-    rows.saturating_sub(height).min(usize::from(u16::MAX - 1)) as u16
+    let max_scroll = rows.saturating_sub(height).min(usize::from(u16::MAX - 1)) as u16;
+    if requested == u16::MAX {
+        return max_scroll;
+    }
+    requested.min(max_scroll)
 }
 
 fn format_stars(stars: u64) -> String {
@@ -7282,9 +7302,11 @@ mod tests {
         assert_screen_contains(&off_screen, "Settings");
         assert_screen_contains(&off_screen, "Language");
         assert_screen_contains(&off_screen, "Theme");
+        assert_screen_contains(&off_screen, "Handoff Runner");
         assert_screen_contains(&off_screen, "Preview Off");
         assert_screen_contains(&off_screen, "Resume");
 
+        app.handle_key(key('j'));
         app.handle_key(key('j'));
         app.handle_key(key('j'));
         app.handle_key(key(' '));
@@ -7397,6 +7419,26 @@ mod tests {
             state_column >= saved_column + display_width("已保存 婉若游龙") + 2,
             "state column should stay separate from saved column: {theme_line}"
         );
+    }
+
+    #[test]
+    fn settings_overlay_previews_handoff_runner_preference() {
+        let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.handle_key(key(','));
+        app.handle_key(key('j'));
+        app.handle_key(key('j'));
+
+        let codex_screen = render_text(&app, 150, 36);
+        assert_screen_contains(&codex_screen, "Handoff Runner");
+        assert_screen_contains(&codex_screen, "Preview Codex");
+        assert_screen_contains(&codex_screen, "Saved Codex");
+
+        app.handle_key(key(' '));
+        let claude_screen = render_text(&app, 150, 36);
+        assert_screen_contains(&claude_screen, "Preview Claude");
+        assert_screen_contains(&claude_screen, "Unsaved");
+        assert_screen_contains(&claude_screen, "The target agent you choose in");
+        assert_screen_contains(&claude_screen, "Launch stays independent.");
     }
 
     #[test]
@@ -8224,7 +8266,7 @@ mod tests {
         assert_screen_contains(&screen, "Choose handoff skill");
         assert_screen_contains(
             &screen,
-            "Pick the handoff skill; runner setup is checked before launch.",
+            "Pick the handoff skill only; choose the runner in Settings.",
         );
         assert_screen_contains(&screen, "handoff");
         assert_screen_contains(&screen, "Skill");
@@ -8315,10 +8357,7 @@ mod tests {
 
         assert_screen_contains(&screen, "Skill 选择器");
         assert_screen_contains(&screen, "选择 Handoff Skill");
-        assert_screen_contains(
-            &screen,
-            "这里只选择 handoff skill；执行器配置会在启动前预检。",
-        );
+        assert_screen_contains(&screen, "这里只选择 handoff skill；执行器在设置里切换。");
         assert_screen_contains(&screen, "handoff");
         assert_screen_contains(&screen, "Skill");
         assert_screen_contains(&screen, "状态:");
@@ -8758,7 +8797,17 @@ mod tests {
         assert!(!screen.contains("Generated Handoff Artifact"), "{screen}");
         assert!(!screen.contains("Privacy / Redaction"), "{screen}");
 
+        app.modal_scroll = 10_000;
+        let overscrolled = render_text(&app, 140, 48);
+
+        assert_screen_contains(&overscrolled, "Enter/r Start");
+        assert!(
+            overscrolled.contains("Handoff Body") || overscrolled.contains("Verify the UI copy."),
+            "{overscrolled}"
+        );
+
         app.launch_review_details = true;
+        app.modal_scroll = 0;
         let details = render_text(&app, 140, 48);
 
         assert_screen_contains(&details, "Handoff details");
