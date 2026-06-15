@@ -1493,6 +1493,11 @@ Stable interfaces matter more than any single framework:
   artifact staging examples, and Homebrew formula templates now target
   `0.1.4` / `v0.1.4` so the M100 exact artifact review flow can ship through
   tagged GitHub release artifacts.
+- M103: Session Management Vision Baseline; root agent rules now state Moonbox's
+  product direction as an agent workflow decision support system, point future
+  milestone sync at the new lightweight Feishu plan document, and keep the
+  unresolved resume / fork / rewind / handoff / abandon / guidance / risk /
+  evaluation questions in `docs/session-management-questions.md`.
 - M92: Remote / SSH Session Detail Parity; SSH data spaces now hydrate selected
   session details from the remote `compile-request --json` response, preserving
   remote-computed bounded anatomy in the same Details / Zoom Details rendering

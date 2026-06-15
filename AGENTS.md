@@ -1,5 +1,9 @@
 # AGENTS.md
 
+- 愿景：Moonbox 不是只做 session 管理器，而是做 agent 工作流的决策辅助系统。工具变好用是入口，session 管理哲学是核心。
+- 愿景：让 resume、fork、rewind、handoff、abandon、review 等 session 操作变得简单、明确、可判断。
+- Session 管理哲学的未解问题记录在 [docs/session-management-questions.md](docs/session-management-questions.md)，后续随着产品演进定期回看解决了多少。
+- Feishu 计划文档使用 <https://bytedance.larkoffice.com/wiki/Y3k6wXF5qishZgkiTUCc7L0Lnnd>；不要继续更新旧的大型计划文档，除非用户明确要求。
 - One milestone = one branch + one commit + one PR.
 - Before starting a new milestone, verify `main`, `origin/main`, and relevant PR status.
 - Do not start dependent milestones from unmerged milestone branches unless explicitly requested.
