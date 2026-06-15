@@ -75,17 +75,24 @@ pub struct TmuxJumpPlan {
 pub enum SettingsField {
     Language,
     Theme,
+    HandoffRunner,
     SmartEnter,
 }
 
 impl SettingsField {
-    const ALL: [Self; 3] = [Self::Language, Self::Theme, Self::SmartEnter];
+    const ALL: [Self; 4] = [
+        Self::Language,
+        Self::Theme,
+        Self::HandoffRunner,
+        Self::SmartEnter,
+    ];
 
     fn index(self) -> usize {
         match self {
             Self::Language => 0,
             Self::Theme => 1,
-            Self::SmartEnter => 2,
+            Self::HandoffRunner => 2,
+            Self::SmartEnter => 3,
         }
     }
 
@@ -108,14 +115,6 @@ pub struct EnterRoutePreview {
     pub kind: EnterRouteKind,
     pub label: &'static str,
     pub detail: String,
-}
-
-fn target_runner_id(target: CliTool) -> Option<&'static str> {
-    match target {
-        CliTool::Codex => Some("codex"),
-        CliTool::Claude => Some("claude"),
-        CliTool::Hermes => None,
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1034,8 +1033,10 @@ pub struct App {
     pub data_space_config_field: usize,
     pub data_space_delete_confirmation: Option<String>,
     ui_preferences: config::UiPreferencesConfig,
+    handoff_runner_preference: config::HandoffRunnerPreference,
     pub settings_language: config::UiLanguage,
     pub settings_theme: config::UiThemeName,
+    pub settings_handoff_runner: config::HandoffRunnerPreference,
     pub settings_field: SettingsField,
     pub settings_smart_enter_tmux: bool,
     pub pending_target: CliTool,
@@ -1099,12 +1100,17 @@ impl App {
         #[cfg(test)]
         let ui_preferences = config::UiPreferencesConfig::default();
         #[cfg(not(test))]
+        let handoff_runner_preference = config::load_handoff_runner_preference();
+        #[cfg(test)]
+        let handoff_runner_preference = config::HandoffRunnerPreference::default();
+        #[cfg(not(test))]
         let hook_live = hooks::live_state_from_config(&hooks_config);
         #[cfg(test)]
         let hook_live = None;
         let settings_smart_enter_tmux = hooks_config.smart_enter_tmux;
         let settings_language = ui_preferences.language;
         let settings_theme = ui_preferences.theme;
+        let settings_handoff_runner = handoff_runner_preference;
 
         let session_details_loaded =
             !data.timeline.is_empty() && data.capsule.state != "pending_rewind";
@@ -1147,8 +1153,10 @@ impl App {
             data_space_config_field: 0,
             data_space_delete_confirmation: None,
             ui_preferences,
+            handoff_runner_preference,
             settings_language,
             settings_theme,
+            settings_handoff_runner,
             settings_field: SettingsField::Language,
             settings_smart_enter_tmux,
             pending_target: target,
@@ -1457,6 +1465,15 @@ impl App {
     }
 
     #[cfg(test)]
+    pub(crate) fn set_handoff_runner_preference_for_test(
+        &mut self,
+        preference: config::HandoffRunnerPreference,
+    ) {
+        self.handoff_runner_preference = preference;
+        self.settings_handoff_runner = preference;
+    }
+
+    #[cfg(test)]
     pub(crate) fn set_hook_live_events_for_test(&mut self, events: Vec<hooks::HookSpoolEvent>) {
         let mut hook_live =
             hooks::HookLiveState::new(std::path::PathBuf::from("/tmp/moonbox-test-hooks.jsonl"));
@@ -1488,6 +1505,14 @@ impl App {
 
     pub fn settings_smart_enter_dirty(&self) -> bool {
         self.settings_smart_enter_tmux != self.hooks_config.smart_enter_tmux
+    }
+
+    pub fn handoff_runner_preference(&self) -> config::HandoffRunnerPreference {
+        self.handoff_runner_preference
+    }
+
+    pub fn settings_handoff_runner_dirty(&self) -> bool {
+        self.settings_handoff_runner != self.handoff_runner_preference
     }
 
     pub fn ui_language(&self) -> config::UiLanguage {
@@ -1525,6 +1550,7 @@ impl App {
     pub fn settings_dirty(&self) -> bool {
         self.settings_language_dirty()
             || self.settings_theme_dirty()
+            || self.settings_handoff_runner_dirty()
             || self.settings_smart_enter_dirty()
     }
 
@@ -2431,6 +2457,7 @@ impl App {
             self.show_settings = false;
             self.settings_language = self.ui_preferences.language;
             self.settings_theme = self.ui_preferences.theme;
+            self.settings_handoff_runner = self.handoff_runner_preference;
             self.settings_smart_enter_tmux = self.hooks_config.smart_enter_tmux;
             self.settings_field = SettingsField::Language;
             self.modal_scroll = 0;
@@ -2475,6 +2502,7 @@ impl App {
     fn open_settings(&mut self) {
         self.settings_language = self.ui_preferences.language;
         self.settings_theme = self.ui_preferences.theme;
+        self.settings_handoff_runner = self.handoff_runner_preference;
         self.settings_smart_enter_tmux = self.hooks_config.smart_enter_tmux;
         self.settings_field = SettingsField::Language;
         self.show_settings = true;
@@ -2533,6 +2561,17 @@ impl App {
                 };
                 self.set_status(format!("Theme preview: {}", self.settings_theme.label()));
             }
+            SettingsField::HandoffRunner => {
+                self.settings_handoff_runner = if forward {
+                    self.settings_handoff_runner.next()
+                } else {
+                    self.settings_handoff_runner.previous()
+                };
+                self.set_status(format!(
+                    "Handoff runner draft: {}",
+                    self.settings_handoff_runner.label()
+                ));
+            }
             SettingsField::SmartEnter => {
                 self.settings_smart_enter_tmux = !self.settings_smart_enter_tmux;
                 let state = if self.settings_smart_enter_tmux {
@@ -2549,6 +2588,7 @@ impl App {
     fn reset_settings_draft(&mut self) {
         self.settings_language = config::UiLanguage::default();
         self.settings_theme = config::UiThemeName::default();
+        self.settings_handoff_runner = config::HandoffRunnerPreference::default();
         self.settings_smart_enter_tmux = false;
         self.set_status("Settings draft reset to defaults");
         self.pending_g = false;
@@ -2559,20 +2599,27 @@ impl App {
             language: self.settings_language,
             theme: self.settings_theme,
         };
-        match config::save_ui_preferences_and_smart_enter(ui, self.settings_smart_enter_tmux) {
-            Ok((ui_preferences, hooks_config)) => {
+        match config::save_ui_preferences_smart_enter_and_handoff_runner(
+            ui,
+            self.settings_smart_enter_tmux,
+            self.settings_handoff_runner,
+        ) {
+            Ok((ui_preferences, hooks_config, handoff_runner_preference)) => {
                 self.ui_preferences = ui_preferences;
                 self.hooks_config = hooks_config;
+                self.handoff_runner_preference = handoff_runner_preference;
                 self.settings_language = self.ui_preferences.language;
                 self.settings_theme = self.ui_preferences.theme;
+                self.settings_handoff_runner = self.handoff_runner_preference;
                 self.settings_smart_enter_tmux = self.hooks_config.smart_enter_tmux;
                 self.show_settings = false;
                 self.settings_field = SettingsField::Language;
                 self.modal_scroll = 0;
                 self.set_status(format!(
-                    "Settings saved: language {}, theme {}, Smart Enter {}",
+                    "Settings saved: language {}, theme {}, runner {}, Smart Enter {}",
                     self.ui_preferences.language.label(),
                     self.ui_preferences.theme.label(),
+                    self.handoff_runner_preference.label(),
                     if self.hooks_config.smart_enter_tmux {
                         "On"
                     } else {
@@ -2736,22 +2783,11 @@ impl App {
         }
 
         self.data.compilers = compilers;
-        self.selected_compiler = compiler_index_for_equivalent_id(
-            &self.data,
-            &selected_id,
-            self.data.target,
-            self.selected_compiler,
-        );
+        self.selected_compiler =
+            compiler_index_for_equivalent_id(&self.data, &selected_id, self.selected_compiler);
         self.pending_compiler = pending_id
             .as_deref()
-            .map(|id| {
-                compiler_index_for_equivalent_id(
-                    &self.data,
-                    id,
-                    self.data.target,
-                    self.pending_compiler,
-                )
-            })
+            .map(|id| compiler_index_for_equivalent_id(&self.data, id, self.pending_compiler))
             .unwrap_or(self.selected_compiler);
     }
 
@@ -2854,10 +2890,10 @@ impl App {
                     .map(|spec| (index, spec))
             })
             .collect::<Vec<_>>();
-        if let Some(target_runner_id) = target_runner_id(self.data.target)
-            && let Some((index, _)) = matching_indices
-                .iter()
-                .find(|(_, spec)| spec.runner.id() == target_runner_id)
+        let preferred_runner = self.handoff_runner_preference.runner();
+        if let Some((index, _)) = matching_indices
+            .iter()
+            .find(|(_, spec)| spec.runner == preferred_runner)
         {
             return Some(*index);
         }
@@ -2920,8 +2956,9 @@ impl App {
         self.modal_scroll = 0;
         if continue_launch {
             self.set_status(format!(
-                "Handoff skill: {selected_label}; press Enter to generate Review"
+                "Handoff skill: {selected_label}; generating Review"
             ));
+            self.confirm_launch_target();
         } else {
             self.set_status(format!("Handoff skill: {selected_label}"));
         }
@@ -3580,7 +3617,7 @@ impl App {
             self.show_launch = true;
             self.target_launch_result = None;
             self.launch_review_details = false;
-            self.modal_scroll = u16::MAX;
+            self.modal_scroll = 0;
             self.set_status(format!("Handoff review ready: {}", self.pending_target));
             self.pending_g = false;
             return;
@@ -3591,6 +3628,7 @@ impl App {
             self.pending_g = false;
             return;
         }
+        self.selected_compiler = self.selected_compiler_for_handoff();
         self.pending_target = self.data.target;
         self.show_launch = true;
         self.launch_review = false;
@@ -3682,6 +3720,7 @@ impl App {
         }
         self.refresh_compiler_catalog();
         let target = self.pending_target;
+        self.selected_compiler = self.selected_compiler_for_handoff();
         let validation = self.validate_launch_for_target(target);
         if self.launch_requires_handoff_skill(target) {
             self.open_skill_picker();
@@ -3717,7 +3756,7 @@ impl App {
             self.launch_review_details = false;
             self.target_launch_result = None;
             self.launch_review_error = None;
-            self.modal_scroll = u16::MAX;
+            self.modal_scroll = 0;
             self.set_status(format!("Handoff review ready: {target}"));
             self.pending_g = false;
             return;
@@ -3817,6 +3856,45 @@ impl App {
             self.set_status(format!("Preparing handoff review: {target}"));
         }
         self.pending_g = false;
+    }
+
+    fn selected_compiler_for_handoff(&self) -> usize {
+        let selected_id = self
+            .data
+            .compilers
+            .get(self.selected_compiler)
+            .cloned()
+            .unwrap_or_else(|| self.data.capsule.compiler.clone());
+        if let Some(selected_spec) = handoff::parse_compiler_id(&selected_id) {
+            return self
+                .preferred_agent_compiler_index(&selected_spec.skill_id)
+                .unwrap_or_else(|| {
+                    compiler_index_for_equivalent_id(
+                        &self.data,
+                        &selected_id,
+                        self.selected_compiler,
+                    )
+                });
+        }
+        if compiler::compiler_is_builtin(&selected_id)
+            && self
+                .current_session()
+                .is_some_and(|session| session.source_provenance != SourceProvenance::Fixture)
+            && let Some(index) = self.preferred_default_agent_compiler_index()
+        {
+            return index;
+        }
+        compiler_index_for_equivalent_id(&self.data, &selected_id, self.selected_compiler)
+    }
+
+    fn preferred_default_agent_compiler_index(&self) -> Option<usize> {
+        if let Some(index) = self.preferred_agent_compiler_index("handoff") {
+            return Some(index);
+        }
+        let skill_id = self.data.compilers.iter().find_map(|compiler_id| {
+            handoff::parse_compiler_id(compiler_id).map(|spec| spec.skill_id)
+        })?;
+        self.preferred_agent_compiler_index(&skill_id)
     }
 
     fn handoff_review_ready_for(
@@ -4318,7 +4396,7 @@ impl App {
                 self.target_launch_result = None;
                 self.compile_status = "ACTIVE";
                 self.verify_passed = true;
-                self.modal_scroll = u16::MAX;
+                self.modal_scroll = 0;
                 self.pending_g = false;
                 if review_was_visible {
                     self.set_status(format!(
@@ -4372,6 +4450,12 @@ impl App {
     }
 
     fn scroll_modal(&mut self, forward: bool, amount: u16) {
+        if self.modal_scroll == u16::MAX {
+            if !forward {
+                self.modal_scroll = 0;
+            }
+            return;
+        }
         self.modal_scroll = if forward {
             self.modal_scroll.saturating_add(amount)
         } else {
@@ -4763,7 +4847,6 @@ fn compiler_index_for_id(data: &WorkbenchData, compiler_id: &str, fallback: usiz
 fn compiler_index_for_equivalent_id(
     data: &WorkbenchData,
     compiler_id: &str,
-    target: CliTool,
     fallback: usize,
 ) -> usize {
     if let Some(index) = data
@@ -4776,16 +4859,6 @@ fn compiler_index_for_equivalent_id(
     let Some(selected_spec) = handoff::parse_compiler_id(compiler_id) else {
         return fallback.min(data.compilers.len().saturating_sub(1));
     };
-    if let Some(target_runner_id) = target_runner_id(target)
-        && let Some(index) = data.compilers.iter().position(|candidate| {
-            handoff::parse_compiler_id(candidate).is_some_and(|candidate_spec| {
-                candidate_spec.skill_id == selected_spec.skill_id
-                    && candidate_spec.runner.id() == target_runner_id
-            })
-        })
-    {
-        return index;
-    }
     data.compilers
         .iter()
         .position(|candidate| {
@@ -5257,15 +5330,95 @@ mod tests {
 
         let candidates = app.skill_picker_candidate_indices();
 
-        assert_eq!(candidates, vec![1]);
+        assert_eq!(candidates, vec![0]);
         assert!(app.compiler_selection_matches(candidates[0], app.selected_compiler));
 
         app.handle_key(key('S'));
-        assert_eq!(app.pending_compiler, 1);
+        assert_eq!(app.pending_compiler, 0);
         app.handle_key(KeyEvent::from(KeyCode::Enter));
 
-        assert_eq!(app.data.capsule.compiler, "agent:claude:handoff");
+        assert_eq!(app.data.capsule.compiler, "agent:codex:handoff");
         assert_eq!(app.status_message, "Handoff skill: handoff");
+    }
+
+    #[test]
+    fn skill_picker_uses_configured_handoff_runner() {
+        let mut app = new_app(CliTool::Codex, CliTool::Claude);
+        app.set_handoff_runner_preference_for_test(config::HandoffRunnerPreference::Claude);
+        app.data.target = CliTool::Claude;
+        app.pending_target = CliTool::Codex;
+        app.show_launch = true;
+        app.data.compilers = vec![
+            "agent:codex:handoff".into(),
+            "agent:claude:handoff".into(),
+            "engineering-handoff".into(),
+        ];
+        app.selected_compiler = 1;
+        app.data.capsule.compiler = "agent:claude:handoff".into();
+
+        let candidates = app.skill_picker_candidate_indices();
+
+        assert_eq!(candidates, vec![1]);
+        assert!(app.compiler_selection_matches(candidates[0], app.selected_compiler));
+    }
+
+    #[test]
+    fn launch_review_uses_default_codex_runner_for_selected_skill() {
+        let mut app = new_app(CliTool::Codex, CliTool::Claude);
+        app.data.target = CliTool::Claude;
+        app.pending_target = CliTool::Claude;
+        app.show_launch = true;
+        app.data.compilers = vec![
+            "agent:codex:handoff".into(),
+            "agent:claude:handoff".into(),
+            "engineering-handoff".into(),
+        ];
+        app.selected_compiler = 1;
+        app.data.capsule.compiler = "agent:claude:handoff".into();
+
+        app.confirm_launch_target();
+
+        let pending = app
+            .pending_launch_review
+            .as_ref()
+            .expect("launch review worker");
+        assert_eq!(pending.target, CliTool::Claude);
+        assert_eq!(pending.compiler_id, "agent:codex:handoff");
+        assert_eq!(
+            app.data.compilers[app.selected_compiler],
+            "agent:codex:handoff"
+        );
+        assert_eq!(app.data.capsule.compiler, "agent:claude:handoff");
+    }
+
+    #[test]
+    fn launch_review_uses_configured_claude_runner_for_selected_skill() {
+        let mut app = new_app(CliTool::Codex, CliTool::Claude);
+        app.set_handoff_runner_preference_for_test(config::HandoffRunnerPreference::Claude);
+        app.data.target = CliTool::Codex;
+        app.pending_target = CliTool::Codex;
+        app.show_launch = true;
+        app.data.compilers = vec![
+            "agent:codex:handoff".into(),
+            "agent:claude:handoff".into(),
+            "engineering-handoff".into(),
+        ];
+        app.selected_compiler = 0;
+        app.data.capsule.compiler = "agent:codex:handoff".into();
+
+        app.confirm_launch_target();
+
+        let pending = app
+            .pending_launch_review
+            .as_ref()
+            .expect("launch review worker");
+        assert_eq!(pending.target, CliTool::Codex);
+        assert_eq!(pending.compiler_id, "agent:claude:handoff");
+        assert_eq!(
+            app.data.compilers[app.selected_compiler],
+            "agent:claude:handoff"
+        );
+        assert_eq!(app.data.capsule.compiler, "agent:codex:handoff");
     }
 
     #[test]
@@ -6369,10 +6522,14 @@ Host devbox
         app.handle_key(key('H'));
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
         settle_launch_review(&mut app);
+        assert_eq!(app.modal_scroll, 0);
 
         app.handle_key(key('G'));
         assert_eq!(app.modal_scroll, u16::MAX);
+        app.handle_key(key('k'));
+        assert_eq!(app.modal_scroll, 0);
 
+        app.handle_key(key('G'));
         app.handle_key(key('g'));
         assert!(app.pending_g);
         app.handle_key(key('g'));
@@ -6398,23 +6555,31 @@ Host devbox
     }
 
     #[test]
-    fn real_builtin_draft_enter_opens_skill_picker_not_review() {
+    fn real_builtin_draft_enter_generates_review_with_selected_handoff_skill() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.data.sessions[app.selected_session].source_provenance = SourceProvenance::Real;
         app.selected_compiler = compiler_index_for_id(&app.data, "engineering-handoff", 0);
         app.data.capsule.compiler = "engineering-handoff".into();
 
         app.handle_key(key('H'));
+        assert!(app.show_launch);
+        assert!(!app.show_skill_picker);
+        assert_eq!(
+            app.data.compilers[app.selected_compiler],
+            "agent:codex:handoff"
+        );
+
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
         assert!(app.show_launch);
-        assert!(app.show_skill_picker);
+        assert!(!app.show_skill_picker);
         assert!(!app.launch_review);
-        assert!(!app.is_launch_review_pending());
-        assert_eq!(
-            app.status_message,
-            "Choose an AI handoff skill before Handoff Review"
-        );
+        assert!(app.is_launch_review_pending());
+        let pending = app
+            .pending_launch_review
+            .as_ref()
+            .expect("launch review worker");
+        assert_eq!(pending.compiler_id, "agent:codex:handoff");
     }
 
     #[test]
@@ -6427,35 +6592,41 @@ Host devbox
         app.data.capsule.compiler = "engineering-handoff".into();
 
         app.handle_key(key('H'));
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
-
         assert!(app.show_launch);
-        assert!(app.show_skill_picker);
+        assert!(!app.show_skill_picker);
         assert!(
             app.data
                 .compilers
                 .iter()
-                .any(|compiler| compiler == "agent:claude:handoff")
+                .any(|compiler| compiler == "agent:codex:handoff")
         );
         assert_eq!(
-            app.data.compilers[app.pending_compiler],
-            "agent:claude:handoff"
+            app.data.compilers[app.selected_compiler],
+            "agent:codex:handoff"
         );
-        assert_eq!(
-            app.status_message,
-            "Choose an AI handoff skill before Handoff Review"
-        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(app.show_launch);
+        assert!(!app.show_skill_picker);
+        assert!(app.is_launch_review_pending());
+        let pending = app
+            .pending_launch_review
+            .as_ref()
+            .expect("launch review worker");
+        assert_eq!(pending.target, CliTool::Claude);
+        assert_eq!(pending.compiler_id, "agent:codex:handoff");
     }
 
     #[test]
-    fn skill_picker_enter_from_launch_applies_skill_without_starting_review() {
+    fn skill_picker_enter_from_launch_applies_skill_and_starts_review() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.data.sessions[app.selected_session].source_provenance = SourceProvenance::Real;
         app.selected_compiler = compiler_index_for_id(&app.data, "engineering-handoff", 0);
         app.data.capsule.compiler = "engineering-handoff".into();
 
         app.handle_key(key('H'));
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        app.handle_key(key('S'));
 
         assert!(app.show_launch);
         assert!(app.show_skill_picker);
@@ -6468,17 +6639,13 @@ Host devbox
         assert!(app.show_launch);
         assert_eq!(app.selected_compiler, pending_compiler);
         assert_eq!(app.data.capsule.compiler, pending_id);
-        assert!(!app.is_launch_review_pending());
         assert!(!app.launch_review);
-        assert_eq!(
-            app.status_message,
-            "Handoff skill: handoff; press Enter to generate Review"
-        );
-
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
-
         assert!(app.is_launch_review_pending());
-        assert!(!app.launch_review);
+        let pending = app
+            .pending_launch_review
+            .as_ref()
+            .expect("launch review worker");
+        assert_eq!(pending.compiler_id, "agent:codex:handoff");
     }
 
     #[test]

@@ -7,7 +7,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::moonbox_theme;
 
-use super::model::{CliTool, TimelineKind};
+use super::{
+    handoff::AgentRunner,
+    model::{CliTool, TimelineKind},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompilerPresetConfig {
@@ -184,6 +187,41 @@ impl From<moonbox_theme::ThemeId> for UiThemeName {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HandoffRunnerPreference {
+    #[default]
+    Codex,
+    Claude,
+}
+
+impl HandoffRunnerPreference {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Codex => "Codex",
+            Self::Claude => "Claude",
+        }
+    }
+
+    pub fn runner(self) -> AgentRunner {
+        match self {
+            Self::Codex => AgentRunner::Codex,
+            Self::Claude => AgentRunner::Claude,
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Codex => Self::Claude,
+            Self::Claude => Self::Codex,
+        }
+    }
+
+    pub fn previous(self) -> Self {
+        self.next()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct UiPreferencesConfig {
     #[serde(default)]
@@ -210,6 +248,8 @@ struct UserConfig {
     hooks: HooksConfig,
     #[serde(default)]
     ui: UiPreferencesConfig,
+    #[serde(default)]
+    handoff_runner: HandoffRunnerPreference,
     #[serde(default)]
     compiler_presets: Vec<CompilerPresetConfig>,
     #[serde(default)]
@@ -329,6 +369,13 @@ pub fn load_ui_preferences_config() -> UiPreferencesConfig {
         .unwrap_or_default()
 }
 
+#[cfg_attr(test, allow(dead_code))]
+pub fn load_handoff_runner_preference() -> HandoffRunnerPreference {
+    load_user_config()
+        .map(|config| config.handoff_runner)
+        .unwrap_or_default()
+}
+
 pub fn save_hooks_config(config: HooksConfig) -> Result<(), Box<dyn std::error::Error>> {
     let path = config_path().ok_or("missing home directory")?;
     let mut user_config = load_user_config_from_path(&path).unwrap_or_default();
@@ -347,14 +394,41 @@ fn save_ui_preferences_config_to_path(
     Ok(user_config.ui)
 }
 
-pub fn save_ui_preferences_and_smart_enter(
+pub fn save_ui_preferences_smart_enter_and_handoff_runner(
     ui: UiPreferencesConfig,
     smart_enter_tmux: bool,
-) -> Result<(UiPreferencesConfig, HooksConfig), Box<dyn std::error::Error>> {
+    handoff_runner: HandoffRunnerPreference,
+) -> Result<(UiPreferencesConfig, HooksConfig, HandoffRunnerPreference), Box<dyn std::error::Error>>
+{
     let path = config_path().ok_or("missing home directory")?;
-    save_ui_preferences_and_smart_enter_to_path(&path, ui, smart_enter_tmux)
+    save_ui_preferences_smart_enter_and_handoff_runner_to_path(
+        &path,
+        ui,
+        smart_enter_tmux,
+        handoff_runner,
+    )
 }
 
+fn save_ui_preferences_smart_enter_and_handoff_runner_to_path(
+    path: &Path,
+    ui: UiPreferencesConfig,
+    smart_enter_tmux: bool,
+    handoff_runner: HandoffRunnerPreference,
+) -> Result<(UiPreferencesConfig, HooksConfig, HandoffRunnerPreference), Box<dyn std::error::Error>>
+{
+    let mut user_config = load_user_config_from_path(path).unwrap_or_default();
+    user_config.ui = ui.normalized_for_ui();
+    user_config.hooks.smart_enter_tmux = smart_enter_tmux;
+    user_config.handoff_runner = handoff_runner;
+    save_user_config_to_path(path, &user_config)?;
+    Ok((
+        user_config.ui,
+        user_config.hooks,
+        user_config.handoff_runner,
+    ))
+}
+
+#[cfg(test)]
 fn save_ui_preferences_and_smart_enter_to_path(
     path: &Path,
     ui: UiPreferencesConfig,
@@ -480,6 +554,7 @@ mod tests {
         assert_eq!(config.hooks.spool_max_bytes, default_hook_spool_max_bytes());
         assert_eq!(config.ui.language, UiLanguage::ZhHans);
         assert_eq!(config.ui.theme, UiThemeName::TokyoNight);
+        assert_eq!(config.handoff_runner, HandoffRunnerPreference::Codex);
         assert_eq!(config.ui.theme.normalized_for_ui(), UiThemeName::Moonbox);
         assert_eq!(config.compiler_presets[0].args, ["--mode", "handoff"]);
         assert_eq!(
@@ -724,6 +799,51 @@ mod tests {
         assert!(hooks.smart_enter_tmux);
         assert_eq!(saved.ui.language, UiLanguage::ZhHans);
         assert_eq!(saved.ui.theme, UiThemeName::LuoshenPine);
+        assert_eq!(saved.compiler_presets[0].id, "handoff");
+        assert_eq!(saved.ssh_hosts[0].name, "prod");
+        assert_eq!(saved.starred_sessions, ["codex:abc"]);
+    }
+
+    #[test]
+    fn save_ui_preferences_smart_enter_and_handoff_runner_preserves_other_config() {
+        let path = env::temp_dir().join(format!(
+            "moonbox-config-ui-runner-{}.json",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        fs::write(
+            &path,
+            r#"{
+  "hooks": {"enabled": true, "smart_enter_tmux": false, "spool_path": "/tmp/moonbox/events.jsonl"},
+  "compiler_presets": [
+    {"id": "handoff", "command": "/bin/moonbox-handoff"}
+  ],
+  "ssh_hosts": [
+    {"name": "prod", "host": "prod.internal"}
+  ],
+  "starred_sessions": ["codex:abc"]
+}"#,
+        )
+        .expect("write config");
+
+        let (ui, hooks, runner) = save_ui_preferences_smart_enter_and_handoff_runner_to_path(
+            &path,
+            UiPreferencesConfig {
+                language: UiLanguage::ZhHans,
+                theme: UiThemeName::LuoshenPine,
+            },
+            true,
+            HandoffRunnerPreference::Claude,
+        )
+        .expect("save ui preferences, smart enter, and runner");
+        let saved = load_user_config_from_path(&path).expect("saved");
+
+        assert_eq!(ui.language, UiLanguage::ZhHans);
+        assert_eq!(ui.theme, UiThemeName::LuoshenPine);
+        assert!(hooks.enabled);
+        assert!(hooks.smart_enter_tmux);
+        assert_eq!(runner, HandoffRunnerPreference::Claude);
+        assert_eq!(saved.handoff_runner, HandoffRunnerPreference::Claude);
         assert_eq!(saved.compiler_presets[0].id, "handoff");
         assert_eq!(saved.ssh_hosts[0].name, "prod");
         assert_eq!(saved.starred_sessions, ["codex:abc"]);

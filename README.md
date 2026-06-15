@@ -638,8 +638,11 @@ CLI/JSON compatibility. The TUI Skill Picker is skill-first: it collapses
 runner-specific catalog entries into one handoff skill row, shows whether that
 skill is installed locally, and shows either the local `SKILL.md` path or the
 community install source. Runner SDK setup, package-manager choice, login, and
-provider credential checks are launch preflight concerns, not Skill Picker
-choices. Moonbox discovers generic `handoff` skills from `MOONBOX_SKILLS_DIRS`,
+provider credential checks are Settings and launch preflight concerns, not
+Skill Picker choices. The TUI runner preference lives in Settings and defaults
+to Codex; switch it to Claude only when you want the selected handoff skill to
+run through the Claude Agent SDK. Moonbox discovers generic `handoff` skills
+from `MOONBOX_SKILLS_DIRS`,
 `CODEX_HOME` / `MOONBOX_CODEX_HOME` `skills`, and the user's local Codex /
 agent skill homes. When no handoff skill is installed, the Skill Picker shows a
 single install-hint skill row rather than Codex / Claude runner choices. The
@@ -668,8 +671,10 @@ as runnable.
 
 The TUI keeps agent handoff generation to one background worker at a time.
 Handoff generation is always an explicit user action: choosing a skill in the
-Skill Picker only saves the selected handoff skill, and pressing `Enter` in the
-Launch picker starts generation. When a Review job is already running, opening
+Skill Picker starts generation when the picker is layered above Launch; otherwise
+it only saves the selected handoff skill. Pressing `Enter` in the Launch target
+picker starts generation with the selected skill and saved runner preference.
+When a Review job is already running, opening
 the launch flow or pressing `Enter` returns to that job's progress panel instead
 of starting another SDK process. The panel shows the selected target,
 skill/compiler id, current stage, elapsed time, and configured timeout; `Esc`
@@ -679,8 +684,8 @@ the compiler catalog and SDK preflight state, so installing a runner SDK while
 Moonbox is open can be recovered by pressing `r` to retry instead of restarting
 the app.
 
-The production handoff path is skill-first: pick a source session, target
-executor, handoff skill, and runner SDK, then review the generated handoff
+The production handoff path is skill-first: pick a source session, handoff
+skill, runner preference, and target agent, then review the generated handoff
 before launching. Community handoff skills use the same runner path and Review
 UX. Moonbox acts as the orchestrator: it runs the selected skill, reads the
 generated Markdown artifact, and passes that artifact to the target agent after
@@ -856,13 +861,16 @@ Moonbox has two separate actions for a selected session:
   launching or copying it. `H` and `t` remain compatibility aliases.
 - `S`: open Skill Picker. Agent-backed handoff rows are collapsed by skill and
   show installed/local path, third-party provider/source link when known, or
-  install source; runner SDK setup is checked before launch. Built-in draft
-  compilers are not handoff skill choices in the TUI. If Moonbox ships a
-  built-in interactive handoff later, it must be a bundled skill invoked through
-  the same agent runner path. Press `y` to copy the skill path or install
-  source.
+  install source; the saved runner preference is configured in Settings and
+  checked before launch. When Launch is open, `Enter` applies the highlighted
+  handoff skill and immediately starts Review generation with the saved runner
+  preference. Built-in draft compilers are not handoff skill choices in the TUI.
+  If Moonbox ships a built-in interactive handoff later, it must be a bundled
+  skill invoked through the same agent runner path. Press `y` to copy the skill
+  path or install source.
 - `,`: open Settings. M95 exposes Smart Enter / tmux jump there with preview and
-  persistence; hooks install/uninstall remains a CLI command.
+  persistence; Settings also owns the handoff runner preference, defaulting to
+  Codex. Hooks install/uninstall remains a CLI command.
 
 The main screen is a global session entry point. Sessions are sorted by time and
 tagged by source CLI. Source filtering is controlled by `f` or `[` / `]` and
@@ -873,7 +881,8 @@ changing the saved target. If the selected session row is still hydrating,
 `H` / `x` still opens the target picker immediately; the selected session
 context is loaded when Review starts. Confirming a ready or warning target
 prepares the Handoff Review in the background, shows a cancellable loading
-panel, and opens the review at the bottom where the executable actions live.
+panel, and opens the review at the top. `G` jumps to the bottom actions and
+`gg` returns to the top; overscroll is clamped so `j/k` cannot blank the body.
 Moving through the session list, changing filters, or typing search changes
 selection only; after a short debounce Moonbox may start a bounded background
 timeline preview for the selected row. It does not rebuild the workbench,
@@ -888,8 +897,8 @@ target picker again restores the pending or ready review unless Moonbox has
 exited. If generation fails, the Launch panel stays open with the attempted
 skill/compiler, elapsed time, failure reason, and explicit `r` retry / `S`
 choose-skill actions; `Enter` does not retry a failed AI generation. When Skill
-Picker is opened from Launch, `Enter` applies the selected handoff skill only;
-return to Launch and press `Enter` again to start background Review generation.
+Picker is opened from Launch, `Enter` applies the selected handoff skill and
+starts background Review generation in one step.
 Community skill Markdown artifacts are reviewed as handoff artifacts: missing
 Moonbox-specific semantic refs warn instead of blocking launch, while hard
 source / target / rewind mismatches still block. For the community `handoff`
@@ -902,7 +911,7 @@ appended to the handoff text.
 Generated handoff files may live under the current `TMPDIR` or `/tmp`, but
 Moonbox still requires a canonical system temp path, a Moonbox handoff filename
 prefix, and a `.md` extension before reading the artifact.
-`G` jumps back to the bottom and `gg` jumps to the top. Pressing `Enter` in
+`G` jumps to the bottom and `gg` jumps to the top. Pressing `Enter` in
 that review restores the terminal first, launches the local target CLI with the
 reviewed skill artifact, then returns to Moonbox with a three-action result
 panel: run again, copy command, or return. Pressing `y` in Review copies the
@@ -1340,8 +1349,8 @@ Stable interfaces matter more than any single framework:
   target handoff instead of local original resume, `o` is blocked, Handoff
   Review uses `r` for explicit local target launch, and Moonbox returns with a
   run/copy/back result panel after the target exits. Handoff Review generation
-  now runs in the background with a cancellable loading panel, opens at the
-  bottom action area, supports `gg` / `G` review jumps, and blocks real-session
+  now runs in the background with a cancellable loading panel, opens at the top
+  of the generated handoff, supports `gg` / `G` review jumps, and blocks real-session
   draft compiler runs before spawning a target process.
 - M90: Agent-backed Handoff Runtime + Review UX; Moonbox discovers local
   generic handoff skills, exposes explicit Codex / Claude runner choices in the
@@ -1448,8 +1457,8 @@ Stable interfaces matter more than any single framework:
   block, and the pending panel labels stage, elapsed time, timeout limit, and
   blocker reasons in user-facing language.
 - M96.11: Handoff worker lifecycle P0 fix; Handoff generation is now strictly
-  user-confirmed from Launch, Skill Picker selection no longer starts AI work,
-  failed Review panels use explicit `r` retry, ready artifacts are reused
+  user-confirmed from Launch, standalone Skill Picker selection no longer
+  starts AI work, failed Review panels use explicit `r` retry, ready artifacts are reused
   instead of regenerated, SDK runner child process groups are reaped after
   success or timeout, Moonbox-generated handoff worker sessions are hidden from
   the main inventory unless explicitly searched, and loading timelines keep a
@@ -1493,6 +1502,10 @@ Stable interfaces matter more than any single framework:
   artifact staging examples, and Homebrew formula templates now target
   `0.1.4` / `v0.1.4` so the M100 exact artifact review flow can ship through
   tagged GitHub release artifacts.
+- M102: Handoff target/runner UX hotfix; Launch now only selects the target
+  agent, the handoff runner preference defaults to Codex and lives in Settings,
+  `S` switches handoff skill, Skill Picker `Enter` starts Review when opened
+  from Launch, and Handoff Review opens at the top with clamped scrolling.
 - M92: Remote / SSH Session Detail Parity; SSH data spaces now hydrate selected
   session details from the remote `compile-request --json` response, preserving
   remote-computed bounded anatomy in the same Details / Zoom Details rendering
