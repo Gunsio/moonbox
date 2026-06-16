@@ -743,6 +743,7 @@ struct PendingArchiveFeedback {
 #[derive(Debug, Clone)]
 pub enum TuiExitAction {
     OriginalResume(Box<OriginalSessionPlan>),
+    NativeFork(Box<OriginalSessionPlan>),
 }
 
 #[derive(Debug, Clone)]
@@ -1158,6 +1159,7 @@ pub struct App {
     hook_live: Option<hooks::HookLiveState>,
     clipboard_text: Option<String>,
     pending_resume: Option<Box<OriginalSessionPlan>>,
+    pending_native_fork: Option<Box<OriginalSessionPlan>>,
     pending_launch: Option<Box<LaunchPlan>>,
     pending_tmux_jump: Option<Box<TmuxJumpPlan>>,
     exit_action: Option<TuiExitAction>,
@@ -1291,6 +1293,7 @@ impl App {
             hook_live,
             clipboard_text: None,
             pending_resume: None,
+            pending_native_fork: None,
             pending_launch: None,
             pending_tmux_jump: None,
             exit_action: None,
@@ -1326,6 +1329,10 @@ impl App {
 
     pub fn take_pending_resume(&mut self) -> Option<Box<OriginalSessionPlan>> {
         self.pending_resume.take()
+    }
+
+    pub fn take_pending_native_fork(&mut self) -> Option<Box<OriginalSessionPlan>> {
+        self.pending_native_fork.take()
     }
 
     pub fn take_pending_launch(&mut self) -> Option<Box<LaunchPlan>> {
@@ -3564,6 +3571,10 @@ impl App {
                 self.show_action_menu = false;
                 self.queue_tmux_jump_or_resume();
             }
+            SessionAvailableActionKind::Fork => {
+                self.show_action_menu = false;
+                self.queue_native_fork();
+            }
             SessionAvailableActionKind::Inspect => {
                 self.show_action_menu = false;
                 self.focus = Focus::Capsule;
@@ -3574,8 +3585,7 @@ impl App {
                 self.show_action_menu = false;
                 self.toggle_archived_session();
             }
-            SessionAvailableActionKind::Fork
-            | SessionAvailableActionKind::Copy
+            SessionAvailableActionKind::Copy
             | SessionAvailableActionKind::CopySessionId
             | SessionAvailableActionKind::Export => {
                 self.set_status(format!(
@@ -3584,6 +3594,56 @@ impl App {
                 ));
             }
         }
+    }
+
+    fn queue_native_fork(&mut self) {
+        self.show_action_menu = false;
+        if !self.current_data_space().is_local() {
+            self.set_status("SSH sessions cannot be forked locally");
+            self.pending_g = false;
+            return;
+        }
+        if !self.ensure_session_details_ready("Fork") {
+            return;
+        }
+        let Some(session) = self.current_session().cloned() else {
+            self.set_status("No session selected");
+            return;
+        };
+        let Some(command) = launcher::native_fork_command(&session) else {
+            self.set_status(format!(
+                "Fork unavailable: {} does not expose native session fork",
+                session.cli
+            ));
+            self.pending_g = false;
+            return;
+        };
+        let plan = OriginalSessionPlan {
+            version: 1,
+            action: SessionAction::NativeFork,
+            dry_run: true,
+            source_session: session.clone(),
+            command,
+        };
+        self.modal_scroll = 0;
+        match original_resume_mode_from_env() {
+            OriginalResumeMode::Suspend => {
+                self.pending_native_fork = Some(Box::new(plan));
+                self.set_status(format!(
+                    "Suspending to native fork: {} {}",
+                    session.cli, session.id
+                ));
+            }
+            OriginalResumeMode::Exec => {
+                self.exit_action = Some(TuiExitAction::NativeFork(Box::new(plan)));
+                self.should_quit = true;
+                self.set_status(format!(
+                    "Opening native fork: {} {}",
+                    session.cli, session.id
+                ));
+            }
+        }
+        self.pending_g = false;
     }
 
     fn open_original(&mut self) {
@@ -7417,7 +7477,7 @@ Host devbox
     }
 
     #[test]
-    fn action_menu_can_open_handoff_and_blocks_planned_fork() {
+    fn action_menu_can_open_handoff_and_native_fork() {
         let mut handoff = new_app(CliTool::Codex, CliTool::Hermes);
         handoff.handle_key(key('o'));
         handoff.handle_key(key('j'));
@@ -7434,10 +7494,19 @@ Host devbox
         fork.handle_key(key('j'));
         fork.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
-        assert!(fork.show_action_menu);
+        assert!(!fork.show_action_menu);
         assert!(!fork.show_launch);
         assert!(fork.take_pending_resume().is_none());
-        assert!(fork.status_message.contains("Fork unavailable"));
+        let Some(plan) = fork.take_pending_native_fork() else {
+            panic!("expected pending native fork");
+        };
+        assert_eq!(plan.action, SessionAction::NativeFork);
+        assert_eq!(plan.source_session.id, "codex-cxcp-design");
+        assert_eq!(plan.command.args, ["fork", "codex-cxcp-design"]);
+        assert_eq!(
+            fork.status_message,
+            "Suspending to native fork: Codex codex-cxcp-design"
+        );
     }
 
     #[test]

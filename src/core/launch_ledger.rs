@@ -464,7 +464,7 @@ fn target_input(
 
 fn original_input_from_execution(execution: &OriginalSessionExecution) -> LaunchRecordInput {
     LaunchRecordInput {
-        action: SessionAction::OriginalResume,
+        action: execution.plan.action,
         capsule_name: None,
         capsule_ref: None,
         source_cli: execution.plan.source_session.cli,
@@ -483,7 +483,7 @@ fn original_input_from_execution(execution: &OriginalSessionExecution) -> Launch
 
 fn original_input_from_failed(plan: &OriginalSessionPlan, error: &CoreError) -> LaunchRecordInput {
     LaunchRecordInput {
-        action: SessionAction::OriginalResume,
+        action: plan.action,
         capsule_name: None,
         capsule_ref: None,
         source_cli: plan.source_session.cli,
@@ -656,6 +656,7 @@ fn record_from_row(row: &Row<'_>) -> rusqlite::Result<LaunchRecord> {
 fn action_to_db(action: SessionAction) -> &'static str {
     match action {
         SessionAction::OriginalResume => "original_resume",
+        SessionAction::NativeFork => "native_fork",
         SessionAction::TargetHandoff => "target_handoff",
         SessionAction::AppDeepLink => "app_deep_link",
     }
@@ -664,6 +665,7 @@ fn action_to_db(action: SessionAction) -> &'static str {
 fn action_from_db(value: String) -> rusqlite::Result<SessionAction> {
     match value.as_str() {
         "original_resume" => Ok(SessionAction::OriginalResume),
+        "native_fork" => Ok(SessionAction::NativeFork),
         "target_handoff" => Ok(SessionAction::TargetHandoff),
         "app_deep_link" => Ok(SessionAction::AppDeepLink),
         _ => conversion_error(2, format!("unknown launch action {value}")),
@@ -848,6 +850,65 @@ mod tests {
                 .as_deref()
                 .expect("reason")
                 .contains("Work Capsule")
+        );
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn records_native_fork_as_distinct_original_action() {
+        let path = store_path("native-fork");
+        let _ = fs::remove_file(&path);
+        let store = LaunchLedgerStore::open_path(&path).expect("store");
+        let workbench =
+            data::fixture_workbench_data(CliTool::Codex, CliTool::Hermes).expect("fixture data");
+        let source_session = workbench
+            .sessions
+            .iter()
+            .find(|session| session.cli == CliTool::Codex)
+            .expect("codex session")
+            .clone();
+        let plan = OriginalSessionPlan {
+            version: 1,
+            action: SessionAction::NativeFork,
+            dry_run: true,
+            source_session,
+            command: TargetLaunchCommand {
+                program: "codex".into(),
+                args: vec!["fork".into(), "codex-cxcp-design".into()],
+                cwd: None,
+                display: "codex fork codex-cxcp-design".into(),
+            },
+        };
+        let execution = OriginalSessionExecution {
+            version: 1,
+            status: LaunchExecutionStatus::Success,
+            exit_code: Some(0),
+            plan: plan.clone(),
+            launch_ledger: None,
+            launch_ledger_warning: None,
+        };
+
+        let record = store
+            .insert(original_input_from_execution(&execution))
+            .expect("success record");
+
+        assert_eq!(record.action, SessionAction::NativeFork);
+        assert_eq!(record.status, LaunchLedgerStatus::Success);
+
+        let failed_record = store
+            .insert(original_input_from_failed(
+                &plan,
+                &CoreError::LaunchBlocked {
+                    reason: "provider does not support fork".into(),
+                },
+            ))
+            .expect("failed record");
+
+        assert_eq!(failed_record.action, SessionAction::NativeFork);
+        assert_eq!(failed_record.status, LaunchLedgerStatus::Failed);
+        assert_eq!(
+            failed_record.error_reason.as_deref(),
+            Some("provider does not support fork")
         );
         let _ = fs::remove_file(&path);
     }

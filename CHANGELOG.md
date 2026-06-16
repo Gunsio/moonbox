@@ -40,6 +40,9 @@ and this project uses semantic versioning once tagged releases start.
   availability model shared by CLI and TUI for Inspect, Resume, Jump, Fork,
   Handoff, Copy, Copy Session ID, Export, and Archive; TUI `o` opens that action
   menu for the selected session.
+- TUI action menu `Fork` now calls provider-native session fork for Codex and
+  Claude, keeps Hermes explicitly unavailable until it exposes a native fork
+  command, and records launches as `native_fork` instead of `original_resume`.
 - TUI archive overlay stores Archive / Unarchive state in Moonbox config,
   hides archived sessions by default, adds an `Archived` filter for search and
   restore, and gives the selected row short feedback before the list compacts.

@@ -860,8 +860,10 @@ Moonbox has two separate actions for a selected session:
   are enabled and Settings separately enables Smart Enter / tmux jump, `enter`
   routes to a live tmux pane first and falls back to this same resume/handoff
   behavior when live pane metadata is unavailable or invalid.
-- `o`: preview an `original_resume` command for the selected session's
-  original CLI, then press `enter` to use the same suspend-and-return flow.
+- `o`: open the selected session's action menu. Resume uses the original CLI
+  suspend-and-return flow; Handoff opens target review; Fork uses provider-native
+  session fork for Codex and Claude, while Hermes stays unavailable until it
+  exposes a native fork command.
 - `x`: choose a target CLI, then review a `target_handoff` command before
   launching or copying it. `H` and `t` remain compatibility aliases.
 - `S`: open Skill Picker. Agent-backed handoff rows are collapsed by skill and
@@ -1519,6 +1521,10 @@ Stable interfaces matter more than any single framework:
   selected session through a Moonbox config overlay, default lists hide archived
   sessions, the `Archived` filter can search and restore them, and the selected
   row shows a short feedback state before the list compacts.
+- M107: Native Session Fork; the action menu Fork path now calls Codex
+  `fork <session>` with the source cwd and Claude `--resume <session>
+  --fork-session`, keeps Hermes clearly unavailable, and records launches as
+  `native_fork`.
 
 ### Remaining Milestones
 

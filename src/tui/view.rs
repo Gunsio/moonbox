@@ -7082,7 +7082,17 @@ fn action_menu_reason_label(
             _ => "可通过本地 provider CLI 恢复该会话。".into(),
         },
         SessionAvailableActionKind::Jump => localize_action_menu_jump_reason(&action.reason),
-        SessionAvailableActionKind::Fork => "整段会话分叉将在后续里程碑实现。".into(),
+        SessionAvailableActionKind::Fork => match action.reason.as_str() {
+            "SSH data space is read-only; native fork requires a local provider CLI." => {
+                "SSH 数据空间只读；原生分叉需要本地 provider CLI。".into()
+            }
+            "Codex native session fork is available." => "可调用 Codex 原生 session fork。".into(),
+            "Claude native resume fork is available." => "可调用 Claude resume fork。".into(),
+            "Hermes does not currently expose native session fork." => {
+                "Hermes 当前未暴露原生 session fork。".into()
+            }
+            _ => action.reason.clone(),
+        },
         SessionAvailableActionKind::Copy => "复制最后一条 AI 输出将在后续里程碑实现。".into(),
         SessionAvailableActionKind::CopySessionId => "复制 Session ID 将在后续里程碑实现。".into(),
         SessionAvailableActionKind::Export => "导出会话动作将在后续里程碑实现。".into(),
@@ -7430,7 +7440,7 @@ mod tests {
     }
 
     #[test]
-    fn action_menu_renders_resume_handoff_and_planned_fork() {
+    fn action_menu_renders_resume_handoff_and_native_fork() {
         let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
         app.handle_key(key('o'));
 
@@ -7467,7 +7477,7 @@ mod tests {
         assert_screen_contains(&screen, "会话动作");
         assert_screen_contains(&screen, "↩ 恢复  ✓ 可用");
         assert_screen_contains(&screen, "→ 交接  ✓ 可用");
-        assert_screen_contains(&screen, "Y 分叉  · 不可用");
+        assert_screen_contains(&screen, "Y 分叉  ✓ 可用");
         assert_screen_contains(&screen, "↗ 跳转  · 不可用");
         assert_screen_contains(&screen, "i 详情  ✓ 可用");
         assert_screen_contains(&screen, "⧉ 复制 AI 输出  · 不可用");
@@ -7475,8 +7485,8 @@ mod tests {
         assert_screen_contains(&screen, "↓ 导出  · 不可用");
         assert_screen_contains(&screen, "▣ 归档  ✓ 可用");
         assert_screen_contains(&screen, "└ 可通过本地 provider CLI 恢复该会话。");
+        assert_screen_contains(&screen, "可调用 Codex 原生 session fork。");
         assert_screen_contains(&screen, "Hooks 未启用，无法获得实时 tmux 状态。");
-        assert_screen_contains(&screen, "整段会话分叉将在后续里程碑实现。");
         assert_screen_contains(&screen, "复制最后一条 AI 输出将在后续里程碑实现。");
         assert_screen_contains(&screen, "复制 Session ID 将在后续里程碑实现。");
         assert_screen_contains(&screen, "导出会话动作将在后续里程碑实现。");
