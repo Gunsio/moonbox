@@ -45,9 +45,10 @@ MOONBOX_SESSION_MODE=fixture moon doctor --json
 moon completions zsh > /tmp/_moon
 ```
 
-If `moon --help` still says the session list "uses demo data", the global binary
-is stale. Reinstall from the current checkout or run through `cargo run --locked
--- ...` while testing local changes.
+The TUI header shows the running Moonbox version. If `moon --help` still says
+the session list "uses demo data", or the TUI version is not the build you
+expect, the global binary is stale. Reinstall from the current checkout or run
+through `cargo run --locked -- ...` while testing local changes.
 
 ### Source Checkout
 
@@ -242,6 +243,13 @@ The first implementation focuses on the product shell:
 - Source filter defaults to `All`; `Source` is a session-list filter, not a global handoff mode
 - `moonbox sessions --filter <source>` lists one source while keeping default output as the time-sorted global session index
 - `moonbox sessions --json` keeps the stable session array shape and annotates each session with `source_provenance`, `source_path`, and `parse_skip_count`
+- `moonbox actions --session <id> --json` reports the selected session's
+  Inspect / Resume / Jump / Fork / Handoff / Copy / Copy Session ID / Export /
+  Archive availability, reason, and safety constraints without executing
+  actions
+- TUI `o` opens the selected session's action menu. `j` / `k` selects Resume,
+  Handoff, Fork, Jump, Inspect, Copy, Copy Session ID, Export, or Archive, and
+  `enter` runs the selected available action.
 - `moonbox snapshot` captures a workspace continuation snapshot with git HEAD,
   branch, staged/unstaged/untracked paths, bounded diff previews, key project
   files, environment summary, and explicitly requested test-command results
@@ -960,7 +968,7 @@ commands, remains available through the dry-run JSON surfaces and
 | `tab` / `shift-tab` | Switch panel |
 | `/` | Filter sessions by text |
 | `f` | Cycle session source filter |
-| `o` | Review original resume command |
+| `o` | Open session action menu |
 | `[` / `]` | Previous / next session source filter |
 | `s` | Star / unstar selected session |
 | `*` | Star / unstar alias |
@@ -1337,12 +1345,13 @@ Stable interfaces matter more than any single framework:
   as `SSH: <host>`, use their saved user/host/port/key for remote inventory, and
   search common user install paths before reporting that the remote `moonbox`
   command is missing. SSH sessions are read-only in the TUI: `enter` opens
-  target handoff instead of local original resume, `o` is blocked, Handoff
-  Review uses `r` for explicit local target launch, and Moonbox returns with a
-  run/copy/back result panel after the target exits. Handoff Review generation
-  now runs in the background with a cancellable loading panel, opens at the
-  bottom action area, supports `gg` / `G` review jumps, and blocks real-session
-  draft compiler runs before spawning a target process.
+  target handoff instead of local original resume, the `o` action menu blocks
+  Resume while keeping Handoff available, Handoff Review uses `r` for explicit
+  local target launch, and Moonbox returns with a run/copy/back result panel
+  after the target exits. Handoff Review generation now runs in the background
+  with a cancellable loading panel, opens at the bottom action area, supports
+  `gg` / `G` review jumps, and blocks real-session draft compiler runs before
+  spawning a target process.
 - M90: Agent-backed Handoff Runtime + Review UX; Moonbox discovers local
   generic handoff skills, exposes explicit Codex / Claude runner choices in the
   Skill Picker, compiles selected handoff reviews in a background worker with
@@ -1499,6 +1508,10 @@ Stable interfaces matter more than any single framework:
   path used by local sessions. Remote inventories stay lightweight and read-only;
   older remote Moonbox binaries that do not return anatomy show a clear
   `remote-unavailable` note instead of misleading local path errors.
+- M105: Session Action Foundation; CLI and TUI now share a read-only action
+  availability model for Inspect, Resume, Jump, Fork, Handoff, Copy, Copy
+  Session ID, Export, and Archive, and TUI `o` opens that action menu for the
+  selected session.
 
 ### Remaining Milestones
 

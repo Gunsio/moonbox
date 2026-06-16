@@ -43,6 +43,7 @@ pub fn run() -> Result<()> {
     match cli.command.unwrap_or_default() {
         Command::Tui(args) => run_tui(args),
         Command::Sessions(args) => print_sessions(args),
+        Command::Actions(args) => print_actions(args),
         Command::Open(args) => print_open_command(args),
         Command::OpenApp(args) => print_open_app_plan(args),
         Command::Capsule(args) => print_capsule(args),
@@ -182,6 +183,35 @@ fn parse_skip_suffix(parse_skip_count: usize) -> String {
     } else {
         format!("  skipped={parse_skip_count}")
     }
+}
+
+fn print_actions(args: cli::ActionArgs) -> Result<()> {
+    let actions = core::workbench::session_actions(args.session.as_deref())?;
+    let Some(actions) = actions else {
+        println!("No session selected");
+        return Ok(());
+    };
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&actions)?);
+        return Ok(());
+    }
+    println!("session: {}", actions.source_session);
+    println!("source: {}", actions.source_cli);
+    for action in actions.actions {
+        let keys = if action.keys.is_empty() {
+            String::new()
+        } else {
+            format!(" keys={}", action.keys.join(","))
+        };
+        println!(
+            "{:<8} {:<11} {}{}",
+            action.kind.id(),
+            action.status.id(),
+            action.reason,
+            keys
+        );
+    }
+    Ok(())
 }
 
 fn print_open_command(args: cli::OpenArgs) -> Result<()> {

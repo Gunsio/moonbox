@@ -1598,6 +1598,51 @@ fn open_launch_and_verify_public_cli_contracts_are_dry_run_by_default() {
 }
 
 #[test]
+fn actions_cli_reports_fixture_safe_action_model() {
+    let actions = output_json(
+        moonbox_command("actions-contract")
+            .args(["actions", "--session", "codex-cxcp-design", "--json"])
+            .output()
+            .expect("actions json"),
+    );
+    assert_eq!(actions["version"], 1);
+    assert_eq!(actions["source_cli"], "codex");
+    assert_eq!(actions["source_session"], "codex-cxcp-design");
+    assert!(actions.get("recommended").is_none());
+
+    let entries = actions["actions"].as_array().expect("actions array");
+    let action = |kind: &str| {
+        entries
+            .iter()
+            .find(|entry| entry["kind"] == kind)
+            .unwrap_or_else(|| panic!("missing action {kind}"))
+    };
+    assert_eq!(action("inspect")["status"], "available");
+    assert_eq!(action("resume")["status"], "available");
+    assert_eq!(action("jump")["status"], "unavailable");
+    assert_eq!(action("fork")["status"], "unavailable");
+    assert_eq!(action("handoff")["status"], "available");
+    assert_eq!(action("copy")["status"], "unavailable");
+    assert_eq!(action("copy_session_id")["status"], "unavailable");
+    assert_eq!(action("export")["status"], "unavailable");
+    assert_eq!(action("archive")["status"], "unavailable");
+    assert!(
+        action("export")["safety"]
+            .as_array()
+            .expect("export safety")
+            .iter()
+            .any(|safety| safety == "moonbox_overlay_write")
+    );
+    assert!(
+        action("archive")["safety"]
+            .as_array()
+            .expect("archive safety")
+            .iter()
+            .any(|safety| safety == "moonbox_overlay_write")
+    );
+}
+
+#[test]
 fn launch_continuation_protocol_blocks_unsupported_import_and_restore_modes() {
     let package = output_json(
         moonbox_command("continuation-package-import")

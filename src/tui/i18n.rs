@@ -91,7 +91,6 @@ pub enum Text {
     Zoom,
     Restore,
     Resume,
-    Original,
     Handoff,
     Events,
     Detail,
@@ -288,7 +287,6 @@ fn english(key: Text) -> &'static str {
         Text::Zoom => "Zoom",
         Text::Restore => "Restore",
         Text::Resume => "Resume",
-        Text::Original => "Original",
         Text::Handoff => "Handoff",
         Text::Events => "Events",
         Text::Detail => "Detail",
@@ -363,7 +361,7 @@ fn english(key: Text) -> &'static str {
         Text::NextRunCopy => {
             "Next: press r to start the local target; press y to copy; Esc returns"
         }
-        Text::LocalSourceOriginal => "Local source: original resume is still available with o.",
+        Text::LocalSourceOriginal => "Local source: choose Resume from the o action menu.",
         Text::SshSourceReadOnly => {
             "SSH source is read-only: Moonbox builds a local target handoff, not remote resume."
         }
@@ -470,7 +468,6 @@ fn zh_hans(key: Text) -> &'static str {
         Text::Zoom => "放大",
         Text::Restore => "还原",
         Text::Resume => "恢复",
-        Text::Original => "原生",
         Text::Handoff => "Handoff",
         Text::Events => "事件",
         Text::Detail => "详情",
@@ -539,7 +536,7 @@ fn zh_hans(key: Text) -> &'static str {
         Text::WaitBackground => "后台生成",
         Text::NextCopyOnly => "下一步: 当前只能按 y 复制命令；Esc 返回",
         Text::NextRunCopy => "下一步: 按 r 启动本地目标；按 y 复制命令；Esc 返回",
-        Text::LocalSourceOriginal => "本地 source：原生 resume 仍可用 o 单独打开。",
+        Text::LocalSourceOriginal => "本地 source：按 o 打开动作菜单后选择 Resume。",
         Text::SshSourceReadOnly => {
             "SSH source 只读：Moonbox 只构建本地目标 handoff，不远程 resume。"
         }

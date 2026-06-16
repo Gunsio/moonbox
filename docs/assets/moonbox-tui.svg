@@ -13,19 +13,20 @@
   <text x="46" y="60" class="mono" font-size="14" font-weight="500" fill="#374452">╭ Moonbox CLI ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮</text>
   <text x="46" y="78" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="73" y="78" class="mono" font-size="14" font-weight="800" fill="#e4e8ec">MOONBOX</text>
-  <text x="172" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Filter</text>
-  <text x="235" y="78" class="mono" font-size="14" font-weight="500" fill="#8b949e">[ ]</text>
-  <text x="262" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">:</text>
-  <text x="280" y="78" class="mono" font-size="14" font-weight="800" fill="#5c91f5">All</text>
-  <text x="334" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Data:</text>
-  <text x="388" y="78" class="mono" font-size="14" font-weight="800" fill="#47c9da">Local</text>
-  <text x="460" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Handoff Skill:</text>
-  <text x="595" y="78" class="mono" font-size="14" font-weight="500" fill="#47c9da">engineering-handoff</text>
-  <text x="793" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Tokens:</text>
-  <text x="865" y="78" class="mono" font-size="14" font-weight="800" fill="#e6be53">42K</text>
-  <text x="919" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Pre-flight:</text>
-  <text x="1027" y="78" class="mono" font-size="14" font-weight="800" fill="#e6be53">WARN</text>
-  <text x="1072" y="78" class="mono" font-size="14" font-weight="800" fill="#e6be53">Medium</text>
+  <text x="145" y="78" class="mono" font-size="14" font-weight="500" fill="#8b949e">v0.1.4</text>
+  <text x="226" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Filter</text>
+  <text x="289" y="78" class="mono" font-size="14" font-weight="500" fill="#8b949e">[ ]</text>
+  <text x="316" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">:</text>
+  <text x="334" y="78" class="mono" font-size="14" font-weight="800" fill="#5c91f5">All</text>
+  <text x="388" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Data:</text>
+  <text x="442" y="78" class="mono" font-size="14" font-weight="800" fill="#47c9da">Local</text>
+  <text x="514" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Handoff Skill:</text>
+  <text x="649" y="78" class="mono" font-size="14" font-weight="500" fill="#47c9da">engineering-handoff</text>
+  <text x="847" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Tokens:</text>
+  <text x="919" y="78" class="mono" font-size="14" font-weight="800" fill="#e6be53">42K</text>
+  <text x="973" y="78" class="mono" font-size="14" font-weight="500" fill="#e4e8ec">Pre-flight:</text>
+  <text x="1081" y="78" class="mono" font-size="14" font-weight="800" fill="#e6be53">WARN</text>
+  <text x="1126" y="78" class="mono" font-size="14" font-weight="800" fill="#e6be53">Medium</text>
   <text x="1441" y="78" class="mono" font-size="14" font-weight="500" fill="#374452">│</text>
   <text x="46" y="96" class="mono" font-size="14" font-weight="500" fill="#374452">╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
   <text x="46" y="114" class="mono" font-size="14" font-weight="500" fill="#e6be53">╭ [] Sessions · All (1/3)        ─────╮</text>
@@ -66,7 +67,7 @@
   <text x="235" y="222" class="mono" font-size="14" font-weight="800" fill="#e6be53">Next: press r to start the local target; press y to copy; Esc returns</text>
   <text x="1270" y="222" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="240" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
-  <text x="235" y="240" class="mono" font-size="14" font-weight="500" fill="#8b949e">Local source: original resume is still available with o.</text>
+  <text x="235" y="240" class="mono" font-size="14" font-weight="500" fill="#8b949e">Local source: choose Resume from the o action menu.</text>
   <text x="1270" y="240" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="217" y="258" class="mono" font-size="14" font-weight="500" fill="#e6be53">│</text>
   <text x="235" y="258" class="mono" font-size="14" font-weight="500" fill="#5c91f5">Path:</text>

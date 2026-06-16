@@ -36,6 +36,14 @@ and this project uses semantic versioning once tagged releases start.
 - `action` discriminators in dry-run `open --json`, `open-app --json`, and
   `launch --json` output, using `original_resume`, `app_deep_link`, and
   `target_handoff`.
+- `moonbox actions --session <id> --json` reports a read-only action
+  availability model shared by CLI and TUI for Inspect, Resume, Jump, Fork,
+  Handoff, Copy, Copy Session ID, Export, and Archive; TUI `o` opens that action
+  menu for the selected session.
+- TUI header and loading screen show the running Moonbox package version so
+  stale installed binaries are visible during local validation.
+- TUI action menu localizes action labels and availability reasons in
+  Simplified Chinese.
 - First-class `moon` binary alias installed alongside `moonbox`.
 - Homebrew tap prerelease distribution workflow for `Gunsio/tap`, including
   tagged release artifact checksums and formula verification guidance.
@@ -83,8 +91,8 @@ and this project uses semantic versioning once tagged releases start.
 - TUI header now marks remote inventory explicitly as `Data: SSH: <host>` so SSH
   data spaces are not confused with local session stores.
 - SSH data-space sessions are read-only in the TUI: `enter` opens the target
-  handoff flow instead of trying local original resume, and `o` is blocked with
-  an explicit status message.
+  handoff flow instead of trying local original resume, and the `o` action menu
+  blocks Resume while keeping Handoff available.
 - TUI Handoff Review now uses `r` as the explicit local target launch action;
   `enter` is review-only, `y` copies the actual target command, and target
   completion returns to Moonbox with visible run-again/copy/back actions.

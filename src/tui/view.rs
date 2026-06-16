@@ -12,8 +12,8 @@ use ratatui::{
 
 use crate::{
     app::{
-        App, CommandPaletteEntry, DATA_SPACE_CONFIG_FIELD_COUNT, EnterRouteKind, Focus,
-        HandoffTrailFrame, HookWaitingItem, LaunchReviewStage, SessionFilter, SettingsField,
+        ActionMenuEntry, App, CommandPaletteEntry, DATA_SPACE_CONFIG_FIELD_COUNT, EnterRouteKind,
+        Focus, HandoffTrailFrame, HookWaitingItem, LaunchReviewStage, SessionFilter, SettingsField,
     },
     core::image_preview::{ImagePreviewStatus, PreviewCell, PreviewRgb, TimelineImagePreview},
     core::model::{
@@ -22,7 +22,10 @@ use crate::{
         SourceAdapterReport, SourceFidelityStatus, SourceProvenance, TimelineAttachment,
         TimelineEvent, TimelineKind, VerificationReport, VerificationStatus, WorkCapsule,
     },
-    core::{compiler, handoff, hooks},
+    core::{
+        actions::{SessionActionAvailability, SessionAvailableAction, SessionAvailableActionKind},
+        compiler, handoff, hooks,
+    },
 };
 
 use super::{
@@ -79,6 +82,9 @@ pub fn render(frame: &mut Frame, app: &App) {
     if app.show_launch {
         render_launch(frame, root, app);
     }
+    if app.show_action_menu {
+        render_action_menu(frame, root, app);
+    }
     if app.show_open_original {
         render_open_original(frame, root, app);
     }
@@ -116,12 +122,7 @@ pub fn render_loading(frame: &mut Frame, tick: usize, language: crate::core::con
     let root = centered(area, 52, 32);
     let spinner = ["|", "/", "-", "\\"][tick % 4];
     let lines = vec![
-        Line::from(vec![Span::styled(
-            " MOONBOX ",
-            Style::default()
-                .fg(theme::text())
-                .add_modifier(Modifier::BOLD),
-        )]),
+        Line::from(header_title_spans(52, language)),
         Line::raw(""),
         Line::from(vec![
             Span::styled(spinner, Style::default().fg(theme::gold())),
@@ -289,15 +290,21 @@ fn data_space_header_style(app: &App) -> Style {
 }
 
 fn header_title_spans(width: u16, language: crate::core::config::UiLanguage) -> Vec<Span<'static>> {
-    let mut spans = vec![Span::styled(
-        " MOONBOX ",
-        Style::default()
-            .fg(theme::text())
-            .add_modifier(Modifier::BOLD),
-    )];
+    let mut spans = vec![
+        Span::styled(
+            " MOONBOX ",
+            Style::default()
+                .fg(theme::text())
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("v{}", env!("CARGO_PKG_VERSION")),
+            Style::default().fg(theme::muted()),
+        ),
+    ];
     if width >= 120 && language == crate::core::config::UiLanguage::ZhHans {
         spans.push(Span::styled(
-            "月光宝盒",
+            " 月光宝盒",
             Style::default().fg(theme::muted()),
         ));
     }
@@ -2697,6 +2704,13 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("Esc", i18n::text(language, Text::Cancel)),
         ];
     }
+    if app.show_action_menu {
+        return vec![
+            ("j/k", i18n::text(language, Text::Action)),
+            ("enter", i18n::text(language, Text::Choose)),
+            ("Esc/q", i18n::text(language, Text::Close)),
+        ];
+    }
     if app.show_open_original {
         return vec![
             ("y", i18n::text(language, Text::Copy)),
@@ -2779,7 +2793,7 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("S", i18n::text(language, Text::Skill)),
             ("+", i18n::text(language, Text::Zoom)),
             ("-", i18n::text(language, Text::Restore)),
-            ("o", i18n::text(language, Text::Original)),
+            ("o", i18n::text(language, Text::Action)),
             ("enter", localized_enter_key_hint(app)),
             ("x/H", i18n::text(language, Text::Handoff)),
             ("tab", i18n::text(language, Text::Next)),
@@ -2811,7 +2825,7 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
         Focus::Branches => vec![
             ("enter", localized_enter_key_hint(app)),
             ("x/H", i18n::text(language, Text::Handoff)),
-            ("o", i18n::text(language, Text::Original)),
+            ("o", i18n::text(language, Text::Action)),
             ("space", i18n::text(language, Text::RewindPoint)),
             ("D", i18n::text(language, Text::Preflight)),
             (",", i18n::text(language, Text::Settings)),
@@ -6805,6 +6819,208 @@ fn verification_color(status: VerificationStatus) -> Color {
     }
 }
 
+fn render_action_menu(frame: &mut Frame, root: Rect, app: &App) {
+    let language = app.effective_language();
+    let area = modal_area(root, 70, 86);
+    frame.render_widget(Clear, area);
+    let mut lines = Vec::new();
+    if let Some(session) = app.current_session() {
+        lines.push(Line::from(Span::styled(
+            localized(language, "Session actions", "会话动作"),
+            Style::default()
+                .fg(theme::gold())
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::raw(""));
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{}: ", i18n::text(language, Text::Session)),
+                Style::default().fg(theme::blue()),
+            ),
+            Span::raw(format!("{} / {}", session.cli, session.id)),
+        ]));
+        lines.push(Line::raw(""));
+        for entry in app.action_menu_entries() {
+            lines.extend(action_menu_entry_lines(entry, language));
+        }
+        lines.push(Line::raw(""));
+        lines.push(Line::from(Span::styled(
+            localized(
+                language,
+                "j/k choose   enter run selected action   Esc/q close",
+                "j/k 选择   enter 执行动作   Esc/q 关闭",
+            ),
+            Style::default().fg(theme::muted()),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            i18n::text(language, Text::NoSelectedSession),
+            Style::default()
+                .fg(theme::gold())
+                .add_modifier(Modifier::BOLD),
+        )));
+    }
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(panel_block(
+                localized(language, " Action Menu ", " 动作菜单 "),
+                true,
+            ))
+            .wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
+fn action_menu_entry_lines(
+    entry: ActionMenuEntry,
+    language: crate::core::config::UiLanguage,
+) -> Vec<Line<'static>> {
+    let marker = if entry.selected { ">" } else { " " };
+    let label_style = if entry.selected {
+        Style::default()
+            .fg(action_status_color(entry.action.status))
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(action_status_color(entry.action.status))
+    };
+    let status = action_menu_status_label(entry.action.status, language);
+    vec![
+        Line::from(vec![
+            Span::styled(marker, Style::default().fg(theme::gold())),
+            Span::raw(" "),
+            Span::styled(
+                action_menu_action_label(entry.action.kind, language),
+                label_style,
+            ),
+            Span::raw("  "),
+            Span::styled(
+                status,
+                Style::default().fg(action_status_color(entry.action.status)),
+            ),
+        ]),
+        Line::from(vec![
+            Span::raw("    "),
+            Span::styled(
+                action_menu_reason_label(&entry.action, language),
+                Style::default().fg(theme::muted()),
+            ),
+        ]),
+    ]
+}
+
+fn action_menu_action_label(
+    kind: SessionAvailableActionKind,
+    language: crate::core::config::UiLanguage,
+) -> &'static str {
+    match kind {
+        SessionAvailableActionKind::Resume => i18n::text(language, Text::Resume),
+        SessionAvailableActionKind::Handoff => localized(language, "Handoff", "交接"),
+        SessionAvailableActionKind::Fork => localized(language, "Fork", "分叉"),
+        SessionAvailableActionKind::Jump => i18n::text(language, Text::Jump),
+        SessionAvailableActionKind::Inspect => localized(language, "Inspect", "详情"),
+        SessionAvailableActionKind::Copy => localized(language, "Copy", "复制 AI 输出"),
+        SessionAvailableActionKind::CopySessionId => {
+            localized(language, "Copy Session ID", "复制 Session ID")
+        }
+        SessionAvailableActionKind::Export => localized(language, "Export", "导出"),
+        SessionAvailableActionKind::Archive => localized(language, "Archive", "归档"),
+    }
+}
+
+fn action_menu_reason_label(
+    action: &SessionAvailableAction,
+    language: crate::core::config::UiLanguage,
+) -> String {
+    if language == crate::core::config::UiLanguage::English {
+        return action.reason.clone();
+    }
+    match action.kind {
+        SessionAvailableActionKind::Inspect => "可查看会话详情，不会修改来源存储。".into(),
+        SessionAvailableActionKind::Resume => match action.status {
+            SessionActionAvailability::Blocked => {
+                "SSH 数据空间只读；恢复需要本地 provider CLI。".into()
+            }
+            SessionActionAvailability::Warning => {
+                "检测到可用的实时 tmux pane；恢复可能会启动另一个 provider 进程。".into()
+            }
+            _ => "可通过本地 provider CLI 恢复该会话。".into(),
+        },
+        SessionAvailableActionKind::Jump => localize_action_menu_jump_reason(&action.reason),
+        SessionAvailableActionKind::Fork => "整段会话分叉将在后续里程碑实现。".into(),
+        SessionAvailableActionKind::Copy => "复制最后一条 AI 输出将在后续里程碑实现。".into(),
+        SessionAvailableActionKind::CopySessionId => "复制 Session ID 将在后续里程碑实现。".into(),
+        SessionAvailableActionKind::Export => "导出会话动作将在后续里程碑实现。".into(),
+        SessionAvailableActionKind::Handoff => {
+            if action.reason.starts_with("SSH data space is read-only") {
+                "SSH 数据空间只读；仍可生成受保护的交接文档。".into()
+            } else {
+                "可生成交给目标智能体的接续文档。".into()
+            }
+        }
+        SessionAvailableActionKind::Archive => {
+            "归档状态会写入 Moonbox overlay，将在后续里程碑实现。".into()
+        }
+    }
+}
+
+fn localize_action_menu_jump_reason(reason: &str) -> String {
+    match reason {
+        "SSH data space is read-only; tmux jump is only checked locally." => {
+            "SSH 数据空间只读；tmux 跳转只在本地检查。".into()
+        }
+        "Hooks are disabled; no live tmux state is available." => {
+            "Hooks 未启用，无法获得实时 tmux 状态。".into()
+        }
+        "Smart Enter / tmux jump is disabled in Settings." => {
+            "设置中未启用 Smart Enter / tmux 跳转。".into()
+        }
+        "No hook live state for this session." => "当前会话没有 hook 实时状态。".into(),
+        "Hook state marks this session ended." => "Hook 状态显示该会话已结束。".into(),
+        "hook event did not include TMUX_PANE" => "Hook 事件缺少 TMUX_PANE。".into(),
+        "hook event did not include TMUX socket metadata" => {
+            "Hook 事件缺少 TMUX socket 元数据。".into()
+        }
+        "TMUX metadata does not include a socket path" => "TMUX 元数据缺少 socket path。".into(),
+        _ => {
+            if let Some(pane_id) = reason
+                .strip_prefix("Live tmux pane ")
+                .and_then(|value| value.strip_suffix(" is available."))
+            {
+                format!("可跳转到实时 tmux pane {pane_id}。")
+            } else if let Some(pane_id) = reason
+                .strip_prefix("tmux pane ")
+                .and_then(|value| value.strip_suffix(" is not live"))
+            {
+                format!("tmux pane {pane_id} 不在线。")
+            } else {
+                reason.to_string()
+            }
+        }
+    }
+}
+
+fn action_menu_status_label(
+    status: SessionActionAvailability,
+    language: crate::core::config::UiLanguage,
+) -> &'static str {
+    match status {
+        SessionActionAvailability::Available => localized(language, "available", "可用"),
+        SessionActionAvailability::Warning => localized(language, "warning", "警告"),
+        SessionActionAvailability::Blocked => localized(language, "blocked", "阻塞"),
+        SessionActionAvailability::Unavailable => localized(language, "unavailable", "不可用"),
+    }
+}
+
+fn action_status_color(status: SessionActionAvailability) -> Color {
+    match status {
+        SessionActionAvailability::Available => theme::green(),
+        SessionActionAvailability::Warning => theme::gold(),
+        SessionActionAvailability::Blocked => theme::red(),
+        SessionActionAvailability::Unavailable => theme::muted(),
+    }
+}
+
 fn render_open_original(frame: &mut Frame, root: Rect, app: &App) {
     let area = modal_area(root, 72, 64);
     frame.render_widget(Clear, area);
@@ -7044,6 +7260,63 @@ mod tests {
             assert_screen_contains(&screen, "Status");
             assert!(screen.chars().any(|ch| !ch.is_whitespace()));
         }
+    }
+
+    #[test]
+    fn action_menu_renders_resume_handoff_and_planned_fork() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.handle_key(key('o'));
+
+        let screen = render_text(&app, 120, 36);
+
+        assert_screen_contains(&screen, "Action Menu");
+        assert_screen_contains(&screen, "Session actions");
+        assert_screen_contains(&screen, "Resume");
+        assert_screen_contains(&screen, "Handoff");
+        assert_screen_contains(&screen, "Fork");
+        assert_screen_contains(&screen, "Copy");
+        assert_screen_contains(&screen, "Copy Session ID");
+        assert_screen_contains(&screen, "Export");
+        assert_screen_contains(&screen, "unavailable");
+        assert_screen_contains(&screen, "j/k choose");
+    }
+
+    #[test]
+    fn action_menu_localizes_zh_hans_labels_and_reasons() {
+        let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.set_ui_preferences_for_test(crate::core::config::UiPreferencesConfig {
+            language: crate::core::config::UiLanguage::ZhHans,
+            theme: crate::core::config::UiThemeName::Moonbox,
+        });
+        app.handle_key(key('o'));
+
+        let screen = render_text(&app, 120, 36);
+
+        assert_screen_contains(&screen, "动作菜单");
+        assert_screen_contains(&screen, "会话动作");
+        assert_screen_contains(&screen, "恢复  可用");
+        assert_screen_contains(&screen, "交接  可用");
+        assert_screen_contains(&screen, "分叉  不可用");
+        assert_screen_contains(&screen, "跳转  不可用");
+        assert_screen_contains(&screen, "详情  可用");
+        assert_screen_contains(&screen, "复制 AI 输出  不可用");
+        assert_screen_contains(&screen, "复制 Session ID  不可用");
+        assert_screen_contains(&screen, "导出  不可用");
+        assert_screen_contains(&screen, "归档  不可用");
+        assert_screen_contains(&screen, "可通过本地 provider CLI 恢复该会话。");
+        assert_screen_contains(&screen, "Hooks 未启用，无法获得实时 tmux 状态。");
+        assert_screen_contains(&screen, "整段会话分叉将在后续里程碑实现。");
+        assert_screen_contains(&screen, "复制最后一条 AI 输出将在后续里程碑实现。");
+        assert_screen_contains(&screen, "复制 Session ID 将在后续里程碑实现。");
+        assert_screen_contains(&screen, "导出会话动作将在后续里程碑实现。");
+        assert!(
+            !screen.contains("Local provider resume is available."),
+            "{screen}"
+        );
+        assert!(
+            !screen.contains("Whole-session fork is planned"),
+            "{screen}"
+        );
     }
 
     #[test]
@@ -7568,9 +7841,10 @@ mod tests {
             .map(|span| span.content.into_owned())
             .collect::<String>();
 
-        assert_eq!(narrow, " MOONBOX ");
-        assert_eq!(wide, " MOONBOX ");
-        assert_eq!(zh_wide, " MOONBOX 月光宝盒");
+        let version = format!("v{}", env!("CARGO_PKG_VERSION"));
+        assert_eq!(narrow, format!(" MOONBOX {version}"));
+        assert_eq!(wide, format!(" MOONBOX {version}"));
+        assert_eq!(zh_wide, format!(" MOONBOX {version} 月光宝盒"));
     }
 
     #[test]
