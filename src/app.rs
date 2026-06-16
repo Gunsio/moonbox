@@ -2566,6 +2566,7 @@ impl App {
                 self.set_status("Launch cancelled");
             }
             KeyCode::Char('S') => self.open_skill_picker(),
+            KeyCode::Char('R') => self.cycle_handoff_runner(),
             KeyCode::Enter => self.confirm_launch_target(),
             KeyCode::Char('y') => self.copy_launch_command(),
             KeyCode::PageDown => self.scroll_modal(true, 6),
@@ -3057,6 +3058,73 @@ impl App {
         ));
     }
 
+    fn ensure_launch_handoff_skill_default(&mut self) {
+        if !self
+            .current_session()
+            .is_some_and(|session| session.source_provenance != SourceProvenance::Fixture)
+        {
+            return;
+        }
+        let Some(current) = self.data.compilers.get(self.selected_compiler) else {
+            return;
+        };
+        if !compiler::compiler_is_builtin(current) {
+            return;
+        }
+        let Some(candidate) = self.skill_picker_candidate_indices().first().copied() else {
+            return;
+        };
+        self.selected_compiler = candidate;
+        if let Some(compiler) = self.data.compilers.get(self.selected_compiler).cloned() {
+            self.data.capsule.compiler = compiler;
+        }
+    }
+
+    fn cycle_handoff_runner(&mut self) {
+        self.ensure_launch_handoff_skill_default();
+        let Some(current_id) = self.data.compilers.get(self.selected_compiler) else {
+            self.set_status("No handoff runner selected");
+            return;
+        };
+        let Some(current_spec) = handoff::parse_compiler_id(current_id) else {
+            self.set_status("Choose a handoff skill before switching runner");
+            return;
+        };
+        let matching = self
+            .data
+            .compilers
+            .iter()
+            .enumerate()
+            .filter_map(|(index, compiler_id)| {
+                handoff::parse_compiler_id(compiler_id)
+                    .filter(|spec| spec.skill_id == current_spec.skill_id)
+                    .map(|spec| (index, spec))
+            })
+            .collect::<Vec<_>>();
+        if matching.len() <= 1 {
+            self.set_status(format!(
+                "No alternate runner for {}",
+                handoff::skill_display_label(&current_spec.skill_id)
+            ));
+            return;
+        }
+        let position = matching
+            .iter()
+            .position(|(index, _)| *index == self.selected_compiler)
+            .unwrap_or(0);
+        let (next_index, next_spec) = &matching[(position + 1) % matching.len()];
+        self.selected_compiler = *next_index;
+        self.pending_compiler = *next_index;
+        self.data.capsule.compiler = self.data.compilers[*next_index].clone();
+        self.launch_review_error = None;
+        self.set_status(format!(
+            "Runner: {} / {}",
+            next_spec.runner.label(),
+            handoff::skill_display_label(&next_spec.skill_id)
+        ));
+        self.pending_g = false;
+    }
+
     pub(crate) fn skill_picker_candidate_indices(&self) -> Vec<usize> {
         let mut candidates = Vec::new();
         let mut seen_agent_skills: Vec<String> = Vec::new();
@@ -3132,7 +3200,7 @@ impl App {
             .compilers
             .get(index)
             .and_then(|compiler_id| handoff::parse_compiler_id(compiler_id))
-            .map(|spec| spec.skill_id)
+            .map(|spec| handoff::skill_display_label(&spec.skill_id).to_string())
             .or_else(|| self.data.compilers.get(index).cloned())
             .unwrap_or_else(|| "unknown".into())
     }
@@ -4087,6 +4155,7 @@ impl App {
             return;
         }
         self.pending_target = self.data.target;
+        self.ensure_launch_handoff_skill_default();
         self.show_launch = true;
         self.launch_review = false;
         self.launch_review_details = false;
@@ -5749,6 +5818,7 @@ mod tests {
             "engineering-handoff".into(),
         ];
         app.selected_compiler = 0;
+        app.pending_compiler = 1;
         app.data.capsule.compiler = "agent:codex:handoff".into();
 
         let candidates = app.skill_picker_candidate_indices();
@@ -5757,11 +5827,14 @@ mod tests {
         assert!(app.compiler_selection_matches(candidates[0], app.selected_compiler));
 
         app.handle_key(key('S'));
-        assert_eq!(app.pending_compiler, 1);
+        assert_eq!(
+            app.data.compilers[app.pending_compiler],
+            "agent:claude:handoff"
+        );
         app.handle_key(KeyEvent::from(KeyCode::Enter));
 
         assert_eq!(app.data.capsule.compiler, "agent:claude:handoff");
-        assert_eq!(app.status_message, "Handoff skill: handoff");
+        assert_eq!(app.status_message, "Handoff skill: matt-handoff");
     }
 
     #[test]
@@ -6024,7 +6097,7 @@ Host devbox
         let mut worker = app.data.sessions[0].clone();
         worker.id = "moonbox-worker-session".into();
         worker.title =
-            "$handoff You are running a Moonbox continuation handoff job. Use the selected community handoff skill."
+            "You are running a Moonbox continuation handoff job. Use the selected handoff skill."
                 .into();
         app.data.sessions.insert(0, worker);
         let mut prompt_worker = app.data.sessions[0].clone();
@@ -6069,7 +6142,7 @@ Host devbox
                 .any(|index| app.data.sessions[*index].id == "moonbox-worker-aborted-session")
         );
 
-        app.search_query = "$handoff".into();
+        app.search_query = "moonbox continuation handoff".into();
         app.refresh_visible_sessions();
 
         assert!(
@@ -6433,6 +6506,42 @@ Host devbox
             "{}",
             app.status_message
         );
+    }
+
+    #[test]
+    fn launch_defaults_real_builtin_draft_to_handoff_skill() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.data.compilers = vec![
+            "engineering-handoff".into(),
+            "agent:codex:handoff".into(),
+            "agent:claude:handoff".into(),
+        ];
+        app.selected_compiler = 0;
+        app.data.capsule.compiler = "engineering-handoff".into();
+        app.data.sessions[app.selected_session].source_provenance = SourceProvenance::Real;
+
+        app.ensure_launch_handoff_skill_default();
+
+        assert_eq!(app.data.capsule.compiler, "agent:codex:handoff");
+        assert!(!app.launch_requires_handoff_skill(CliTool::Hermes));
+    }
+
+    #[test]
+    fn launch_picker_cycles_runner_for_selected_handoff_skill() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.data.compilers = vec![
+            "agent:codex:handoff".into(),
+            "agent:claude:handoff".into(),
+            "agent:codex:moonbox-handoff".into(),
+        ];
+        app.selected_compiler = 0;
+        app.pending_compiler = 0;
+        app.data.capsule.compiler = "agent:codex:handoff".into();
+
+        app.cycle_handoff_runner();
+
+        assert_eq!(app.data.capsule.compiler, "agent:claude:handoff");
+        assert_eq!(app.status_message, "Runner: Claude / matt-handoff");
     }
 
     #[test]
@@ -6970,23 +7079,24 @@ Host devbox
     }
 
     #[test]
-    fn real_builtin_draft_enter_opens_skill_picker_not_review() {
+    fn real_builtin_draft_enter_uses_default_handoff_skill_for_real_session() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.data.sessions[app.selected_session].source_provenance = SourceProvenance::Real;
         app.selected_compiler = compiler_index_for_id(&app.data, "engineering-handoff", 0);
         app.data.capsule.compiler = "engineering-handoff".into();
 
         app.handle_key(key('H'));
+        assert!(app.show_launch);
+        assert!(!app.show_skill_picker);
+        assert!(!compiler::compiler_is_builtin(&app.data.capsule.compiler));
+        assert!(!app.launch_requires_handoff_skill(CliTool::Hermes));
+
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
         assert!(app.show_launch);
-        assert!(app.show_skill_picker);
         assert!(!app.launch_review);
-        assert!(!app.is_launch_review_pending());
-        assert_eq!(
-            app.status_message,
-            "Choose an AI handoff skill before Handoff Review"
-        );
+        assert!(app.is_launch_review_pending());
+        assert_eq!(app.status_message, "Regenerating handoff review: Hermes");
     }
 
     #[test]
@@ -6999,24 +7109,20 @@ Host devbox
         app.data.capsule.compiler = "engineering-handoff".into();
 
         app.handle_key(key('H'));
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
         assert!(app.show_launch);
-        assert!(app.show_skill_picker);
+        assert!(!app.show_skill_picker);
         assert!(
             app.data
                 .compilers
                 .iter()
-                .any(|compiler| compiler == "agent:claude:handoff")
+                .any(|compiler| compiler == "agent:claude:moonbox-handoff")
         );
         assert_eq!(
-            app.data.compilers[app.pending_compiler],
-            "agent:claude:handoff"
+            app.data.compilers[app.selected_compiler],
+            "agent:claude:moonbox-handoff"
         );
-        assert_eq!(
-            app.status_message,
-            "Choose an AI handoff skill before Handoff Review"
-        );
+        assert_eq!(app.status_message, "Choose target CLI");
     }
 
     #[test]
@@ -7027,7 +7133,7 @@ Host devbox
         app.data.capsule.compiler = "engineering-handoff".into();
 
         app.handle_key(key('H'));
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        app.handle_key(key('S'));
 
         assert!(app.show_launch);
         assert!(app.show_skill_picker);
@@ -7044,7 +7150,7 @@ Host devbox
         assert!(!app.launch_review);
         assert_eq!(
             app.status_message,
-            "Handoff skill: handoff; press Enter to generate Review"
+            "Handoff skill: moonbox-handoff; press Enter to generate Review"
         );
 
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));

@@ -646,13 +646,13 @@ arguments, timeout, and the reason behind the quality signal.
 Agent-backed handoff skills appear in the same catalog with source `Agent` for
 CLI/JSON compatibility. The TUI Skill Picker is skill-first: it collapses
 runner-specific catalog entries into one handoff skill row, shows whether that
-skill is installed locally, and shows either the local `SKILL.md` path or the
-community install source. Runner SDK setup, package-manager choice, login, and
-provider credential checks are launch preflight concerns, not Skill Picker
-choices. Moonbox discovers generic `handoff` skills from `MOONBOX_SKILLS_DIRS`,
+skill is built into Moonbox or installed locally, and shows either `built-in`
+or the local `SKILL.md` path. Runner SDK setup, package-manager choice, login,
+and provider credential checks are launch preflight concerns, not Skill Picker
+choices. Moonbox ships `moonbox-handoff` as a bundled first-party handoff
+prompt and also discovers generic `handoff` skills from `MOONBOX_SKILLS_DIRS`,
 `CODEX_HOME` / `MOONBOX_CODEX_HOME` `skills`, and the user's local Codex /
-agent skill homes. When no handoff skill is installed, the Skill Picker shows a
-single install-hint skill row rather than Codex / Claude runner choices. The
+agent skill homes. The
 CLI still accepts explicit `--compiler agent:<runner>:<skill>` ids and
 `default_compiler` values for automation after reviewing preflight state. Codex
 handoff generation uses the official `openai-codex`
@@ -691,12 +691,11 @@ the app.
 
 The production handoff path is skill-first: pick a source session, target
 executor, handoff skill, and runner SDK, then review the generated handoff
-before launching. Community handoff skills use the same runner path and Review
-UX. Moonbox acts as the orchestrator: it runs the selected skill, reads the
-generated Markdown artifact, and passes that artifact to the target agent after
-user confirmation. Deterministic built-in compiler output is not a production
-Review path; if a built-in fallback is reintroduced for interactive handoff, it
-must appear as a built-in skill through the same runner / review flow.
+before launching. Built-in and community handoff skills use the same runner
+path and Review UX. Moonbox acts as the orchestrator: it runs the selected
+skill, reads the generated Markdown artifact, and passes that artifact to the
+target agent after user confirmation. Deterministic built-in compiler output is
+not a production Review path.
 
 Environment variables remain the highest-priority one-off override:
 
@@ -867,12 +866,10 @@ Moonbox has two separate actions for a selected session:
 - `x`: choose a target CLI, then review a `target_handoff` command before
   launching or copying it. `H` and `t` remain compatibility aliases.
 - `S`: open Skill Picker. Agent-backed handoff rows are collapsed by skill and
-  show installed/local path, third-party provider/source link when known, or
-  install source; runner SDK setup is checked before launch. Built-in draft
-  compilers are not handoff skill choices in the TUI. If Moonbox ships a
-  built-in interactive handoff later, it must be a bundled skill invoked through
-  the same agent runner path. Press `y` to copy the skill path or install
-  source.
+  show `moonbox-handoff` as the bundled Moonbox source, or the installed local
+  path for community skills; runner SDK setup is checked before launch.
+  Built-in draft compilers are not handoff skill choices in the TUI. Press `y`
+  to copy the skill reference.
 - `,`: open Settings. M95 exposes Smart Enter / tmux jump there with preview and
   persistence; hooks install/uninstall remains a CLI command.
 
@@ -1491,8 +1488,8 @@ Stable interfaces matter more than any single framework:
   from the default Review surface, `Enter` confirms and queues the target agent
   launch after review, and `y` remains the copy-command path. The
   TUI Skill Picker no longer exposes built-in draft compilers as skill choices;
-  any future built-in interactive handoff must be exposed as a bundled skill
-  through the same skill-first path.
+  built-in interactive handoff must be exposed as a bundled skill through the
+  same skill-first path.
 - M99: v0.1.3 prerelease packaging; package metadata, lockfile metadata,
   release artifact staging examples, and Homebrew formula templates now target
   `0.1.3` / `v0.1.3` so M97 Luoshen themes and M98 skill-first handoff review
@@ -1525,6 +1522,11 @@ Stable interfaces matter more than any single framework:
   `fork <session>` with the source cwd and Claude `--resume <session>
   --fork-session`, keeps Hermes clearly unavailable, and records launches as
   `native_fork`.
+- M111: Built-In Handoff Skill; Moonbox now ships `moonbox-handoff` as a
+  bundled first-party handoff prompt that appears in the same skill-first
+  catalog and Handoff Review runner path as community skills. The built-in skill
+  consumes only Moonbox's bounded context pack, reports `built-in` as its path,
+  and does not write to user skill homes.
 
 ### Remaining Milestones
 

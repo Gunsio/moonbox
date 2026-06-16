@@ -148,10 +148,9 @@ and this project uses semantic versioning once tagged releases start.
 - Timeline preview, selected-session load, and Handoff Review pending states
   now render an animated `| / - \` spinner so long background work no longer
   looks frozen.
-- Missing community handoff skills now appear as non-default agent placeholders
-  with install guidance instead of silently falling back to hidden assumptions;
-  ready agent runners must be selected explicitly or configured as the default
-  compiler before they run.
+- `moonbox-handoff` is now bundled as a first-party handoff prompt in the same
+  skill-first catalog and Handoff Review runner path as community skills,
+  without writing to user skill homes.
 - Moonbox-generated handoff worker sessions are hidden from the main TUI
   inventory by default and reappear only when explicitly searched, keeping
   background handoff jobs from flooding the user's normal continuation list.

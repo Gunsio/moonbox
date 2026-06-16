@@ -266,10 +266,34 @@ fn selected_skill_label(app: &App) -> String {
     app.data
         .compilers
         .get(app.selected_compiler)
-        .and_then(|compiler_id| handoff::parse_compiler_id(compiler_id))
-        .map(|spec| spec.skill_id)
+        .map(|compiler_id| compiler_skill_label(compiler_id))
         .or_else(|| app.data.compilers.get(app.selected_compiler).cloned())
         .unwrap_or_else(|| app.data.capsule.compiler.clone())
+}
+
+fn selected_runner_label(app: &App, language: crate::core::config::UiLanguage) -> String {
+    let Some(compiler_id) = app.data.compilers.get(app.selected_compiler) else {
+        return localized(language, "Unknown", "未知").into();
+    };
+    compiler_runner_label(compiler_id, language)
+}
+
+fn compiler_skill_label(compiler_id: &str) -> String {
+    if let Some(spec) = handoff::parse_compiler_id(compiler_id) {
+        return handoff::skill_display_label(&spec.skill_id).to_string();
+    }
+    compiler_id.to_string()
+}
+
+fn compiler_runner_label(compiler_id: &str, language: crate::core::config::UiLanguage) -> String {
+    if let Some(spec) = handoff::parse_compiler_id(compiler_id) {
+        return spec.runner.label().into();
+    }
+    if compiler::compiler_is_builtin(compiler_id) {
+        localized(language, "Built-in", "内置").into()
+    } else {
+        localized(language, "External", "外部").into()
+    }
 }
 
 fn data_space_header_label(app: &App) -> String {
@@ -3028,36 +3052,38 @@ fn render_settings(frame: &mut Frame, root: Rect, app: &App) {
                 Style::default().fg(theme::muted()),
             ),
         ]),
-        settings_row(SettingsRow {
-            app,
-            language,
-            layout: settings_row_layout,
-            field: SettingsField::Language,
-            label: i18n::text(language, Text::Language),
-            draft: i18n::language_name(language, app.settings_language),
-            saved: i18n::language_name(language, app.ui_language()),
-            dirty: app.settings_language_dirty(),
-        }),
-        settings_row(SettingsRow {
-            app,
-            language,
-            layout: settings_row_layout,
-            field: SettingsField::Theme,
-            label: i18n::text(language, Text::Theme),
-            draft: app.settings_theme.label(),
-            saved: app.ui_theme().label(),
-            dirty: app.settings_theme_dirty(),
-        }),
-        settings_row(SettingsRow {
-            app,
-            language,
-            layout: settings_row_layout,
-            field: SettingsField::SmartEnter,
-            label: i18n::text(language, Text::SmartEnterTmux),
-            draft: i18n::on_off(language, app.settings_smart_enter_tmux),
-            saved: i18n::on_off(language, app.smart_enter_tmux_enabled()),
-            dirty: app.settings_smart_enter_dirty(),
-        }),
+    ];
+    lines.extend(settings_row(SettingsRow {
+        app,
+        language,
+        layout: settings_row_layout,
+        field: SettingsField::Language,
+        label: i18n::text(language, Text::Language),
+        draft: i18n::language_name(language, app.settings_language),
+        saved: i18n::language_name(language, app.ui_language()),
+        dirty: app.settings_language_dirty(),
+    }));
+    lines.extend(settings_row(SettingsRow {
+        app,
+        language,
+        layout: settings_row_layout,
+        field: SettingsField::Theme,
+        label: i18n::text(language, Text::Theme),
+        draft: app.settings_theme.label(),
+        saved: app.ui_theme().label(),
+        dirty: app.settings_theme_dirty(),
+    }));
+    lines.extend(settings_row(SettingsRow {
+        app,
+        language,
+        layout: settings_row_layout,
+        field: SettingsField::SmartEnter,
+        label: i18n::text(language, Text::SmartEnterTmux),
+        draft: i18n::on_off(language, app.settings_smart_enter_tmux),
+        saved: i18n::on_off(language, app.smart_enter_tmux_enabled()),
+        dirty: app.settings_smart_enter_dirty(),
+    }));
+    lines.extend([
         Line::raw(""),
         Line::from(Span::styled(
             i18n::text(language, Text::CurrentEnterRoute),
@@ -3065,7 +3091,7 @@ fn render_settings(frame: &mut Frame, root: Rect, app: &App) {
                 .fg(theme::blue())
                 .add_modifier(Modifier::BOLD),
         )),
-    ];
+    ]);
 
     if let Some(route) = route {
         lines.push(Line::from(vec![
@@ -3134,11 +3160,10 @@ struct SettingsRowLayout {
     label_width: usize,
     draft_width: usize,
     saved_width: usize,
-    status_width: usize,
     gap_width: usize,
 }
 
-fn settings_row(row: SettingsRow<'_>) -> Line<'static> {
+fn settings_row(row: SettingsRow<'_>) -> Vec<Line<'static>> {
     let focused = row.app.settings_field_is_focused(row.field);
     let marker = if focused { ">" } else { " " };
     let marker_color = if focused {
@@ -3161,59 +3186,82 @@ fn settings_row(row: SettingsRow<'_>) -> Line<'static> {
     } else {
         i18n::text(row.language, Text::Saved)
     };
-    Line::from(vec![
-        Span::styled(format!("{marker} "), Style::default().fg(marker_color)),
-        Span::styled(
-            fit_display_width(row.label, row.layout.label_width),
-            Style::default().fg(label_color),
-        ),
-        Span::raw(" ".repeat(row.layout.gap_width)),
-        Span::styled(
-            fit_display_width(
-                &format!("{} {}", i18n::text(row.language, Text::Draft), row.draft),
-                row.layout.draft_width,
+    let (field_icon, field_icon_color) = settings_field_icon(row.field);
+    let status_icon = if row.dirty { "!" } else { "✓" };
+    let secondary_style = Style::default().fg(theme::border());
+    vec![
+        Line::from(vec![
+            Span::styled(format!("{marker} "), Style::default().fg(marker_color)),
+            Span::styled(
+                field_icon,
+                Style::default()
+                    .fg(field_icon_color)
+                    .add_modifier(Modifier::BOLD),
             ),
-            Style::default().fg(if row.dirty {
-                theme::gold()
-            } else {
-                theme::text()
-            }),
-        ),
-        Span::raw(" ".repeat(row.layout.gap_width)),
-        Span::styled(
-            fit_display_width(
-                &format!("{} {}", i18n::text(row.language, Text::Saved), row.saved),
-                row.layout.saved_width,
+            Span::raw(" "),
+            Span::styled(
+                fit_display_width(row.label, row.layout.label_width),
+                Style::default().fg(label_color).add_modifier(if focused {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
             ),
-            Style::default().fg(theme::muted()),
-        ),
-        Span::raw(" ".repeat(row.layout.gap_width)),
-        Span::styled(
-            fit_display_width_right(state_label, row.layout.status_width),
-            Style::default().fg(state_color),
-        ),
-    ])
+            Span::raw("  "),
+            Span::styled(
+                status_icon,
+                Style::default()
+                    .fg(state_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(state_label, Style::default().fg(state_color)),
+        ]),
+        Line::from(vec![
+            Span::raw("    "),
+            Span::styled("└", Style::default().fg(theme::border())),
+            Span::raw(" "),
+            Span::styled(
+                fit_display_width(
+                    &format!("{} {}", i18n::text(row.language, Text::Draft), row.draft),
+                    row.layout.draft_width,
+                ),
+                secondary_style,
+            ),
+            Span::raw(" ".repeat(row.layout.gap_width)),
+            Span::styled(
+                fit_display_width(
+                    &format!("{} {}", i18n::text(row.language, Text::Saved), row.saved),
+                    row.layout.saved_width,
+                ),
+                secondary_style,
+            ),
+        ]),
+    ]
+}
+
+fn settings_field_icon(field: SettingsField) -> (&'static str, Color) {
+    match field {
+        SettingsField::Language => ("文", theme::blue()),
+        SettingsField::Theme => ("◈", theme::purple()),
+        SettingsField::SmartEnter => ("↵", theme::green()),
+    }
 }
 
 fn settings_row_layout(
     row_width: usize,
-    language: crate::core::config::UiLanguage,
+    _language: crate::core::config::UiLanguage,
 ) -> SettingsRowLayout {
-    let marker_width = 2;
+    let detail_prefix_width = 6;
     let label_width = 22;
     let gap_width = 2;
-    let status_width = display_width(i18n::text(language, Text::Unsaved))
-        .max(display_width(i18n::text(language, Text::Saved)))
-        .max(6);
-    let value_width =
-        row_width.saturating_sub(marker_width + label_width + (gap_width * 3) + status_width);
+    let value_width = row_width.saturating_sub(detail_prefix_width + gap_width);
     let (draft_width, saved_width) = settings_value_widths(value_width, 42, 24);
 
     SettingsRowLayout {
         label_width,
         draft_width,
         saved_width,
-        status_width,
         gap_width,
     }
 }
@@ -3265,17 +3313,6 @@ fn fit_display_width(text: &str, width: usize) -> String {
     }
     output.push_str(&ellipsis);
     pad_display_width(output, width)
-}
-
-fn fit_display_width_right(text: &str, width: usize) -> String {
-    let fitted = fit_display_width(text, width);
-    let trimmed = fitted.trim_end();
-    let trimmed_width = display_width(trimmed);
-    if trimmed_width >= width {
-        fitted
-    } else {
-        format!("{}{}", " ".repeat(width - trimmed_width), trimmed)
-    }
 }
 
 fn pad_display_width(mut text: String, width: usize) -> String {
@@ -4007,45 +4044,55 @@ fn render_skill_picker(frame: &mut Frame, root: Rect, app: &App) {
         let status_color = skill_picker_status_color(&info);
         let row_style = if pending {
             Style::default()
-                .fg(Color::Black)
-                .bg(status_color)
-                .add_modifier(Modifier::BOLD)
-        } else if active {
-            Style::default()
-                .fg(theme::text())
+                .fg(status_color)
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(theme::text())
+            Style::default().fg(status_color)
         };
-        let muted_style = if pending {
-            Style::default().fg(theme::text())
-        } else {
-            Style::default().fg(theme::muted())
-        };
+        let muted_style = Style::default().fg(theme::border());
         let cursor = if pending { ">" } else { " " };
         let active_mark = if active {
             i18n::text(language, Text::Active)
         } else {
             ""
         };
+        let (skill_icon, skill_icon_color) = skill_picker_icon(&info);
+        let (status_icon, status_icon_color) = skill_picker_status_icon(&info);
         lines.push(Line::from(vec![
-            Span::styled(format!("{cursor} "), row_style),
-            Span::styled(format!("{:<24}", skill_picker_row_title(&info)), row_style),
-            Span::styled("  ", row_style),
+            Span::styled(cursor, Style::default().fg(theme::gold())),
+            Span::raw(" "),
             Span::styled(
-                format!("{:<7}", skill_picker_status_label(&info, language)),
-                row_style,
+                skill_icon,
+                Style::default()
+                    .fg(skill_icon_color)
+                    .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("  ", row_style),
+            Span::raw(" "),
+            Span::styled(format!("{:<24}", skill_picker_row_title(&info)), row_style),
+            Span::raw("  "),
+            Span::styled(
+                status_icon,
+                Style::default()
+                    .fg(status_icon_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                format!("{:<9}", skill_picker_status_label(&info, language)),
+                Style::default().fg(status_color),
+            ),
+            Span::raw("  "),
             Span::styled(
                 format!("{:<15}", compiler_kind_label(info.kind, language)),
-                row_style,
+                Style::default().fg(theme::muted()),
             ),
-            Span::styled("  ", row_style),
-            Span::styled(active_mark, row_style),
+            Span::raw("  "),
+            Span::styled(active_mark, Style::default().fg(theme::green())),
         ]));
         lines.push(Line::from(vec![
             Span::raw("    "),
+            Span::styled("└", Style::default().fg(theme::border())),
+            Span::raw(" "),
             Span::styled(skill_picker_description(&info, language), muted_style),
         ]));
         lines.extend(compiler_detail_lines(&info, language, muted_style));
@@ -4520,7 +4567,7 @@ fn fallback_compiler_info(id: &str) -> CompilerPresetInfo {
 
 fn skill_picker_row_title(info: &CompilerPresetInfo) -> String {
     handoff::parse_compiler_id(&info.id)
-        .map(|spec| spec.skill_id)
+        .map(|spec| handoff::skill_display_label(&spec.skill_id).to_string())
         .unwrap_or_else(|| info.id.clone())
 }
 
@@ -4529,6 +4576,9 @@ fn skill_picker_status_label(
     language: crate::core::config::UiLanguage,
 ) -> &'static str {
     if handoff::parse_compiler_id(&info.id).is_some() {
+        if compiler::compiler_skill_is_builtin(info) {
+            return localized(language, "BUILT-IN", "内置");
+        }
         if compiler::compiler_skill_path(info).is_some() {
             return localized(language, "INSTALLED", "已安装");
         }
@@ -4545,6 +4595,35 @@ fn skill_picker_status_color(info: &CompilerPresetInfo) -> Color {
         return theme::gold();
     }
     compiler_status_color(info.status)
+}
+
+fn skill_picker_icon(info: &CompilerPresetInfo) -> (&'static str, Color) {
+    if compiler::compiler_skill_is_builtin(info) {
+        return ("◈", theme::purple());
+    }
+    if handoff::parse_compiler_id(&info.id).is_some() {
+        return ("↗", theme::cyan());
+    }
+    match info.kind {
+        CompilerPresetKind::Builtin => ("B", theme::purple()),
+        CompilerPresetKind::Environment => ("E", theme::blue()),
+        CompilerPresetKind::Config => ("C", theme::cyan()),
+        CompilerPresetKind::Agent => ("S", theme::gold()),
+    }
+}
+
+fn skill_picker_status_icon(info: &CompilerPresetInfo) -> (&'static str, Color) {
+    if handoff::parse_compiler_id(&info.id).is_some() {
+        if compiler::compiler_skill_path(info).is_some() {
+            return ("✓", theme::green());
+        }
+        return ("!", theme::gold());
+    }
+    match info.status {
+        CompilerPresetStatus::Ready => ("✓", theme::green()),
+        CompilerPresetStatus::Warning => ("!", theme::gold()),
+        CompilerPresetStatus::Disabled => ("×", theme::muted()),
+    }
 }
 
 fn compiler_status_label(
@@ -4647,6 +4726,11 @@ fn agent_skill_detail_lines(
     language: crate::core::config::UiLanguage,
 ) -> Vec<Line<'static>> {
     if let Some(path) = compiler::compiler_skill_path(info) {
+        let status = if compiler::compiler_skill_is_builtin(info) {
+            localized(language, "Built in with Moonbox", "Moonbox 内置可用")
+        } else {
+            localized(language, "Installed locally", "本机已安装")
+        };
         let mut lines = Vec::new();
         if let Some(provider) = skill_provider_label(info, language) {
             lines.push(compiler_detail_line(
@@ -4671,7 +4755,7 @@ fn agent_skill_detail_lines(
                 language,
                 "Status",
                 "状态",
-                localized(language, "Installed locally", "本机已安装").into(),
+                status.into(),
                 Style::default().fg(theme::green()),
             ),
             compiler_detail_line(
@@ -4718,6 +4802,9 @@ fn skill_provider_label(
     info: &CompilerPresetInfo,
     language: crate::core::config::UiLanguage,
 ) -> Option<String> {
+    if compiler::compiler_skill_is_builtin(info) {
+        return Some(localized(language, "Moonbox (built-in)", "Moonbox（内置）").into());
+    }
     let homepage = info.homepage.as_deref()?;
     if let Some(provider) = github_provider_label(homepage) {
         return Some(match language {
@@ -4922,6 +5009,14 @@ fn skill_picker_description(
     if handoff::parse_compiler_id(&info.id).is_some()
         && let Some(description) = info.description.as_deref()
     {
+        if compiler::compiler_skill_is_builtin(info) {
+            return localized(
+                language,
+                "Built-in Moonbox handoff prompt for transferring bounded context to another agent.",
+                "Moonbox 内置 handoff prompt，用于把有限上下文交给另一个 agent 接手。",
+            )
+            .into();
+        }
         if description.ends_with(" runner placeholder for the community `handoff` skill.") {
             return localized(
                 language,
@@ -5204,13 +5299,27 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             lines.extend([
                 Line::from(vec![
                     Span::styled(
-                        format!(
-                            "{}: ",
-                            localized(language, "Skill / Runner", "技能 / 执行器")
-                        ),
+                        format!("{}: ", i18n::text(language, Text::HandoffSkill)),
                         Style::default().fg(theme::blue()),
                     ),
-                    Span::styled(status.compiler_id, Style::default().fg(theme::cyan())),
+                    Span::styled(
+                        compiler_skill_label(&status.compiler_id),
+                        Style::default()
+                            .fg(theme::cyan())
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::styled(
+                        format!("{}: ", localized(language, "Runner", "执行器")),
+                        Style::default().fg(theme::blue()),
+                    ),
+                    Span::styled(
+                        compiler_runner_label(&status.compiler_id, language),
+                        Style::default()
+                            .fg(theme::cyan())
+                            .add_modifier(Modifier::BOLD),
+                    ),
                 ]),
                 Line::from(vec![
                     Span::styled(
@@ -5231,62 +5340,13 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                     ),
                     Span::raw(format_duration_ms(status.elapsed_ms)),
                     Span::styled(
-                        format!("   {}: ", localized(language, "Timeout limit", "超时上限")),
+                        format!("   {}: ", localized(language, "Timeout", "超时")),
                         Style::default().fg(theme::blue()),
                     ),
                     Span::raw(format_duration_ms(status.timeout_ms)),
                 ]),
-                Line::from(vec![
-                    Span::styled(
-                        format!("{}: ", localized(language, "Last update", "最近更新")),
-                        Style::default().fg(theme::blue()),
-                    ),
-                    Span::raw(status.detail),
-                ]),
             ]);
         }
-        lines.extend([
-            Line::from(Span::styled(
-                if app.current_data_space().is_local() {
-                    localized(
-                        language,
-                        "Reading the selected local session and running the handoff skill.",
-                        "正在读取选中的本地 session，并执行 handoff skill。",
-                    )
-                } else {
-                    localized(
-                        language,
-                        "Reading the selected SSH session in read-only mode, then running the local handoff skill.",
-                        "正在以只读方式读取选中的 SSH session，然后执行本地 handoff skill。",
-                    )
-                },
-                Style::default().fg(theme::text()),
-            )),
-            Line::raw(""),
-        ]);
-        lines.push(Line::from(Span::styled(
-            localized(
-                language,
-                "Progress is approximate; the job fails with a reason if the timeout is reached.",
-                "进度是阶段状态；到达超时上限后会失败并显示原因。",
-            ),
-            Style::default().fg(theme::muted()),
-        )));
-        lines.extend([
-            Line::raw(""),
-            Line::from(Span::styled(
-                i18n::text(language, Text::LoadingHiddenJob),
-                Style::default().fg(theme::muted()),
-            )),
-            Line::from(Span::styled(
-                localized(
-                    language,
-                    "Enter only returns to this running job; it will not start another SDK process.",
-                    "Enter 只回到当前任务；不会再启动新的 SDK 进程。",
-                ),
-                Style::default().fg(theme::muted()),
-            )),
-        ]);
         frame.render_widget(
             Paragraph::new(lines)
                 .block(panel_block(" Launch ", true))
@@ -5882,46 +5942,67 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
     let mut target_lines = Vec::new();
     for target in CliTool::ALL {
         let selected = target == app.pending_target;
-        let validation = app.validate_launch_for_target(target);
         let needs_handoff_skill = app.launch_requires_handoff_skill(target);
-        let validation_state = if needs_handoff_skill {
+        let raw_validation_state = if needs_handoff_skill {
             LaunchValidationState::Blocked
         } else {
-            validation.state
+            app.validate_launch_for_target(target).state
         };
-        let style = if selected {
+        let validation_state = target_picker_validation_state(raw_validation_state);
+        let label_style = if selected {
             Style::default()
-                .fg(ratatui::style::Color::Black)
-                .bg(validation_color(validation_state))
+                .fg(validation_color(validation_state))
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(validation_color(validation_state))
         };
-        let muted_style = if selected {
+        let status_style = if selected {
             Style::default()
-                .fg(ratatui::style::Color::Black)
-                .bg(validation_color(validation_state))
+                .fg(validation_color(validation_state))
+                .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(theme::muted())
+            Style::default().fg(validation_color(validation_state))
         };
         let cursor = if selected { ">" } else { " " };
-        let mark = if selected { "[x]" } else { "[ ]" };
+        let (target_icon, target_icon_color) = target_picker_icon(target);
+        let (status_icon, status_icon_color) = target_picker_status_icon(validation_state);
         target_lines.push(Line::from(vec![
-            Span::styled(format!("{cursor} {mark} {target:<6}"), style),
+            Span::styled(cursor, Style::default().fg(theme::gold())),
+            Span::raw(" "),
             Span::styled(
-                format!("  {}", validation_label(language, validation_state)),
-                style,
+                target_icon,
+                Style::default()
+                    .fg(target_icon_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(format!("{target:<6}"), label_style),
+            Span::raw("  "),
+            Span::styled(
+                status_icon,
+                Style::default()
+                    .fg(status_icon_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                target_picker_validation_label(language, raw_validation_state),
+                status_style,
             ),
         ]));
         target_lines.push(Line::from(vec![
             Span::raw("    "),
+            Span::styled("└", Style::default().fg(theme::border())),
+            Span::raw(" "),
             Span::styled(
-                if needs_handoff_skill {
-                    i18n::text(language, Text::HandoffSkillRequired).to_string()
-                } else {
-                    validation_summary_text(language, &validation)
-                },
-                muted_style,
+                target_picker_description(
+                    language,
+                    target,
+                    raw_validation_state,
+                    needs_handoff_skill,
+                    &app.validate_launch_for_target(target),
+                ),
+                Style::default().fg(theme::border()),
             ),
         ]));
     }
@@ -5932,13 +6013,48 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                 .fg(theme::gold())
                 .add_modifier(Modifier::BOLD),
         )),
-        Line::raw(""),
         Line::from(vec![
             Span::styled(
                 format!("{}: ", i18n::text(language, Text::Session)),
                 Style::default().fg(theme::blue()),
             ),
             Span::raw(session),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                format!("{}: ", i18n::text(language, Text::HandoffSkill)),
+                Style::default()
+                    .fg(theme::blue())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                selected_skill_label(app),
+                Style::default()
+                    .fg(theme::cyan())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                localized(language, "S change", "S 切换"),
+                Style::default().fg(theme::muted()),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                format!("{}: ", localized(language, "Runner", "执行器")),
+                Style::default().fg(theme::blue()),
+            ),
+            Span::styled(
+                selected_runner_label(app, language),
+                Style::default()
+                    .fg(theme::green())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                localized(language, "R change", "R 切换"),
+                Style::default().fg(theme::muted()),
+            ),
         ]),
         Line::raw(""),
         Line::from(Span::styled(
@@ -5950,43 +6066,7 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
     ];
     lines.extend(target_lines);
     let pending_needs_handoff_skill = app.launch_requires_handoff_skill(app.pending_target);
-    let pending_validation_state = if pending_needs_handoff_skill {
-        LaunchValidationState::Blocked
-    } else {
-        pending_validation.state
-    };
-    lines.extend([
-        Line::raw(""),
-        Line::from(vec![
-            Span::styled(
-                format!("{}: ", i18n::text(language, Text::Selected)),
-                Style::default().fg(theme::blue()),
-            ),
-            Span::raw(app.pending_target.to_string()),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                format!("{}: ", i18n::text(language, Text::Validation)),
-                Style::default().fg(theme::blue()),
-            ),
-            Span::styled(
-                validation_label(language, pending_validation_state),
-                Style::default()
-                    .fg(validation_color(pending_validation_state))
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  "),
-            Span::styled(
-                if pending_needs_handoff_skill {
-                    i18n::text(language, Text::HandoffSkillRequired).to_string()
-                } else {
-                    validation_summary_text(language, &pending_validation)
-                },
-                Style::default().fg(theme::muted()),
-            ),
-        ]),
-        Line::raw(""),
-    ]);
+    lines.push(Line::raw(""));
     if pending_needs_handoff_skill {
         lines.extend([
             Line::from(Span::styled(
@@ -6004,24 +6084,11 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                 Style::default().fg(theme::gold()),
             )),
         ]);
-    } else {
-        lines.push(Line::from(Span::styled(
-            i18n::text(language, Text::Readiness),
-            Style::default()
-                .fg(theme::blue())
-                .add_modifier(Modifier::BOLD),
-        )));
-        lines.extend(readiness_lines(pending_report.as_ref(), 6, language));
     }
     let can_regenerate_handoff = validation_can_regenerate_handoff(&pending_validation);
     lines.extend([
         if pending_needs_handoff_skill {
-            Line::from(Span::styled(
-                i18n::text(language, Text::HandoffSkillRequired),
-                Style::default()
-                    .fg(theme::gold())
-                    .add_modifier(Modifier::BOLD),
-            ))
+            Line::raw("")
         } else if pending_validation.state == LaunchValidationState::Blocked {
             Line::from(Span::styled(
                 if can_regenerate_handoff {
@@ -6047,25 +6114,25 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         Line::from(Span::styled(
             if pending_needs_handoff_skill {
                 if language == crate::core::config::UiLanguage::ZhHans {
-                    "j/k 选择目标   S/enter 选择 Skill   y 不可用   Esc 取消"
+                    "j/k 选择目标   S Skill   R Runner   Enter 选择 Skill   y 不可用   Esc 取消"
                 } else {
-                    "j/k choose target   S/enter choose skill   y unavailable   Esc cancel"
+                    "j/k target   S skill   R runner   Enter choose skill   y unavailable   Esc cancel"
                 }
             } else if pending_validation.state == LaunchValidationState::Blocked {
                 if can_regenerate_handoff && language == crate::core::config::UiLanguage::ZhHans {
-                    "j/k 选择目标   enter 重新生成   y 不可用   Esc 取消"
+                    "j/k 选择目标   S Skill   R Runner   Enter 重新生成   y 不可用   Esc 取消"
                 } else if can_regenerate_handoff {
-                    "j/k choose target   enter regenerate   y unavailable   Esc cancel"
+                    "j/k target   S skill   R runner   Enter regenerate   y unavailable   Esc cancel"
                 } else if language == crate::core::config::UiLanguage::ZhHans {
-                    "j/k 选择目标   enter/y 已阻塞   Esc 取消"
+                    "j/k 选择目标   S Skill   R Runner   enter/y 已阻塞   Esc 取消"
                 } else {
-                    "j/k choose target   enter/y blocked   Esc cancel"
+                    "j/k target   S skill   R runner   enter/y blocked   Esc cancel"
                 }
             } else {
                 if language == crate::core::config::UiLanguage::ZhHans {
-                    "j/k 选择目标   enter 确认   y 不可用   Esc 取消"
+                    "j/k 选择目标   S Skill   R Runner   enter review   y 不可用   Esc 取消"
                 } else {
-                    "j/k choose target   enter review   y unavailable   Esc cancel"
+                    "j/k target   S skill   R runner   enter review   y unavailable   Esc cancel"
                 }
             },
             Style::default().fg(theme::muted()),
@@ -6243,7 +6310,7 @@ fn render_skill_handoff_review(
     let content_area = chunks[0];
     let footer_area = chunks[1];
 
-    let skill = capsule.handoff_skill.as_deref().unwrap_or("handoff");
+    let skill = handoff::skill_display_label(capsule.handoff_skill.as_deref().unwrap_or("handoff"));
     let artifact = capsule.handoff_artifact.as_deref().unwrap_or_default();
     let mut lines = vec![
         Line::from(Span::styled(
@@ -6275,8 +6342,16 @@ fn render_skill_handoff_review(
             theme::blue(),
         ),
         review_label_line(
-            i18n::text(language, Text::Skill),
+            i18n::text(language, Text::HandoffSkill),
             skill.to_string(),
+            theme::blue(),
+        ),
+        review_label_line(
+            localized(language, "Runner", "执行器"),
+            capsule
+                .handoff_runner
+                .clone()
+                .unwrap_or_else(|| localized(language, "Unknown", "未知").into()),
             theme::blue(),
         ),
     ];
@@ -6303,22 +6378,25 @@ fn render_skill_handoff_review(
         content_area,
     );
 
+    let mut footer_actions = vec![
+        action_button("Enter/r", localized(language, "Start", "启动")),
+        Span::raw("  "),
+        action_button("y", localized(language, "Copy text", "复制全文")),
+        Span::raw("  "),
+    ];
+    if capsule.handoff_artifact_path.is_some() {
+        footer_actions.extend([
+            action_button("p", localized(language, "Copy path", "复制路径")),
+            Span::raw("  "),
+        ]);
+    }
+    footer_actions.extend([
+        action_button("d", i18n::text(language, Text::Detail)),
+        Span::raw("  "),
+        action_button("Esc", i18n::text(language, Text::Back)),
+    ]);
     let footer_lines = vec![
-        Line::from(vec![
-            action_button("Enter/r", localized(language, "Start", "启动")),
-            Span::raw("  "),
-            action_button("y", localized(language, "Copy text", "复制全文")),
-            Span::raw("  "),
-            if capsule.handoff_artifact_path.is_some() {
-                action_button("p", localized(language, "Copy path", "复制路径"))
-            } else {
-                disabled_action_button("p", localized(language, "No path", "无路径"))
-            },
-            Span::raw("  "),
-            action_button("d", i18n::text(language, Text::Detail)),
-            Span::raw("  "),
-            action_button("Esc", i18n::text(language, Text::Back)),
-        ]),
+        Line::from(footer_actions),
         Line::from(Span::styled(
             localized(
                 language,
@@ -6351,7 +6429,7 @@ fn render_skill_handoff_details(
     let footer_area = chunks[1];
 
     let runner = capsule.handoff_runner.as_deref().unwrap_or("agent");
-    let skill = capsule.handoff_skill.as_deref().unwrap_or("handoff");
+    let skill = handoff::skill_display_label(capsule.handoff_skill.as_deref().unwrap_or("handoff"));
     let skill_path = handoff_evidence_value(capsule, "skill path: ").unwrap_or_else(|| "-".into());
     let file_path = capsule
         .handoff_artifact_path
@@ -6388,7 +6466,7 @@ fn render_skill_handoff_details(
             theme::blue(),
         ),
         review_label_line(
-            i18n::text(language, Text::Skill),
+            i18n::text(language, Text::HandoffSkill),
             skill.into(),
             theme::blue(),
         ),
@@ -6632,6 +6710,76 @@ fn validation_label(
         LaunchValidationState::Ready => "READY",
         LaunchValidationState::Warning => "WARN",
         LaunchValidationState::Blocked => "BLOCKED",
+    }
+}
+
+fn target_picker_validation_state(state: LaunchValidationState) -> LaunchValidationState {
+    match state {
+        LaunchValidationState::Warning => LaunchValidationState::Ready,
+        other => other,
+    }
+}
+
+fn target_picker_icon(target: CliTool) -> (&'static str, Color) {
+    match target {
+        CliTool::Codex => ("C", source_tool_color(target)),
+        CliTool::Claude => ("λ", source_tool_color(target)),
+        CliTool::Hermes => ("H", source_tool_color(target)),
+    }
+}
+
+fn target_picker_status_icon(state: LaunchValidationState) -> (&'static str, Color) {
+    match state {
+        LaunchValidationState::Ready | LaunchValidationState::Warning => ("✓", theme::green()),
+        LaunchValidationState::Blocked => ("×", theme::red()),
+    }
+}
+
+fn target_picker_validation_label(
+    language: crate::core::config::UiLanguage,
+    state: LaunchValidationState,
+) -> &'static str {
+    match state {
+        LaunchValidationState::Ready | LaunchValidationState::Warning => {
+            localized(language, "available", "可用")
+        }
+        LaunchValidationState::Blocked => {
+            validation_label(language, LaunchValidationState::Blocked)
+        }
+    }
+}
+
+fn target_picker_description(
+    language: crate::core::config::UiLanguage,
+    target: CliTool,
+    raw_state: LaunchValidationState,
+    needs_handoff_skill: bool,
+    validation: &crate::core::model::LaunchValidation,
+) -> String {
+    if needs_handoff_skill {
+        return i18n::text(language, Text::HandoffSkillRequired).to_string();
+    }
+    if raw_state == LaunchValidationState::Blocked {
+        let summary = validation_summary_text(language, validation);
+        if !summary.is_empty() {
+            return summary;
+        }
+    }
+    if raw_state == LaunchValidationState::Warning {
+        return localized(
+            language,
+            "Review will load the selected session context.",
+            "Review 会加载选中会话上下文。",
+        )
+        .into();
+    }
+    match language {
+        crate::core::config::UiLanguage::English => {
+            format!("{target} will read the generated handoff document.")
+        }
+        crate::core::config::UiLanguage::ZhHans => {
+            format!("{target} 会读取生成的 handoff 文档。")
+        }
     }
 }
 
@@ -7371,22 +7519,24 @@ mod tests {
             .unwrap_or_else(|| panic!("missing {needle:?} in screen:\n{screen}"))
     }
 
-    fn settings_row_columns(screen: &str, row_label: &str) -> (usize, usize, usize) {
-        let line = screen
-            .lines()
-            .find(|line| line.contains(row_label) && line.contains("预览"))
+    fn settings_row_columns(screen: &str, row_label: &str) -> (usize, usize) {
+        let lines = screen.lines().collect::<Vec<_>>();
+        let row_index = lines
+            .iter()
+            .position(|line| line.contains(row_label))
             .unwrap_or_else(|| panic!("missing settings row {row_label:?} in screen:\n{screen}"));
-        let draft_index = line.find("预览").expect("draft column");
-        let saved_index = line.find("已保存").expect("saved column");
-        let status_index = line.rfind("已保存").expect("status column");
+        let detail_line = lines.get(row_index + 1).unwrap_or_else(|| {
+            panic!("missing settings detail row after {row_label:?}:\n{screen}")
+        });
+        let draft_index = detail_line.find("预览").expect("draft column");
+        let saved_index = detail_line.find("已保存").expect("saved column");
         (
-            display_width(&line[..draft_index]),
-            display_width(&line[..saved_index]),
-            display_width(&line[..status_index]),
+            display_width(&detail_line[..draft_index]),
+            display_width(&detail_line[..saved_index]),
         )
     }
 
-    fn assert_settings_columns_aligned(screen: &str) -> Vec<(usize, usize, usize)> {
+    fn assert_settings_columns_aligned(screen: &str) -> Vec<(usize, usize)> {
         let columns = ["语言", "主题", "Smart Enter / tmux"]
             .into_iter()
             .map(|label| settings_row_columns(screen, label))
@@ -7750,7 +7900,7 @@ mod tests {
         assert_screen_contains(&on_screen, "Preview On");
         assert_screen_contains(&on_screen, "Unsaved");
         assert_screen_contains(&on_screen, "Jump");
-        assert_screen_contains(&on_screen, "never translates session content");
+        assert_screen_contains(&on_screen, "not source session stores");
     }
 
     #[test]
@@ -7868,21 +8018,33 @@ mod tests {
         app.handle_key(key(' '));
 
         let screen = render_text(&app, 150, 36);
-        let theme_line = screen
-            .lines()
-            .find(|line| line.contains("主题") && line.contains("荣曜秋菊"))
+        let lines = screen.lines().collect::<Vec<_>>();
+        let theme_row_index = lines
+            .iter()
+            .position(|line| line.contains("主题") && line.contains("未保存"))
             .unwrap_or_else(|| panic!("missing theme settings row:\n{screen}"));
+        let theme_line = *lines
+            .get(theme_row_index + 1)
+            .unwrap_or_else(|| panic!("missing theme settings detail row:\n{screen}"));
 
+        assert!(theme_line.contains("预览 荣曜秋菊"), "{theme_line}");
         assert!(theme_line.contains("已保存 婉若游龙"), "{theme_line}");
-        assert!(theme_line.contains("未保存"), "{theme_line}");
 
+        let draft_index = theme_line.find("预览 荣曜秋菊").expect("draft column");
         let saved_index = theme_line.find("已保存 婉若游龙").expect("saved column");
-        let state_index = theme_line.rfind("未保存").expect("state column");
+        let draft_column = display_width(&theme_line[..draft_index]);
         let saved_column = display_width(&theme_line[..saved_index]);
-        let state_column = display_width(&theme_line[..state_index]);
         assert!(
-            state_column >= saved_column + display_width("已保存 婉若游龙") + 2,
-            "state column should stay separate from saved column: {theme_line}"
+            saved_column >= draft_column + display_width("预览 荣曜秋菊") + 2,
+            "saved column should stay separate from preview column: {theme_line}"
+        );
+        let theme_status_line = screen
+            .lines()
+            .find(|line| line.contains("主题") && line.contains("未保存"))
+            .unwrap_or_else(|| panic!("missing theme status row:\n{screen}"));
+        assert!(
+            theme_status_line.contains("! 未保存"),
+            "{theme_status_line}"
         );
     }
 
@@ -8740,7 +8902,7 @@ mod tests {
             &screen,
             "Pick the handoff skill; runner setup is checked before launch.",
         );
-        assert_screen_contains(&screen, "handoff");
+        assert_screen_contains(&screen, "matt-handoff");
         assert_screen_contains(&screen, "Skill");
         assert_screen_contains(&screen, "Status:");
         assert_screen_contains(&screen, "j/k Choose");
@@ -8795,6 +8957,36 @@ mod tests {
     }
 
     #[test]
+    fn built_in_agent_skill_details_show_moonbox_source() {
+        let info = crate::core::model::CompilerPresetInfo {
+            id: "agent:codex:moonbox-handoff".into(),
+            kind: crate::core::model::CompilerPresetKind::Agent,
+            status: crate::core::model::CompilerPresetStatus::Ready,
+            score: 90,
+            command: Some("python3".into()),
+            args: vec!["skill=built-in".into()],
+            timeout_ms: None,
+            reason: "built_in_handoff_skill: bundled with Moonbox".into(),
+            description: Some(
+                "Codex runner using built-in Moonbox handoff skill: Built-in Moonbox handoff prompt."
+                    .into(),
+            ),
+            homepage: Some("https://github.com/Gunsio/moonbox".into()),
+            github_stars: None,
+        };
+
+        let text = agent_skill_detail_lines(&info, crate::core::config::UiLanguage::ZhHans)
+            .iter()
+            .map(line_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("提供方: Moonbox（内置）"), "{text}");
+        assert!(text.contains("状态: Moonbox 内置可用"), "{text}");
+        assert!(text.contains("路径: built-in"), "{text}");
+    }
+
+    #[test]
     fn skill_picker_over_launch_shows_apply_and_generate_hint() {
         let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
         app.set_ui_preferences_for_test(crate::core::config::UiPreferencesConfig {
@@ -8833,7 +9025,7 @@ mod tests {
             &screen,
             "这里只选择 handoff skill；执行器配置会在启动前预检。",
         );
-        assert_screen_contains(&screen, "handoff");
+        assert_screen_contains(&screen, "matt-handoff");
         assert_screen_contains(&screen, "Skill");
         assert_screen_contains(&screen, "状态:");
         assert_screen_contains(&screen, "已启用");
@@ -9056,15 +9248,17 @@ mod tests {
 
         assert_screen_contains(&screen, "Launch");
         assert_screen_contains(&screen, "Choose target CLI");
-        assert_screen_contains(&screen, "BLOCKED");
-        assert_screen_contains(&screen, "Readiness");
-        assert_screen_contains(&screen, "Source Health");
-        assert_screen_contains(&screen, "Capsule Health");
-        assert_screen_contains(&screen, "Target Readiness");
-        assert_screen_contains(&screen, "FAIL");
-        assert_screen_contains(&screen, "target_support");
-        assert_screen_contains(&screen, "raw resume is known failed");
-        assert_screen_contains(&screen, "enter/y Blocked");
+        assert_screen_contains(&screen, "H Hermes");
+        assert_screen_contains(&screen, "× BLOCKED");
+        assert_screen_contains(
+            &screen,
+            "Hermes raw resume is known failed for this session",
+        );
+        assert_screen_contains(&screen, "enter/y blocked");
+        assert!(!screen.contains("Selected:"), "{screen}");
+        assert!(!screen.contains("Readiness"), "{screen}");
+        assert!(!screen.contains("Target Readiness"), "{screen}");
+        assert!(!screen.contains("target_support"), "{screen}");
     }
 
     #[test]
@@ -9077,9 +9271,32 @@ mod tests {
 
         assert_screen_contains(&screen, "Launch");
         assert_screen_contains(&screen, "Choose target CLI");
-        assert_screen_contains(&screen, "WARN");
-        assert_screen_contains(&screen, "context will load when Review starts");
+        assert_screen_contains(&screen, "Session:");
+        assert_screen_contains(
+            &screen,
+            &format!("Handoff Skill: {}", selected_skill_label(&app)),
+        );
+        assert_screen_contains(&screen, "S change");
+        assert_screen_contains(
+            &screen,
+            &format!(
+                "Runner: {}",
+                selected_runner_label(&app, app.effective_language())
+            ),
+        );
+        assert_screen_contains(&screen, "R change");
+        assert_screen_contains(&screen, "C Codex");
+        assert_screen_contains(&screen, "λ Claude");
+        assert_screen_contains(&screen, "H Hermes");
+        assert_screen_contains(&screen, "Review will load the selected session context.");
+        assert_screen_contains(&screen, "available");
         assert_screen_contains(&screen, "enter Review");
+        assert!(!screen.contains("WARN"), "{screen}");
+        assert!(!screen.contains("Selected:"), "{screen}");
+        assert!(
+            !screen.contains("context will load when Review starts"),
+            "{screen}"
+        );
         assert!(!screen.contains("Loading selected session"), "{screen}");
         assert!(!screen.contains("Enter waits"), "{screen}");
     }
@@ -9117,10 +9334,9 @@ mod tests {
         let screen = render_text(&app, 140, 52);
 
         assert_screen_contains(&screen, "选择目标 CLI");
-        assert_screen_contains(&screen, "当前 handoff 由其他 skill/compiler 生成");
-        assert_screen_contains(&screen, "请用当前 skill 重新生成后再启动");
         assert_screen_contains(&screen, "按 Enter 用当前 skill 重新生成 handoff");
-        assert_screen_contains(&screen, "enter 重新生成");
+        assert_screen_contains(&screen, "Enter 重新生成");
+        assert_screen_contains(&screen, "当前 handoff 由其他 skill/compiler 生成");
         assert!(!screen.contains("generated_by"), "{screen}");
         assert!(!screen.contains(" vs compiler "), "{screen}");
     }
@@ -9178,7 +9394,9 @@ mod tests {
         let target_screen = render_text(&app, 140, 48);
         assert_screen_contains(&target_screen, "先选择 AI handoff skill");
         assert_screen_contains(&target_screen, "真实 session 不再进入草稿 Review");
-        assert_screen_contains(&target_screen, "S/enter 选择 Skill");
+        assert_screen_contains(&target_screen, "S Skill");
+        assert_screen_contains(&target_screen, "R Runner");
+        assert_screen_contains(&target_screen, "Enter 选择 Skill");
         assert!(
             !target_screen.contains("engineering-handoff is a built-in"),
             "{target_screen}"
@@ -9254,7 +9472,8 @@ mod tests {
         );
         assert_screen_contains(&screen, "Source:");
         assert_screen_contains(&screen, "Target: Hermes");
-        assert_screen_contains(&screen, "Skill: handoff");
+        assert_screen_contains(&screen, "Handoff Skill: matt-handoff");
+        assert_screen_contains(&screen, "Runner: Codex");
         assert_screen_contains(
             &screen,
             "File: /var/folders/example/moonbox-handoff-demo.md",
@@ -9277,7 +9496,7 @@ mod tests {
 
         assert_screen_contains(&details, "Handoff details");
         assert_screen_contains(&details, "Runner: Codex");
-        assert_screen_contains(&details, "Skill: handoff");
+        assert_screen_contains(&details, "Handoff Skill: matt-handoff");
         assert_screen_contains(
             &details,
             "File: /var/folders/example/moonbox-handoff-demo.md",
@@ -9334,14 +9553,27 @@ mod tests {
         let screen = render_text(&app, 120, 36);
 
         assert_screen_contains(&screen, "Generating Handoff Review");
-        assert_screen_contains(&screen, "Skill / Runner:");
+        assert_screen_contains(&screen, "Handoff Skill:");
+        assert_screen_contains(&screen, "Runner:");
+        assert_screen_contains(&screen, "engineering-handoff");
+        assert_screen_contains(&screen, "Built-in");
         assert_screen_contains(&screen, "Stage:");
         assert_screen_contains(&screen, "Queued");
-        assert_screen_contains(&screen, "Timeout limit: 180s");
-        assert_screen_contains(&screen, "waiting for background handoff worker");
-        assert_screen_contains(&screen, "Esc hides this panel");
-        assert_screen_contains(&screen, "will not start another SDK process");
+        assert_screen_contains(&screen, "Timeout: 300s");
         assert_screen_contains(&screen, "wait background job");
+        assert!(!screen.contains("Skill / Runner:"), "{screen}");
+        assert!(!screen.contains("agent:codex:handoff"), "{screen}");
+        assert!(!screen.contains("Timeout limit"), "{screen}");
+        assert!(!screen.contains("Last update"), "{screen}");
+        assert!(
+            !screen.contains("Reading the selected local session"),
+            "{screen}"
+        );
+        assert!(!screen.contains("Esc hides this panel"), "{screen}");
+        assert!(
+            !screen.contains("will not start another SDK process"),
+            "{screen}"
+        );
     }
 
     #[test]
@@ -9395,17 +9627,19 @@ mod tests {
     }
 
     #[test]
-    fn launch_overlay_renders_warning_readiness_signal() {
+    fn launch_overlay_renders_warning_target_summary() {
         let mut app = App::new(CliTool::Codex, CliTool::Codex).expect("app");
         app.show_launch = true;
         app.pending_target = CliTool::Codex;
         let screen = render_text(&app, 120, 36);
 
-        assert_screen_contains(&screen, "WARN");
-        assert_screen_contains(&screen, "Readiness");
-        assert_screen_contains(&screen, "Target Readiness");
-        assert_screen_contains(&screen, "target_support");
-        assert_screen_contains(&screen, "Same-CLI handoff");
+        assert_screen_contains(&screen, "available");
         assert_screen_contains(&screen, "enter Review");
+        assert!(!screen.contains("WARN"), "{screen}");
+        assert!(!screen.contains("Same-CLI handoff"), "{screen}");
+        assert!(!screen.contains("Selected:"), "{screen}");
+        assert!(!screen.contains("Readiness"), "{screen}");
+        assert!(!screen.contains("Target Readiness"), "{screen}");
+        assert!(!screen.contains("target_support"), "{screen}");
     }
 }
