@@ -117,6 +117,20 @@ pub fn original_command(session: &SessionSummary) -> TargetLaunchCommand {
     }
 }
 
+pub fn native_fork_command(session: &SessionSummary) -> Option<TargetLaunchCommand> {
+    let program = configured_target_binary(session.cli);
+    let cwd = usable_cwd(&session.cwd);
+    let args = native_fork_args(session, cwd.as_deref())?;
+    let display = shell_command(&program, &args);
+
+    Some(TargetLaunchCommand {
+        program,
+        args,
+        cwd,
+        display,
+    })
+}
+
 pub fn execute_original_plan(
     mut plan: OriginalSessionPlan,
 ) -> Result<OriginalSessionExecution, CoreError> {
@@ -150,8 +164,12 @@ pub(crate) fn run_original_interactive(
 
 pub(crate) fn original_handoff_notice(plan: &OriginalSessionPlan) -> String {
     let cwd = plan.command.cwd.as_deref().unwrap_or("terminal default");
+    let action = match plan.action {
+        super::model::SessionAction::NativeFork => "Forking native session",
+        _ => "Opening original session",
+    };
     format!(
-        "Opening original session: {} {}\nCwd: {}\nCommand: {}\n",
+        "{action}: {} {}\nCwd: {}\nCommand: {}\n",
         plan.source_session.cli, plan.source_session.id, cwd, plan.command.display
     )
 }
@@ -241,6 +259,27 @@ fn original_args(session: &SessionSummary, cwd: Option<&str>) -> Vec<String> {
         }
         CliTool::Claude => vec!["--resume".into(), session.id.clone()],
         CliTool::Hermes => vec!["--resume".into(), session.id.clone()],
+    }
+}
+
+fn native_fork_args(session: &SessionSummary, cwd: Option<&str>) -> Option<Vec<String>> {
+    match session.cli {
+        CliTool::Codex => {
+            let mut args = Vec::new();
+            if let Some(cwd) = cwd {
+                args.push("-C".into());
+                args.push(cwd.into());
+            }
+            args.push("fork".into());
+            args.push(session.id.clone());
+            Some(args)
+        }
+        CliTool::Claude => Some(vec![
+            "--resume".into(),
+            session.id.clone(),
+            "--fork-session".into(),
+        ]),
+        CliTool::Hermes => None,
     }
 }
 
@@ -971,6 +1010,50 @@ mod tests {
     }
 
     #[test]
+    fn native_fork_commands_use_provider_entrypoints() {
+        let root =
+            std::env::temp_dir().join(format!("moonbox-native-fork-cwd-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("temp root");
+        let codex = codex_session_with_cwd(root.display().to_string());
+
+        let codex_command = native_fork_command(&codex).expect("codex native fork");
+        assert_eq!(
+            codex_command.args,
+            [
+                "-C",
+                root.to_string_lossy().as_ref(),
+                "fork",
+                "codex-cxcp-design"
+            ]
+        );
+        assert_eq!(
+            codex_command.cwd.as_deref(),
+            Some(root.to_string_lossy().as_ref())
+        );
+
+        let data = data::workbench_data(CliTool::Codex, CliTool::Hermes).expect("data");
+        let claude = data
+            .sessions
+            .iter()
+            .find(|session| session.cli == CliTool::Claude)
+            .expect("claude");
+        let hermes = data
+            .sessions
+            .iter()
+            .find(|session| session.cli == CliTool::Hermes)
+            .expect("hermes");
+
+        assert_eq!(
+            native_fork_command(claude)
+                .expect("claude native fork")
+                .args,
+            ["--resume", "claude-qc-platform", "--fork-session"]
+        );
+        assert!(native_fork_command(hermes).is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn original_handoff_notice_names_session_and_command() {
         let data = data::workbench_data(CliTool::Codex, CliTool::Hermes).expect("data");
         let session = data
@@ -993,6 +1076,29 @@ mod tests {
         assert!(notice.contains("Opening original session: Codex codex-cxcp-design"));
         assert!(notice.contains("Cwd: terminal default"));
         assert!(notice.contains("Command: codex resume codex-cxcp-design"));
+    }
+
+    #[test]
+    fn original_handoff_notice_labels_native_fork() {
+        let root =
+            std::env::temp_dir().join(format!("moonbox-native-fork-notice-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("temp root");
+        let session = codex_session_with_cwd(root.display().to_string());
+        let command = native_fork_command(&session).expect("native fork command");
+        let plan = OriginalSessionPlan {
+            version: 1,
+            action: crate::core::model::SessionAction::NativeFork,
+            dry_run: true,
+            source_session: session,
+            command,
+        };
+
+        let notice = original_handoff_notice(&plan);
+
+        assert!(notice.contains("Forking native session: Codex codex-cxcp-design"));
+        assert!(notice.contains("Command: codex -C "));
+        assert!(notice.contains(" fork codex-cxcp-design"));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[cfg(unix)]

@@ -142,7 +142,7 @@ pub fn session_action_set(
         inspect_action(),
         resume_action(context),
         jump_action(context),
-        fork_action(),
+        fork_action(session, context),
         handoff_action(context),
         copy_action(),
         copy_session_id_action(),
@@ -268,14 +268,45 @@ fn jump_action(context: &SessionActionContext) -> SessionAvailableAction {
     }
 }
 
-fn fork_action() -> SessionAvailableAction {
-    action(
-        SessionAvailableActionKind::Fork,
-        SessionActionAvailability::Unavailable,
-        "Whole-session fork is planned for a later milestone.",
-        vec![SessionActionSafety::SourceStoreReadOnly],
-        Vec::new(),
-    )
+fn fork_action(session: &SessionSummary, context: &SessionActionContext) -> SessionAvailableAction {
+    if !context.local_data_space {
+        return action(
+            SessionAvailableActionKind::Fork,
+            SessionActionAvailability::Blocked,
+            "SSH data space is read-only; native fork requires a local provider CLI.",
+            vec![SessionActionSafety::SourceStoreReadOnly],
+            Vec::new(),
+        );
+    }
+    match session.cli {
+        CliTool::Codex => action(
+            SessionAvailableActionKind::Fork,
+            SessionActionAvailability::Available,
+            "Codex native session fork is available.",
+            vec![
+                SessionActionSafety::SourceStoreReadOnly,
+                SessionActionSafety::LaunchesProviderProcess,
+            ],
+            Vec::new(),
+        ),
+        CliTool::Claude => action(
+            SessionAvailableActionKind::Fork,
+            SessionActionAvailability::Available,
+            "Claude native resume fork is available.",
+            vec![
+                SessionActionSafety::SourceStoreReadOnly,
+                SessionActionSafety::LaunchesProviderProcess,
+            ],
+            Vec::new(),
+        ),
+        CliTool::Hermes => action(
+            SessionAvailableActionKind::Fork,
+            SessionActionAvailability::Unavailable,
+            "Hermes does not currently expose native session fork.",
+            vec![SessionActionSafety::SourceStoreReadOnly],
+            Vec::new(),
+        ),
+    }
 }
 
 fn handoff_action(context: &SessionActionContext) -> SessionAvailableAction {
@@ -396,7 +427,7 @@ mod tests {
     }
 
     #[test]
-    fn local_actions_include_planned_future_actions_without_enabling_them() {
+    fn local_actions_include_available_native_fork_and_future_actions() {
         let actions = session_action_set(&session(), &SessionActionContext::local_without_live());
 
         assert_eq!(
@@ -411,7 +442,7 @@ mod tests {
                 .action(SessionAvailableActionKind::Fork)
                 .expect("fork")
                 .status,
-            SessionActionAvailability::Unavailable
+            SessionActionAvailability::Available
         );
         assert_eq!(
             actions
@@ -440,6 +471,65 @@ mod tests {
                 .expect("archive")
                 .safety,
             vec![SessionActionSafety::MoonboxOverlayWrite]
+        );
+    }
+
+    #[test]
+    fn native_fork_availability_tracks_provider_support() {
+        let mut codex = session();
+        codex.cli = CliTool::Codex;
+        let codex_action = session_action_set(&codex, &SessionActionContext::local_without_live())
+            .action(SessionAvailableActionKind::Fork)
+            .expect("codex fork")
+            .clone();
+        assert_eq!(codex_action.status, SessionActionAvailability::Available);
+        assert_eq!(
+            codex_action.reason,
+            "Codex native session fork is available."
+        );
+
+        let mut claude = session();
+        claude.cli = CliTool::Claude;
+        let claude_action =
+            session_action_set(&claude, &SessionActionContext::local_without_live())
+                .action(SessionAvailableActionKind::Fork)
+                .expect("claude fork")
+                .clone();
+        assert_eq!(claude_action.status, SessionActionAvailability::Available);
+        assert_eq!(
+            claude_action.reason,
+            "Claude native resume fork is available."
+        );
+
+        let mut hermes = session();
+        hermes.cli = CliTool::Hermes;
+        let hermes_action =
+            session_action_set(&hermes, &SessionActionContext::local_without_live())
+                .action(SessionAvailableActionKind::Fork)
+                .expect("hermes fork")
+                .clone();
+        assert_eq!(hermes_action.status, SessionActionAvailability::Unavailable);
+        assert_eq!(
+            hermes_action.reason,
+            "Hermes does not currently expose native session fork."
+        );
+    }
+
+    #[test]
+    fn remote_native_fork_is_blocked() {
+        let context = SessionActionContext {
+            local_data_space: false,
+            ..SessionActionContext::local_without_live()
+        };
+        let action = session_action_set(&session(), &context)
+            .action(SessionAvailableActionKind::Fork)
+            .expect("remote fork")
+            .clone();
+
+        assert_eq!(action.status, SessionActionAvailability::Blocked);
+        assert_eq!(
+            action.reason,
+            "SSH data space is read-only; native fork requires a local provider CLI."
         );
     }
 

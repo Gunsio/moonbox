@@ -1620,7 +1620,18 @@ fn actions_cli_reports_fixture_safe_action_model() {
     assert_eq!(action("inspect")["status"], "available");
     assert_eq!(action("resume")["status"], "available");
     assert_eq!(action("jump")["status"], "unavailable");
-    assert_eq!(action("fork")["status"], "unavailable");
+    assert_eq!(action("fork")["status"], "available");
+    assert_eq!(
+        action("fork")["reason"],
+        "Codex native session fork is available."
+    );
+    assert!(
+        action("fork")["safety"]
+            .as_array()
+            .expect("fork safety")
+            .iter()
+            .any(|safety| safety == "launches_provider_process")
+    );
     assert_eq!(action("handoff")["status"], "available");
     assert_eq!(action("copy")["status"], "unavailable");
     assert_eq!(action("copy_session_id")["status"], "unavailable");
