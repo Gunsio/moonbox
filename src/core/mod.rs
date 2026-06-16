@@ -1,3 +1,4 @@
+pub mod actions;
 pub mod adapter;
 pub mod anatomy;
 pub mod capability;

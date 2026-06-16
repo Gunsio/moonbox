@@ -1,6 +1,7 @@
 use std::{fs, path::Path};
 
 use super::{
+    actions::{self, SessionActionContext, SessionActionSet},
     capsule_store::{
         self, CapsuleExportEnvelope, CapsuleImportResult, CapsuleRecord, CapsuleSummary,
     },
@@ -76,6 +77,16 @@ pub fn find_session(session_id: &str) -> Result<Option<SessionSummary>, CoreErro
 
 pub fn default_session() -> Result<Option<SessionSummary>, CoreError> {
     Ok(list_sessions()?.into_iter().next())
+}
+
+pub fn session_actions(session_id: Option<&str>) -> Result<Option<SessionActionSet>, CoreError> {
+    let Some(source_session) = selected_session(session_id)? else {
+        return Ok(None);
+    };
+    Ok(Some(actions::session_action_set(
+        &source_session,
+        &SessionActionContext::local_without_live(),
+    )))
 }
 
 pub fn open_command(session_id: Option<&str>) -> Result<Option<String>, CoreError> {

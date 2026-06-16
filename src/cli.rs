@@ -22,6 +22,8 @@ pub enum Command {
     Tui(TuiArgs),
     /// List discovered sessions.
     Sessions(SessionListArgs),
+    /// List available actions for a session without executing them.
+    Actions(ActionArgs),
     /// Print the command for opening an original session.
     Open(OpenArgs),
     /// Preview a provider app deep link without launching it.
@@ -159,6 +161,16 @@ pub struct SessionListArgs {
     /// Maximum continuation points to include per Hermes session search result.
     #[arg(long = "hermes-search-limit", default_value_t = 3)]
     pub hermes_search_limit: usize,
+}
+
+#[derive(Debug, Args, Clone, Default)]
+pub struct ActionArgs {
+    /// Session id to inspect. Defaults to the newest discovered session.
+    #[arg(long)]
+    pub session: Option<String>,
+    /// Print JSON output.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args, Clone, Default)]

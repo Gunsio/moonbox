@@ -8,6 +8,11 @@ use std::{
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::core::{
+    actions::{
+        self, SessionActionAvailability, SessionActionContext, SessionActionLiveContext,
+        SessionActionLiveStatus, SessionActionSet, SessionAvailableAction,
+        SessionAvailableActionKind,
+    },
     capsule_store::CapsuleSummary,
     compiler, config, continuation, dataspace, doctor,
     error::CoreError,
@@ -110,12 +115,49 @@ pub struct EnterRoutePreview {
     pub detail: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionMenuEntry {
+    pub action: SessionAvailableAction,
+    pub selected: bool,
+    pub runnable: bool,
+}
+
 fn target_runner_id(target: CliTool) -> Option<&'static str> {
     match target {
         CliTool::Codex => Some("codex"),
         CliTool::Claude => Some("claude"),
         CliTool::Hermes => None,
     }
+}
+
+fn session_action_live_status(status: hooks::HookSessionStatus) -> SessionActionLiveStatus {
+    match status {
+        hooks::HookSessionStatus::Running => SessionActionLiveStatus::Running,
+        hooks::HookSessionStatus::Waiting => SessionActionLiveStatus::Waiting,
+        hooks::HookSessionStatus::Idle => SessionActionLiveStatus::Idle,
+        hooks::HookSessionStatus::Dead => SessionActionLiveStatus::Dead,
+    }
+}
+
+fn action_is_runnable(status: SessionActionAvailability) -> bool {
+    matches!(
+        status,
+        SessionActionAvailability::Available | SessionActionAvailability::Warning
+    )
+}
+
+fn action_menu_order() -> [SessionAvailableActionKind; 9] {
+    [
+        SessionAvailableActionKind::Resume,
+        SessionAvailableActionKind::Handoff,
+        SessionAvailableActionKind::Fork,
+        SessionAvailableActionKind::Jump,
+        SessionAvailableActionKind::Inspect,
+        SessionAvailableActionKind::Copy,
+        SessionAvailableActionKind::CopySessionId,
+        SessionAvailableActionKind::Export,
+        SessionAvailableActionKind::Archive,
+    ]
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1009,6 +1051,8 @@ pub struct App {
     pub show_launch: bool,
     pub launch_review: bool,
     pub launch_review_details: bool,
+    pub show_action_menu: bool,
+    pub action_menu_selection: usize,
     pub show_open_original: bool,
     pub show_doctor: bool,
     pub show_skill_picker: bool,
@@ -1123,6 +1167,8 @@ impl App {
             show_launch: false,
             launch_review: false,
             launch_review_details: false,
+            show_action_menu: false,
+            action_menu_selection: 0,
             show_open_original: false,
             show_doctor: false,
             show_skill_picker: false,
@@ -1601,57 +1647,146 @@ impl App {
             .map(|session| self.enter_route_preview_for(session, self.settings_smart_enter_tmux))
     }
 
+    pub fn session_actions(&self, session: &SessionSummary) -> SessionActionSet {
+        self.session_actions_for(session, self.hooks_config.smart_enter_tmux)
+    }
+
+    pub fn action_menu_entries(&self) -> Vec<ActionMenuEntry> {
+        let Some(session) = self.current_session() else {
+            return Vec::new();
+        };
+        let actions = self.session_actions(session);
+        action_menu_order()
+            .into_iter()
+            .filter_map(|kind| actions.action(kind).cloned())
+            .enumerate()
+            .map(|(index, action)| ActionMenuEntry {
+                runnable: action_is_runnable(action.status),
+                selected: index == self.action_menu_selection,
+                action,
+            })
+            .collect()
+    }
+
+    pub fn selected_action_menu_entry(&self) -> Option<ActionMenuEntry> {
+        self.action_menu_entries()
+            .into_iter()
+            .nth(self.action_menu_selection)
+    }
+
+    fn session_actions_for(
+        &self,
+        session: &SessionSummary,
+        smart_enter_tmux: bool,
+    ) -> SessionActionSet {
+        actions::session_action_set(
+            session,
+            &self.session_action_context_for(session, smart_enter_tmux),
+        )
+    }
+
+    fn session_action_context_for(
+        &self,
+        session: &SessionSummary,
+        smart_enter_tmux: bool,
+    ) -> SessionActionContext {
+        let local_data_space = self.current_data_space().is_local();
+        let live = if local_data_space {
+            self.hook_live_for_session(session)
+                .map(|live| SessionActionLiveContext {
+                    status: session_action_live_status(live.status),
+                    tmux_target: tmux::target_from_hook(
+                        live.tmux.as_deref(),
+                        live.tmux_pane.as_deref(),
+                    )
+                    .map(|target| target.pane_id),
+                })
+        } else {
+            None
+        };
+        SessionActionContext {
+            local_data_space,
+            hooks_enabled: self.hooks_config.enabled,
+            smart_enter_tmux,
+            live,
+        }
+    }
+
     fn enter_route_preview_for(
         &self,
         session: &SessionSummary,
         smart_enter_tmux: bool,
     ) -> EnterRoutePreview {
-        if !self.current_data_space().is_local() {
+        let actions = if smart_enter_tmux == self.hooks_config.smart_enter_tmux {
+            self.session_actions(session)
+        } else {
+            self.session_actions_for(session, smart_enter_tmux)
+        };
+        let handoff = actions.action(SessionAvailableActionKind::Handoff);
+        let resume = actions.action(SessionAvailableActionKind::Resume);
+        let jump = actions.action(SessionAvailableActionKind::Jump);
+        if let Some(handoff) = handoff.filter(|action| {
+            action.status == SessionActionAvailability::Available
+                && !self.current_data_space().is_local()
+        }) {
             return EnterRoutePreview {
                 kind: EnterRouteKind::Handoff,
                 label: "Handoff",
-                detail: "SSH data space is read-only; Enter opens guarded handoff".into(),
+                detail: handoff.reason.clone(),
             };
         }
         if !self.hooks_config.enabled {
             return EnterRoutePreview {
                 kind: EnterRouteKind::Disabled,
                 label: "Resume",
-                detail: "Hooks are disabled; Enter keeps the existing resume path".into(),
+                detail: jump.map(|action| action.reason.clone()).unwrap_or_else(|| {
+                    "Hooks are disabled; Enter keeps the existing resume path".into()
+                }),
             };
         }
         if !smart_enter_tmux {
             return EnterRoutePreview {
                 kind: EnterRouteKind::Disabled,
                 label: "Resume",
-                detail: "Smart Enter / tmux jump is disabled in Settings".into(),
+                detail: jump
+                    .map(|action| action.reason.clone())
+                    .unwrap_or_else(|| "Smart Enter / tmux jump is disabled in Settings".into()),
             };
         }
-        let Some(live) = self.hook_live_for_session(session) else {
+        let Some(jump) = jump else {
             return EnterRoutePreview {
                 kind: EnterRouteKind::Resume,
                 label: "Resume",
-                detail: "No hook live state for this session; Enter resumes normally".into(),
+                detail: resume
+                    .map(|action| action.reason.clone())
+                    .unwrap_or_else(|| "Local provider resume is available.".into()),
             };
         };
-        if live.status == hooks::HookSessionStatus::Dead {
+        if jump.status == SessionActionAvailability::Available {
             return EnterRoutePreview {
-                kind: EnterRouteKind::Resume,
-                label: "Resume",
-                detail: "Hook state marks this session ended; Enter resumes normally".into(),
-            };
-        }
-        match tmux::target_from_hook(live.tmux.as_deref(), live.tmux_pane.as_deref()) {
-            Ok(target) => EnterRoutePreview {
                 kind: EnterRouteKind::Jump,
                 label: "Jump",
-                detail: format!("Enter validates and jumps to tmux pane {}", target.pane_id),
-            },
-            Err(reason) => EnterRoutePreview {
+                detail: jump.reason.clone(),
+            };
+        }
+        if let Some(live) = self.hook_live_for_session(session) {
+            if live.status == hooks::HookSessionStatus::Dead {
+                return EnterRoutePreview {
+                    kind: EnterRouteKind::Resume,
+                    label: "Resume",
+                    detail: format!("{}; Enter resumes normally", jump.reason),
+                };
+            }
+            return EnterRoutePreview {
                 kind: EnterRouteKind::Unavailable,
                 label: "Resume",
-                detail: format!("{reason}; Enter falls back to resume"),
-            },
+                detail: format!("{}; Enter falls back to resume", jump.reason),
+            };
+        }
+        EnterRoutePreview {
+            kind: EnterRouteKind::Resume,
+            label: "Resume",
+            detail: jump.reason.clone(),
         }
     }
 
@@ -1875,7 +2010,7 @@ impl App {
             KeyCode::Char('a') => self.clear_session_filters(),
             KeyCode::Char(',') => self.open_settings(),
             KeyCode::Char('s') | KeyCode::Char('*') => self.toggle_starred_session(),
-            KeyCode::Char('o') => self.open_original(),
+            KeyCode::Char('o') => self.open_action_menu(),
             KeyCode::Char('x') | KeyCode::Char('t') | KeyCode::Char('H') => {
                 self.open_launch_picker()
             }
@@ -1922,6 +2057,14 @@ impl App {
             self.queue_original_resume();
             return;
         }
+        self.queue_tmux_jump_or_resume();
+    }
+
+    fn queue_tmux_jump_or_resume(&mut self) {
+        let Some(session) = self.current_session().cloned() else {
+            self.set_status("No session selected");
+            return;
+        };
         let Some(live) = self.hook_live_for_session(&session) else {
             self.queue_original_resume();
             return;
@@ -2359,6 +2502,10 @@ impl App {
     }
 
     fn handle_overlay_key(&mut self, key: KeyEvent) {
+        if self.show_action_menu {
+            self.handle_action_menu_key(key);
+            return;
+        }
         if self.show_settings {
             self.handle_settings_key(key);
             return;
@@ -2435,6 +2582,11 @@ impl App {
             self.settings_field = SettingsField::Language;
             self.modal_scroll = 0;
             self.set_status("Settings closed");
+        } else if self.show_action_menu {
+            self.show_action_menu = false;
+            self.action_menu_selection = 0;
+            self.modal_scroll = 0;
+            self.set_status("Action menu closed");
         } else if self.show_open_original {
             self.show_open_original = false;
             self.modal_scroll = 0;
@@ -3258,6 +3410,97 @@ impl App {
         self.pending_g = false;
     }
 
+    fn open_action_menu(&mut self) {
+        if self.current_session().is_none() {
+            self.show_action_menu = false;
+            self.set_status("No session selected");
+            self.pending_g = false;
+            return;
+        }
+        self.show_action_menu = true;
+        self.action_menu_selection = 0;
+        self.modal_scroll = 0;
+        self.set_status("Choose session action");
+        self.pending_g = false;
+    }
+
+    fn handle_action_menu_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => self.back_or_quit(),
+            KeyCode::Char('j') | KeyCode::Down => self.move_action_menu_selection(true),
+            KeyCode::Char('k') | KeyCode::Up => self.move_action_menu_selection(false),
+            KeyCode::Enter => self.execute_action_menu_selection(),
+            _ => {}
+        }
+    }
+
+    fn move_action_menu_selection(&mut self, forward: bool) {
+        let count = self.action_menu_entries().len();
+        if count == 0 {
+            self.action_menu_selection = 0;
+            self.set_status("No session actions");
+            return;
+        }
+        if forward {
+            self.action_menu_selection = (self.action_menu_selection + 1) % count;
+        } else if self.action_menu_selection == 0 {
+            self.action_menu_selection = count - 1;
+        } else {
+            self.action_menu_selection -= 1;
+        }
+        if let Some(entry) = self.selected_action_menu_entry() {
+            self.set_status(format!("Action candidate: {}", entry.action.label));
+        }
+    }
+
+    fn execute_action_menu_selection(&mut self) {
+        let Some(entry) = self.selected_action_menu_entry() else {
+            self.set_status("No session action selected");
+            return;
+        };
+        if !entry.runnable {
+            self.set_status(format!(
+                "{} unavailable: {}",
+                entry.action.label, entry.action.reason
+            ));
+            return;
+        }
+        match entry.action.kind {
+            SessionAvailableActionKind::Resume => {
+                self.show_action_menu = false;
+                self.queue_original_resume();
+            }
+            SessionAvailableActionKind::Handoff => {
+                self.show_action_menu = false;
+                if self.current_data_space().is_local() {
+                    self.open_launch_picker();
+                } else {
+                    self.open_launch_picker_for_remote_session();
+                }
+            }
+            SessionAvailableActionKind::Jump => {
+                self.show_action_menu = false;
+                self.queue_tmux_jump_or_resume();
+            }
+            SessionAvailableActionKind::Inspect => {
+                self.show_action_menu = false;
+                self.focus = Focus::Capsule;
+                self.zoomed_focus = Some(Focus::Capsule);
+                self.set_status("Inspecting session details");
+            }
+            SessionAvailableActionKind::Fork
+            | SessionAvailableActionKind::Copy
+            | SessionAvailableActionKind::CopySessionId
+            | SessionAvailableActionKind::Export
+            | SessionAvailableActionKind::Archive => {
+                self.set_status(format!(
+                    "{} unavailable: {}",
+                    entry.action.label, entry.action.reason
+                ));
+            }
+        }
+    }
+
     fn open_original(&mut self) {
         if !self.current_data_space().is_local() {
             self.show_open_original = false;
@@ -3298,6 +3541,7 @@ impl App {
         mode: OriginalResumeMode,
         status: Option<String>,
     ) {
+        self.show_action_menu = false;
         if !self.current_data_space().is_local() {
             self.show_open_original = false;
             self.set_status("SSH sessions cannot be resumed locally; use handoff");
@@ -3540,6 +3784,7 @@ impl App {
 
     fn has_overlay(&self) -> bool {
         self.show_help
+            || self.show_action_menu
             || self.show_open_original
             || self.show_doctor
             || self.show_skill_picker
@@ -6594,6 +6839,37 @@ Host devbox
     }
 
     #[test]
+    fn action_model_and_enter_hint_use_same_live_tmux_state() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        enable_hook_config(&mut app, true);
+        let session = app.current_session().expect("session").clone();
+        app.set_hook_live_events_for_test(vec![hook_event_for_session(
+            &session,
+            hooks::HookEventKind::PreToolUse,
+            Some("/tmp/tmux-501/default,1,0"),
+            Some("%42"),
+        )]);
+
+        let actions = app.session_actions(&session);
+
+        assert_eq!(
+            actions
+                .action(SessionAvailableActionKind::Jump)
+                .expect("jump")
+                .status,
+            SessionActionAvailability::Available
+        );
+        assert_eq!(
+            actions
+                .action(SessionAvailableActionKind::Resume)
+                .expect("resume")
+                .status,
+            SessionActionAvailability::Warning
+        );
+        assert_eq!(app.enter_key_hint(), "Jump");
+    }
+
+    #[test]
     fn failed_tmux_jump_queues_resume_with_visible_reason() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         let session = app.current_session().expect("session").clone();
@@ -6687,12 +6963,45 @@ Host devbox
         ];
         app.selected_data_space = 1;
 
-        app.handle_key(key('o'));
+        app.open_original();
 
         assert!(!app.show_open_original);
         assert_eq!(
             app.status_message,
             "SSH sessions cannot be opened locally; use handoff"
+        );
+    }
+
+    #[test]
+    fn remote_action_menu_blocks_resume_but_allows_handoff() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.data_spaces = vec![
+            dataspace::DataSpaceEntry::local(),
+            dataspace::DataSpaceEntry {
+                id: "ssh:devbox".into(),
+                label: "devbox".into(),
+                kind: dataspace::DataSpaceKind::Ssh,
+                detail: "yangyang.1205@10.37.218.31".into(),
+                ssh_host: Some("10.37.218.31".into()),
+                ssh_user: Some("yangyang.1205".into()),
+                ssh_port: None,
+                ssh_identity_file: None,
+                config_source: Some("Moonbox config".into()),
+                config_path: None,
+            },
+        ];
+        app.selected_data_space = 1;
+
+        app.handle_key(key('o'));
+        let entries = app.action_menu_entries();
+
+        assert!(app.show_action_menu);
+        assert_eq!(entries[0].action.kind, SessionAvailableActionKind::Resume);
+        assert_eq!(entries[0].action.status, SessionActionAvailability::Blocked);
+        assert_eq!(entries[1].action.kind, SessionAvailableActionKind::Handoff);
+        assert_eq!(
+            entries[1].action.status,
+            SessionActionAvailability::Available
         );
     }
 
@@ -6794,9 +7103,118 @@ Host devbox
     }
 
     #[test]
-    fn original_copy_and_enter_queue_distinct_actions() {
+    fn action_menu_default_resume_queues_original_resume() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.handle_key(key('o'));
+
+        assert!(app.show_action_menu);
+        let entries = app.action_menu_entries();
+        assert_eq!(entries[0].action.kind, SessionAvailableActionKind::Resume);
+        assert_eq!(entries[1].action.kind, SessionAvailableActionKind::Handoff);
+        assert_eq!(entries[2].action.kind, SessionAvailableActionKind::Fork);
+        assert_eq!(entries[5].action.kind, SessionAvailableActionKind::Copy);
+        assert_eq!(
+            entries[5].action.status,
+            SessionActionAvailability::Unavailable
+        );
+        assert_eq!(
+            entries[6].action.kind,
+            SessionAvailableActionKind::CopySessionId
+        );
+        assert_eq!(
+            entries[6].action.status,
+            SessionActionAvailability::Unavailable
+        );
+        assert_eq!(entries[7].action.kind, SessionAvailableActionKind::Export);
+        assert_eq!(
+            entries[7].action.status,
+            SessionActionAvailability::Unavailable
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(!app.show_action_menu);
+        assert!(!app.should_quit());
+        assert!(app.take_exit_action().is_none());
+        let Some(plan) = app.take_pending_resume() else {
+            panic!("expected pending original resume");
+        };
+        assert_eq!(plan.source_session.id, "codex-cxcp-design");
+        assert_eq!(plan.command.display, "codex resume codex-cxcp-design");
+        assert!(plan.dry_run);
+    }
+
+    #[test]
+    fn action_menu_can_open_handoff_and_blocks_planned_fork() {
+        let mut handoff = new_app(CliTool::Codex, CliTool::Hermes);
+        handoff.handle_key(key('o'));
+        handoff.handle_key(key('j'));
+        handoff.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(!handoff.show_action_menu);
+        assert!(handoff.show_launch);
+        assert_eq!(handoff.status_message, "Choose target CLI");
+        assert!(handoff.take_pending_resume().is_none());
+
+        let mut fork = new_app(CliTool::Codex, CliTool::Hermes);
+        fork.handle_key(key('o'));
+        fork.handle_key(key('j'));
+        fork.handle_key(key('j'));
+        fork.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(fork.show_action_menu);
+        assert!(!fork.show_launch);
+        assert!(fork.take_pending_resume().is_none());
+        assert!(fork.status_message.contains("Fork unavailable"));
+    }
+
+    #[test]
+    fn action_menu_keeps_copy_and_export_as_future_actions() {
+        let mut copy = new_app(CliTool::Codex, CliTool::Hermes);
+        copy.handle_key(key('o'));
+        for _ in 0..5 {
+            copy.handle_key(key('j'));
+        }
+        copy.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(copy.show_action_menu);
+        assert!(!copy.show_launch);
+        assert!(copy.take_pending_resume().is_none());
+        assert!(copy.status_message.contains("Copy unavailable"));
+
+        let mut copy_session_id = new_app(CliTool::Codex, CliTool::Hermes);
+        copy_session_id.handle_key(key('o'));
+        for _ in 0..6 {
+            copy_session_id.handle_key(key('j'));
+        }
+        copy_session_id.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(copy_session_id.show_action_menu);
+        assert!(!copy_session_id.show_launch);
+        assert!(copy_session_id.take_pending_resume().is_none());
+        assert!(
+            copy_session_id
+                .status_message
+                .contains("Copy Session ID unavailable")
+        );
+
+        let mut export = new_app(CliTool::Codex, CliTool::Hermes);
+        export.handle_key(key('o'));
+        for _ in 0..7 {
+            export.handle_key(key('j'));
+        }
+        export.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(export.show_action_menu);
+        assert!(!export.show_launch);
+        assert!(export.take_pending_resume().is_none());
+        assert!(export.status_message.contains("Export unavailable"));
+    }
+
+    #[test]
+    fn original_copy_and_enter_queue_distinct_actions() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.open_original();
         app.handle_key(key('y'));
 
         assert_eq!(
