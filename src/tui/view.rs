@@ -12,8 +12,9 @@ use ratatui::{
 
 use crate::{
     app::{
-        ActionMenuEntry, App, CommandPaletteEntry, DATA_SPACE_CONFIG_FIELD_COUNT, EnterRouteKind,
-        Focus, HandoffTrailFrame, HookWaitingItem, LaunchReviewStage, SessionFilter, SettingsField,
+        ActionMenuEntry, App, ArchiveFeedbackKind, CommandPaletteEntry,
+        DATA_SPACE_CONFIG_FIELD_COUNT, EnterRouteKind, Focus, HandoffTrailFrame, HookWaitingItem,
+        LaunchReviewStage, SessionFilter, SettingsField,
     },
     core::image_preview::{ImagePreviewStatus, PreviewCell, PreviewRgb, TimelineImagePreview},
     core::model::{
@@ -572,7 +573,11 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
                     Span::raw(" ")
                 };
                 let mut title_spans = vec![selector, Span::raw(" ")];
-                for marker in session_row_markers(session, app.is_session_starred(session)) {
+                let archive_feedback = app.archive_feedback_for_session(session);
+                let archived = app.is_session_archived(session);
+                for marker in
+                    session_row_markers(session, app.is_session_starred(session), archived)
+                {
                     title_spans.push(marker);
                     title_spans.push(Span::raw(" "));
                 }
@@ -584,9 +589,13 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
                     title_spans.push(session_live_badge(live));
                     title_spans.push(Span::raw("  "));
                 }
+                if let Some(feedback) = archive_feedback {
+                    title_spans.push(archive_feedback_badge(feedback, language));
+                    title_spans.push(Span::raw("  "));
+                }
                 title_spans.push(Span::styled(
                     &session.title,
-                    session_title_style(selected_row),
+                    session_title_style(selected_row, archive_feedback),
                 ));
                 ListItem::new(vec![
                     Line::from(title_spans),
@@ -651,7 +660,10 @@ fn compile_status_label(status: &str) -> String {
     format!("{status:<8}")
 }
 
-fn session_title_style(selected: bool) -> Style {
+fn session_title_style(selected: bool, archive_feedback: Option<ArchiveFeedbackKind>) -> Style {
+    if archive_feedback.is_some() {
+        return Style::default().fg(theme::muted());
+    }
     if selected {
         Style::default()
             .fg(theme::text())
@@ -664,13 +676,22 @@ fn session_title_style(selected: bool) -> Style {
 fn session_row_markers(
     session: &crate::core::model::SessionSummary,
     starred: bool,
+    archived: bool,
 ) -> Vec<Span<'static>> {
-    let mut markers = Vec::with_capacity(2);
+    let mut markers = Vec::with_capacity(3);
     if starred {
         markers.push(Span::styled(
             "*",
             Style::default()
                 .fg(theme::gold())
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    if archived {
+        markers.push(Span::styled(
+            "A",
+            Style::default()
+                .fg(theme::cyan())
                 .add_modifier(Modifier::BOLD),
         ));
     }
@@ -687,6 +708,22 @@ fn session_row_markers(
         SessionStatus::Healthy => {}
     }
     markers
+}
+
+fn archive_feedback_badge(
+    feedback: ArchiveFeedbackKind,
+    language: crate::core::config::UiLanguage,
+) -> Span<'static> {
+    let label = match feedback {
+        ArchiveFeedbackKind::Archive => localized(language, "archiving", "归档中"),
+        ArchiveFeedbackKind::Unarchive => localized(language, "restoring", "恢复中"),
+    };
+    Span::styled(
+        label,
+        Style::default()
+            .fg(theme::gold())
+            .add_modifier(Modifier::BOLD),
+    )
 }
 
 fn session_list_window(total: usize, selected: usize, area_height: u16) -> (usize, usize) {
@@ -1046,6 +1083,7 @@ fn session_filter_label(
     match filter {
         SessionFilter::All => "全部",
         SessionFilter::Starred => i18n::text(language, Text::Star),
+        SessionFilter::Archived => localized(language, "Archived", "已归档"),
         SessionFilter::Tool(CliTool::Codex) => "Codex",
         SessionFilter::Tool(CliTool::Claude) => "Claude",
         SessionFilter::Tool(CliTool::Hermes) => "Hermes",
@@ -2788,7 +2826,7 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("{ }", i18n::text(language, Text::Data)),
             ("d", i18n::text(language, Text::DataPicker)),
             (",", i18n::text(language, Text::Settings)),
-            ("a", i18n::text(language, Text::Clear)),
+            ("a", localized(language, "Archive", "归档")),
             ("s", i18n::text(language, Text::Star)),
             ("S", i18n::text(language, Text::Skill)),
             ("+", i18n::text(language, Text::Zoom)),
@@ -2955,6 +2993,7 @@ fn render_settings(frame: &mut Frame, root: Rect, app: &App) {
     frame.render_widget(Clear, area);
     let language = app.effective_language();
     let row_width = usize::from(area.width.saturating_sub(4));
+    let settings_row_layout = settings_row_layout(row_width, language);
     let route = app.settings_enter_route_preview();
     let hooks = if app.hooks_enabled() {
         (i18n::text(language, Text::Enabled), theme::green())
@@ -2992,7 +3031,7 @@ fn render_settings(frame: &mut Frame, root: Rect, app: &App) {
         settings_row(SettingsRow {
             app,
             language,
-            row_width,
+            layout: settings_row_layout,
             field: SettingsField::Language,
             label: i18n::text(language, Text::Language),
             draft: i18n::language_name(language, app.settings_language),
@@ -3002,7 +3041,7 @@ fn render_settings(frame: &mut Frame, root: Rect, app: &App) {
         settings_row(SettingsRow {
             app,
             language,
-            row_width,
+            layout: settings_row_layout,
             field: SettingsField::Theme,
             label: i18n::text(language, Text::Theme),
             draft: app.settings_theme.label(),
@@ -3012,7 +3051,7 @@ fn render_settings(frame: &mut Frame, root: Rect, app: &App) {
         settings_row(SettingsRow {
             app,
             language,
-            row_width,
+            layout: settings_row_layout,
             field: SettingsField::SmartEnter,
             label: i18n::text(language, Text::SmartEnterTmux),
             draft: i18n::on_off(language, app.settings_smart_enter_tmux),
@@ -3074,7 +3113,7 @@ fn render_settings(frame: &mut Frame, root: Rect, app: &App) {
                 },
                 true,
             ))
-            .wrap(Wrap { trim: true }),
+            .wrap(Wrap { trim: false }),
         area,
     );
 }
@@ -3082,12 +3121,21 @@ fn render_settings(frame: &mut Frame, root: Rect, app: &App) {
 struct SettingsRow<'a> {
     app: &'a App,
     language: crate::core::config::UiLanguage,
-    row_width: usize,
+    layout: SettingsRowLayout,
     field: SettingsField,
     label: &'a str,
     draft: &'a str,
     saved: &'a str,
     dirty: bool,
+}
+
+#[derive(Clone, Copy)]
+struct SettingsRowLayout {
+    label_width: usize,
+    draft_width: usize,
+    saved_width: usize,
+    status_width: usize,
+    gap_width: usize,
 }
 
 fn settings_row(row: SettingsRow<'_>) -> Line<'static> {
@@ -3099,7 +3147,7 @@ fn settings_row(row: SettingsRow<'_>) -> Line<'static> {
         theme::border()
     };
     let label_color = if focused {
-        theme::text()
+        theme::gold()
     } else {
         theme::blue()
     };
@@ -3113,34 +3161,17 @@ fn settings_row(row: SettingsRow<'_>) -> Line<'static> {
     } else {
         i18n::text(row.language, Text::Saved)
     };
-    let label_width = 22;
-    let marker_width = 2;
-    let gap_width = 2;
-    let status_width = display_width(i18n::text(row.language, Text::Unsaved))
-        .max(display_width(i18n::text(row.language, Text::Saved)))
-        .max(6);
-    let value_width = row
-        .row_width
-        .saturating_sub(marker_width + label_width + (gap_width * 3) + status_width);
-    let draft_preferred_width = 42;
-    let saved_preferred_width = 24;
-    let (draft_width, saved_width) =
-        settings_value_widths(value_width, draft_preferred_width, saved_preferred_width);
     Line::from(vec![
         Span::styled(format!("{marker} "), Style::default().fg(marker_color)),
         Span::styled(
-            fit_display_width(row.label, label_width),
-            Style::default().fg(label_color).add_modifier(if focused {
-                Modifier::BOLD
-            } else {
-                Modifier::empty()
-            }),
+            fit_display_width(row.label, row.layout.label_width),
+            Style::default().fg(label_color),
         ),
-        Span::raw(" ".repeat(gap_width)),
+        Span::raw(" ".repeat(row.layout.gap_width)),
         Span::styled(
             fit_display_width(
                 &format!("{} {}", i18n::text(row.language, Text::Draft), row.draft),
-                draft_width,
+                row.layout.draft_width,
             ),
             Style::default().fg(if row.dirty {
                 theme::gold()
@@ -3148,20 +3179,43 @@ fn settings_row(row: SettingsRow<'_>) -> Line<'static> {
                 theme::text()
             }),
         ),
-        Span::raw(" ".repeat(gap_width)),
+        Span::raw(" ".repeat(row.layout.gap_width)),
         Span::styled(
             fit_display_width(
                 &format!("{} {}", i18n::text(row.language, Text::Saved), row.saved),
-                saved_width,
+                row.layout.saved_width,
             ),
             Style::default().fg(theme::muted()),
         ),
-        Span::raw(" ".repeat(gap_width)),
+        Span::raw(" ".repeat(row.layout.gap_width)),
         Span::styled(
-            fit_display_width(state_label, status_width),
+            fit_display_width_right(state_label, row.layout.status_width),
             Style::default().fg(state_color),
         ),
     ])
+}
+
+fn settings_row_layout(
+    row_width: usize,
+    language: crate::core::config::UiLanguage,
+) -> SettingsRowLayout {
+    let marker_width = 2;
+    let label_width = 22;
+    let gap_width = 2;
+    let status_width = display_width(i18n::text(language, Text::Unsaved))
+        .max(display_width(i18n::text(language, Text::Saved)))
+        .max(6);
+    let value_width =
+        row_width.saturating_sub(marker_width + label_width + (gap_width * 3) + status_width);
+    let (draft_width, saved_width) = settings_value_widths(value_width, 42, 24);
+
+    SettingsRowLayout {
+        label_width,
+        draft_width,
+        saved_width,
+        status_width,
+        gap_width,
+    }
 }
 
 fn settings_value_widths(
@@ -3211,6 +3265,17 @@ fn fit_display_width(text: &str, width: usize) -> String {
     }
     output.push_str(&ellipsis);
     pad_display_width(output, width)
+}
+
+fn fit_display_width_right(text: &str, width: usize) -> String {
+    let fitted = fit_display_width(text, width);
+    let trimmed = fitted.trim_end();
+    let trimmed_width = display_width(trimmed);
+    if trimmed_width >= width {
+        fitted
+    } else {
+        format!("{}{}", " ".repeat(width - trimmed_width), trimmed)
+    }
 }
 
 fn pad_display_width(mut text: String, width: usize) -> String {
@@ -3571,13 +3636,13 @@ fn render_help(frame: &mut Frame, root: Rect, app: &App) {
         Line::raw("j/k, gg/G       navigate"),
         Line::raw("tab, shift-tab  switch panel"),
         Line::raw("f               cycle session source filter"),
-        Line::raw("a               clear source and text filters"),
+        Line::raw("a               archive / unarchive selected session"),
         Line::raw("d               open Local / SSH data space picker"),
         Line::raw("{ / }           previous / next data space"),
         Line::raw("s               star / unstar selected session"),
         Line::raw("*               star / unstar selected session alias"),
         Line::raw("/text           filter sessions by text"),
-        Line::raw("o               preview original CLI resume"),
+        Line::raw("o               open session action menu"),
         Line::raw("enter           open original CLI, then return"),
         Line::raw("e               open selected Timeline event detail"),
         Line::raw("x / H           choose target for handoff"),
@@ -6877,6 +6942,8 @@ fn action_menu_entry_lines(
     language: crate::core::config::UiLanguage,
 ) -> Vec<Line<'static>> {
     let marker = if entry.selected { ">" } else { " " };
+    let (action_icon, action_icon_color) = action_menu_action_icon(&entry.action);
+    let (status_icon, status_icon_color) = action_menu_status_icon(entry.action.status);
     let label_style = if entry.selected {
         Style::default()
             .fg(action_status_color(entry.action.status))
@@ -6890,10 +6957,24 @@ fn action_menu_entry_lines(
             Span::styled(marker, Style::default().fg(theme::gold())),
             Span::raw(" "),
             Span::styled(
-                action_menu_action_label(entry.action.kind, language),
+                action_icon,
+                Style::default()
+                    .fg(action_icon_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                action_menu_action_label(&entry.action, language),
                 label_style,
             ),
             Span::raw("  "),
+            Span::styled(
+                status_icon,
+                Style::default()
+                    .fg(status_icon_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
             Span::styled(
                 status,
                 Style::default().fg(action_status_color(entry.action.status)),
@@ -6901,19 +6982,67 @@ fn action_menu_entry_lines(
         ]),
         Line::from(vec![
             Span::raw("    "),
+            Span::styled("└", Style::default().fg(theme::border())),
+            Span::raw(" "),
             Span::styled(
                 action_menu_reason_label(&entry.action, language),
-                Style::default().fg(theme::muted()),
+                Style::default().fg(theme::border()),
             ),
         ]),
     ]
 }
 
+fn action_menu_action_icon(action: &SessionAvailableAction) -> (&'static str, Color) {
+    let color = if matches!(action.status, SessionActionAvailability::Unavailable) {
+        theme::muted()
+    } else {
+        match action.kind {
+            SessionAvailableActionKind::Resume => theme::green(),
+            SessionAvailableActionKind::Handoff => theme::cyan(),
+            SessionAvailableActionKind::Fork => theme::purple(),
+            SessionAvailableActionKind::Jump => theme::blue(),
+            SessionAvailableActionKind::Inspect => theme::blue(),
+            SessionAvailableActionKind::Copy | SessionAvailableActionKind::CopySessionId => {
+                theme::cyan()
+            }
+            SessionAvailableActionKind::Export => theme::gold(),
+            SessionAvailableActionKind::Archive => theme::gold(),
+        }
+    };
+    let icon = match action.kind {
+        SessionAvailableActionKind::Resume => "↩",
+        SessionAvailableActionKind::Handoff => "→",
+        SessionAvailableActionKind::Fork => "Y",
+        SessionAvailableActionKind::Jump => "↗",
+        SessionAvailableActionKind::Inspect => "i",
+        SessionAvailableActionKind::Copy => "⧉",
+        SessionAvailableActionKind::CopySessionId => "#",
+        SessionAvailableActionKind::Export => "↓",
+        SessionAvailableActionKind::Archive => {
+            if action.label == "Unarchive" {
+                "□"
+            } else {
+                "▣"
+            }
+        }
+    };
+    (icon, color)
+}
+
+fn action_menu_status_icon(status: SessionActionAvailability) -> (&'static str, Color) {
+    match status {
+        SessionActionAvailability::Available => ("✓", theme::green()),
+        SessionActionAvailability::Warning => ("!", theme::gold()),
+        SessionActionAvailability::Blocked => ("×", theme::red()),
+        SessionActionAvailability::Unavailable => ("·", theme::muted()),
+    }
+}
+
 fn action_menu_action_label(
-    kind: SessionAvailableActionKind,
+    action: &SessionAvailableAction,
     language: crate::core::config::UiLanguage,
 ) -> &'static str {
-    match kind {
+    match action.kind {
         SessionAvailableActionKind::Resume => i18n::text(language, Text::Resume),
         SessionAvailableActionKind::Handoff => localized(language, "Handoff", "交接"),
         SessionAvailableActionKind::Fork => localized(language, "Fork", "分叉"),
@@ -6924,7 +7053,13 @@ fn action_menu_action_label(
             localized(language, "Copy Session ID", "复制 Session ID")
         }
         SessionAvailableActionKind::Export => localized(language, "Export", "导出"),
-        SessionAvailableActionKind::Archive => localized(language, "Archive", "归档"),
+        SessionAvailableActionKind::Archive => {
+            if action.label == "Unarchive" {
+                localized(language, "Unarchive", "取消归档")
+            } else {
+                localized(language, "Archive", "归档")
+            }
+        }
     }
 }
 
@@ -6959,7 +7094,11 @@ fn action_menu_reason_label(
             }
         }
         SessionAvailableActionKind::Archive => {
-            "归档状态会写入 Moonbox overlay，将在后续里程碑实现。".into()
+            if action.label == "Unarchive" {
+                "从 Moonbox overlay 移除归档标记，不会修改来源存储。".into()
+            } else {
+                "归档状态会写入 Moonbox overlay，不会修改来源存储。".into()
+            }
         }
     }
 }
@@ -7222,6 +7361,34 @@ mod tests {
             .unwrap_or_else(|| panic!("missing {needle:?} in screen:\n{screen}"))
     }
 
+    fn settings_row_columns(screen: &str, row_label: &str) -> (usize, usize, usize) {
+        let line = screen
+            .lines()
+            .find(|line| line.contains(row_label) && line.contains("预览"))
+            .unwrap_or_else(|| panic!("missing settings row {row_label:?} in screen:\n{screen}"));
+        let draft_index = line.find("预览").expect("draft column");
+        let saved_index = line.find("已保存").expect("saved column");
+        let status_index = line.rfind("已保存").expect("status column");
+        (
+            display_width(&line[..draft_index]),
+            display_width(&line[..saved_index]),
+            display_width(&line[..status_index]),
+        )
+    }
+
+    fn assert_settings_columns_aligned(screen: &str) -> Vec<(usize, usize, usize)> {
+        let columns = ["语言", "主题", "Smart Enter / tmux"]
+            .into_iter()
+            .map(|label| settings_row_columns(screen, label))
+            .collect::<Vec<_>>();
+        let first = columns[0];
+        assert!(
+            columns.iter().all(|columns| *columns == first),
+            "settings columns should align across rows: {columns:?}\n{screen}"
+        );
+        columns
+    }
+
     fn render_loading_text(
         tick: usize,
         width: u16,
@@ -7277,6 +7444,10 @@ mod tests {
         assert_screen_contains(&screen, "Copy");
         assert_screen_contains(&screen, "Copy Session ID");
         assert_screen_contains(&screen, "Export");
+        assert_screen_contains(&screen, "Archive");
+        assert_screen_contains(&screen, "↩ Resume");
+        assert_screen_contains(&screen, "→ Handoff");
+        assert_screen_contains(&screen, "▣ Archive");
         assert_screen_contains(&screen, "unavailable");
         assert_screen_contains(&screen, "j/k choose");
     }
@@ -7294,21 +7465,25 @@ mod tests {
 
         assert_screen_contains(&screen, "动作菜单");
         assert_screen_contains(&screen, "会话动作");
-        assert_screen_contains(&screen, "恢复  可用");
-        assert_screen_contains(&screen, "交接  可用");
-        assert_screen_contains(&screen, "分叉  不可用");
-        assert_screen_contains(&screen, "跳转  不可用");
-        assert_screen_contains(&screen, "详情  可用");
-        assert_screen_contains(&screen, "复制 AI 输出  不可用");
-        assert_screen_contains(&screen, "复制 Session ID  不可用");
-        assert_screen_contains(&screen, "导出  不可用");
-        assert_screen_contains(&screen, "归档  不可用");
-        assert_screen_contains(&screen, "可通过本地 provider CLI 恢复该会话。");
+        assert_screen_contains(&screen, "↩ 恢复  ✓ 可用");
+        assert_screen_contains(&screen, "→ 交接  ✓ 可用");
+        assert_screen_contains(&screen, "Y 分叉  · 不可用");
+        assert_screen_contains(&screen, "↗ 跳转  · 不可用");
+        assert_screen_contains(&screen, "i 详情  ✓ 可用");
+        assert_screen_contains(&screen, "⧉ 复制 AI 输出  · 不可用");
+        assert_screen_contains(&screen, "# 复制 Session ID  · 不可用");
+        assert_screen_contains(&screen, "↓ 导出  · 不可用");
+        assert_screen_contains(&screen, "▣ 归档  ✓ 可用");
+        assert_screen_contains(&screen, "└ 可通过本地 provider CLI 恢复该会话。");
         assert_screen_contains(&screen, "Hooks 未启用，无法获得实时 tmux 状态。");
         assert_screen_contains(&screen, "整段会话分叉将在后续里程碑实现。");
         assert_screen_contains(&screen, "复制最后一条 AI 输出将在后续里程碑实现。");
         assert_screen_contains(&screen, "复制 Session ID 将在后续里程碑实现。");
         assert_screen_contains(&screen, "导出会话动作将在后续里程碑实现。");
+        assert_screen_contains(
+            &screen,
+            "归档状态会写入 Moonbox overlay，不会修改来源存储。",
+        );
         assert!(
             !screen.contains("Local provider resume is available."),
             "{screen}"
@@ -7643,6 +7818,35 @@ mod tests {
     }
 
     #[test]
+    fn settings_overlay_keeps_columns_stable_while_focus_moves() {
+        let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.set_ui_preferences_for_test(crate::core::config::UiPreferencesConfig {
+            language: crate::core::config::UiLanguage::ZhHans,
+            theme: crate::core::config::UiThemeName::LuoshenDragon,
+        });
+        app.handle_key(key(','));
+
+        let language_screen = render_text(&app, 150, 36);
+        let language_columns = assert_settings_columns_aligned(&language_screen);
+
+        app.handle_key(key('j'));
+        let theme_screen = render_text(&app, 150, 36);
+        let theme_columns = assert_settings_columns_aligned(&theme_screen);
+
+        app.handle_key(key('j'));
+        let smart_enter_screen = render_text(&app, 150, 36);
+        let smart_enter_columns = assert_settings_columns_aligned(&smart_enter_screen);
+
+        app.handle_key(key('k'));
+        let theme_again_screen = render_text(&app, 150, 36);
+        let theme_again_columns = assert_settings_columns_aligned(&theme_again_screen);
+
+        assert_eq!(language_columns, theme_columns);
+        assert_eq!(language_columns, smart_enter_columns);
+        assert_eq!(language_columns, theme_again_columns);
+    }
+
+    #[test]
     fn settings_overlay_aligns_long_theme_status_columns() {
         let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
         app.set_ui_preferences_for_test(crate::core::config::UiPreferencesConfig {
@@ -7706,12 +7910,16 @@ mod tests {
 
     #[test]
     fn unselected_session_titles_are_muted() {
-        assert_eq!(session_title_style(false).fg, Some(theme::muted()));
-        assert_eq!(session_title_style(true).fg, Some(theme::text()));
+        assert_eq!(session_title_style(false, None).fg, Some(theme::muted()));
+        assert_eq!(session_title_style(true, None).fg, Some(theme::text()));
         assert!(
-            session_title_style(true)
+            session_title_style(true, None)
                 .add_modifier
                 .contains(Modifier::BOLD)
+        );
+        assert_eq!(
+            session_title_style(true, Some(ArchiveFeedbackKind::Archive)).fg,
+            Some(theme::muted())
         );
     }
 
@@ -7910,21 +8118,21 @@ mod tests {
         let mut session = test_session("2026-06-07T13:33:44+08:00", None);
 
         session.status = SessionStatus::Failed;
-        let failed_markers: Vec<String> = session_row_markers(&session, true)
+        let failed_markers: Vec<String> = session_row_markers(&session, true, true)
             .into_iter()
             .map(|span| span.content.into_owned())
             .collect();
-        assert_eq!(failed_markers, ["*", "!"]);
+        assert_eq!(failed_markers, ["*", "A", "!"]);
 
         session.status = SessionStatus::Warning;
-        let warning_markers: Vec<String> = session_row_markers(&session, true)
+        let warning_markers: Vec<String> = session_row_markers(&session, true, false)
             .into_iter()
             .map(|span| span.content.into_owned())
             .collect();
         assert_eq!(warning_markers, ["*", "▲"]);
 
         session.status = SessionStatus::Healthy;
-        assert!(session_row_markers(&session, false).is_empty());
+        assert!(session_row_markers(&session, false, false).is_empty());
     }
 
     #[test]
@@ -7944,6 +8152,28 @@ mod tests {
         let screen = render_text(&app, 140, 64);
 
         assert_screen_contains(&screen, "* !");
+    }
+
+    #[test]
+    fn session_list_renders_archive_feedback_and_marker() {
+        let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.archived_sessions.clear();
+        app.apply_session_filter(SessionFilter::All);
+        let session_key = {
+            let session = app.current_session().expect("session");
+            format!("{}:{}", session.cli.id(), session.id)
+        };
+
+        app.handle_key(key('a'));
+        let archiving = render_text(&app, 120, 36);
+        assert_screen_contains(&archiving, "archiving");
+
+        app.archived_sessions = vec![session_key];
+        app.apply_session_filter(SessionFilter::Archived);
+        let archived = render_text(&app, 120, 36);
+
+        assert_screen_contains(&archived, "Archived");
+        assert_screen_contains(&archived, "A");
     }
 
     #[test]

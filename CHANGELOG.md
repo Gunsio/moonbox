@@ -40,6 +40,9 @@ and this project uses semantic versioning once tagged releases start.
   availability model shared by CLI and TUI for Inspect, Resume, Jump, Fork,
   Handoff, Copy, Copy Session ID, Export, and Archive; TUI `o` opens that action
   menu for the selected session.
+- TUI archive overlay stores Archive / Unarchive state in Moonbox config,
+  hides archived sessions by default, adds an `Archived` filter for search and
+  restore, and gives the selected row short feedback before the list compacts.
 - TUI header and loading screen show the running Moonbox package version so
   stale installed binaries are visible during local validation.
 - TUI action menu localizes action labels and availability reasons in

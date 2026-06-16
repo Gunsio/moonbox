@@ -105,8 +105,8 @@ fn draft_compiler_execute_blocker(plan: &LaunchPlan, allow_draft: bool) -> Optio
 
 pub fn original_command(session: &SessionSummary) -> TargetLaunchCommand {
     let program = configured_target_binary(session.cli);
-    let args = original_args(session);
     let cwd = usable_cwd(&session.cwd);
+    let args = original_args(session, cwd.as_deref());
     let display = shell_command(&program, &args);
 
     TargetLaunchCommand {
@@ -149,9 +149,10 @@ pub(crate) fn run_original_interactive(
 }
 
 pub(crate) fn original_handoff_notice(plan: &OriginalSessionPlan) -> String {
+    let cwd = plan.command.cwd.as_deref().unwrap_or("terminal default");
     format!(
-        "Opening original session: {} {}\nCommand: {}\n",
-        plan.source_session.cli, plan.source_session.id, plan.command.display
+        "Opening original session: {} {}\nCwd: {}\nCommand: {}\n",
+        plan.source_session.cli, plan.source_session.id, cwd, plan.command.display
     )
 }
 
@@ -226,9 +227,18 @@ fn launch_start_error(command: &TargetLaunchCommand, error: std::io::Error) -> C
     }
 }
 
-fn original_args(session: &SessionSummary) -> Vec<String> {
+fn original_args(session: &SessionSummary, cwd: Option<&str>) -> Vec<String> {
     match session.cli {
-        CliTool::Codex => vec!["resume".into(), session.id.clone()],
+        CliTool::Codex => {
+            let mut args = Vec::new();
+            if let Some(cwd) = cwd {
+                args.push("-C".into());
+                args.push(cwd.into());
+            }
+            args.push("resume".into());
+            args.push(session.id.clone());
+            args
+        }
         CliTool::Claude => vec!["--resume".into(), session.id.clone()],
         CliTool::Hermes => vec!["--resume".into(), session.id.clone()],
     }
@@ -702,7 +712,36 @@ fn shell_quote(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{data, workbench};
+    use crate::core::{
+        data,
+        model::{SessionRuntimeStatus, SessionStatus},
+        workbench,
+    };
+
+    fn codex_session_with_cwd(cwd: String) -> SessionSummary {
+        SessionSummary {
+            id: "codex-cxcp-design".into(),
+            cli: CliTool::Codex,
+            title: "Codex fixture".into(),
+            cwd,
+            updated_at: "2026-06-16T00:00:00Z".into(),
+            updated: "now".into(),
+            runtime_status: SessionRuntimeStatus::Unknown,
+            runtime_reason: None,
+            status: SessionStatus::Healthy,
+            branch: None,
+            token_count: None,
+            health_reason: None,
+            event_count: 1,
+            resume_command: "codex resume codex-cxcp-design".into(),
+            source_provenance: SourceProvenance::Fixture,
+            source_path: None,
+            source_size_bytes: None,
+            parse_skip_count: 0,
+            provider_metadata: None,
+            anatomy: None,
+        }
+    }
 
     #[test]
     fn codex_command_uses_prompt_argument_and_workspace() {
@@ -904,6 +943,34 @@ mod tests {
     }
 
     #[test]
+    fn codex_original_resume_passes_source_cwd_to_cli() {
+        let root = std::env::temp_dir().join(format!(
+            "moonbox-original-command-cwd-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).expect("temp root");
+        let session = codex_session_with_cwd(root.display().to_string());
+
+        let command = original_command(&session);
+
+        assert_eq!(
+            command.args,
+            [
+                "-C",
+                root.to_string_lossy().as_ref(),
+                "resume",
+                "codex-cxcp-design"
+            ]
+        );
+        assert_eq!(
+            command.cwd.as_deref(),
+            Some(root.to_string_lossy().as_ref())
+        );
+        assert!(command.display.contains(" -C "));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn original_handoff_notice_names_session_and_command() {
         let data = data::workbench_data(CliTool::Codex, CliTool::Hermes).expect("data");
         let session = data
@@ -924,6 +991,7 @@ mod tests {
         let notice = original_handoff_notice(&plan);
 
         assert!(notice.contains("Opening original session: Codex codex-cxcp-design"));
+        assert!(notice.contains("Cwd: terminal default"));
         assert!(notice.contains("Command: codex resume codex-cxcp-design"));
     }
 
@@ -939,12 +1007,16 @@ mod tests {
         ));
         fs::create_dir_all(&root).expect("temp root");
         let marker = root.join("args.txt");
+        let pwd_marker = root.join("pwd.txt");
+        let workspace = root.join("workspace");
+        fs::create_dir_all(&workspace).expect("workspace");
         let script = root.join("fake-original");
         fs::write(
             &script,
             format!(
-                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nexit 7\n",
-                marker.display()
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\npwd > '{}'\nexit 7\n",
+                marker.display(),
+                pwd_marker.display()
             ),
         )
         .expect("fake script");
@@ -961,6 +1033,8 @@ mod tests {
             .find(|session| session.cli == CliTool::Codex)
             .expect("codex")
             .clone();
+        let mut session = session;
+        session.cwd = workspace.display().to_string();
         let mut command = original_command(&session);
         command.program = script.display().to_string();
         command.display = format!("{} {}", command.program, command.args.join(" "));
@@ -977,8 +1051,13 @@ mod tests {
         assert_eq!(status.code(), Some(7));
         assert_eq!(
             fs::read_to_string(marker).expect("marker"),
-            "resume\ncodex-cxcp-design\n"
+            format!("-C\n{}\nresume\ncodex-cxcp-design\n", workspace.display())
         );
+        let actual_pwd =
+            fs::canonicalize(fs::read_to_string(pwd_marker).expect("pwd marker").trim())
+                .expect("actual pwd");
+        let expected_pwd = fs::canonicalize(&workspace).expect("expected pwd");
+        assert_eq!(actual_pwd, expected_pwd);
         let _ = fs::remove_dir_all(root);
     }
 

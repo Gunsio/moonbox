@@ -160,6 +160,8 @@ fn action_menu_order() -> [SessionAvailableActionKind; 9] {
     ]
 }
 
+const ARCHIVE_FEEDBACK_FRAMES: usize = 3;
+
 #[derive(Debug, Clone, Copy)]
 struct HandoffTrail {
     phase: HandoffTrailPhase,
@@ -661,6 +663,7 @@ impl Focus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionFilter {
     Starred,
+    Archived,
     All,
     Tool(CliTool),
 }
@@ -669,6 +672,7 @@ impl SessionFilter {
     pub fn label(self) -> &'static str {
         match self {
             Self::Starred => "Star",
+            Self::Archived => "Archived",
             Self::All => "All",
             Self::Tool(CliTool::Codex) => "Codex",
             Self::Tool(CliTool::Claude) => "Claude",
@@ -676,19 +680,32 @@ impl SessionFilter {
         }
     }
 
-    fn matches(self, session: &SessionSummary, starred_sessions: &[String]) -> bool {
+    fn matches(
+        self,
+        session: &SessionSummary,
+        starred_sessions: &[String],
+        archived_sessions: &[String],
+    ) -> bool {
+        let archived = archived_sessions
+            .iter()
+            .any(|key| key == &session_overlay_key(session));
         match self {
-            Self::Starred => starred_sessions
-                .iter()
-                .any(|key| key == &session_star_key(session)),
-            Self::All => true,
-            Self::Tool(tool) => session.cli == tool,
+            Self::Starred => {
+                starred_sessions
+                    .iter()
+                    .any(|key| key == &session_overlay_key(session))
+                    && !archived
+            }
+            Self::Archived => archived,
+            Self::All => !archived,
+            Self::Tool(tool) => session.cli == tool && !archived,
         }
     }
 
     fn next(self) -> Self {
         match self {
-            Self::Starred => Self::All,
+            Self::Starred => Self::Archived,
+            Self::Archived => Self::All,
             Self::All => Self::Tool(CliTool::Codex),
             Self::Tool(CliTool::Codex) => Self::Tool(CliTool::Claude),
             Self::Tool(CliTool::Claude) => Self::Tool(CliTool::Hermes),
@@ -699,12 +716,28 @@ impl SessionFilter {
     fn previous(self) -> Self {
         match self {
             Self::Starred => Self::Tool(CliTool::Hermes),
-            Self::All => Self::Starred,
+            Self::Archived => Self::Starred,
+            Self::All => Self::Archived,
             Self::Tool(CliTool::Codex) => Self::All,
             Self::Tool(CliTool::Claude) => Self::Tool(CliTool::Codex),
             Self::Tool(CliTool::Hermes) => Self::Tool(CliTool::Claude),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArchiveFeedbackKind {
+    Archive,
+    Unarchive,
+}
+
+#[derive(Debug, Clone)]
+struct PendingArchiveFeedback {
+    session_key: String,
+    session_id: String,
+    kind: ArchiveFeedbackKind,
+    visible_position: usize,
+    started_tick: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -817,7 +850,7 @@ const COMMAND_PALETTE_ENTRIES: &[CommandPaletteEntry] = &[
         command: "source next",
         aliases: &["filter", "filter next", "source"],
         description: "Switch to the next session source filter",
-        params: "All, Starred, Codex, Claude, Hermes",
+        params: "All, Starred, Archived, Codex, Claude, Hermes",
         badge: "SWITCH",
         dangerous: false,
     },
@@ -825,7 +858,7 @@ const COMMAND_PALETTE_ENTRIES: &[CommandPaletteEntry] = &[
         command: "source prev",
         aliases: &["filter prev", "filter previous", "source previous"],
         description: "Switch to the previous session source filter",
-        params: "All, Starred, Codex, Claude, Hermes",
+        params: "All, Starred, Archived, Codex, Claude, Hermes",
         badge: "SWITCH",
         dangerous: false,
     },
@@ -859,6 +892,22 @@ const COMMAND_PALETTE_ENTRIES: &[CommandPaletteEntry] = &[
         description: "Show starred sessions only",
         params: "source filter",
         badge: "SWITCH",
+        dangerous: false,
+    },
+    CommandPaletteEntry {
+        command: "archived",
+        aliases: &["filter archived", "archive filter"],
+        description: "Show archived sessions only",
+        params: "archive overlay",
+        badge: "SWITCH",
+        dangerous: false,
+    },
+    CommandPaletteEntry {
+        command: "archive",
+        aliases: &["a", "unarchive"],
+        description: "Archive or unarchive the selected session in the Moonbox overlay",
+        params: "selected session",
+        badge: "OVERLAY",
         dangerous: false,
     },
     CommandPaletteEntry {
@@ -1068,6 +1117,7 @@ pub struct App {
     pub saved_capsule_error: Option<String>,
     pub session_filter: SessionFilter,
     pub starred_sessions: Vec<String>,
+    pub archived_sessions: Vec<String>,
     pub search_query: String,
     visible_session_indices: Vec<usize>,
     pub data_spaces: Vec<dataspace::DataSpaceEntry>,
@@ -1103,6 +1153,7 @@ pub struct App {
     launch_review_request_id: u64,
     pending_launch_review: Option<PendingLaunchReview>,
     handoff_trail: Option<HandoffTrail>,
+    pending_archive_feedback: Option<PendingArchiveFeedback>,
     hooks_config: config::HooksConfig,
     hook_live: Option<hooks::HookLiveState>,
     clipboard_text: Option<String>,
@@ -1149,6 +1200,14 @@ impl App {
         let settings_smart_enter_tmux = hooks_config.smart_enter_tmux;
         let settings_language = ui_preferences.language;
         let settings_theme = ui_preferences.theme;
+        #[cfg(not(test))]
+        let starred_sessions = config::load_starred_sessions();
+        #[cfg(test)]
+        let starred_sessions = Vec::new();
+        #[cfg(not(test))]
+        let archived_sessions = config::load_archived_sessions();
+        #[cfg(test)]
+        let archived_sessions = Vec::new();
 
         let session_details_loaded =
             !data.timeline.is_empty() && data.capsule.state != "pending_rewind";
@@ -1183,7 +1242,8 @@ impl App {
             saved_capsules: Vec::new(),
             saved_capsule_error: None,
             session_filter: SessionFilter::All,
-            starred_sessions: config::load_starred_sessions(),
+            starred_sessions,
+            archived_sessions,
             search_query: String::new(),
             data_spaces: dataspace::list_data_spaces(),
             selected_data_space: 0,
@@ -1226,6 +1286,7 @@ impl App {
             launch_review_request_id: 0,
             pending_launch_review: None,
             handoff_trail: None,
+            pending_archive_feedback: None,
             hooks_config,
             hook_live,
             clipboard_text: None,
@@ -1252,6 +1313,7 @@ impl App {
 
     pub fn advance_animation(&mut self) {
         self.animation_tick = self.animation_tick.wrapping_add(1);
+        self.advance_archive_feedback();
     }
 
     pub fn animation_tick(&self) -> usize {
@@ -1660,10 +1722,28 @@ impl App {
             .into_iter()
             .filter_map(|kind| actions.action(kind).cloned())
             .enumerate()
-            .map(|(index, action)| ActionMenuEntry {
-                runnable: action_is_runnable(action.status),
-                selected: index == self.action_menu_selection,
-                action,
+            .map(|(index, mut action)| {
+                if action.kind == SessionAvailableActionKind::Archive {
+                    let archived = self.is_session_archived(session);
+                    action.status = SessionActionAvailability::Available;
+                    action.label = if archived {
+                        "Unarchive".into()
+                    } else {
+                        "Archive".into()
+                    };
+                    action.reason = if archived {
+                        "Remove this session from the Moonbox archive overlay.".into()
+                    } else {
+                        "Archive this session in the Moonbox overlay without touching the provider store."
+                            .into()
+                    };
+                    action.keys = vec!["a".into()];
+                }
+                ActionMenuEntry {
+                    runnable: action_is_runnable(action.status),
+                    selected: index == self.action_menu_selection,
+                    action,
+                }
             })
             .collect()
     }
@@ -2007,7 +2087,7 @@ impl App {
             KeyCode::Char('}') => self.cycle_data_space(true),
             KeyCode::Char('d') => self.open_data_space_picker(),
             KeyCode::Char('f') => self.cycle_session_filter(true),
-            KeyCode::Char('a') => self.clear_session_filters(),
+            KeyCode::Char('a') => self.toggle_archived_session(),
             KeyCode::Char(',') => self.open_settings(),
             KeyCode::Char('s') | KeyCode::Char('*') => self.toggle_starred_session(),
             KeyCode::Char('o') => self.open_action_menu(),
@@ -2258,6 +2338,8 @@ impl App {
             "source next" => self.cycle_session_filter(true),
             "source prev" => self.cycle_session_filter(false),
             "starred" => self.apply_session_filter(SessionFilter::Starred),
+            "archived" => self.apply_session_filter(SessionFilter::Archived),
+            "archive" => self.toggle_archived_session(),
             "clear" => self.clear_session_filters(),
             "source codex" => self.apply_session_filter(SessionFilter::Tool(CliTool::Codex)),
             "source claude" => self.apply_session_filter(SessionFilter::Tool(CliTool::Claude)),
@@ -3488,11 +3570,14 @@ impl App {
                 self.zoomed_focus = Some(Focus::Capsule);
                 self.set_status("Inspecting session details");
             }
+            SessionAvailableActionKind::Archive => {
+                self.show_action_menu = false;
+                self.toggle_archived_session();
+            }
             SessionAvailableActionKind::Fork
             | SessionAvailableActionKind::Copy
             | SessionAvailableActionKind::CopySessionId
-            | SessionAvailableActionKind::Export
-            | SessionAvailableActionKind::Archive => {
+            | SessionAvailableActionKind::Export => {
                 self.set_status(format!(
                     "{} unavailable: {}",
                     entry.action.label, entry.action.reason
@@ -3594,8 +3679,21 @@ impl App {
     }
 
     pub fn is_session_starred(&self, session: &SessionSummary) -> bool {
-        let key = session_star_key(session);
+        let key = session_overlay_key(session);
         self.starred_sessions.iter().any(|item| item == &key)
+    }
+
+    pub fn is_session_archived(&self, session: &SessionSummary) -> bool {
+        let key = session_overlay_key(session);
+        self.archived_sessions.iter().any(|item| item == &key)
+    }
+
+    pub fn archive_feedback_for_session(
+        &self,
+        session: &SessionSummary,
+    ) -> Option<ArchiveFeedbackKind> {
+        let feedback = self.pending_archive_feedback.as_ref()?;
+        (feedback.session_key == session_overlay_key(session)).then_some(feedback.kind)
     }
 
     fn refresh_visible_sessions(&mut self) {
@@ -3605,7 +3703,13 @@ impl App {
             .sessions
             .iter()
             .enumerate()
-            .filter(|(_, session)| self.session_filter.matches(session, &self.starred_sessions))
+            .filter(|(_, session)| {
+                self.session_filter.matches(
+                    session,
+                    &self.starred_sessions,
+                    &self.archived_sessions,
+                )
+            })
             .filter(|(_, session)| session_matches_query(session, &query))
             .filter(|(_, session)| {
                 !is_moonbox_handoff_worker_session(session)
@@ -3748,7 +3852,7 @@ impl App {
             self.pending_g = false;
             return;
         };
-        let key = session_star_key(session);
+        let key = session_overlay_key(session);
         let starred =
             if let Some(index) = self.starred_sessions.iter().position(|item| item == &key) {
                 self.starred_sessions.remove(index);
@@ -3769,6 +3873,92 @@ impl App {
         self.refresh_visible_sessions();
         self.clamp_selected_session();
         self.pending_g = false;
+    }
+
+    fn toggle_archived_session(&mut self) {
+        self.commit_pending_archive_feedback();
+        let Some(session) = self.current_session() else {
+            self.set_status("No session selected");
+            self.pending_g = false;
+            return;
+        };
+        let key = session_overlay_key(session);
+        let visible_position = self
+            .visible_session_indices
+            .iter()
+            .position(|index| *index == self.selected_session)
+            .unwrap_or(0);
+        let archived = self.archived_sessions.iter().any(|item| item == &key);
+        let kind = if archived {
+            ArchiveFeedbackKind::Unarchive
+        } else {
+            ArchiveFeedbackKind::Archive
+        };
+        self.pending_archive_feedback = Some(PendingArchiveFeedback {
+            session_key: key,
+            session_id: session.id.clone(),
+            kind,
+            visible_position,
+            started_tick: self.animation_tick,
+        });
+        self.set_status(match kind {
+            ArchiveFeedbackKind::Archive => "Archiving session...",
+            ArchiveFeedbackKind::Unarchive => "Unarchiving session...",
+        });
+        self.pending_g = false;
+    }
+
+    fn advance_archive_feedback(&mut self) {
+        let Some(feedback) = self.pending_archive_feedback.as_ref() else {
+            return;
+        };
+        if self.animation_tick.wrapping_sub(feedback.started_tick) >= ARCHIVE_FEEDBACK_FRAMES {
+            self.commit_pending_archive_feedback();
+        }
+    }
+
+    fn commit_pending_archive_feedback(&mut self) {
+        let Some(feedback) = self.pending_archive_feedback.take() else {
+            return;
+        };
+        let mut archived_sessions = self.archived_sessions.clone();
+        match feedback.kind {
+            ArchiveFeedbackKind::Archive => {
+                archived_sessions.push(feedback.session_key.clone());
+                archived_sessions.sort();
+                archived_sessions.dedup();
+            }
+            ArchiveFeedbackKind::Unarchive => {
+                archived_sessions.retain(|key| key != &feedback.session_key);
+            }
+        }
+        if let Err(error) = config::save_archived_sessions(&archived_sessions) {
+            self.set_status(format!("Archive save failed: {error}"));
+            self.pending_g = false;
+            return;
+        }
+        self.archived_sessions = archived_sessions;
+        self.refresh_visible_sessions();
+        self.select_visible_session_position(feedback.visible_position);
+        self.set_status(match feedback.kind {
+            ArchiveFeedbackKind::Archive => format!("Session archived: {}", feedback.session_id),
+            ArchiveFeedbackKind::Unarchive => {
+                format!("Session unarchived: {}", feedback.session_id)
+            }
+        });
+        self.pending_g = false;
+    }
+
+    fn select_visible_session_position(&mut self, position: usize) {
+        if self.visible_session_indices.is_empty() {
+            self.selected_session = 0;
+            self.pending_session_load = None;
+            self.pending_session_preview = None;
+            self.deferred_session_preview = None;
+            return;
+        }
+        let next_position = position.min(self.visible_session_indices.len().saturating_sub(1));
+        self.select_session_index(self.visible_session_indices[next_position]);
     }
 
     fn clamp_selected_session(&mut self) {
@@ -5066,7 +5256,7 @@ fn timeline_event_is_rewind_anchor(event: &crate::core::model::TimelineEvent) ->
     matches!(event.kind, TimelineKind::User | TimelineKind::RewindPoint)
 }
 
-fn session_star_key(session: &SessionSummary) -> String {
+fn session_overlay_key(session: &SessionSummary) -> String {
     format!("{}:{}", session.cli.id(), session.id)
 }
 
@@ -5238,6 +5428,7 @@ mod tests {
     fn new_app(source: CliTool, target: CliTool) -> App {
         let mut app = App::new(source, target).expect("app");
         app.starred_sessions.clear();
+        app.archived_sessions.clear();
         app.refresh_visible_sessions();
         app
     }
@@ -5829,13 +6020,22 @@ Host devbox
     }
 
     #[test]
-    fn session_filter_cycles_starred_before_all() {
+    fn session_filter_cycles_archived_between_starred_and_all() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+
+        app.handle_key(key('['));
+
+        assert_eq!(app.session_filter, SessionFilter::Archived);
+        assert_eq!(app.status_message, "Filter: Archived");
 
         app.handle_key(key('['));
 
         assert_eq!(app.session_filter, SessionFilter::Starred);
         assert_eq!(app.status_message, "Filter: Star");
+
+        app.handle_key(key(']'));
+
+        assert_eq!(app.session_filter, SessionFilter::Archived);
 
         app.handle_key(key(']'));
 
@@ -5964,13 +6164,80 @@ Host devbox
         app.handle_key(key('/'));
         app.handle_key(key('5'));
         app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
-        app.handle_key(key('a'));
+        app.run_palette_command("clear");
 
         assert_eq!(app.session_filter, SessionFilter::All);
         assert!(app.search_query.is_empty());
         assert_eq!(app.visible_session_indices().len(), 3);
         assert_eq!(app.status_message, "Filters cleared");
         assert!(!app.is_session_load_pending());
+    }
+
+    #[test]
+    fn archive_shortcut_hides_after_feedback_and_unarchive_restores() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        let first_id = app.current_session().expect("session").id.clone();
+        let second_id = app.data.sessions[app.visible_session_indices()[1]]
+            .id
+            .clone();
+
+        app.handle_key(key('a'));
+
+        assert_eq!(app.status_message, "Archiving session...");
+        assert!(
+            app.visible_session_indices()
+                .iter()
+                .any(|index| app.data.sessions[*index].id == first_id)
+        );
+        assert_eq!(
+            app.current_session()
+                .and_then(|session| app.archive_feedback_for_session(session)),
+            Some(ArchiveFeedbackKind::Archive)
+        );
+
+        for _ in 0..ARCHIVE_FEEDBACK_FRAMES {
+            app.advance_animation();
+        }
+
+        assert!(app.status_message.starts_with("Session archived: "));
+        assert!(
+            !app.visible_session_indices()
+                .iter()
+                .any(|index| app.data.sessions[*index].id == first_id)
+        );
+        assert_eq!(
+            app.current_session().map(|session| session.id.as_str()),
+            Some(second_id.as_str())
+        );
+
+        app.apply_session_filter(SessionFilter::Archived);
+        app.search_query = first_id.clone();
+        app.refresh_visible_sessions();
+        app.clamp_selected_session();
+
+        assert_eq!(
+            app.current_session().map(|session| session.id.as_str()),
+            Some(first_id.as_str())
+        );
+
+        app.handle_key(key('a'));
+        assert_eq!(app.status_message, "Unarchiving session...");
+
+        for _ in 0..ARCHIVE_FEEDBACK_FRAMES {
+            app.advance_animation();
+        }
+
+        assert!(app.visible_session_indices().is_empty());
+        assert!(app.status_message.starts_with("Session unarchived: "));
+
+        app.search_query.clear();
+        app.apply_session_filter(SessionFilter::All);
+
+        assert!(
+            app.visible_session_indices()
+                .iter()
+                .any(|index| app.data.sessions[*index].id == first_id)
+        );
     }
 
     #[test]
@@ -7130,6 +7397,11 @@ Host devbox
             entries[7].action.status,
             SessionActionAvailability::Unavailable
         );
+        assert_eq!(entries[8].action.kind, SessionAvailableActionKind::Archive);
+        assert_eq!(
+            entries[8].action.status,
+            SessionActionAvailability::Available
+        );
 
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
@@ -7209,6 +7481,33 @@ Host devbox
         assert!(!export.show_launch);
         assert!(export.take_pending_resume().is_none());
         assert!(export.status_message.contains("Export unavailable"));
+    }
+
+    #[test]
+    fn action_menu_archive_uses_tui_overlay_action() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        let session_id = app.current_session().expect("session").id.clone();
+        app.handle_key(key('o'));
+        for _ in 0..8 {
+            app.handle_key(key('j'));
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(!app.show_action_menu);
+        assert_eq!(app.status_message, "Archiving session...");
+        assert_eq!(
+            app.current_session()
+                .and_then(|session| app.archive_feedback_for_session(session)),
+            Some(ArchiveFeedbackKind::Archive)
+        );
+        for _ in 0..ARCHIVE_FEEDBACK_FRAMES {
+            app.advance_animation();
+        }
+        assert!(
+            !app.visible_session_indices()
+                .iter()
+                .any(|index| app.data.sessions[*index].id == session_id)
+        );
     }
 
     #[test]

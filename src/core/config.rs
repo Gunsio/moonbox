@@ -216,6 +216,8 @@ struct UserConfig {
     ssh_hosts: Vec<SshHostConfig>,
     #[serde(default)]
     starred_sessions: Vec<String>,
+    #[serde(default)]
+    archived_sessions: Vec<String>,
 }
 
 pub fn load_last_target() -> Option<CliTool> {
@@ -301,9 +303,20 @@ fn remove_ssh_host_config_from_path(
     Ok(true)
 }
 
+#[cfg_attr(test, allow(dead_code))]
 pub fn load_starred_sessions() -> Vec<String> {
     load_user_config()
         .map(|config| config.starred_sessions)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|id| !id.trim().is_empty())
+        .collect()
+}
+
+#[cfg_attr(test, allow(dead_code))]
+pub fn load_archived_sessions() -> Vec<String> {
+    load_user_config()
+        .map(|config| config.archived_sessions)
         .unwrap_or_default()
         .into_iter()
         .filter(|id| !id.trim().is_empty())
@@ -371,6 +384,13 @@ pub fn save_starred_sessions(sessions: &[String]) -> Result<(), Box<dyn std::err
     let path = config_path().ok_or("missing home directory")?;
     let mut config = load_user_config_from_path(&path).unwrap_or_default();
     config.starred_sessions = sessions.to_vec();
+    save_user_config_to_path(&path, &config)
+}
+
+pub fn save_archived_sessions(sessions: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let path = config_path().ok_or("missing home directory")?;
+    let mut config = load_user_config_from_path(&path).unwrap_or_default();
+    config.archived_sessions = sessions.to_vec();
     save_user_config_to_path(&path, &config)
 }
 
@@ -456,7 +476,8 @@ mod tests {
   "ssh_hosts": [
     {"name": "dev", "hostname": "dev.example.com", "user": "moon", "port": 2222, "identity_file": "~/.ssh/dev", "tags": ["dev"]}
   ],
-  "starred_sessions": ["codex:session-1"]
+  "starred_sessions": ["codex:session-1"],
+  "archived_sessions": ["claude:session-2"]
 }"#,
         )
         .expect("config");
@@ -494,6 +515,7 @@ mod tests {
         assert_eq!(config.ssh_hosts[0].name, "dev");
         assert_eq!(config.ssh_hosts[0].host, "dev.example.com");
         assert_eq!(config.starred_sessions, ["codex:session-1"]);
+        assert_eq!(config.archived_sessions, ["claude:session-2"]);
     }
 
     #[test]
@@ -531,7 +553,8 @@ mod tests {
   "ssh_hosts": [
     {"name": "prod", "host": "prod.internal", "user": "deploy"}
   ],
-  "starred_sessions": ["hermes:prod"]
+  "starred_sessions": ["hermes:prod"],
+  "archived_sessions": ["codex:old"]
 }"#,
         )
         .expect("write config");
@@ -557,6 +580,7 @@ mod tests {
         assert_eq!(saved.ssh_hosts.len(), 1);
         assert_eq!(saved.ssh_hosts[0].name, "prod");
         assert_eq!(saved.starred_sessions, ["hermes:prod"]);
+        assert_eq!(saved.archived_sessions, ["codex:old"]);
     }
 
     #[test]
@@ -593,6 +617,42 @@ mod tests {
         assert_eq!(saved.compiler_presets.len(), 1);
         assert_eq!(saved.ssh_hosts.len(), 1);
         assert_eq!(saved.starred_sessions, ["codex:abc", "claude:def"]);
+    }
+
+    #[test]
+    fn save_archived_sessions_preserves_other_config() {
+        let path = env::temp_dir().join(format!(
+            "moonbox-config-archived-{}.json",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        fs::write(
+            &path,
+            r#"{
+  "last_target": "hermes",
+  "default_compiler": "handoff",
+  "compiler_presets": [
+    {"id": "handoff", "command": "/bin/moonbox-handoff"}
+  ],
+  "ssh_hosts": [
+    {"name": "prod", "host": "prod.internal"}
+  ],
+  "starred_sessions": ["codex:abc"]
+}"#,
+        )
+        .expect("write config");
+
+        let mut config = load_user_config_from_path(&path).expect("config");
+        config.archived_sessions = vec!["codex:old".into(), "claude:done".into()];
+        save_user_config_to_path(&path, &config).expect("save");
+        let saved = load_user_config_from_path(&path).expect("saved config");
+
+        assert_eq!(saved.last_target, Some(CliTool::Hermes));
+        assert_eq!(saved.default_compiler.as_deref(), Some("handoff"));
+        assert_eq!(saved.compiler_presets.len(), 1);
+        assert_eq!(saved.ssh_hosts.len(), 1);
+        assert_eq!(saved.starred_sessions, ["codex:abc"]);
+        assert_eq!(saved.archived_sessions, ["codex:old", "claude:done"]);
     }
 
     #[test]

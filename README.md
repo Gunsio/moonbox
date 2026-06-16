@@ -249,7 +249,8 @@ The first implementation focuses on the product shell:
   actions
 - TUI `o` opens the selected session's action menu. `j` / `k` selects Resume,
   Handoff, Fork, Jump, Inspect, Copy, Copy Session ID, Export, or Archive, and
-  `enter` runs the selected available action.
+  `enter` runs the selected available action. Archive / Unarchive is a TUI
+  overlay action stored in Moonbox config and does not write provider stores.
 - `moonbox snapshot` captures a workspace continuation snapshot with git HEAD,
   branch, staged/unstaged/untracked paths, bounded diff previews, key project
   files, environment summary, and explicitly requested test-command results
@@ -304,9 +305,10 @@ The first implementation focuses on the product shell:
   auto-loaded into the picker
 - Real Codex, Claude, and Hermes resume-surface listing plus timeline parsing
 - Original-session open command, Work Capsule, and branch tree previews
-- Live `/` session search, combined filter display, and one-key clear with `a`
-- Starred sessions with `s` toggle and a `Star` source filter immediately before
-  `All` in the filter cycle
+- Live `/` session search, combined filter display, and archive / unarchive with
+  `a`
+- Starred sessions with `s` toggle plus `Star` and `Archived` source filters
+  before `All` in the filter cycle
 - Selected/filtered session drives timeline, Work Capsule, branch preview, token budget, and default rewind point
 - Real-session metadata is labeled separately from draft Work Capsule guidance,
   so source store facts are not confused with built-in compiler placeholders
@@ -970,6 +972,7 @@ commands, remains available through the dry-run JSON surfaces and
 | `f` | Cycle session source filter |
 | `o` | Open session action menu |
 | `[` / `]` | Previous / next session source filter |
+| `a` | Archive / unarchive selected session |
 | `s` | Star / unstar selected session |
 | `*` | Star / unstar alias |
 | `space` | Set rewind point |
@@ -1512,6 +1515,10 @@ Stable interfaces matter more than any single framework:
   availability model for Inspect, Resume, Jump, Fork, Handoff, Copy, Copy
   Session ID, Export, and Archive, and TUI `o` opens that action menu for the
   selected session.
+- M106: Archive Overlay; TUI `a` and the action menu archive or unarchive the
+  selected session through a Moonbox config overlay, default lists hide archived
+  sessions, the `Archived` filter can search and restore them, and the selected
+  row shows a short feedback state before the list compacts.
 
 ### Remaining Milestones
 
