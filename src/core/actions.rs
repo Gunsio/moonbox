@@ -10,9 +10,7 @@ pub enum SessionAvailableActionKind {
     Jump,
     Fork,
     Handoff,
-    Copy,
-    CopySessionId,
-    Export,
+    Yank,
     Archive,
 }
 
@@ -24,9 +22,7 @@ impl SessionAvailableActionKind {
             Self::Jump => "jump",
             Self::Fork => "fork",
             Self::Handoff => "handoff",
-            Self::Copy => "copy",
-            Self::CopySessionId => "copy_session_id",
-            Self::Export => "export",
+            Self::Yank => "yank",
             Self::Archive => "archive",
         }
     }
@@ -38,9 +34,7 @@ impl SessionAvailableActionKind {
             Self::Jump => "Jump",
             Self::Fork => "Fork",
             Self::Handoff => "Handoff",
-            Self::Copy => "Copy",
-            Self::CopySessionId => "Copy Session ID",
-            Self::Export => "Export",
+            Self::Yank => "Yank",
             Self::Archive => "Archive",
         }
     }
@@ -144,9 +138,7 @@ pub fn session_action_set(
         jump_action(context),
         fork_action(session, context),
         handoff_action(context),
-        copy_action(),
-        copy_session_id_action(),
-        export_action(),
+        share_action(),
         archive_action(),
     ];
     SessionActionSet {
@@ -327,36 +319,13 @@ fn handoff_action(context: &SessionActionContext) -> SessionAvailableAction {
     )
 }
 
-fn copy_action() -> SessionAvailableAction {
+fn share_action() -> SessionAvailableAction {
     action(
-        SessionAvailableActionKind::Copy,
-        SessionActionAvailability::Unavailable,
-        "Copy last AI output is planned for a later milestone.",
+        SessionAvailableActionKind::Yank,
+        SessionActionAvailability::Available,
+        "Yank session content without launching provider processes.",
         vec![SessionActionSafety::SourceStoreReadOnly],
-        Vec::new(),
-    )
-}
-
-fn copy_session_id_action() -> SessionAvailableAction {
-    action(
-        SessionAvailableActionKind::CopySessionId,
-        SessionActionAvailability::Unavailable,
-        "Copy session id is planned for a later milestone.",
-        vec![SessionActionSafety::SourceStoreReadOnly],
-        Vec::new(),
-    )
-}
-
-fn export_action() -> SessionAvailableAction {
-    action(
-        SessionAvailableActionKind::Export,
-        SessionActionAvailability::Unavailable,
-        "Session export action is planned for a later milestone.",
-        vec![
-            SessionActionSafety::SourceStoreReadOnly,
-            SessionActionSafety::MoonboxOverlayWrite,
-        ],
-        Vec::new(),
+        vec!["y"],
     )
 }
 
@@ -427,7 +396,7 @@ mod tests {
     }
 
     #[test]
-    fn local_actions_include_available_native_fork_and_future_actions() {
+    fn local_actions_include_available_native_fork_and_yank() {
         let actions = session_action_set(&session(), &SessionActionContext::local_without_live());
 
         assert_eq!(
@@ -446,24 +415,10 @@ mod tests {
         );
         assert_eq!(
             actions
-                .action(SessionAvailableActionKind::Copy)
-                .expect("copy")
+                .action(SessionAvailableActionKind::Yank)
+                .expect("yank")
                 .status,
-            SessionActionAvailability::Unavailable
-        );
-        assert_eq!(
-            actions
-                .action(SessionAvailableActionKind::CopySessionId)
-                .expect("copy session id")
-                .status,
-            SessionActionAvailability::Unavailable
-        );
-        assert_eq!(
-            actions
-                .action(SessionAvailableActionKind::Export)
-                .expect("export")
-                .status,
-            SessionActionAvailability::Unavailable
+            SessionActionAvailability::Available
         );
         assert_eq!(
             actions

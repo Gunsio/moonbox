@@ -2,7 +2,7 @@ use std::{
     env, fmt,
     sync::mpsc::{self, TryRecvError},
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -130,6 +130,34 @@ pub struct ActionMenuEntry {
     pub runnable: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SharePanelActionKind {
+    FirstUserInput,
+    LastAiOutput,
+    SessionId,
+    HandoffContent,
+    PortableJson,
+}
+
+impl SharePanelActionKind {
+    const ALL: [Self; 5] = [
+        Self::FirstUserInput,
+        Self::LastAiOutput,
+        Self::SessionId,
+        Self::HandoffContent,
+        Self::PortableJson,
+    ];
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SharePanelEntry {
+    pub kind: SharePanelActionKind,
+    pub selected: bool,
+    pub runnable: bool,
+    pub status: SessionActionAvailability,
+    pub reason: String,
+}
+
 fn target_runner_id(target: CliTool) -> Option<&'static str> {
     match target {
         CliTool::Codex => Some("codex"),
@@ -154,20 +182,19 @@ fn action_is_runnable(status: SessionActionAvailability) -> bool {
     )
 }
 
-fn action_menu_order() -> [SessionAvailableActionKind; 9] {
+fn action_menu_order() -> [SessionAvailableActionKind; 7] {
     [
         SessionAvailableActionKind::Resume,
         SessionAvailableActionKind::Handoff,
         SessionAvailableActionKind::Fork,
         SessionAvailableActionKind::Jump,
         SessionAvailableActionKind::Inspect,
-        SessionAvailableActionKind::Copy,
-        SessionAvailableActionKind::CopySessionId,
-        SessionAvailableActionKind::Export,
+        SessionAvailableActionKind::Yank,
         SessionAvailableActionKind::Archive,
     ]
 }
 
+const SHARE_PORTABLE_JSON_CLIPBOARD_LIMIT_BYTES: usize = 512 * 1024;
 const ARCHIVE_FEEDBACK_FRAMES: usize = 3;
 
 #[derive(Debug, Clone, Copy)]
@@ -1130,6 +1157,8 @@ pub struct App {
     pub launch_review_details: bool,
     pub show_action_menu: bool,
     pub action_menu_selection: usize,
+    pub show_share_panel: bool,
+    pub share_panel_selection: usize,
     pub show_open_original: bool,
     pub show_doctor: bool,
     pub show_skill_picker: bool,
@@ -1180,6 +1209,7 @@ pub struct App {
     pending_data_space_load: Option<PendingDataSpaceLoad>,
     launch_review_request_id: u64,
     pending_launch_review: Option<PendingLaunchReview>,
+    pending_share_handoff_copy: bool,
     handoff_trail: Option<HandoffTrail>,
     pending_archive_feedback: Option<PendingArchiveFeedback>,
     hooks_config: config::HooksConfig,
@@ -1262,6 +1292,8 @@ impl App {
             launch_review_details: false,
             show_action_menu: false,
             action_menu_selection: 0,
+            show_share_panel: false,
+            share_panel_selection: 0,
             show_open_original: false,
             show_doctor: false,
             show_skill_picker: false,
@@ -1319,6 +1351,7 @@ impl App {
             pending_data_space_load: None,
             launch_review_request_id: 0,
             pending_launch_review: None,
+            pending_share_handoff_copy: false,
             handoff_trail: None,
             pending_archive_feedback: None,
             hooks_config,
@@ -1818,6 +1851,129 @@ impl App {
             .collect()
     }
 
+    pub fn share_panel_entries(&self) -> Vec<SharePanelEntry> {
+        SharePanelActionKind::ALL
+            .into_iter()
+            .enumerate()
+            .map(|(index, kind)| {
+                let (status, reason) = self.share_action_state(kind);
+                SharePanelEntry {
+                    kind,
+                    selected: index == self.share_panel_selection,
+                    runnable: action_is_runnable(status),
+                    status,
+                    reason,
+                }
+            })
+            .collect()
+    }
+
+    fn share_action_state(
+        &self,
+        kind: SharePanelActionKind,
+    ) -> (SessionActionAvailability, String) {
+        match kind {
+            SharePanelActionKind::FirstUserInput => {
+                if self.first_user_input().is_some() {
+                    (
+                        SessionActionAvailability::Available,
+                        "Copy the first user message from the loaded timeline.".into(),
+                    )
+                } else if self.is_session_load_pending() || self.is_session_preview_pending() {
+                    (
+                        SessionActionAvailability::Unavailable,
+                        "Timeline is still loading; try again after the preview is ready.".into(),
+                    )
+                } else if self.selected_session_timeline_loaded() {
+                    (
+                        SessionActionAvailability::Unavailable,
+                        "Loaded timeline has no user input to copy.".into(),
+                    )
+                } else {
+                    (
+                        SessionActionAvailability::Unavailable,
+                        "Load session details before copying the first user input.".into(),
+                    )
+                }
+            }
+            SharePanelActionKind::LastAiOutput => {
+                if self.last_ai_output().is_some() {
+                    (
+                        SessionActionAvailability::Available,
+                        "Copy the latest assistant message from the loaded timeline.".into(),
+                    )
+                } else if self.is_session_load_pending() || self.is_session_preview_pending() {
+                    (
+                        SessionActionAvailability::Unavailable,
+                        "Timeline is still loading; try again after the preview is ready.".into(),
+                    )
+                } else if self.selected_session_timeline_loaded() {
+                    (
+                        SessionActionAvailability::Unavailable,
+                        "Loaded timeline has no assistant output to copy.".into(),
+                    )
+                } else {
+                    (
+                        SessionActionAvailability::Unavailable,
+                        "Load session details before copying the latest assistant output.".into(),
+                    )
+                }
+            }
+            SharePanelActionKind::SessionId => {
+                if self.current_session().is_some() {
+                    (
+                        SessionActionAvailability::Available,
+                        "Copy the selected provider session id.".into(),
+                    )
+                } else {
+                    (
+                        SessionActionAvailability::Unavailable,
+                        "No session is selected.".into(),
+                    )
+                }
+            }
+            SharePanelActionKind::HandoffContent => {
+                if self.selected_handoff_artifact().is_some() {
+                    (
+                        SessionActionAvailability::Available,
+                        "Copy the ready handoff artifact without launching a target session."
+                            .into(),
+                    )
+                } else if self.is_launch_review_pending() {
+                    (
+                        SessionActionAvailability::Unavailable,
+                        "Handoff generation is already running.".into(),
+                    )
+                } else {
+                    (
+                        SessionActionAvailability::Available,
+                        "Generate a handoff artifact, then copy it without launching the target."
+                            .into(),
+                    )
+                }
+            }
+            SharePanelActionKind::PortableJson => {
+                if self.current_session().is_none() {
+                    (
+                        SessionActionAvailability::Unavailable,
+                        "No session is selected.".into(),
+                    )
+                } else if self.is_session_load_pending() || self.is_session_preview_pending() {
+                    (
+                        SessionActionAvailability::Unavailable,
+                        "Timeline is still loading; compact JSON waits for loaded session context."
+                            .into(),
+                    )
+                } else {
+                    (
+                        SessionActionAvailability::Available,
+                        "Copy a compact Moonbox JSON envelope for this selected session.".into(),
+                    )
+                }
+            }
+        }
+    }
+
     pub fn selected_action_menu_entry(&self) -> Option<ActionMenuEntry> {
         self.action_menu_entries()
             .into_iter()
@@ -1963,6 +2119,7 @@ impl App {
                     self.pending_session_load = Some(pending);
                 }
                 Err(TryRecvError::Disconnected) => {
+                    self.pending_share_handoff_copy = false;
                     self.compile_status = "FAILED";
                     self.set_status(format!("Session load failed: {}", pending.session_id));
                     changed = true;
@@ -2161,6 +2318,7 @@ impl App {
             KeyCode::Char(',') => self.open_settings(),
             KeyCode::Char('s') | KeyCode::Char('*') => self.toggle_starred_session(),
             KeyCode::Char('o') => self.open_action_menu(),
+            KeyCode::Char('y') => self.open_share_panel(),
             KeyCode::Char('x') | KeyCode::Char('t') | KeyCode::Char('H') => {
                 self.open_launch_picker()
             }
@@ -2187,7 +2345,6 @@ impl App {
             KeyCode::Char('S') => self.open_skill_picker(),
             KeyCode::Char('+') | KeyCode::Char('=') => self.zoom_current_panel(),
             KeyCode::Char('-') => self.restore_zoom(),
-            KeyCode::Char('y') => self.copy_focused_command(),
             KeyCode::Enter => self.handle_main_enter(),
             _ => self.pending_g = false,
         }
@@ -2673,6 +2830,10 @@ impl App {
     }
 
     fn handle_overlay_key(&mut self, key: KeyEvent) {
+        if self.show_share_panel {
+            self.handle_share_panel_key(key);
+            return;
+        }
         if self.show_action_menu {
             self.handle_action_menu_key(key);
             return;
@@ -2699,7 +2860,8 @@ impl App {
             KeyCode::Char('r') if self.show_capsules => self.refresh_capsules(),
             KeyCode::Char('v') if self.show_doctor => self.toggle_verify(),
             KeyCode::Char('y') if self.show_doctor => self.copy_doctor_report(),
-            KeyCode::Char('y') => self.copy_focused_command(),
+            KeyCode::Char('y') if self.show_open_original => self.copy_focused_command(),
+            KeyCode::Char('y') => self.open_share_panel(),
             KeyCode::Enter if self.show_open_original => self.queue_original_resume(),
             KeyCode::Char('j') | KeyCode::Down => self.scroll_modal(true, 1),
             KeyCode::Char('k') | KeyCode::Up => self.scroll_modal(false, 1),
@@ -2721,6 +2883,11 @@ impl App {
             self.modal_scroll = 0;
             self.pending_compiler = self.selected_compiler;
             self.set_status("Skill picker closed");
+        } else if self.show_share_panel {
+            self.show_share_panel = false;
+            self.share_panel_selection = 0;
+            self.modal_scroll = 0;
+            self.set_status("Yank closed");
         } else if self.show_doctor {
             self.show_doctor = false;
             self.modal_scroll = 0;
@@ -3701,11 +3868,29 @@ impl App {
         self.pending_g = false;
     }
 
+    fn open_share_panel(&mut self) {
+        if self.current_session().is_none() {
+            self.show_share_panel = false;
+            self.set_status("No session selected");
+            self.pending_g = false;
+            return;
+        }
+        self.show_action_menu = false;
+        self.show_share_panel = true;
+        self.share_panel_selection = self
+            .share_panel_selection
+            .min(SharePanelActionKind::ALL.len().saturating_sub(1));
+        self.modal_scroll = 0;
+        self.set_status("Choose yank action");
+        self.pending_g = false;
+    }
+
     fn handle_action_menu_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => self.back_or_quit(),
             KeyCode::Char('j') | KeyCode::Down => self.move_action_menu_selection(true),
             KeyCode::Char('k') | KeyCode::Up => self.move_action_menu_selection(false),
+            KeyCode::Char('y') => self.open_share_panel(),
             KeyCode::Enter => self.execute_action_menu_selection(),
             _ => {}
         }
@@ -3769,18 +3954,53 @@ impl App {
                 self.zoomed_focus = Some(Focus::Capsule);
                 self.set_status("Inspecting session details");
             }
+            SessionAvailableActionKind::Yank => self.open_share_panel(),
             SessionAvailableActionKind::Archive => {
                 self.show_action_menu = false;
                 self.toggle_archived_session();
             }
-            SessionAvailableActionKind::Copy
-            | SessionAvailableActionKind::CopySessionId
-            | SessionAvailableActionKind::Export => {
-                self.set_status(format!(
-                    "{} unavailable: {}",
-                    entry.action.label, entry.action.reason
-                ));
-            }
+        }
+    }
+
+    fn handle_share_panel_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => self.back_or_quit(),
+            KeyCode::Char('j') | KeyCode::Down => self.move_share_panel_selection(true),
+            KeyCode::Char('k') | KeyCode::Up => self.move_share_panel_selection(false),
+            KeyCode::Enter => self.execute_share_panel_selection(),
+            _ => {}
+        }
+    }
+
+    fn move_share_panel_selection(&mut self, forward: bool) {
+        let count = SharePanelActionKind::ALL.len();
+        if forward {
+            self.share_panel_selection = (self.share_panel_selection + 1) % count;
+        } else if self.share_panel_selection == 0 {
+            self.share_panel_selection = count - 1;
+        } else {
+            self.share_panel_selection -= 1;
+        }
+        let kind = SharePanelActionKind::ALL[self.share_panel_selection];
+        self.set_status(format!("Yank candidate: {}", share_action_label(kind)));
+    }
+
+    fn execute_share_panel_selection(&mut self) {
+        let kind = SharePanelActionKind::ALL[self.share_panel_selection];
+        let (status, reason) = self.share_action_state(kind);
+        if !action_is_runnable(status) {
+            self.set_status(format!(
+                "{} unavailable: {reason}",
+                share_action_label(kind)
+            ));
+            return;
+        }
+        match kind {
+            SharePanelActionKind::FirstUserInput => self.copy_share_first_user_input(),
+            SharePanelActionKind::LastAiOutput => self.copy_share_last_ai_output(),
+            SharePanelActionKind::SessionId => self.copy_share_session_id(),
+            SharePanelActionKind::HandoffContent => self.copy_share_handoff_content(),
+            SharePanelActionKind::PortableJson => self.copy_share_portable_json(),
         }
     }
 
@@ -4222,6 +4442,7 @@ impl App {
 
     fn has_overlay(&self) -> bool {
         self.show_help
+            || self.show_share_panel
             || self.show_action_menu
             || self.show_open_original
             || self.show_doctor
@@ -5008,7 +5229,29 @@ impl App {
                 self.verify_passed = true;
                 self.modal_scroll = u16::MAX;
                 self.pending_g = false;
-                if review_was_visible {
+                if self.pending_share_handoff_copy {
+                    self.pending_share_handoff_copy = false;
+                    let copied = self.selected_handoff_artifact().map(str::to_string);
+                    self.show_launch = false;
+                    self.launch_review = false;
+                    self.launch_review_details = false;
+                    self.show_share_panel = true;
+                    self.modal_scroll = 0;
+                    if let Some(artifact) = copied {
+                        self.clipboard_text = Some(artifact);
+                        self.set_status(format!(
+                            "Copied generated handoff: {} ({} ms)",
+                            pending.target,
+                            elapsed.as_millis()
+                        ));
+                    } else {
+                        self.set_status(format!(
+                            "Generated handoff has no copyable content: {} ({} ms)",
+                            pending.target,
+                            elapsed.as_millis()
+                        ));
+                    }
+                } else if review_was_visible {
                     self.set_status(format!(
                         "Handoff review ready: {} ({} ms)",
                         pending.target,
@@ -5023,6 +5266,7 @@ impl App {
                 }
             }
             Err(error) => {
+                self.pending_share_handoff_copy = false;
                 self.compile_status = "FAILED";
                 self.verify_passed = false;
                 self.pending_target = pending.target;
@@ -5137,6 +5381,168 @@ impl App {
         };
         self.clipboard_text = Some(path);
         self.set_status("Copied handoff path");
+    }
+
+    fn copy_share_first_user_input(&mut self) {
+        if let Some(input) = self.first_user_input().map(str::to_string) {
+            self.clipboard_text = Some(input);
+            self.set_status("Copied first user input");
+            self.pending_g = false;
+            return;
+        }
+        if self.ensure_session_details_ready("Yank first user input") {
+            self.set_status("No user input to copy");
+        }
+        self.pending_g = false;
+    }
+
+    fn copy_share_last_ai_output(&mut self) {
+        if let Some(output) = self.last_ai_output().map(str::to_string) {
+            self.clipboard_text = Some(output);
+            self.set_status("Copied last AI output");
+            self.pending_g = false;
+            return;
+        }
+        if self.ensure_session_details_ready("Yank last AI output") {
+            self.set_status("No assistant output to copy");
+        }
+        self.pending_g = false;
+    }
+
+    fn copy_share_session_id(&mut self) {
+        let Some(session_id) = self.current_session().map(|session| session.id.clone()) else {
+            self.set_status("No session selected");
+            self.pending_g = false;
+            return;
+        };
+        self.clipboard_text = Some(session_id);
+        self.set_status("Copied Session ID");
+        self.pending_g = false;
+    }
+
+    fn copy_share_handoff_content(&mut self) {
+        if let Some(artifact) = self.selected_handoff_artifact().map(str::to_string) {
+            self.clipboard_text = Some(artifact);
+            self.set_status("Copied handoff text");
+            self.pending_g = false;
+            return;
+        }
+        if !self.ensure_session_details_ready("Yank handoff") {
+            return;
+        }
+        self.ensure_launch_handoff_skill_default();
+        self.pending_share_handoff_copy = true;
+        self.show_share_panel = false;
+        self.pending_target = self.data.target;
+        self.confirm_launch_target();
+    }
+
+    fn copy_share_portable_json(&mut self) {
+        if !self.ensure_session_details_ready("Yank portable JSON") {
+            return;
+        }
+        let Some(session) = self.current_session() else {
+            self.set_status("No session selected");
+            self.pending_g = false;
+            return;
+        };
+        let payload = self.compact_portable_json(session);
+        let Ok(text) = serde_json::to_string(&payload) else {
+            self.set_status("Portable JSON failed to serialize");
+            self.pending_g = false;
+            return;
+        };
+        if text.len() > SHARE_PORTABLE_JSON_CLIPBOARD_LIMIT_BYTES {
+            self.set_status(format!(
+                "Portable JSON is {}KB; use file export when M113 lands",
+                text.len() / 1024
+            ));
+            self.pending_g = false;
+            return;
+        }
+        self.clipboard_text = Some(text);
+        self.set_status("Copied portable JSON");
+        self.pending_g = false;
+    }
+
+    fn first_user_input(&self) -> Option<&str> {
+        if !self.selected_session_timeline_loaded() {
+            return None;
+        }
+        self.data
+            .timeline
+            .iter()
+            .find(|event| event.kind == TimelineKind::User && !event.detail.trim().is_empty())
+            .map(|event| event.detail.trim())
+    }
+
+    fn last_ai_output(&self) -> Option<&str> {
+        if !self.selected_session_timeline_loaded() {
+            return None;
+        }
+        self.data
+            .timeline
+            .iter()
+            .rev()
+            .find(|event| event.kind == TimelineKind::Assistant && !event.detail.trim().is_empty())
+            .map(|event| event.detail.trim())
+    }
+
+    fn selected_handoff_artifact(&self) -> Option<&str> {
+        let session = self.current_session()?;
+        if self.data.capsule.source_session != session.id
+            || self.data.capsule.source_cli != session.cli
+        {
+            return None;
+        }
+        self.data.capsule.handoff_artifact.as_deref()
+    }
+
+    fn compact_portable_json(&self, session: &SessionSummary) -> serde_json::Value {
+        let exported_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0);
+        let timeline_events = self
+            .data
+            .timeline
+            .iter()
+            .map(|event| {
+                serde_json::json!({
+                    "id": event.id,
+                    "time": event.time,
+                    "kind": event.kind,
+                    "title": event.title,
+                    "detail": event.detail,
+                })
+            })
+            .collect::<Vec<_>>();
+        serde_json::json!({
+            "schema": "moonbox.portable_session.v1",
+            "moonbox_version": env!("CARGO_PKG_VERSION"),
+            "exported_at_unix": exported_at,
+            "source": {
+                "cli": session.cli,
+                "session_id": session.id,
+                "title": session.title,
+                "cwd": session.cwd,
+                "branch": session.branch,
+                "updated_at": session.updated_at,
+            },
+            "handoff": {
+                "target_cli": self.pending_target,
+                "compiler": self.data.capsule.compiler,
+                "runner": self.data.capsule.handoff_runner,
+                "skill": self.data.capsule.handoff_skill,
+                "artifact": self.selected_handoff_artifact(),
+            },
+            "last_ai_output": self.last_ai_output(),
+            "timeline": {
+                "loaded": self.selected_session_timeline_loaded(),
+                "event_count": timeline_events.len(),
+                "events": timeline_events,
+            },
+        })
     }
 
     fn copy_target_launch_result_command(&mut self) {
@@ -5711,6 +6117,16 @@ fn query_explicitly_requests_moonbox_handoff_workers(query: &str) -> bool {
 
 fn original_resume_mode_from_env() -> OriginalResumeMode {
     parse_original_resume_mode(env::var("MOONBOX_RESUME_MODE").ok().as_deref())
+}
+
+fn share_action_label(kind: SharePanelActionKind) -> &'static str {
+    match kind {
+        SharePanelActionKind::FirstUserInput => "First user input",
+        SharePanelActionKind::LastAiOutput => "Last AI output",
+        SharePanelActionKind::SessionId => "Session ID",
+        SharePanelActionKind::HandoffContent => "Handoff content",
+        SharePanelActionKind::PortableJson => "Portable JSON",
+    }
 }
 
 fn parse_original_resume_mode(value: Option<&str>) -> OriginalResumeMode {
@@ -7748,27 +8164,14 @@ Host devbox
         assert_eq!(entries[0].action.kind, SessionAvailableActionKind::Resume);
         assert_eq!(entries[1].action.kind, SessionAvailableActionKind::Handoff);
         assert_eq!(entries[2].action.kind, SessionAvailableActionKind::Fork);
-        assert_eq!(entries[5].action.kind, SessionAvailableActionKind::Copy);
+        assert_eq!(entries[5].action.kind, SessionAvailableActionKind::Yank);
         assert_eq!(
             entries[5].action.status,
-            SessionActionAvailability::Unavailable
+            SessionActionAvailability::Available
         );
-        assert_eq!(
-            entries[6].action.kind,
-            SessionAvailableActionKind::CopySessionId
-        );
+        assert_eq!(entries[6].action.kind, SessionAvailableActionKind::Archive);
         assert_eq!(
             entries[6].action.status,
-            SessionActionAvailability::Unavailable
-        );
-        assert_eq!(entries[7].action.kind, SessionAvailableActionKind::Export);
-        assert_eq!(
-            entries[7].action.status,
-            SessionActionAvailability::Unavailable
-        );
-        assert_eq!(entries[8].action.kind, SessionAvailableActionKind::Archive);
-        assert_eq!(
-            entries[8].action.status,
             SessionActionAvailability::Available
         );
 
@@ -7819,46 +8222,87 @@ Host devbox
     }
 
     #[test]
-    fn action_menu_keeps_copy_and_export_as_future_actions() {
-        let mut copy = new_app(CliTool::Codex, CliTool::Hermes);
-        copy.handle_key(key('o'));
+    fn action_menu_opens_share_panel() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.handle_key(key('o'));
         for _ in 0..5 {
-            copy.handle_key(key('j'));
+            app.handle_key(key('j'));
         }
-        copy.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
-        assert!(copy.show_action_menu);
-        assert!(!copy.show_launch);
-        assert!(copy.take_pending_resume().is_none());
-        assert!(copy.status_message.contains("Copy unavailable"));
+        assert!(!app.show_action_menu);
+        assert!(app.show_share_panel);
+        assert!(!app.show_launch);
+        assert!(app.take_pending_resume().is_none());
+        assert_eq!(app.status_message, "Choose yank action");
+    }
 
-        let mut copy_session_id = new_app(CliTool::Codex, CliTool::Hermes);
-        copy_session_id.handle_key(key('o'));
-        for _ in 0..6 {
-            copy_session_id.handle_key(key('j'));
-        }
-        copy_session_id.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+    #[test]
+    fn share_panel_copies_first_user_last_ai_and_session_id() {
+        let mut user = new_app(CliTool::Codex, CliTool::Hermes);
+        let expected = user.first_user_input().expect("user input").to_string();
+        user.handle_key(key('y'));
+        user.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
-        assert!(copy_session_id.show_action_menu);
-        assert!(!copy_session_id.show_launch);
-        assert!(copy_session_id.take_pending_resume().is_none());
-        assert!(
-            copy_session_id
-                .status_message
-                .contains("Copy Session ID unavailable")
+        assert_eq!(
+            user.take_clipboard_text().as_deref(),
+            Some(expected.as_str())
         );
+        assert_eq!(user.status_message, "Copied first user input");
 
-        let mut export = new_app(CliTool::Codex, CliTool::Hermes);
-        export.handle_key(key('o'));
-        for _ in 0..7 {
-            export.handle_key(key('j'));
+        let mut ai = new_app(CliTool::Codex, CliTool::Hermes);
+        let expected = ai.last_ai_output().expect("assistant output").to_string();
+        ai.handle_key(key('y'));
+        ai.handle_key(key('j'));
+        ai.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert_eq!(ai.take_clipboard_text().as_deref(), Some(expected.as_str()));
+        assert_eq!(ai.status_message, "Copied last AI output");
+
+        let mut session_id = new_app(CliTool::Codex, CliTool::Hermes);
+        let expected = session_id.current_session().expect("session").id.clone();
+        session_id.handle_key(key('y'));
+        session_id.handle_key(key('j'));
+        session_id.handle_key(key('j'));
+        session_id.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert_eq!(
+            session_id.take_clipboard_text().as_deref(),
+            Some(expected.as_str())
+        );
+        assert_eq!(session_id.status_message, "Copied Session ID");
+    }
+
+    #[test]
+    fn share_panel_copies_ready_handoff_and_portable_json() {
+        let mut handoff = new_app(CliTool::Codex, CliTool::Hermes);
+        handoff.data.capsule.handoff_artifact = Some("# Handoff\n\nContinue here.".into());
+        handoff.handle_key(key('y'));
+        handoff.handle_key(key('j'));
+        handoff.handle_key(key('j'));
+        handoff.handle_key(key('j'));
+        handoff.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert_eq!(
+            handoff.take_clipboard_text().as_deref(),
+            Some("# Handoff\n\nContinue here.")
+        );
+        assert_eq!(handoff.status_message, "Copied handoff text");
+
+        let mut portable = new_app(CliTool::Codex, CliTool::Hermes);
+        let session_id = portable.current_session().expect("session").id.clone();
+        portable.handle_key(key('y'));
+        for _ in 0..4 {
+            portable.handle_key(key('j'));
         }
-        export.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        portable.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
-        assert!(export.show_action_menu);
-        assert!(!export.show_launch);
-        assert!(export.take_pending_resume().is_none());
-        assert!(export.status_message.contains("Export unavailable"));
+        let copied = portable.take_clipboard_text().expect("portable json");
+        let json: serde_json::Value = serde_json::from_str(&copied).expect("valid json");
+        assert_eq!(json["schema"], "moonbox.portable_session.v1");
+        assert_eq!(json["source"]["session_id"], session_id);
+        assert_eq!(json["timeline"]["loaded"], true);
+        assert_eq!(portable.status_message, "Copied portable JSON");
     }
 
     #[test]
@@ -7866,7 +8310,7 @@ Host devbox
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         let session_id = app.current_session().expect("session").id.clone();
         app.handle_key(key('o'));
-        for _ in 0..8 {
+        for _ in 0..6 {
             app.handle_key(key('j'));
         }
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));

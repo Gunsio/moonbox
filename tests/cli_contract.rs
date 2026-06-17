@@ -1633,16 +1633,14 @@ fn actions_cli_reports_fixture_safe_action_model() {
             .any(|safety| safety == "launches_provider_process")
     );
     assert_eq!(action("handoff")["status"], "available");
-    assert_eq!(action("copy")["status"], "unavailable");
-    assert_eq!(action("copy_session_id")["status"], "unavailable");
-    assert_eq!(action("export")["status"], "unavailable");
+    assert_eq!(action("yank")["status"], "available");
     assert_eq!(action("archive")["status"], "unavailable");
     assert!(
-        action("export")["safety"]
+        action("yank")["safety"]
             .as_array()
-            .expect("export safety")
+            .expect("yank safety")
             .iter()
-            .any(|safety| safety == "moonbox_overlay_write")
+            .any(|safety| safety == "source_store_read_only")
     );
     assert!(
         action("archive")["safety"]
