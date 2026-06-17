@@ -23,12 +23,14 @@ use super::{
 };
 
 const COMPILER_PREFIX: &str = "agent";
-const DEFAULT_TIMEOUT_MS: u64 = 180_000;
+const DEFAULT_TIMEOUT_MS: u64 = 300_000;
 const MAX_ARTIFACT_CHARS: usize = 40_000;
 const MAX_CONTEXT_EVENTS: usize = 80;
 const MAX_CONTEXT_COMPACTS: usize = 5;
 const MAX_CONTEXT_EVIDENCE: usize = 40;
 const MAX_CONTEXT_EXCERPT_CHARS: usize = 480;
+pub const BUILTIN_HANDOFF_SKILL_ID: &str = "moonbox-handoff";
+const BUILTIN_HANDOFF_SKILL_SOURCE: &str = include_str!("builtin_handoff_skill.md");
 const CLAUDE_PLUGIN_NAME: &str = "moonbox-handoff";
 const AGENT_CHILD_TERM_GRACE_MS: u64 = 80;
 static PYTHON_MODULE_CACHE: OnceLock<Mutex<BTreeMap<(String, String), bool>>> = OnceLock::new();
@@ -210,6 +212,34 @@ pub struct HandoffSkill {
     pub name: String,
     pub description: String,
     pub path: PathBuf,
+    pub source: HandoffSkillSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandoffSkillSource {
+    BuiltIn,
+    Local,
+}
+
+impl HandoffSkill {
+    pub fn is_builtin(&self) -> bool {
+        self.source == HandoffSkillSource::BuiltIn
+    }
+
+    pub fn path_label(&self) -> String {
+        if self.is_builtin() {
+            "built-in".into()
+        } else {
+            self.path.display().to_string()
+        }
+    }
+
+    pub fn source_label(&self) -> &'static str {
+        match self.source {
+            HandoffSkillSource::BuiltIn => "Built-in / Moonbox",
+            HandoffSkillSource::Local => "Local",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -227,6 +257,14 @@ pub struct RunnerPreflight {
 
 pub fn compiler_id(runner: AgentRunner, skill_id: &str) -> String {
     format!("{COMPILER_PREFIX}:{}:{skill_id}", runner.id())
+}
+
+pub fn skill_display_label(skill_id: &str) -> &str {
+    if skill_id == "handoff" {
+        "matt-handoff"
+    } else {
+        skill_id
+    }
 }
 
 pub fn parse_compiler_id(id: &str) -> Option<AgentCompilerSpec> {
@@ -247,11 +285,16 @@ pub fn parse_compiler_id(id: &str) -> Option<AgentCompilerSpec> {
 }
 
 pub fn discover_handoff_skills() -> Vec<HandoffSkill> {
-    let mut skills = Vec::new();
+    let mut skills = vec![builtin_handoff_skill()];
     for root in skill_roots() {
         discover_skills_under(&root, &mut skills);
     }
-    skills.sort_by(|left, right| left.id.cmp(&right.id).then(left.path.cmp(&right.path)));
+    skills.sort_by(|left, right| {
+        left.id
+            .cmp(&right.id)
+            .then(left.is_builtin().cmp(&right.is_builtin()))
+            .then(left.path.cmp(&right.path))
+    });
     skills.dedup_by(|left, right| left.id == right.id && left.path == right.path);
     skills
 }
@@ -260,6 +303,17 @@ pub fn find_handoff_skill(skill_id: &str) -> Option<HandoffSkill> {
     discover_handoff_skills()
         .into_iter()
         .find(|skill| skill.id == skill_id)
+}
+
+pub fn builtin_handoff_skill() -> HandoffSkill {
+    HandoffSkill {
+        id: BUILTIN_HANDOFF_SKILL_ID.into(),
+        name: BUILTIN_HANDOFF_SKILL_ID.into(),
+        description: "Built-in Moonbox handoff prompt for bounded context-pack continuation."
+            .into(),
+        path: PathBuf::from("built-in"),
+        source: HandoffSkillSource::BuiltIn,
+    }
 }
 
 pub fn runner_preflight(runner: AgentRunner) -> RunnerPreflight {
@@ -335,11 +389,7 @@ pub fn compile_with_agent_runner(
             reason: preflight.reason,
         });
     }
-    let skill_source = fs::read_to_string(&skill.path).map_err(|error| CompilerError::Io {
-        compiler: request.compiler.clone(),
-        stream: "skill",
-        reason: error.to_string(),
-    })?;
+    let skill_source = skill_source(&skill, &request.compiler)?;
     let prompt = build_agent_prompt(request, &skill, &skill_source);
     let agent_output = if let Ok(fake) = env::var("MOONBOX_AGENT_HANDOFF_FAKE_OUTPUT") {
         fake
@@ -367,9 +417,9 @@ pub fn build_agent_prompt(
         "\
 You are running a Moonbox continuation handoff job.
 
-Use the selected community handoff skill exactly as the handoff-writing policy:
+Use the selected handoff skill exactly as the handoff-writing policy:
 
-<selected_skill path=\"{}\">
+<selected_skill source=\"{}\" path=\"{}\">
 {}
 </selected_skill>
 
@@ -383,10 +433,22 @@ Moonbox safety constraints:
 
 {}
 ",
-        skill.path.display(),
+        skill.source_label(),
+        skill.path_label(),
         skill_source.trim(),
         context
     )
+}
+
+fn skill_source(skill: &HandoffSkill, compiler_id: &str) -> Result<String, CompilerError> {
+    if skill.is_builtin() {
+        return Ok(BUILTIN_HANDOFF_SKILL_SOURCE.into());
+    }
+    fs::read_to_string(&skill.path).map_err(|error| CompilerError::Io {
+        compiler: compiler_id.into(),
+        stream: "skill",
+        reason: error.to_string(),
+    })
 }
 
 fn normalize_agent_artifact(
@@ -424,7 +486,11 @@ fn normalize_agent_artifact(
         state: "handoff_ready".into(),
         decisions: vec![
             format!("Generated by {} runner.", runner.label()),
-            format!("Used community handoff skill {}.", skill.name),
+            if skill.is_builtin() {
+                format!("Used built-in Moonbox handoff skill {}.", skill.name)
+            } else {
+                format!("Used community handoff skill {}.", skill.name)
+            },
             "Moonbox supplied a bounded context pack instead of granting source-store access."
                 .into(),
         ],
@@ -443,7 +509,8 @@ fn normalize_agent_artifact(
         ],
         evidence: vec![
             format!("source session: {} ({})", session.id, session.cli),
-            format!("skill path: {}", skill.path.display()),
+            format!("skill source: {}", skill.source_label()),
+            format!("skill path: {}", skill.path_label()),
             artifact
                 .path
                 .as_ref()
@@ -893,10 +960,10 @@ fn run_codex_agent_sdk(
             reason: "Codex SDK Python command is not configured".into(),
         })?;
     let payload = json!({
-        "prompt": format!("${}\n\n{}", skill.name, prompt),
+        "prompt": codex_prompt_for_skill(skill, prompt),
         "cwd": sdk_cwd(request),
         "skill_id": skill.id,
-        "skill_path": skill.path.to_string_lossy(),
+        "skill_path": skill.path_label(),
         "codex_bin": env::var("MOONBOX_CODEX_BIN").ok(),
         "model": env::var("MOONBOX_CODEX_MODEL").ok(),
     });
@@ -917,6 +984,14 @@ fn run_codex_agent_sdk(
         });
     }
     Ok(agent_artifact_from_output(&stdout))
+}
+
+fn codex_prompt_for_skill(skill: &HandoffSkill, prompt: &str) -> String {
+    if skill.is_builtin() {
+        prompt.into()
+    } else {
+        format!("${}\n\n{}", skill.name, prompt)
+    }
 }
 
 fn run_claude_agent_sdk(
@@ -1016,7 +1091,7 @@ fn extract_handoff_artifact_path(output: &str) -> Option<PathBuf> {
             character.is_whitespace()
                 || matches!(
                     character,
-                    '<' | '>' | ')' | '(' | '[' | ']' | '\'' | '"' | '`'
+                    '<' | '>' | ')' | '(' | '[' | ']' | '{' | '}' | '\'' | '"' | '`'
                 )
         })
         .map(|token| {
@@ -1452,6 +1527,7 @@ fn parse_skill_file(path: &Path) -> Option<HandoffSkill> {
         name,
         description,
         path: path.to_path_buf(),
+        source: HandoffSkillSource::Local,
     })
 }
 
@@ -1969,6 +2045,26 @@ Write the handoff.
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].id, "handoff");
         assert!(skills[0].description.contains("handoff"));
+        assert_eq!(skills[0].source, HandoffSkillSource::Local);
+    }
+
+    #[test]
+    fn discovers_builtin_handoff_skill_without_user_install() {
+        let skill = find_handoff_skill(BUILTIN_HANDOFF_SKILL_ID).expect("built-in skill");
+
+        assert!(skill.is_builtin());
+        assert_eq!(skill.path_label(), "built-in");
+        assert!(
+            skill_source(&skill, "agent:codex:moonbox-handoff")
+                .expect("skill source")
+                .contains("Suggested Skills")
+        );
+    }
+
+    #[test]
+    fn display_label_disambiguates_matt_pocock_handoff_skill() {
+        assert_eq!(skill_display_label("handoff"), "matt-handoff");
+        assert_eq!(skill_display_label("moonbox-handoff"), "moonbox-handoff");
     }
 
     #[test]
@@ -1980,12 +2076,23 @@ Write the handoff.
             name: "handoff".into(),
             description: "handoff".into(),
             path: PathBuf::from("/skills/handoff/SKILL.md"),
+            source: HandoffSkillSource::Local,
         };
         let prompt = build_agent_prompt(&request, &skill, "Write a handoff document.");
-        assert!(prompt.contains("selected community handoff skill"));
+        assert!(prompt.contains("selected handoff skill"));
         assert!(prompt.contains("Moonbox Handoff Context Pack"));
         assert!(prompt.contains("Source session stores are read-only"));
+        assert!(prompt.contains("source=\"Local\""));
         assert!(prompt.contains("evt-091"));
+    }
+
+    #[test]
+    fn codex_prompt_does_not_reference_uninstalled_builtin_skill() {
+        let skill = builtin_handoff_skill();
+        let prompt = codex_prompt_for_skill(&skill, "Moonbox prompt body");
+
+        assert_eq!(prompt, "Moonbox prompt body");
+        assert!(!prompt.contains("$moonbox-handoff"));
     }
 
     #[test]
@@ -2068,6 +2175,7 @@ Write the handoff.
             name: "handoff".into(),
             description: "handoff".into(),
             path: PathBuf::from("/skills/handoff/SKILL.md"),
+            source: HandoffSkillSource::Local,
         };
         let capsule = normalize_agent_artifact(
             &request,
@@ -2211,6 +2319,7 @@ Write the handoff.
             name: "handoff".into(),
             description: "handoff".into(),
             path: PathBuf::from("/source/skills/handoff/SKILL.md"),
+            source: HandoffSkillSource::Local,
         };
         let plugin = TempClaudePlugin::new(&skill, "# Handoff\nWrite it.").expect("plugin");
         let root = plugin.root.clone();

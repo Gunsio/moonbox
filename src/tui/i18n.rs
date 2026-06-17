@@ -37,7 +37,6 @@ pub enum Text {
     SettingsOpened,
     Launch,
     ChooseTargetCli,
-    Selected,
     LaunchReviewDisabled,
     RegenerateHandoffReview,
     RegenerateBeforeLaunch,
@@ -150,7 +149,6 @@ pub enum Text {
     ChooseAiSkillToRun,
     ScrollOnlyKeys,
     ReviewActionKeys,
-    LoadingHiddenJob,
     WaitBackground,
     NextCopyOnly,
     NextRunCopy,
@@ -224,7 +222,6 @@ fn english(key: Text) -> &'static str {
         Text::SettingsOpened => "Settings opened",
         Text::Launch => "Launch",
         Text::ChooseTargetCli => "Choose target CLI",
-        Text::Selected => "Selected",
         Text::LaunchReviewDisabled => "Launch review disabled until validation passes",
         Text::RegenerateHandoffReview => "Regenerate handoff review",
         Text::RegenerateBeforeLaunch => {
@@ -351,9 +348,6 @@ fn english(key: Text) -> &'static str {
         Text::ChooseAiSkillToRun => "choose an AI skill to run",
         Text::ScrollOnlyKeys => "gg top   G bottom   j/k scroll",
         Text::ReviewActionKeys => "gg top   G bottom   j/k scroll   r/y/Esc actions",
-        Text::LoadingHiddenJob => {
-            "Esc hides this panel; the handoff job continues in the background."
-        }
         Text::WaitBackground => "background job",
         Text::NextCopyOnly => "Next: press y to copy the command; Esc returns",
         Text::NextRunCopy => {
@@ -406,7 +400,6 @@ fn zh_hans(key: Text) -> &'static str {
         Text::SettingsOpened => "设置已打开",
         Text::Launch => "启动",
         Text::ChooseTargetCli => "选择目标 CLI",
-        Text::Selected => "已选择",
         Text::LaunchReviewDisabled => "校验通过后才能进入启动确认",
         Text::RegenerateHandoffReview => "重新生成 Handoff Review",
         Text::RegenerateBeforeLaunch => "按 Enter 用当前 skill 重新生成 handoff，然后再启动",
@@ -529,7 +522,6 @@ fn zh_hans(key: Text) -> &'static str {
         Text::ChooseAiSkillToRun => "选择 AI skill 后可运行",
         Text::ScrollOnlyKeys => "gg 顶部   G 底部   j/k 滚动",
         Text::ReviewActionKeys => "gg 顶部   G 底部   j/k 滚动   r/y/Esc 操作",
-        Text::LoadingHiddenJob => "Esc 隐藏此面板；handoff 任务会继续在后台运行。",
         Text::WaitBackground => "后台生成",
         Text::NextCopyOnly => "下一步: 当前只能按 y 复制命令；Esc 返回",
         Text::NextRunCopy => "下一步: 按 r 启动本地目标；按 y 复制命令；Esc 返回",

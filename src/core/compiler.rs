@@ -104,6 +104,7 @@ pub const FIXTURE_COMPILER_IDS: [&str; 3] =
 const DEFAULT_PROCESS_TIMEOUT_MS: u64 = 30_000;
 const COMMUNITY_HANDOFF_SKILL_HOMEPAGE: &str =
     "https://github.com/mattpocock/skills/tree/main/skills/productivity/handoff";
+const MOONBOX_HANDOFF_SKILL_HOMEPAGE: &str = "https://github.com/Gunsio/moonbox";
 
 pub trait CapsuleCompiler {
     fn compile(
@@ -571,37 +572,7 @@ pub fn compiler_catalog_entries() -> Vec<CompilerPresetInfo> {
     } else {
         for skill in handoff_skills {
             for runner in [AgentRunner::Codex, AgentRunner::Claude] {
-                let preflight = handoff::runner_preflight(runner);
-                push_unique_compiler(
-                    &mut compilers,
-                    CompilerPresetInfo {
-                        id: handoff::compiler_id(runner, &skill.id),
-                        kind: CompilerPresetKind::Agent,
-                        status: preflight.status,
-                        score: if preflight.status == CompilerPresetStatus::Ready {
-                            95
-                        } else {
-                            30
-                        },
-                        command: preflight.command,
-                        args: vec![format!("skill={}", skill.path.display())],
-                        timeout_ms: env::var("MOONBOX_AGENT_HANDOFF_TIMEOUT_MS")
-                            .ok()
-                            .and_then(|value| value.parse::<u64>().ok()),
-                        reason: preflight.reason,
-                        description: Some(format!(
-                            "{} runner using community handoff skill: {}",
-                            runner.label(),
-                            if skill.description.trim().is_empty() {
-                                skill.name.as_str()
-                            } else {
-                                skill.description.as_str()
-                            }
-                        )),
-                        homepage: handoff_skill_homepage(&skill),
-                        github_stars: None,
-                    },
-                );
+                push_unique_compiler(&mut compilers, handoff_skill_info(runner, &skill));
             }
         }
     }
@@ -609,6 +580,60 @@ pub fn compiler_catalog_entries() -> Vec<CompilerPresetInfo> {
         push_unique_compiler(&mut compilers, builtin_info(id));
     }
     compilers
+}
+
+fn handoff_skill_info(runner: AgentRunner, skill: &handoff::HandoffSkill) -> CompilerPresetInfo {
+    let preflight = handoff::runner_preflight(runner);
+    let timeout_ms = env::var("MOONBOX_AGENT_HANDOFF_TIMEOUT_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok());
+    let description = if skill.is_builtin() {
+        format!(
+            "{} runner using built-in Moonbox handoff skill: {}",
+            runner.label(),
+            skill.description
+        )
+    } else {
+        format!(
+            "{} runner using community handoff skill: {}",
+            runner.label(),
+            if skill.description.trim().is_empty() {
+                skill.name.as_str()
+            } else {
+                skill.description.as_str()
+            }
+        )
+    };
+    CompilerPresetInfo {
+        id: handoff::compiler_id(runner, &skill.id),
+        kind: CompilerPresetKind::Agent,
+        status: if skill.is_builtin() {
+            CompilerPresetStatus::Ready
+        } else {
+            preflight.status
+        },
+        score: if skill.is_builtin() {
+            90
+        } else if preflight.status == CompilerPresetStatus::Ready {
+            95
+        } else {
+            30
+        },
+        command: preflight.command,
+        args: vec![format!("skill={}", skill.path_label())],
+        timeout_ms,
+        reason: if skill.is_builtin() {
+            format!(
+                "built_in_handoff_skill: bundled with Moonbox; runner preflight: {}",
+                preflight.reason
+            )
+        } else {
+            preflight.reason
+        },
+        description: Some(description),
+        homepage: handoff_skill_homepage(skill),
+        github_stars: None,
+    }
 }
 
 fn missing_handoff_skill_info(runner: AgentRunner) -> CompilerPresetInfo {
@@ -640,6 +665,9 @@ fn missing_handoff_skill_info(runner: AgentRunner) -> CompilerPresetInfo {
 }
 
 fn handoff_skill_homepage(skill: &handoff::HandoffSkill) -> Option<String> {
+    if skill.is_builtin() {
+        return Some(MOONBOX_HANDOFF_SKILL_HOMEPAGE.into());
+    }
     (skill.id == "handoff").then(|| COMMUNITY_HANDOFF_SKILL_HOMEPAGE.into())
 }
 
@@ -662,6 +690,10 @@ pub fn compiler_skill_clipboard_reference(info: &CompilerPresetInfo) -> Option<S
             info.homepage.clone().or_else(|| info.command.clone())
         }
     })
+}
+
+pub fn compiler_skill_is_builtin(info: &CompilerPresetInfo) -> bool {
+    compiler_skill_path(info) == Some("built-in")
 }
 
 pub fn compile_with_configured_runner(
@@ -921,6 +953,7 @@ fn select_default_compiler(
         .or_else(|| {
             catalog.iter().find(|compiler| {
                 compiler.kind == CompilerPresetKind::Agent
+                    && !compiler_skill_is_builtin(compiler)
                     && compiler.status == CompilerPresetStatus::Ready
             })
         })
@@ -1247,6 +1280,7 @@ sleep 1
             name: "handoff".into(),
             description: "Compact the current conversation into a handoff document.".into(),
             path: PathBuf::from("/skills/handoff/SKILL.md"),
+            source: handoff::HandoffSkillSource::Local,
         };
 
         assert_eq!(
@@ -1259,6 +1293,27 @@ sleep 1
             ..skill
         };
         assert_eq!(handoff_skill_homepage(&custom), None);
+    }
+
+    #[test]
+    fn built_in_handoff_skill_is_ready_catalog_agent_entry() {
+        let skill = handoff::builtin_handoff_skill();
+        let info = handoff_skill_info(AgentRunner::Codex, &skill);
+
+        assert_eq!(info.id, "agent:codex:moonbox-handoff");
+        assert_eq!(info.kind, CompilerPresetKind::Agent);
+        assert_eq!(info.status, CompilerPresetStatus::Ready);
+        assert_eq!(info.score, 90);
+        assert_eq!(compiler_skill_path(&info), Some("built-in"));
+        assert!(compiler_skill_is_builtin(&info));
+        assert!(
+            info.reason
+                .contains("built_in_handoff_skill: bundled with Moonbox")
+        );
+        assert_eq!(
+            info.homepage.as_deref(),
+            Some("https://github.com/Gunsio/moonbox")
+        );
     }
 
     #[test]
@@ -1337,6 +1392,19 @@ sleep 1
         assert_eq!(
             select_default_compiler(Some("agent:codex:handoff".into()), &catalog),
             "agent:codex:handoff"
+        );
+    }
+
+    #[test]
+    fn default_compiler_does_not_auto_run_built_in_agent_skill() {
+        let skill = handoff::builtin_handoff_skill();
+        let agent = handoff_skill_info(AgentRunner::Codex, &skill);
+        let catalog = vec![agent, builtin_info(DEFAULT_COMPILER_ID)];
+
+        assert_eq!(select_default_compiler(None, &catalog), DEFAULT_COMPILER_ID);
+        assert_eq!(
+            select_default_compiler(Some("agent:codex:moonbox-handoff".into()), &catalog),
+            "agent:codex:moonbox-handoff"
         );
     }
 
