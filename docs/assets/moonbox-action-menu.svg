@@ -1,0 +1,261 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1496" height="848" viewBox="0 0 1496 848" role="img" aria-labelledby="title desc">
+  <title id="title">Moonbox TUI screenshot: action-menu</title>
+  <desc id="desc">A generated terminal screenshot of Moonbox showing the action-menu fixture scene with session management, handoff, and Vim-style key hints.</desc>
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="18" stdDeviation="26" flood-color="#000000" flood-opacity="0.40"/>
+    </filter>
+    <style>
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; white-space: pre; }
+    </style>
+  </defs>
+  <rect x="28" y="28" width="1440" height="792" rx="8" fill="#050607" stroke="#58616f" stroke-width="2" filter="url(#shadow)"/>
+  <text x="46" y="60" class="mono" font-size="14" font-weight="500" fill="#5c708a">╭ Moonbox CLI ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮</text>
+  <text x="46" y="78" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="73" y="78" class="mono" font-size="14" font-weight="800" fill="#e8eff4">MOONBOX</text>
+  <text x="145" y="78" class="mono" font-size="14" font-weight="500" fill="#94a2b2">v0.1.4</text>
+  <text x="226" y="78" class="mono" font-size="14" font-weight="500" fill="#e8eff4">Filter</text>
+  <text x="289" y="78" class="mono" font-size="14" font-weight="500" fill="#94a2b2">[ ]</text>
+  <text x="316" y="78" class="mono" font-size="14" font-weight="500" fill="#e8eff4">:</text>
+  <text x="334" y="78" class="mono" font-size="14" font-weight="800" fill="#74a5d6">All</text>
+  <text x="388" y="78" class="mono" font-size="14" font-weight="500" fill="#e8eff4">Data:</text>
+  <text x="442" y="78" class="mono" font-size="14" font-weight="800" fill="#76cbd3">Local</text>
+  <text x="514" y="78" class="mono" font-size="14" font-weight="500" fill="#e8eff4">Handoff Skill:</text>
+  <text x="649" y="78" class="mono" font-size="14" font-weight="500" fill="#76cbd3">Built-in draft</text>
+  <text x="802" y="78" class="mono" font-size="14" font-weight="500" fill="#e8eff4">Tokens:</text>
+  <text x="874" y="78" class="mono" font-size="14" font-weight="800" fill="#debb7a">42K</text>
+  <text x="928" y="78" class="mono" font-size="14" font-weight="500" fill="#e8eff4">Pre-flight:</text>
+  <text x="1036" y="78" class="mono" font-size="14" font-weight="800" fill="#debb7a">WARN</text>
+  <text x="1081" y="78" class="mono" font-size="14" font-weight="800" fill="#debb7a">Medium</text>
+  <text x="1441" y="78" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="96" class="mono" font-size="14" font-weight="500" fill="#5c708a">╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
+  <text x="46" y="114" class="mono" font-size="14" font-weight="500" fill="#debb7a">╭ ~&gt; Sessions · All (1/╭ Action Menu ───────────────────────────────────────────────────────────────────────────────────────────────╮</text>
+  <text x="1243" y="114" class="mono" font-size="14" font-weight="500" fill="#5c708a">──────────────────────╮</text>
+  <text x="46" y="132" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="64" y="132" class="mono" font-size="14" font-weight="800" fill="#e8eff4">▸ Cdx  Moonbox sessio</text>
+  <text x="253" y="132" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="271" y="132" class="mono" font-size="14" font-weight="800" fill="#debb7a">Session actions</text>
+  <text x="1234" y="132" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1441" y="132" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="150" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="100" y="150" class="mono" font-size="14" font-weight="800" fill="#e8eff4">42K tokens · 10m</text>
+  <text x="253" y="150" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1234" y="150" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1252" y="150" class="mono" font-size="14" font-weight="500" fill="#e8eff4">rewind design</text>
+  <text x="1441" y="150" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="168" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="82" y="168" class="mono" font-size="14" font-weight="500" fill="#debb7a">▲</text>
+  <text x="100" y="168" class="mono" font-size="14" font-weight="800" fill="#b094cb">Clu</text>
+  <text x="145" y="168" class="mono" font-size="14" font-weight="500" fill="#94a2b2">QC platform</text>
+  <text x="253" y="168" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="271" y="168" class="mono" font-size="14" font-weight="500" fill="#74a5d6">Session:</text>
+  <text x="352" y="168" class="mono" font-size="14" font-weight="500" fill="#e8eff4">Codex / codex-cxcp-design</text>
+  <text x="1234" y="168" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1243" y="168" class="mono" font-size="14" font-weight="500" fill="#74a5d6">e</text>
+  <text x="1441" y="168" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="186" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="100" y="186" class="mono" font-size="14" font-weight="500" fill="#94a2b2">67K tokens</text>
+  <text x="199" y="186" class="mono" font-size="14" font-weight="500" fill="#5c708a">·</text>
+  <text x="217" y="186" class="mono" font-size="14" font-weight="500" fill="#94a2b2">2h a</text>
+  <text x="253" y="186" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1234" y="186" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1243" y="186" class="mono" font-size="14" font-weight="500" fill="#e2976f">mbedded_fixture</text>
+  <text x="1441" y="186" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="204" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="82" y="204" class="mono" font-size="14" font-weight="800" fill="#e07c92">!</text>
+  <text x="100" y="204" class="mono" font-size="14" font-weight="800" fill="#e2976f">Hms</text>
+  <text x="145" y="204" class="mono" font-size="14" font-weight="500" fill="#94a2b2">cxcp 502 res</text>
+  <text x="253" y="204" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="271" y="204" class="mono" font-size="14" font-weight="500" fill="#debb7a">&gt;</text>
+  <text x="289" y="204" class="mono" font-size="14" font-weight="800" fill="#82be9d">↩</text>
+  <text x="307" y="204" class="mono" font-size="14" font-weight="800" fill="#82be9d">Resume</text>
+  <text x="379" y="204" class="mono" font-size="14" font-weight="800" fill="#82be9d">✓</text>
+  <text x="397" y="204" class="mono" font-size="14" font-weight="500" fill="#82be9d">available</text>
+  <text x="1234" y="204" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1243" y="204" class="mono" font-size="14" font-weight="500" fill="#e8eff4">istant 1 / tool 4 /</text>
+  <text x="1441" y="204" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="222" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="100" y="222" class="mono" font-size="14" font-weight="500" fill="#94a2b2">58K tokens</text>
+  <text x="199" y="222" class="mono" font-size="14" font-weight="500" fill="#5c708a">·</text>
+  <text x="217" y="222" class="mono" font-size="14" font-weight="500" fill="#94a2b2">23h</text>
+  <text x="253" y="222" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="271" y="222" class="mono" font-size="14" font-weight="500" fill="#5c708a">└</text>
+  <text x="289" y="222" class="mono" font-size="14" font-weight="500" fill="#5c708a">Local provider resume is available.</text>
+  <text x="1234" y="222" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1441" y="222" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="240" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="253" y="240" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="271" y="240" class="mono" font-size="14" font-weight="800" fill="#76cbd3">→</text>
+  <text x="289" y="240" class="mono" font-size="14" font-weight="500" fill="#82be9d">Handoff</text>
+  <text x="370" y="240" class="mono" font-size="14" font-weight="800" fill="#82be9d">✓</text>
+  <text x="388" y="240" class="mono" font-size="14" font-weight="500" fill="#82be9d">available</text>
+  <text x="1234" y="240" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1243" y="240" class="mono" font-size="14" font-weight="500" fill="#e8eff4">n ago</text>
+  <text x="1441" y="240" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="258" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="253" y="258" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="271" y="258" class="mono" font-size="14" font-weight="500" fill="#5c708a">└</text>
+  <text x="289" y="258" class="mono" font-size="14" font-weight="500" fill="#5c708a">Handoff review can generate a target-agent continuation.</text>
+  <text x="1234" y="258" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1441" y="258" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="276" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="253" y="276" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="271" y="276" class="mono" font-size="14" font-weight="800" fill="#b094cb">Y</text>
+  <text x="289" y="276" class="mono" font-size="14" font-weight="500" fill="#82be9d">Fork</text>
+  <text x="343" y="276" class="mono" font-size="14" font-weight="800" fill="#82be9d">✓</text>
+  <text x="361" y="276" class="mono" font-size="14" font-weight="500" fill="#82be9d">available</text>
+  <text x="1234" y="276" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1441" y="276" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="294" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="253" y="294" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="271" y="294" class="mono" font-size="14" font-weight="500" fill="#5c708a">└</text>
+  <text x="289" y="294" class="mono" font-size="14" font-weight="500" fill="#5c708a">Codex native session fork is available.</text>
+  <text x="1234" y="294" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1441" y="294" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="312" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="253" y="312" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="271" y="312" class="mono" font-size="14" font-weight="800" fill="#94a2b2">↗</text>
+  <text x="289" y="312" class="mono" font-size="14" font-weight="500" fill="#94a2b2">Jump</text>
+  <text x="343" y="312" class="mono" font-size="14" font-weight="800" fill="#94a2b2">·</text>
+  <text x="361" y="312" class="mono" font-size="14" font-weight="500" fill="#94a2b2">unavailable</text>
+  <text x="1234" y="312" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1441" y="312" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="330" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="253" y="330" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="271" y="330" class="mono" font-size="14" font-weight="500" fill="#5c708a">└</text>
+  <text x="289" y="330" class="mono" font-size="14" font-weight="500" fill="#5c708a">Hooks are disabled; no live tmux state is available.</text>
+  <text x="1234" y="330" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1441" y="330" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="348" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="253" y="348" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="271" y="348" class="mono" font-size="14" font-weight="800" fill="#74a5d6">i</text>
+  <text x="289" y="348" class="mono" font-size="14" font-weight="500" fill="#82be9d">Inspect</text>
+  <text x="370" y="348" class="mono" font-size="14" font-weight="800" fill="#82be9d">✓</text>
+  <text x="388" y="348" class="mono" font-size="14" font-weight="500" fill="#82be9d">available</text>
+  <text x="1234" y="348" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1441" y="348" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="366" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="253" y="366" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="271" y="366" class="mono" font-size="14" font-weight="500" fill="#5c708a">└</text>
+  <text x="289" y="366" class="mono" font-size="14" font-weight="500" fill="#5c708a">Session details can be inspected without touching the provider store.</text>
+  <text x="1234" y="366" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1252" y="366" class="mono" font-size="14" font-weight="500" fill="#82be9d">· ready</text>
+  <text x="1441" y="366" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="384" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="253" y="384" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="271" y="384" class="mono" font-size="14" font-weight="800" fill="#76cbd3">⧉</text>
+  <text x="289" y="384" class="mono" font-size="14" font-weight="500" fill="#82be9d">Yank</text>
+  <text x="343" y="384" class="mono" font-size="14" font-weight="800" fill="#82be9d">✓</text>
+  <text x="361" y="384" class="mono" font-size="14" font-weight="500" fill="#82be9d">available</text>
+  <text x="1234" y="384" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1243" y="384" class="mono" font-size="14" font-weight="500" fill="#94a2b2">s/codex/sessions.json</text>
+  <text x="1441" y="384" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="402" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="253" y="402" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="271" y="402" class="mono" font-size="14" font-weight="500" fill="#5c708a">└</text>
+  <text x="289" y="402" class="mono" font-size="14" font-weight="500" fill="#5c708a">Yank session content without launching provider processes.</text>
+  <text x="1234" y="402" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1441" y="402" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="420" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="253" y="420" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="271" y="420" class="mono" font-size="14" font-weight="800" fill="#debb7a">▣</text>
+  <text x="289" y="420" class="mono" font-size="14" font-weight="500" fill="#82be9d">Archive</text>
+  <text x="370" y="420" class="mono" font-size="14" font-weight="800" fill="#82be9d">✓</text>
+  <text x="388" y="420" class="mono" font-size="14" font-weight="500" fill="#82be9d">available</text>
+  <text x="1234" y="420" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1441" y="420" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="438" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="253" y="438" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="271" y="438" class="mono" font-size="14" font-weight="500" fill="#5c708a">└</text>
+  <text x="289" y="438" class="mono" font-size="14" font-weight="500" fill="#5c708a">Archive this session in the Moonbox overlay without touching the provider store.</text>
+  <text x="1234" y="438" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1243" y="438" class="mono" font-size="14" font-weight="800" fill="#e8eff4">tin_compiler</text>
+  <text x="1441" y="438" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="456" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="253" y="456" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1234" y="456" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1243" y="456" class="mono" font-size="14" font-weight="500" fill="#e8eff4">re raw resume.</text>
+  <text x="1441" y="456" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="474" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="253" y="474" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="271" y="474" class="mono" font-size="14" font-weight="500" fill="#94a2b2">j/k choose   enter run selected action   Esc/q close</text>
+  <text x="1234" y="474" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1243" y="474" class="mono" font-size="14" font-weight="500" fill="#e8eff4">le for Hermes.</text>
+  <text x="1441" y="474" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="492" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="253" y="492" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1234" y="492" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1252" y="492" class="mono" font-size="14" font-weight="500" fill="#e8eff4">session rewind</text>
+  <text x="1441" y="492" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="510" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="253" y="510" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1234" y="510" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1243" y="510" class="mono" font-size="14" font-weight="500" fill="#e8eff4">ewind point.</text>
+  <text x="1441" y="510" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="528" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="253" y="528" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1234" y="528" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1243" y="528" class="mono" font-size="14" font-weight="500" fill="#e07c92">ompiler may omit tool</text>
+  <text x="1441" y="528" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="546" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="253" y="546" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1234" y="546" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1243" y="546" class="mono" font-size="14" font-weight="500" fill="#e07c92">and hidden provider</text>
+  <text x="1441" y="546" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="564" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="253" y="564" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1234" y="564" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1441" y="564" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="582" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="253" y="582" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1234" y="582" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1252" y="582" class="mono" font-size="14" font-weight="500" fill="#94a2b2">review the full</text>
+  <text x="1441" y="582" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="600" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="253" y="600" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1234" y="600" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1441" y="600" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="618" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="253" y="618" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1234" y="618" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1441" y="618" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="636" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="253" y="636" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1234" y="636" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1441" y="636" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="654" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="253" y="654" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1234" y="654" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1441" y="654" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="672" class="mono" font-size="14" font-weight="500" fill="#debb7a">╰──────────────────────│</text>
+  <text x="1234" y="672" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1243" y="672" class="mono" font-size="14" font-weight="500" fill="#5c708a">──────────────────────╯</text>
+  <text x="46" y="690" class="mono" font-size="14" font-weight="500" fill="#5c708a">╭ Action Path ─────────</text>
+  <text x="253" y="690" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1234" y="690" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1243" y="690" class="mono" font-size="14" font-weight="500" fill="#5c708a">──────────────────────╮</text>
+  <text x="46" y="708" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="91" y="708" class="mono" font-size="14" font-weight="800" fill="#74a5d6">source Codex codex</text>
+  <text x="253" y="708" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1234" y="708" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1441" y="708" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="726" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="91" y="726" class="mono" font-size="14" font-weight="500" fill="#94a2b2">cwd:</text>
+  <text x="136" y="726" class="mono" font-size="14" font-weight="500" fill="#e8eff4">~/coding/moon</text>
+  <text x="253" y="726" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1234" y="726" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1441" y="726" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
+  <text x="46" y="744" class="mono" font-size="14" font-weight="500" fill="#5c708a">╰──────────────────────</text>
+  <text x="253" y="744" class="mono" font-size="14" font-weight="500" fill="#debb7a">╰────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
+  <text x="1243" y="744" class="mono" font-size="14" font-weight="500" fill="#5c708a">──────────────────────╯</text>
+  <text x="46" y="762" class="mono" font-size="14" font-weight="500" fill="#5c708a">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+  <text x="46" y="780" class="mono" font-size="14" font-weight="500" fill="#94a2b2">Status Session actions</text>
+  <text x="55" y="798" class="mono" font-size="14" font-weight="800" fill="#74a5d6">j/k</text>
+  <text x="91" y="798" class="mono" font-size="14" font-weight="500" fill="#94a2b2">Action</text>
+  <text x="172" y="798" class="mono" font-size="14" font-weight="800" fill="#74a5d6">enter</text>
+  <text x="226" y="798" class="mono" font-size="14" font-weight="500" fill="#94a2b2">Choose</text>
+  <text x="307" y="798" class="mono" font-size="14" font-weight="800" fill="#74a5d6">y</text>
+  <text x="325" y="798" class="mono" font-size="14" font-weight="500" fill="#94a2b2">Yank</text>
+  <text x="388" y="798" class="mono" font-size="14" font-weight="800" fill="#74a5d6">Esc/q</text>
+  <text x="442" y="798" class="mono" font-size="14" font-weight="500" fill="#94a2b2">Close</text>
+</svg>

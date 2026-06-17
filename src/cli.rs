@@ -210,9 +210,21 @@ pub struct DocsSnapshotArgs {
     /// Snapshot terminal height in cells.
     #[arg(long, default_value_t = 44)]
     pub height: u16,
+    /// Fixture scene to render.
+    #[arg(long, value_enum, default_value_t = DocsSnapshotScene::default())]
+    pub scene: DocsSnapshotScene,
     /// Write the SVG to this path instead of stdout.
     #[arg(long)]
     pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+pub enum DocsSnapshotScene {
+    #[default]
+    Handoff,
+    ActionMenu,
+    Yank,
+    TimelineDetails,
 }
 
 #[derive(Debug, Args, Clone)]

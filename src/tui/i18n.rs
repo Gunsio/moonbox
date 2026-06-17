@@ -17,13 +17,8 @@ pub enum Text {
     TimelineTitle,
     SessionDetailsTitle,
     RealSessionMetadata,
-    RawTitle,
-    Fidelity,
-    Portrait,
-    Updated,
     Runtime,
     Cwd,
-    Branch,
     TimelineItems,
     RawSize,
     SourceHealth,
@@ -96,7 +91,6 @@ pub enum Text {
     Cmd,
     Quit,
     Help,
-    SettingsTitle,
     SettingsSubtitle,
     Language,
     Theme,
@@ -105,7 +99,6 @@ pub enum Text {
     SmartEnterTmux,
     CurrentEnterRoute,
     Effect,
-    SettingsSafety,
     SettingsKeys,
     Unsaved,
     Saved,
@@ -202,13 +195,8 @@ fn english(key: Text) -> &'static str {
         Text::TimelineTitle => "Timeline",
         Text::SessionDetailsTitle => "Session Details",
         Text::RealSessionMetadata => "Real Session Metadata",
-        Text::RawTitle => "Raw Title",
-        Text::Fidelity => "Fidelity",
-        Text::Portrait => "Portrait",
-        Text::Updated => "Updated",
         Text::Runtime => "Runtime",
         Text::Cwd => "Cwd",
-        Text::Branch => "Branch",
         Text::TimelineItems => "Timeline Items",
         Text::RawSize => "Raw Size",
         Text::SourceHealth => "Source Health",
@@ -289,20 +277,14 @@ fn english(key: Text) -> &'static str {
         Text::Cmd => "Cmd",
         Text::Quit => "Quit",
         Text::Help => "Help",
-        Text::SettingsTitle => "Settings",
-        Text::SettingsSubtitle => {
-            "Preview first. Saved settings apply to Moonbox UI only, not source session stores."
-        }
+        Text::SettingsSubtitle => "Preview changes before saving.",
         Text::Language => "Language",
         Text::Theme => "Theme",
         Text::HooksEventChannel => "Hooks event channel",
-        Text::HooksManagedByCli => "install/uninstall is managed by `moonbox hooks`",
+        Text::HooksManagedByCli => "managed by `moonbox hooks`",
         Text::SmartEnterTmux => "Smart Enter / tmux",
         Text::CurrentEnterRoute => "Current Enter Route",
         Text::Effect => "Effect",
-        Text::SettingsSafety => {
-            "Moonbox never translates session content, creates panes, sends keystrokes, resumes source sessions, or mutates source stores from these settings."
-        }
         Text::SettingsKeys => {
             "j/k choose   h/l change   space toggle   r reset   Enter save   Esc cancel"
         }
@@ -380,13 +362,8 @@ fn zh_hans(key: Text) -> &'static str {
         Text::TimelineTitle => "时间线",
         Text::SessionDetailsTitle => "会话详情",
         Text::RealSessionMetadata => "真实会话元数据",
-        Text::RawTitle => "原始标题",
-        Text::Fidelity => "保真度",
-        Text::Portrait => "画像",
-        Text::Updated => "更新时间",
         Text::Runtime => "运行状态",
         Text::Cwd => "工作目录",
-        Text::Branch => "分支",
         Text::TimelineItems => "时间线条目",
         Text::RawSize => "原始大小",
         Text::SourceHealth => "Source 健康",
@@ -465,20 +442,14 @@ fn zh_hans(key: Text) -> &'static str {
         Text::Cmd => "命令",
         Text::Quit => "退出",
         Text::Help => "帮助",
-        Text::SettingsTitle => "设置",
-        Text::SettingsSubtitle => {
-            "先预览再保存。设置只影响 Moonbox UI，不影响 source session store。"
-        }
+        Text::SettingsSubtitle => "先预览，再保存。",
         Text::Language => "语言",
         Text::Theme => "主题",
         Text::HooksEventChannel => "Hooks 事件通道",
-        Text::HooksManagedByCli => "安装/卸载由 `moonbox hooks` 管理",
+        Text::HooksManagedByCli => "由 `moonbox hooks` 管理",
         Text::SmartEnterTmux => "Smart Enter / tmux",
         Text::CurrentEnterRoute => "当前 Enter 路径",
         Text::Effect => "影响",
-        Text::SettingsSafety => {
-            "这些设置不会翻译 session 内容、创建 pane、发送按键、恢复 source session 或修改 source store。"
-        }
         Text::SettingsKeys => "j/k 选择   h/l 切换   space 开关   r 重置   Enter 保存   Esc 取消",
         Text::Unsaved => "未保存",
         Text::Saved => "已保存",

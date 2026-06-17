@@ -414,6 +414,14 @@ and this project uses semantic versioning once tagged releases start.
 - The startup loading screen now follows the saved UI language preference and
   describes the bounded read-only startup index instead of hard-coded English
   scan text.
+- Session Details now uses calmer theme-token metadata coloring, shortened path
+  rendering, only the high-signal handoff marker, and a spatial Zoom Details
+  layout that separates overview, Session Anatomy, Handoff Snapshot, and
+  location/path content.
+- Header chrome is now neutral global status instead of sharing Action Path
+  focus styling; the Handoff Skill label names provider or built-in draft mode,
+  and Zoom Action Path now expands into route, Enter behavior, cwd inventory,
+  target readiness, and review-mode details.
 - Simplified Chinese UI preferences now localize the main TUI chrome, including
   the header, session inventory, timeline/details/action panels, status line,
   key hints, and Launch target picker, while preserving source session content
@@ -466,6 +474,13 @@ and this project uses semantic versioning once tagged releases start.
 
 ### Changed
 
+- README is now a concise community-facing project page focused on the
+  cross-CLI session workbench, Moonlight Box session-management vision, hotkeys,
+  Luoshen themes, install paths, and acknowledgements; milestone-style change
+  history stays in this changelog instead of the README.
+- Documentation screenshots now render four fixture scenes through
+  `docs-snapshot --scene`: Action Menu, Yank panel, Handoff Review, and zoomed
+  Timeline details.
 - Work Capsule and launch plan JSON now emit `handoff_label` instead of the
   misleading `target_branch` name, while still accepting legacy
   `target_branch` capsule input for compatibility.

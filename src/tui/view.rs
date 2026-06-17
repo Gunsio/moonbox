@@ -44,7 +44,7 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     let root = centered(area, 98, 96);
     let header_height = if root.width < 120 { 4 } else { 3 };
-    let command_height = if root.width < 120 { 5 } else { 3 };
+    let command_height = command_bar_height(root.width, app);
     let zoomed_action_path = app.zoomed_focus == Some(Focus::Branches);
     let branch_height = if zoomed_action_path {
         root.height
@@ -256,27 +256,46 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
 
     frame.render_widget(
         Paragraph::new(lines)
-            .block(dynamic_panel_block(
-                format!(" {} ", i18n::text(language, Text::MoonboxCli)),
-                app.focus == Focus::Branches,
-            ))
+            .block(chrome_panel_block(format!(
+                " {} ",
+                i18n::text(language, Text::MoonboxCli)
+            )))
             .alignment(Alignment::Left),
         area,
     );
 }
 
 fn selected_skill_label(app: &App) -> String {
-    let Some(compiler_id) = app.data.compilers.get(app.selected_compiler) else {
-        return app.data.capsule.compiler.clone();
+    let language = app.effective_language();
+    let Some(compiler_id) = app
+        .data
+        .compilers
+        .get(app.selected_compiler)
+        .or_else(|| Some(&app.data.capsule.compiler))
+    else {
+        return "-".into();
     };
+
+    if compiler::compiler_is_builtin(compiler_id) {
+        return localized(language, "Built-in draft", "内置草稿").into();
+    }
+
     if let Some(info) = app
         .compiler_catalog
         .iter()
         .find(|entry| entry.id == *compiler_id)
         && let Some(spec) = handoff::parse_compiler_id(compiler_id)
     {
+        if compiler::compiler_skill_is_builtin(info) {
+            return format!(
+                "{} · {}",
+                localized(language, "Built-in", "内置"),
+                handoff::skill_display_label(&spec.skill_id)
+            );
+        }
         return agent_skill_display_label(info, &spec.skill_id);
     }
+
     compiler_skill_label(compiler_id)
 }
 
@@ -1794,7 +1813,12 @@ fn visible_timeline_events(app: &App) -> Vec<(usize, &TimelineEvent)> {
 fn render_capsule(frame: &mut Frame, area: Rect, app: &App) {
     let language = app.effective_language();
     let capsule = &app.data.capsule;
-    let mut lines = session_detail_lines(app);
+    let mut lines = session_detail_lines(app, area.width);
+
+    if app.zoomed_focus == Some(Focus::Capsule) {
+        render_zoomed_capsule(frame, area, app, capsule);
+        return;
+    }
 
     if app.is_session_load_pending() {
         lines.push(Line::raw(""));
@@ -1872,29 +1896,7 @@ fn render_capsule(frame: &mut Frame, area: Rect, app: &App) {
                 "当前只展示只读 inventory 中的 session metadata。",
             )
         };
-        lines.push(Line::raw(""));
-        lines.push(Line::from(Span::styled(
-            localized(
-                language,
-                "Handoff Snapshot Pending",
-                "Handoff Snapshot 待加载",
-            ),
-            Style::default()
-                .fg(theme::gold())
-                .add_modifier(Modifier::BOLD),
-        )));
-        lines.push(Line::from(Span::styled(
-            preview_detail,
-            Style::default().fg(theme::text()),
-        )));
-        lines.push(Line::from(Span::styled(
-            localized(
-                language,
-                "Open Review to run the selected AI handoff skill.",
-                "打开 Review 后才会运行所选 AI handoff skill。",
-            ),
-            Style::default().fg(theme::muted()),
-        )));
+        lines.extend(handoff_pending_lines(language, preview_detail));
         frame.render_widget(
             Paragraph::new(lines)
                 .block(dynamic_panel_block(
@@ -1926,26 +1928,30 @@ fn compact_capsule_lines(capsule: &WorkCapsule) -> Vec<Line<'static>> {
     vec![
         Line::raw(""),
         Line::from(Span::styled(
-            "Handoff Snapshot",
+            "↪ Handoff Snapshot",
             Style::default()
                 .fg(theme::blue())
                 .add_modifier(Modifier::BOLD),
         )),
-        review_label_line("State", capsule.state.clone(), theme::gold()),
-        review_label_line(
+        metadata_line("State", capsule.state.clone(), status_text_style()),
+        metadata_line(
             "Rewind",
             review_snippet(&capsule.rewind_point, 96),
-            theme::gold(),
+            Style::default().fg(theme::text()),
         ),
-        review_label_line("Goal", review_snippet(&capsule.goal, 96), theme::blue()),
-        review_label_line(
+        metadata_line(
+            "Goal",
+            review_snippet(&capsule.goal, 96),
+            Style::default().fg(theme::text()),
+        ),
+        metadata_line(
             "Risk",
             capsule
                 .risks
                 .first()
                 .map(|risk| review_snippet(risk, 96))
                 .unwrap_or_else(|| "none".into()),
-            theme::red(),
+            Style::default().fg(theme::red()),
         ),
         Line::from(Span::styled(
             "Press c to refresh and review the full handoff.",
@@ -1954,7 +1960,219 @@ fn compact_capsule_lines(capsule: &WorkCapsule) -> Vec<Line<'static>> {
     ]
 }
 
-fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
+fn handoff_pending_lines(
+    language: crate::core::config::UiLanguage,
+    preview_detail: &'static str,
+) -> Vec<Line<'static>> {
+    vec![
+        Line::raw(""),
+        Line::from(Span::styled(
+            localized(
+                language,
+                "↪ Handoff Snapshot Pending",
+                "↪ Handoff Snapshot 待加载",
+            ),
+            Style::default()
+                .fg(theme::gold())
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(vec![
+            Span::styled("  ", Style::default().fg(theme::muted())),
+            Span::styled(preview_detail, Style::default().fg(theme::text())),
+        ]),
+        Line::from(vec![
+            Span::styled("  ↪ ", Style::default().fg(theme::muted())),
+            Span::styled(
+                localized(
+                    language,
+                    "Open Review to run the selected AI handoff skill.",
+                    "打开 Review 后才会运行所选 AI handoff skill。",
+                ),
+                Style::default().fg(theme::muted()),
+            ),
+        ]),
+    ]
+}
+
+fn render_zoomed_capsule(frame: &mut Frame, area: Rect, app: &App, capsule: &WorkCapsule) {
+    let language = app.effective_language();
+    let block = dynamic_panel_block(
+        format!(" {} ", i18n::text(language, Text::SessionDetailsTitle)),
+        app.focus == Focus::Capsule,
+    );
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if inner.height < 18 || inner.width < 82 {
+        let mut lines = session_detail_lines(app, area.width);
+        if let Some(session) = app.current_session() {
+            lines.extend(session_anatomy_zoom_lines(session));
+        }
+        lines.extend(compact_capsule_lines(capsule));
+        frame.render_widget(
+            Paragraph::new(lines)
+                .scroll((app.capsule_scroll, 0))
+                .wrap(Wrap { trim: true }),
+            inner,
+        );
+        return;
+    }
+
+    let overview_lines = session_overview_lines(app, inner.width);
+    let preferred_overview_height = u16::try_from(overview_lines.len().saturating_add(2))
+        .unwrap_or(u16::MAX)
+        .clamp(10, 18);
+    let overview_height = preferred_overview_height.min(inner.height.saturating_sub(12).max(8));
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(overview_height), Constraint::Min(8)])
+        .split(inner);
+    let body_cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
+        .split(rows[1]);
+    let right_rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
+        .split(body_cols[1]);
+
+    frame.render_widget(
+        Paragraph::new(overview_lines)
+            .block(panel_block(" Overview ", false))
+            .wrap(Wrap { trim: true }),
+        rows[0],
+    );
+    frame.render_widget(
+        Paragraph::new(zoomed_anatomy_column_lines(app))
+            .block(panel_block(" Session Anatomy ", false))
+            .scroll((app.capsule_scroll, 0))
+            .wrap(Wrap { trim: true }),
+        body_cols[0],
+    );
+    frame.render_widget(
+        Paragraph::new(zoomed_handoff_column_lines(app, capsule))
+            .block(panel_block(" Handoff ", false))
+            .wrap(Wrap { trim: true }),
+        right_rows[0],
+    );
+    frame.render_widget(
+        Paragraph::new(session_path_footer_lines(app, right_rows[1].width))
+            .block(panel_block(" Location ", false))
+            .wrap(Wrap { trim: true }),
+        right_rows[1],
+    );
+}
+
+fn session_overview_lines(app: &App, width: u16) -> Vec<Line<'static>> {
+    session_detail_lines(app, width)
+}
+
+fn zoomed_anatomy_column_lines(app: &App) -> Vec<Line<'static>> {
+    let Some(session) = app.current_session() else {
+        return Vec::new();
+    };
+    session_anatomy_zoom_lines(session)
+}
+
+fn zoomed_handoff_column_lines(app: &App, capsule: &WorkCapsule) -> Vec<Line<'static>> {
+    let language = app.effective_language();
+    if app.is_session_load_pending() {
+        return vec![
+            Line::raw(""),
+            loading_heading(app, localized(language, "Loading", "正在加载")),
+            Line::from(Span::styled(
+                localized(
+                    language,
+                    "Loading timeline context for the selected session.",
+                    "正在加载选中 session 的 timeline 上下文。",
+                ),
+                Style::default().fg(theme::text()),
+            )),
+            Line::from(Span::styled(
+                localized(
+                    language,
+                    "Handoff generation still waits for an explicit Review action.",
+                    "handoff 生成仍会等待明确的 Review 动作。",
+                ),
+                Style::default().fg(theme::muted()),
+            )),
+        ];
+    }
+
+    if app.is_session_preview_pending() {
+        return vec![
+            Line::raw(""),
+            loading_heading(
+                app,
+                localized(language, "Timeline Preview Loading", "Timeline 预览加载中"),
+            ),
+            Line::from(Span::styled(
+                localized(
+                    language,
+                    "Session browsing remains active while the preview loads.",
+                    "预览加载期间仍可继续浏览 session。",
+                ),
+                Style::default().fg(theme::muted()),
+            )),
+        ];
+    }
+
+    if !app.selected_session_context_loaded() {
+        let preview_detail = if app.selected_session_timeline_loaded() {
+            localized(
+                language,
+                "Timeline preview is available; handoff output has not been generated.",
+                "Timeline 预览已可用；handoff 输出尚未生成。",
+            )
+        } else {
+            localized(
+                language,
+                "Session metadata is from the read-only inventory.",
+                "当前只展示只读 inventory 中的 session metadata。",
+            )
+        };
+        return handoff_pending_lines(language, preview_detail);
+    }
+
+    let mut lines = compact_capsule_lines(capsule);
+    if !capsule.evidence.is_empty() {
+        lines.push(Line::raw(""));
+        lines.push(section_header("Evidence"));
+        for item in capsule.evidence.iter().take(6) {
+            lines.push(Line::from(vec![
+                Span::styled("• ", Style::default().fg(theme::muted())),
+                Span::styled(
+                    review_snippet(item, 96),
+                    Style::default().fg(theme::muted()),
+                ),
+            ]));
+        }
+    }
+    lines
+}
+
+fn session_path_footer_lines(app: &App, width: u16) -> Vec<Line<'static>> {
+    let language = app.effective_language();
+    let Some(session) = app.current_session() else {
+        return Vec::new();
+    };
+    let path_width = session_path_width(width, true);
+    let mut lines = vec![metadata_line(
+        i18n::text(language, Text::Cwd),
+        compact_path(&session.cwd, path_width),
+        Style::default().fg(theme::text()),
+    )];
+    if let Some(path) = &session.source_path {
+        lines.push(metadata_line(
+            i18n::text(language, Text::Path),
+            compact_path(path, path_width.saturating_add(16)),
+            Style::default().fg(theme::muted()),
+        ));
+    }
+    lines
+}
+
+fn session_detail_lines(app: &App, width: u16) -> Vec<Line<'static>> {
     let language = app.effective_language();
     let Some(session) = app.current_session() else {
         return vec![
@@ -1971,7 +2189,7 @@ fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
         ];
     };
 
-    let zoomed = app.zoomed_focus == Some(Focus::Capsule);
+    let path_width = session_path_width(width, app.zoomed_focus == Some(Focus::Capsule));
     let mut lines = vec![
         Line::from(Span::styled(
             i18n::text(language, Text::RealSessionMetadata),
@@ -1980,20 +2198,20 @@ fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
                 .add_modifier(Modifier::BOLD),
         )),
         metadata_line(
-            i18n::text(language, Text::RawTitle),
-            &session.title,
+            localized(language, "Title", "标题"),
+            review_snippet(&session.title, 80),
             Style::default().fg(theme::text()),
         ),
         metadata_line(
-            i18n::text(language, Text::Source),
-            &format!("{} · {}", session.cli, session.source_provenance),
+            localized(language, "Source", "来源"),
+            format!("{} · {}", session.cli, session.source_provenance),
             source_provenance_style(session.source_provenance),
         ),
         source_fidelity_line(app, session.cli),
         metadata_line(
-            i18n::text(language, Text::Portrait),
-            &session_portrait_summary(app, session),
-            Style::default().fg(theme::cyan()),
+            localized(language, "Portrait", "画像"),
+            session_portrait_summary(app, session),
+            Style::default().fg(theme::text()),
         ),
     ];
 
@@ -2028,55 +2246,52 @@ fn session_detail_lines(app: &App) -> Vec<Line<'static>> {
 
     lines.extend([
         metadata_line(
-            i18n::text(language, Text::Updated),
-            &session.updated,
-            Style::default().fg(theme::blue()),
+            localized(language, "Updated", "更新时间"),
+            session.updated.clone(),
+            Style::default().fg(theme::text()),
         ),
         metadata_line(
-            i18n::text(language, Text::Runtime),
-            &session_runtime_detail(session),
+            "Runtime",
+            session_runtime_detail(session),
             session_runtime_style(session.runtime_status),
         ),
         metadata_line(
             i18n::text(language, Text::Cwd),
-            &session.cwd,
+            compact_path(&session.cwd, path_width),
             Style::default().fg(theme::text()),
         ),
         metadata_line(
-            i18n::text(language, Text::Branch),
-            session.branch.as_deref().unwrap_or("-"),
-            Style::default().fg(theme::cyan()),
+            localized(language, "Branch", "分支"),
+            session.branch.as_deref().unwrap_or("-").to_string(),
+            Style::default().fg(theme::text()),
         ),
         metadata_line(
             i18n::text(language, Text::TimelineItems),
-            &session.event_count.to_string(),
+            session.event_count.to_string(),
             Style::default().fg(theme::muted()),
         ),
         metadata_line(
             i18n::text(language, Text::Tokens),
-            &format_token_count(session.token_count),
-            Style::default().fg(theme::gold()),
+            format_token_count(session.token_count),
+            Style::default().fg(theme::text()),
         ),
         metadata_line(
             i18n::text(language, Text::RawSize),
-            &format_source_size_opt(session.source_size_bytes),
+            format_source_size_opt(session.source_size_bytes),
             Style::default().fg(theme::muted()),
         ),
         metadata_line(
             i18n::text(language, Text::SourceHealth),
-            &session_health_detail(session),
+            session_health_detail(session),
             session_health_style(session.status),
         ),
     ]);
     if let Some(path) = &session.source_path {
         lines.push(metadata_line(
             i18n::text(language, Text::Path),
-            path,
+            compact_path(path, path_width.saturating_add(18)),
             Style::default().fg(theme::muted()),
         ));
-    }
-    if zoomed {
-        lines.extend(session_anatomy_zoom_lines(session));
     }
     lines
 }
@@ -2090,13 +2305,13 @@ fn session_anatomy_summary_lines(
 
     let mut lines = vec![metadata_line(
         "Anatomy",
-        &anatomy_status_text(anatomy.status, anatomy.sampled),
+        anatomy_status_text(anatomy.status, anatomy.sampled),
         anatomy_status_style(anatomy.status),
     )];
     if let Some(compact) = &anatomy.compact {
         lines.push(metadata_line(
             "Context Window",
-            &format!(
+            format!(
                 "{} · {} after compact",
                 format_source_size(compact.tail_bytes),
                 compact.tail_lines
@@ -2117,7 +2332,7 @@ fn session_anatomy_summary_lines(
     {
         lines.push(metadata_line(
             "Trust",
-            &format!("{} · {}", signal.value, review_snippet(&signal.detail, 72)),
+            format!("{} · {}", signal.value, review_snippet(&signal.detail, 72)),
             anatomy_status_style(anatomy.status),
         ));
     }
@@ -2128,7 +2343,7 @@ fn session_anatomy_summary_lines(
     {
         lines.push(metadata_line(
             "Skill Usage",
-            &control_block_count(metric.count),
+            control_block_count(metric.count),
             Style::default().fg(theme::cyan()),
         ));
     }
@@ -2372,15 +2587,15 @@ fn source_fidelity_line(app: &App, cli: CliTool) -> Line<'static> {
     let language = app.effective_language();
     let Some(report) = source_adapter_report(app, cli) else {
         return metadata_line(
-            i18n::text(language, Text::Fidelity),
+            localized(language, "Fidelity", "保真度"),
             "missing · none",
             source_fidelity_style(SourceFidelityStatus::Missing),
         );
     };
     let value = source_fidelity_detail(report);
     metadata_line(
-        i18n::text(language, Text::Fidelity),
-        &value,
+        localized(language, "Fidelity", "保真度"),
+        value,
         source_fidelity_style(report.fidelity.status),
     )
 }
@@ -2414,11 +2629,62 @@ fn source_fidelity_style(status: SourceFidelityStatus) -> Style {
     }
 }
 
-fn metadata_line(label: &'static str, value: &str, style: Style) -> Line<'static> {
+fn metadata_line(label: &'static str, value: impl Into<String>, style: Style) -> Line<'static> {
     Line::from(vec![
         Span::styled(format!("{label}: "), Style::default().fg(theme::muted())),
-        Span::styled(value.to_owned(), style),
+        Span::styled(value.into(), style),
     ])
+}
+
+fn status_text_style() -> Style {
+    Style::default()
+        .fg(theme::text())
+        .add_modifier(Modifier::BOLD)
+}
+
+fn session_path_width(width: u16, zoomed: bool) -> usize {
+    let reserved = if zoomed { 20 } else { 16 };
+    usize::from(width.saturating_sub(reserved)).clamp(24, 88)
+}
+
+fn compact_path(path: &str, max_chars: usize) -> String {
+    if path.chars().count() <= max_chars {
+        return path.into();
+    }
+    let parts = path
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if parts.len() >= 2 {
+        let candidate = format!(".../{}/{}", parts[parts.len() - 2], parts[parts.len() - 1]);
+        if candidate.chars().count() <= max_chars {
+            return candidate;
+        }
+    }
+    if let Some(file_name) = parts.last() {
+        let candidate = format!(".../{file_name}");
+        if candidate.chars().count() <= max_chars {
+            return candidate;
+        }
+        return tail_snippet(&candidate, max_chars);
+    }
+    tail_snippet(path, max_chars)
+}
+
+fn tail_snippet(value: &str, max_chars: usize) -> String {
+    if max_chars <= 3 {
+        return "...".chars().take(max_chars).collect();
+    }
+    let tail_len = max_chars.saturating_sub(3);
+    let tail = value
+        .chars()
+        .rev()
+        .take(tail_len)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    format!("...{tail}")
 }
 
 fn session_runtime_detail(session: &crate::core::model::SessionSummary) -> String {
@@ -2442,6 +2708,11 @@ fn session_runtime_style(status: SessionRuntimeStatus) -> Style {
 }
 
 fn render_branch_tree(frame: &mut Frame, area: Rect, app: &App) {
+    if app.zoomed_focus == Some(Focus::Branches) {
+        render_zoomed_action_path(frame, area, app);
+        return;
+    }
+
     let lines = if area.height < 4 {
         vec![handoff_path_line(app, area.width)]
     } else if let Some(trail) = app.handoff_trail_frame() {
@@ -2465,6 +2736,224 @@ fn render_branch_tree(frame: &mut Frame, area: Rect, app: &App) {
         )),
         area,
     );
+}
+
+fn render_zoomed_action_path(frame: &mut Frame, area: Rect, app: &App) {
+    let language = app.effective_language();
+    let block = dynamic_panel_block(
+        format!(" {} ", i18n::text(language, Text::ActionPath)),
+        app.focus == Focus::Branches,
+    );
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
+        .split(inner);
+    frame.render_widget(
+        Paragraph::new(action_path_route_lines(app, cols[0].width))
+            .block(panel_block(" Route ", false))
+            .wrap(Wrap { trim: true }),
+        cols[0],
+    );
+    frame.render_widget(
+        Paragraph::new(action_path_stats_lines(app, cols[1].width))
+            .block(panel_block(" Stats ", false))
+            .wrap(Wrap { trim: true }),
+        cols[1],
+    );
+}
+
+fn action_path_route_lines(app: &App, width: u16) -> Vec<Line<'static>> {
+    let language = app.effective_language();
+    let mut lines = vec![handoff_path_line(app, width), Line::raw("")];
+    let Some(session) = app.current_session() else {
+        lines.push(Line::from(Span::styled(
+            localized(language, "No selected session.", "未选中 session。"),
+            Style::default().fg(theme::muted()),
+        )));
+        return lines;
+    };
+
+    let route = app.enter_route_preview(session);
+    lines.extend([
+        metadata_line(
+            localized(language, "Enter", "Enter"),
+            route.label,
+            enter_route_style(route.kind),
+        ),
+        metadata_line(
+            localized(language, "Enter Detail", "Enter 详情"),
+            route.detail,
+            Style::default().fg(theme::muted()),
+        ),
+        metadata_line(
+            localized(language, "Selected Session", "当前 Session"),
+            format!("{} · {}", session.cli, short_identifier(&session.id, 18)),
+            Style::default().fg(source_tool_color(session.cli)),
+        ),
+        metadata_line(
+            localized(language, "Title", "标题"),
+            review_snippet(
+                &session.title,
+                usize::from(width).saturating_sub(12).clamp(36, 120),
+            ),
+            Style::default().fg(theme::text()),
+        ),
+        metadata_line(
+            localized(language, "Rewind", "Rewind"),
+            rewind_detail(app, width),
+            Style::default().fg(theme::role_rewind()),
+        ),
+        metadata_line(
+            localized(language, "Target", "目标"),
+            action_path_target_detail(app),
+            Style::default().fg(theme::role_target()),
+        ),
+    ]);
+    if let Some(frame) = app.handoff_trail_frame() {
+        lines.push(Line::raw(""));
+        lines.push(handoff_trail_line(frame));
+    }
+    lines
+}
+
+fn action_path_stats_lines(app: &App, width: u16) -> Vec<Line<'static>> {
+    let language = app.effective_language();
+    let Some(session) = app.current_session() else {
+        return Vec::new();
+    };
+    let codex = cwd_session_count(app, &session.cwd, CliTool::Codex);
+    let claude = cwd_session_count(app, &session.cwd, CliTool::Claude);
+    let hermes = cwd_session_count(app, &session.cwd, CliTool::Hermes);
+    let total = codex + claude + hermes;
+    let target = if app.show_launch {
+        app.pending_target
+    } else {
+        app.data.target
+    };
+    let validation = app.validate_launch_for_target(target);
+    let readiness_style = launch_validation_style(validation.state);
+    let needs_skill = app.launch_requires_handoff_skill(target);
+    let compiler = app.launch_capsule_for_target(target).compiler;
+
+    let mut lines = vec![
+        metadata_line(
+            localized(language, "Cwd", "工作目录"),
+            compact_path(&session.cwd, session_path_width(width, true)),
+            Style::default().fg(theme::text()),
+        ),
+        metadata_line(
+            localized(language, "Cwd Sessions", "目录 Sessions"),
+            format!("{total} total"),
+            Style::default().fg(theme::text()),
+        ),
+        metadata_line(
+            "Codex",
+            codex.to_string(),
+            Style::default().fg(source_tool_color(CliTool::Codex)),
+        ),
+        metadata_line(
+            "Claude",
+            claude.to_string(),
+            Style::default().fg(source_tool_color(CliTool::Claude)),
+        ),
+        metadata_line(
+            "Hermes",
+            hermes.to_string(),
+            Style::default().fg(source_tool_color(CliTool::Hermes)),
+        ),
+        Line::raw(""),
+        metadata_line(
+            localized(language, "Target Readiness", "目标就绪"),
+            launch_validation_label(validation.state),
+            readiness_style,
+        ),
+        metadata_line(
+            localized(language, "Compiler", "编译器"),
+            if compiler::compiler_is_builtin(&compiler) {
+                localized(language, "Built-in draft", "内置草稿").to_string()
+            } else {
+                selected_skill_label(app)
+            },
+            Style::default().fg(theme::cyan()),
+        ),
+        metadata_line(
+            localized(language, "Review Mode", "Review 模式"),
+            if needs_skill {
+                localized(
+                    language,
+                    "AI handoff skill required",
+                    "需要 AI handoff skill",
+                )
+            } else {
+                localized(language, "ready for guarded review", "可进入受保护 Review")
+            },
+            if needs_skill {
+                Style::default().fg(theme::gold())
+            } else {
+                Style::default().fg(theme::green())
+            },
+        ),
+    ];
+    for reason in validation.reasons.iter().take(3) {
+        lines.push(Line::from(vec![
+            Span::styled("- ", Style::default().fg(theme::muted())),
+            Span::styled(
+                review_snippet(reason, 88),
+                Style::default().fg(theme::muted()),
+            ),
+        ]));
+    }
+    lines
+}
+
+fn rewind_detail(app: &App, width: u16) -> String {
+    let title = app
+        .data
+        .timeline
+        .iter()
+        .find(|event| event.id == app.rewind_event_id)
+        .map(|event| event.title.as_str())
+        .unwrap_or("selected rewind point");
+    let keep = usize::from(width).saturating_sub(18).clamp(24, 96);
+    format!(
+        "{} · {}",
+        short_identifier(&app.rewind_event_id, 18),
+        review_snippet(title, keep)
+    )
+}
+
+fn action_path_target_detail(app: &App) -> String {
+    let target = if app.show_launch {
+        app.pending_target
+    } else {
+        app.data.target
+    };
+    if app.show_launch && app.pending_target != app.data.target {
+        format!("{target} pending · saved {}", app.data.target)
+    } else {
+        target.to_string()
+    }
+}
+
+fn launch_validation_label(state: LaunchValidationState) -> &'static str {
+    match state {
+        LaunchValidationState::Ready => "READY",
+        LaunchValidationState::Warning => "WARN",
+        LaunchValidationState::Blocked => "BLOCKED",
+    }
+}
+
+fn launch_validation_style(state: LaunchValidationState) -> Style {
+    match state {
+        LaunchValidationState::Ready => Style::default().fg(theme::green()),
+        LaunchValidationState::Warning => Style::default().fg(theme::gold()),
+        LaunchValidationState::Blocked => Style::default()
+            .fg(theme::red())
+            .add_modifier(Modifier::BOLD),
+    }
 }
 
 fn handoff_path_line(app: &App, width: u16) -> Line<'static> {
@@ -2642,8 +3131,7 @@ fn render_command_bar(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         let mut lines = vec![status_line(app)];
         let hints = active_key_hints(app);
-        let chunk_size = if area.width < 120 { 4 } else { hints.len() };
-        for chunk in hints.chunks(chunk_size.max(1)).take(3) {
+        for chunk in hint_lines_for_width(&hints, area.width).into_iter().take(3) {
             lines.push(hint_line(chunk));
         }
         lines
@@ -2661,6 +3149,18 @@ fn render_command_bar(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 type KeyHint = (&'static str, &'static str);
+
+fn command_bar_height(width: u16, app: &App) -> u16 {
+    let line_count = if app.command_mode {
+        2
+    } else {
+        1 + hint_lines_for_width(&active_key_hints(app), width)
+            .len()
+            .min(3)
+    };
+    // One row is reserved for the top border.
+    (line_count as u16 + 1).max(3)
+}
 
 fn active_key_hints(app: &App) -> Vec<KeyHint> {
     let language = app.effective_language();
@@ -2929,6 +3429,34 @@ fn hint_line(hints: &[KeyHint]) -> Line<'static> {
     Line::from(spans)
 }
 
+fn hint_lines_for_width<'a>(hints: &'a [KeyHint], width: u16) -> Vec<&'a [KeyHint]> {
+    if hints.is_empty() {
+        return Vec::new();
+    }
+
+    let available = usize::from(width).saturating_sub(2).max(1);
+    let mut lines = Vec::new();
+    let mut start = 0;
+    let mut current_width = 0;
+
+    for (index, hint) in hints.iter().enumerate() {
+        let hint_width = hint_display_width(*hint);
+        if index > start && current_width + hint_width > available {
+            lines.push(&hints[start..index]);
+            start = index;
+            current_width = 0;
+        }
+        current_width += hint_width;
+    }
+
+    lines.push(&hints[start..]);
+    lines
+}
+
+fn hint_display_width((label, action): KeyHint) -> usize {
+    display_width(label) + 2 + display_width(action) + 2
+}
+
 fn localized_enter_key_hint(app: &App) -> &'static str {
     let label = app.enter_key_hint();
     if app.effective_language() == crate::core::config::UiLanguage::English {
@@ -3046,7 +3574,7 @@ fn render_settings(frame: &mut Frame, root: Rect, app: &App) {
 
     let mut lines = vec![
         Line::from(Span::styled(
-            i18n::text(language, Text::SettingsTitle),
+            localized(language, "Preferences", "偏好"),
             Style::default()
                 .fg(theme::gold())
                 .add_modifier(Modifier::BOLD),
@@ -3137,11 +3665,6 @@ fn render_settings(frame: &mut Frame, root: Rect, app: &App) {
         Line::from(Span::styled(effect, Style::default().fg(theme::text()))),
         Line::raw(""),
         Line::from(Span::styled(
-            i18n::text(language, Text::SettingsSafety),
-            Style::default().fg(theme::muted()),
-        )),
-        Line::raw(""),
-        Line::from(Span::styled(
             i18n::text(language, Text::SettingsKeys),
             Style::default().fg(theme::muted()),
         )),
@@ -3149,11 +3672,11 @@ fn render_settings(frame: &mut Frame, root: Rect, app: &App) {
 
     frame.render_widget(
         Paragraph::new(lines)
-            .block(panel_block(
+            .block(dynamic_panel_block(
                 if app.settings_dirty() {
-                    " Settings * "
+                    localized(language, " Settings * ", " 设置 * ").into()
                 } else {
-                    " Settings "
+                    localized(language, " Settings ", " 设置 ").into()
                 },
                 true,
             ))
@@ -3470,7 +3993,7 @@ fn render_data_space_config(frame: &mut Frame, root: Rect, app: &App) {
 
     let mut lines = vec![
         Line::from(Span::styled(
-            "Add SSH Space",
+            "Connection",
             Style::default()
                 .fg(theme::gold())
                 .add_modifier(Modifier::BOLD),
@@ -6493,8 +7016,8 @@ fn render_skill_handoff_review(
         Line::from(Span::styled(
             localized(
                 language,
-                "gg/G scroll; Enter starts the target agent with this handoff file.",
-                "gg/G 滚动；Enter 会让目标 agent 读取这份 handoff 文档。",
+                "j/k/gg/G scroll; Enter starts the target agent with this handoff file.",
+                "j/k/gg/G 滚动；Enter 会让目标 agent 读取这份 handoff 文档。",
             ),
             Style::default().fg(theme::muted()),
         )),
@@ -6546,13 +7069,6 @@ fn render_skill_handoff_details(
     };
 
     let lines = vec![
-        Line::from(Span::styled(
-            localized(language, "Handoff details", "Handoff 详情"),
-            Style::default()
-                .fg(theme::gold())
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::raw(""),
         review_label_line(
             localized(language, "Runner", "执行器"),
             runner.into(),
@@ -6607,8 +7123,8 @@ fn render_skill_handoff_details(
         Line::from(Span::styled(
             localized(
                 language,
-                "Details are not appended to the handoff text.",
-                "详情不会附加到 handoff 正文。",
+                "j/k/gg/G scroll; details are not appended to the handoff text.",
+                "j/k/gg/G 滚动；详情不会附加到 handoff 正文。",
             ),
             Style::default().fg(theme::muted()),
         )),
@@ -7184,13 +7700,6 @@ fn render_share_panel(frame: &mut Frame, root: Rect, app: &App) {
     frame.render_widget(Clear, area);
     let mut lines = Vec::new();
     if let Some(session) = app.current_session() {
-        lines.push(Line::from(Span::styled(
-            localized(language, "Yank", "复制"),
-            Style::default()
-                .fg(theme::gold())
-                .add_modifier(Modifier::BOLD),
-        )));
-        lines.push(Line::raw(""));
         lines.push(Line::from(vec![
             Span::styled(
                 format!("{}: ", i18n::text(language, Text::Session)),
@@ -7721,6 +8230,16 @@ fn dynamic_panel_block(title: String, focused: bool) -> Block<'static> {
         .padding(Padding::horizontal(1))
 }
 
+fn chrome_panel_block(title: String) -> Block<'static> {
+    Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme::border()))
+        .style(Style::default().fg(theme::text()))
+        .padding(Padding::horizontal(1))
+}
+
 fn stable_panel_title(content: String, area: Rect) -> String {
     let width = usize::from(area.width.saturating_sub(4)).clamp(18, 30);
     let clipped = content.chars().take(width).collect::<String>();
@@ -8095,6 +8614,16 @@ mod tests {
     }
 
     #[test]
+    fn command_bar_packs_hints_by_available_width() {
+        let app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        let hints = active_key_hints(&app);
+        let lines = hint_lines_for_width(&hints, 118);
+
+        assert!(lines[0].len() > 4, "{lines:?}");
+        assert_eq!(command_bar_height(118, &app), 4);
+    }
+
+    #[test]
     fn hooks_disabled_does_not_render_live_queue_noise() {
         let app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
         let screen = render_text(&app, 150, 36);
@@ -8200,6 +8729,7 @@ mod tests {
         app.handle_key(key(','));
         let off_screen = render_text(&app, 150, 36);
         assert_screen_contains(&off_screen, "Settings");
+        assert_screen_contains(&off_screen, "Preferences");
         assert_screen_contains(&off_screen, "Language");
         assert_screen_contains(&off_screen, "Theme");
         assert_screen_contains(&off_screen, "Preview Off");
@@ -8212,7 +8742,8 @@ mod tests {
         assert_screen_contains(&on_screen, "Preview On");
         assert_screen_contains(&on_screen, "Unsaved");
         assert_screen_contains(&on_screen, "Jump");
-        assert_screen_contains(&on_screen, "not source session stores");
+        assert_screen_contains(&on_screen, "Preview changes before saving.");
+        assert!(!on_screen.contains("source session stores"), "{on_screen}");
     }
 
     #[test]
@@ -8259,11 +8790,10 @@ mod tests {
         assert_screen_contains(&screen, "时间线");
         assert_screen_contains(&screen, "会话详情");
         assert_screen_contains(&screen, "真实会话元数据");
-        assert_screen_contains(&screen, "原始标题");
-        assert_screen_contains(&screen, "保真度");
         assert_screen_contains(&screen, "操作路径");
         assert_screen_contains(&screen, "状态");
         assert_screen_contains(&screen, "Moonbox session rewind design");
+        assert_screen_contains(&screen, "保真度: fallback · embedded_fixture");
     }
 
     #[test]
@@ -8425,6 +8955,18 @@ mod tests {
     }
 
     #[test]
+    fn header_handoff_skill_label_names_provider_or_builtin_kind() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.data.compilers = vec!["agent:codex:handoff".into(), "engineering-handoff".into()];
+        app.selected_compiler = 0;
+
+        assert_eq!(selected_skill_label(&app), "matt-handoff");
+
+        app.selected_compiler = 1;
+        assert_eq!(selected_skill_label(&app), "Built-in draft");
+    }
+
+    #[test]
     fn header_marks_ssh_data_space_explicitly() {
         let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
         app.data_spaces = vec![
@@ -8512,7 +9054,7 @@ mod tests {
         let screen = render_text(&app, 160, 44);
 
         assert_screen_contains(&screen, "Add SSH Data Space");
-        assert_screen_contains(&screen, "Add SSH Space");
+        assert_screen_contains(&screen, "Connection");
         assert_screen_contains(&screen, "devbox");
         assert_screen_contains(&screen, "10.37.218.31");
         assert_screen_contains(&screen, "Ctrl-S save");
@@ -8678,7 +9220,7 @@ mod tests {
 
         assert_screen_contains(&screen, "42K tokens");
         assert_screen_contains(&screen, "Timeline Items");
-        assert_screen_contains(&screen, "Portrait");
+        assert_screen_contains(&screen, "Portrait: user 1 / assistant 1 / tool");
         assert_screen_contains(&screen, "user 1 / assistant 1 / tool");
         assert_screen_contains(&screen, "4 / rewind 1");
         assert!(!screen.contains("shape U"), "{screen}");
@@ -8792,7 +9334,8 @@ mod tests {
 
         assert_screen_contains(&screen, "Session Anatomy");
         assert_screen_contains(&screen, "remote-unavailable");
-        assert_screen_contains(&screen, "upgrade the remote moonbox binary");
+        assert_screen_contains(&screen, "upgrade the");
+        assert_screen_contains(&screen, "moonbox binary");
         assert!(!screen.contains("Source path is not readable"), "{screen}");
     }
 
@@ -9446,6 +9989,25 @@ mod tests {
     }
 
     #[test]
+    fn zoomed_action_path_adds_route_and_stats_details() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Branches;
+        app.zoomed_focus = Some(Focus::Branches);
+
+        let screen = render_text(&app, 150, 48);
+
+        assert_screen_contains(&screen, "Route");
+        assert_screen_contains(&screen, "Stats");
+        assert_screen_contains(&screen, "Enter:");
+        assert_screen_contains(&screen, "Selected Session:");
+        assert_screen_contains(&screen, "Rewind:");
+        assert_screen_contains(&screen, "Target:");
+        assert_screen_contains(&screen, "Cwd Sessions:");
+        assert_screen_contains(&screen, "Target Readiness:");
+        assert_screen_contains(&screen, "Review Mode:");
+    }
+
+    #[test]
     fn selected_timeline_rows_keep_role_accent_colors() {
         assert_eq!(timeline_group_accent(theme::blue(), false), theme::blue());
         assert_eq!(timeline_group_accent(theme::gold(), false), theme::gold());
@@ -9477,7 +10039,7 @@ mod tests {
         let screen = render_text(&app, 140, 40);
 
         assert_screen_contains(&screen, "Real Session Metadata");
-        assert_screen_contains(&screen, "Fidelity");
+        assert_screen_contains(&screen, "Fidelity: fallback · embedded_fixture");
         assert_screen_contains(&screen, "fallback · embedded_fixture");
         assert_screen_contains(&screen, "Handoff Snapshot");
         assert_screen_contains(&screen, "draft_from_builtin_compiler");
@@ -9628,6 +10190,28 @@ mod tests {
         assert!(!screen.contains("Handoff Snapshot\nState:"), "{screen}");
         assert!(!app.is_session_load_pending());
         assert!(app.is_session_preview_pending());
+    }
+
+    #[test]
+    fn zoomed_session_details_keeps_metadata_while_preview_loads() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+
+        app.handle_key(key('j'));
+        app.focus = Focus::Capsule;
+        app.zoomed_focus = Some(Focus::Capsule);
+        let screen = render_text(&app, 150, 48);
+
+        assert_screen_contains(&screen, "Overview");
+        assert_screen_contains(&screen, "Session Anatomy");
+        assert_screen_contains(&screen, "Handoff");
+        assert_screen_contains(&screen, "Location");
+        assert_screen_contains(&screen, "Runtime:");
+        assert_screen_contains(&screen, "Branch:");
+        assert_screen_contains(&screen, "Timeline Items:");
+        assert_screen_contains(&screen, "Tokens:");
+        assert_screen_contains(&screen, "Raw Size:");
+        assert_screen_contains(&screen, "Source Health:");
+        assert_screen_contains(&screen, "Timeline Preview Loading");
     }
 
     #[test]
@@ -9806,7 +10390,6 @@ mod tests {
         app.launch_review_details = true;
         let details = render_text(&app, 140, 48);
 
-        assert_screen_contains(&details, "Handoff details");
         assert_screen_contains(&details, "Runner: Codex");
         assert_screen_contains(&details, "Handoff Skill: matt-handoff");
         assert_screen_contains(
@@ -9834,6 +10417,49 @@ mod tests {
         assert_screen_contains(&zh_screen, "Handoff 正文");
         assert_screen_contains(&zh_screen, "Enter/r 启动");
         assert_screen_contains(&zh_screen, "y 复制全文");
+    }
+
+    #[test]
+    fn agent_skill_handoff_review_scrolls_with_jk_without_prior_jump() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.data.compilers.insert(0, "agent:codex:handoff".into());
+        app.selected_compiler = 0;
+        app.data.capsule.compiler = "agent:codex:handoff".into();
+        if let Some(raw_source_map) = &mut app.data.capsule.raw_source_map {
+            raw_source_map.generated_by = "agent:codex:handoff".into();
+        }
+        app.data.capsule.handoff_runner = Some("Codex".into());
+        app.data.capsule.handoff_skill = Some("handoff".into());
+        app.data.capsule.handoff_artifact_path =
+            Some("/var/folders/example/moonbox-handoff-scroll.md".into());
+        let long_body = (0..48)
+            .map(|index| {
+                format!(
+                    "- scroll regression line {index:02}: keep the generated handoff body visible"
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        app.data.capsule.handoff_artifact = Some(format!("# Handoff\n\n{long_body}"));
+        app.show_launch = true;
+        app.launch_review = true;
+        app.pending_target = CliTool::Hermes;
+
+        let first = render_text(&app, 120, 18);
+        assert_screen_contains(&first, "Handoff ready");
+        assert_screen_contains(&first, "scroll regression line 00");
+        assert_screen_contains(&first, "j/k/gg/G scroll");
+
+        app.handle_key(key('j'));
+        let after_j = render_text(&app, 120, 18);
+        assert_screen_contains(&after_j, "This is the full handoff document");
+        assert_screen_contains(&after_j, "scroll regression line 00");
+        assert_screen_contains(&after_j, "Enter/r Start");
+
+        app.handle_key(key('k'));
+        let after_k = render_text(&app, 120, 18);
+        assert_screen_contains(&after_k, "Handoff ready");
+        assert_screen_contains(&after_k, "scroll regression line 00");
     }
 
     #[test]

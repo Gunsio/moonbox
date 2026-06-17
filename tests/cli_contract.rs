@@ -688,10 +688,20 @@ fn docs_snapshot_is_hidden_fixture_safe_and_generated() {
 
     assert!(svg.starts_with("<svg "));
     assert!(svg.contains("Handoff Review"));
-    assert!(svg.contains("Capsule"));
-    assert!(svg.contains("Draft Handoff"));
-    assert!(svg.contains("Target receives"));
-    assert!(svg.contains("Run local target"));
+    assert!(svg.contains("Handoff ready"));
+    assert!(svg.contains("Handoff Body"));
+    assert!(svg.contains("Copy text"));
+
+    let action_svg = output_text(
+        moonbox_command("docs-snapshot-action-menu")
+            .args(["docs-snapshot", "--scene", "action-menu"])
+            .output()
+            .expect("docs snapshot action menu"),
+    );
+
+    assert!(action_svg.starts_with("<svg "));
+    assert!(action_svg.contains("Action Menu"));
+    assert!(action_svg.contains("Session actions"));
 }
 
 #[test]
