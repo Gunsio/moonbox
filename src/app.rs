@@ -20,12 +20,12 @@ use crate::core::{
     image_preview::{TimelineImagePreview, build_timeline_image_previews},
     launcher,
     model::{
-        CliTool, ContinuationOptions, DoctorReport, LaunchExecution, LaunchExecutionStatus,
-        LaunchPlan, LaunchValidation, LaunchValidationState, OriginalSessionPlan, SessionAction,
-        SessionSummary, SourceProvenance, TimelineKind, VerificationReport, WorkCapsule,
-        WorkbenchData,
+        CliTool, CompilerPresetInfo, ContinuationOptions, DoctorReport, LaunchExecution,
+        LaunchExecutionStatus, LaunchPlan, LaunchValidation, LaunchValidationState,
+        OriginalSessionPlan, SessionAction, SessionSummary, SourceProvenance, TimelineKind,
+        VerificationReport, WorkCapsule, WorkbenchData,
     },
-    tmux, verifier, workbench,
+    setup, tmux, verifier, workbench,
 };
 
 type SessionLoadResult = Result<WorkbenchData, CoreError>;
@@ -74,6 +74,14 @@ pub struct HookWaitingItem {
 pub struct TmuxJumpPlan {
     pub source_session: SessionSummary,
     pub command: tmux::TmuxJumpCommand,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetupInstallPlan {
+    pub target: setup::SetupInstallTarget,
+    pub label: String,
+    pub command_display: String,
+    pub compiler_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1085,9 +1093,28 @@ fn fuzzy_contains(haystack: &str, needle: &str) -> bool {
     false
 }
 
+fn sync_compiler_ids_with_catalog(
+    data: &mut WorkbenchData,
+    catalog: &[CompilerPresetInfo],
+    preserved_ids: impl IntoIterator<Item = String>,
+) {
+    let mut compilers = catalog
+        .iter()
+        .map(|entry| entry.id.clone())
+        .collect::<Vec<_>>();
+    let existing_ids = data.compilers.clone();
+    for id in preserved_ids.into_iter().chain(existing_ids) {
+        if !id.trim().is_empty() && !compilers.contains(&id) {
+            compilers.push(id);
+        }
+    }
+    data.compilers = compilers;
+}
+
 #[derive(Debug)]
 pub struct App {
     pub data: WorkbenchData,
+    pub compiler_catalog: Vec<CompilerPresetInfo>,
     pub focus: Focus,
     pub zoomed_focus: Option<Focus>,
     pub selected_session: usize,
@@ -1162,6 +1189,7 @@ pub struct App {
     pending_native_fork: Option<Box<OriginalSessionPlan>>,
     pending_launch: Option<Box<LaunchPlan>>,
     pending_tmux_jump: Option<Box<TmuxJumpPlan>>,
+    pending_setup_install: Option<Box<SetupInstallPlan>>,
     exit_action: Option<TuiExitAction>,
     should_quit: bool,
 }
@@ -1177,7 +1205,10 @@ impl App {
         Ok(Self::from_data(data, target))
     }
 
-    fn from_data(data: WorkbenchData, target: CliTool) -> Self {
+    fn from_data(mut data: WorkbenchData, target: CliTool) -> Self {
+        let compiler_catalog = compiler::compiler_catalog_entries();
+        let selected_compiler_id = data.capsule.compiler.clone();
+        sync_compiler_ids_with_catalog(&mut data, &compiler_catalog, [selected_compiler_id]);
         let rewind_event_id = initial_rewind_event_id(&data);
         let selected_session = data
             .sessions
@@ -1215,6 +1246,7 @@ impl App {
             !data.timeline.is_empty() && data.capsule.state != "pending_rewind";
         let mut app = Self {
             data,
+            compiler_catalog,
             focus: Focus::Sessions,
             zoomed_focus: None,
             selected_session,
@@ -1296,6 +1328,7 @@ impl App {
             pending_native_fork: None,
             pending_launch: None,
             pending_tmux_jump: None,
+            pending_setup_install: None,
             exit_action: None,
             should_quit: false,
             visible_session_indices: Vec::new(),
@@ -1343,8 +1376,38 @@ impl App {
         self.pending_tmux_jump.take()
     }
 
+    pub fn take_pending_setup_install(&mut self) -> Option<Box<SetupInstallPlan>> {
+        self.pending_setup_install.take()
+    }
+
     pub fn take_exit_action(&mut self) -> Option<TuiExitAction> {
         self.exit_action.take()
+    }
+
+    pub fn complete_setup_install(
+        &mut self,
+        plan: &SetupInstallPlan,
+        outcome: String,
+        success: bool,
+    ) {
+        if success {
+            let selected_id = plan
+                .compiler_id
+                .clone()
+                .or_else(|| self.data.compilers.get(self.selected_compiler).cloned());
+            self.refresh_compiler_catalog();
+            if let Some(selected_id) = selected_id {
+                self.selected_compiler =
+                    compiler_index_for_equivalent_id(&self.data, &selected_id, self.data.target, 0);
+                self.pending_compiler = self.selected_compiler;
+                if let Some(compiler) = self.data.compilers.get(self.selected_compiler).cloned() {
+                    self.data.capsule.compiler = compiler;
+                }
+            }
+            self.launch_review_error = None;
+        }
+        self.set_status(format!("{}: {outcome}", plan.label));
+        self.pending_g = false;
     }
 
     pub fn complete_tmux_jump(&mut self, plan: Box<TmuxJumpPlan>, result: Result<(), String>) {
@@ -2413,7 +2476,13 @@ impl App {
                     self.set_status("Handoff review error closed");
                 }
                 KeyCode::Enter => {
-                    self.set_status("Handoff review failed; press r to retry or S to choose skill")
+                    if let Some(plan) = self.launch_review_error_setup_install_plan() {
+                        self.queue_setup_install(plan);
+                    } else {
+                        self.set_status(
+                            "Handoff review failed; press r to retry or S to choose skill",
+                        );
+                    }
                 }
                 KeyCode::Char('r') => self.confirm_launch_target(),
                 KeyCode::Char('S') => {
@@ -2422,7 +2491,13 @@ impl App {
                     self.set_status("Choose handoff skill");
                 }
                 KeyCode::Char('y') => {
-                    self.set_status("Handoff review failed; press r to retry or S to choose skill")
+                    if let Some(plan) = self.launch_review_error_setup_install_plan() {
+                        self.copy_setup_install_command(plan);
+                    } else {
+                        self.set_status(
+                            "Handoff review failed; press r to retry or S to choose skill",
+                        );
+                    }
                 }
                 KeyCode::Char('G') => {
                     self.modal_scroll = u16::MAX;
@@ -2568,7 +2643,13 @@ impl App {
             KeyCode::Char('S') => self.open_skill_picker(),
             KeyCode::Char('R') => self.cycle_handoff_runner(),
             KeyCode::Enter => self.confirm_launch_target(),
-            KeyCode::Char('y') => self.copy_launch_command(),
+            KeyCode::Char('y') => {
+                if let Some(plan) = self.selected_compiler_setup_install_plan() {
+                    self.copy_setup_install_command(plan);
+                } else {
+                    self.copy_launch_command();
+                }
+            }
             KeyCode::PageDown => self.scroll_modal(true, 6),
             KeyCode::PageUp => self.scroll_modal(false, 6),
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -2961,23 +3042,13 @@ impl App {
             .cloned()
             .unwrap_or_else(|| self.data.capsule.compiler.clone());
         let pending_id = self.data.compilers.get(self.pending_compiler).cloned();
-        let mut compilers = compiler::compiler_catalog();
-        if compilers.is_empty() {
+        let catalog = compiler::compiler_catalog_entries();
+        if catalog.is_empty() {
             return;
         }
-        if !selected_id.trim().is_empty()
-            && !compilers.iter().any(|compiler| compiler == &selected_id)
-        {
-            compilers.push(selected_id.clone());
-        }
-        if let Some(pending_id) = pending_id.as_ref()
-            && !pending_id.trim().is_empty()
-            && !compilers.iter().any(|compiler| compiler == pending_id)
-        {
-            compilers.push(pending_id.clone());
-        }
-
-        self.data.compilers = compilers;
+        self.compiler_catalog = catalog;
+        let preserved = [selected_id.clone(), pending_id.clone().unwrap_or_default()];
+        sync_compiler_ids_with_catalog(&mut self.data, &self.compiler_catalog, preserved);
         self.selected_compiler = compiler_index_for_equivalent_id(
             &self.data,
             &selected_id,
@@ -2995,6 +3066,50 @@ impl App {
                 )
             })
             .unwrap_or(self.selected_compiler);
+    }
+
+    pub(crate) fn pending_skill_setup_install_plan(&self) -> Option<SetupInstallPlan> {
+        self.setup_install_plan_for_compiler_index(self.pending_compiler, SetupInstallScope::Skill)
+    }
+
+    pub(crate) fn selected_compiler_setup_install_plan(&self) -> Option<SetupInstallPlan> {
+        self.setup_install_plan_for_compiler_index(
+            self.selected_compiler,
+            SetupInstallScope::Launch,
+        )
+    }
+
+    fn setup_install_plan_for_compiler_index(
+        &self,
+        index: usize,
+        scope: SetupInstallScope,
+    ) -> Option<SetupInstallPlan> {
+        let compiler_id = self.data.compilers.get(index)?;
+        let info = self
+            .compiler_catalog
+            .iter()
+            .find(|entry| entry.id == *compiler_id)?;
+        setup_install_plan_for_compiler_info(info, scope)
+    }
+
+    pub(crate) fn launch_review_error_setup_install_plan(&self) -> Option<SetupInstallPlan> {
+        let error = self.launch_review_error.as_ref()?;
+        setup_install_plan_for_compiler_error(&error.compiler_id, &error.message)
+    }
+
+    fn queue_setup_install(&mut self, plan: SetupInstallPlan) {
+        self.pending_setup_install = Some(Box::new(plan.clone()));
+        self.set_status(format!(
+            "Installing {} outside Moonbox: {}",
+            plan.label, plan.command_display
+        ));
+        self.pending_g = false;
+    }
+
+    fn copy_setup_install_command(&mut self, plan: SetupInstallPlan) {
+        self.clipboard_text = Some(plan.command_display.clone());
+        self.set_status(format!("Copied setup command: {}", plan.label));
+        self.pending_g = false;
     }
 
     fn open_skill_picker(&mut self) {
@@ -3220,6 +3335,10 @@ impl App {
         if !candidates.contains(&self.pending_compiler) {
             self.pending_compiler = candidates[0];
         }
+        if let Some(plan) = self.pending_skill_setup_install_plan() {
+            self.queue_setup_install(plan);
+            return;
+        }
         self.selected_compiler = self.pending_compiler;
         self.data.capsule.compiler = self.data.compilers[self.selected_compiler].clone();
         let selected_label = self.skill_picker_candidate_label(self.selected_compiler);
@@ -3242,11 +3361,12 @@ impl App {
             self.set_status("No compiler skill selected");
             return;
         };
-        let info = compiler::compiler_catalog_entries()
-            .into_iter()
+        let info = self
+            .compiler_catalog
+            .iter()
             .find(|entry| entry.id == *skill);
         let copied = info
-            .and_then(|entry| compiler::compiler_skill_clipboard_reference(&entry))
+            .and_then(compiler::compiler_skill_clipboard_reference)
             .unwrap_or_else(|| self.skill_picker_candidate_label(self.pending_compiler));
         self.clipboard_text = Some(copied);
         self.set_status(format!(
@@ -4246,6 +4366,10 @@ impl App {
         }
         self.refresh_compiler_catalog();
         let target = self.pending_target;
+        if let Some(plan) = self.selected_compiler_setup_install_plan() {
+            self.queue_setup_install(plan);
+            return;
+        }
         let validation = self.validate_launch_for_target(target);
         if self.launch_requires_handoff_skill(target) {
             self.open_skill_picker();
@@ -5369,6 +5493,58 @@ fn launch_validation_can_regenerate_handoff(validation: &LaunchValidation) -> bo
             .all(|reason| is_stale_handoff_compiler_mismatch(reason))
 }
 
+fn setup_install_plan_for_compiler_info(
+    info: &crate::core::model::CompilerPresetInfo,
+    scope: SetupInstallScope,
+) -> Option<SetupInstallPlan> {
+    setup_install_plan_for_compiler_error_with_scope(&info.id, &info.reason, scope)
+}
+
+fn setup_install_plan_for_compiler_error(
+    compiler_id: &str,
+    message: &str,
+) -> Option<SetupInstallPlan> {
+    setup_install_plan_for_compiler_error_with_scope(
+        compiler_id,
+        message,
+        SetupInstallScope::Launch,
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SetupInstallScope {
+    Skill,
+    Launch,
+}
+
+fn setup_install_plan_for_compiler_error_with_scope(
+    compiler_id: &str,
+    message: &str,
+    scope: SetupInstallScope,
+) -> Option<SetupInstallPlan> {
+    let spec = handoff::parse_compiler_id(compiler_id)?;
+    let target = if message.contains("skill_not_installed") {
+        setup::SetupInstallTarget::MattHandoff
+    } else if scope == SetupInstallScope::Launch && message.contains("sdk_not_found:") {
+        match spec.runner {
+            handoff::AgentRunner::Codex => setup::SetupInstallTarget::CodexSdk,
+            handoff::AgentRunner::Claude => setup::SetupInstallTarget::ClaudeSdk,
+        }
+    } else {
+        return None;
+    };
+    Some(SetupInstallPlan {
+        target,
+        label: match target {
+            setup::SetupInstallTarget::CodexSdk => "Install Codex SDK".into(),
+            setup::SetupInstallTarget::ClaudeSdk => "Install Claude SDK".into(),
+            setup::SetupInstallTarget::MattHandoff => "Install matt-handoff".into(),
+        },
+        command_display: setup::setup_command_display_for_current_exe(target),
+        compiler_id: Some(compiler_id.to_string()),
+    })
+}
+
 fn is_stale_handoff_compiler_mismatch(reason: &str) -> bool {
     reason.contains("raw source map mismatch")
         && reason.contains("generated_by ")
@@ -5798,13 +5974,18 @@ mod tests {
     #[test]
     fn skill_picker_applies_selected_compiler() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
-        let first = app.data.capsule.compiler.clone();
         app.handle_key(key('S'));
+        app.data.compilers = vec!["custom-handoff-a".into(), "custom-handoff-b".into()];
+        app.selected_compiler = 0;
+        app.pending_compiler = 0;
+        app.data.capsule.compiler = "custom-handoff-a".into();
+        let first = app.data.capsule.compiler.clone();
         assert!(app.show_skill_picker);
         assert_eq!(app.data.capsule.compiler, first);
-        app.handle_key(key('j'));
+        app.pending_compiler = compiler_index_for_id(&app.data, "custom-handoff-b", 0);
         app.handle_key(KeyEvent::from(KeyCode::Enter));
         assert_ne!(app.data.capsule.compiler, first);
+        assert_eq!(app.data.capsule.compiler, "custom-handoff-b");
         assert!(!app.show_skill_picker);
     }
 
@@ -5817,6 +5998,7 @@ mod tests {
             "agent:claude:handoff".into(),
             "engineering-handoff".into(),
         ];
+        app.compiler_catalog.clear();
         app.selected_compiler = 0;
         app.pending_compiler = 1;
         app.data.capsule.compiler = "agent:codex:handoff".into();
@@ -5826,7 +6008,7 @@ mod tests {
         assert_eq!(candidates, vec![1]);
         assert!(app.compiler_selection_matches(candidates[0], app.selected_compiler));
 
-        app.handle_key(key('S'));
+        app.show_skill_picker = true;
         assert_eq!(
             app.data.compilers[app.pending_compiler],
             "agent:claude:handoff"
@@ -5834,7 +6016,7 @@ mod tests {
         app.handle_key(KeyEvent::from(KeyCode::Enter));
 
         assert_eq!(app.data.capsule.compiler, "agent:claude:handoff");
-        assert_eq!(app.status_message, "Handoff skill: matt-handoff");
+        assert_eq!(app.status_message, "Handoff skill: handoff");
     }
 
     #[test]
@@ -6541,7 +6723,7 @@ Host devbox
         app.cycle_handoff_runner();
 
         assert_eq!(app.data.capsule.compiler, "agent:claude:handoff");
-        assert_eq!(app.status_message, "Runner: Claude / matt-handoff");
+        assert_eq!(app.status_message, "Runner: Claude / handoff");
     }
 
     #[test]
@@ -7081,6 +7263,10 @@ Host devbox
     #[test]
     fn real_builtin_draft_enter_uses_default_handoff_skill_for_real_session() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.data.compilers = vec![
+            "engineering-handoff".into(),
+            "agent:codex:moonbox-handoff".into(),
+        ];
         app.data.sessions[app.selected_session].source_provenance = SourceProvenance::Real;
         app.selected_compiler = compiler_index_for_id(&app.data, "engineering-handoff", 0);
         app.data.capsule.compiler = "engineering-handoff".into();
@@ -7095,8 +7281,13 @@ Host devbox
 
         assert!(app.show_launch);
         assert!(!app.launch_review);
-        assert!(app.is_launch_review_pending());
-        assert_eq!(app.status_message, "Regenerating handoff review: Hermes");
+        if let Some(plan) = app.take_pending_setup_install() {
+            assert_eq!(plan.target, setup::SetupInstallTarget::CodexSdk);
+            assert!(app.status_message.contains("Install Codex SDK"));
+        } else {
+            assert!(app.is_launch_review_pending());
+            assert_eq!(app.status_message, "Regenerating handoff review: Hermes");
+        }
     }
 
     #[test]
@@ -7128,6 +7319,10 @@ Host devbox
     #[test]
     fn skill_picker_enter_from_launch_applies_skill_without_starting_review() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.data.compilers = vec![
+            "engineering-handoff".into(),
+            "agent:codex:moonbox-handoff".into(),
+        ];
         app.data.sessions[app.selected_session].source_provenance = SourceProvenance::Real;
         app.selected_compiler = compiler_index_for_id(&app.data, "engineering-handoff", 0);
         app.data.capsule.compiler = "engineering-handoff".into();
@@ -7139,8 +7334,11 @@ Host devbox
         assert!(app.show_skill_picker);
         let pending_compiler = app.pending_compiler;
         let pending_id = app.data.compilers[pending_compiler].clone();
+        assert!(app.pending_skill_setup_install_plan().is_none());
 
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(app.take_pending_setup_install().is_none());
 
         assert!(!app.show_skill_picker);
         assert!(app.show_launch);
@@ -7155,7 +7353,12 @@ Host devbox
 
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
-        assert!(app.is_launch_review_pending());
+        if let Some(plan) = app.take_pending_setup_install() {
+            assert_eq!(plan.target, setup::SetupInstallTarget::CodexSdk);
+            assert!(app.status_message.contains("Install Codex SDK"));
+        } else {
+            assert!(app.is_launch_review_pending());
+        }
         assert!(!app.launch_review);
     }
 
@@ -7870,5 +8073,60 @@ Host devbox
         app.handle_key(key('k'));
 
         assert_eq!(app.capsule_scroll, 1);
+    }
+
+    #[test]
+    fn setup_install_plan_prefers_missing_handoff_skill() {
+        let plan = setup_install_plan_for_compiler_error(
+            "agent:claude:handoff",
+            "skill_not_installed: install a generic handoff skill; runner preflight: sdk_not_found: runner=Claude",
+        )
+        .expect("setup plan");
+
+        assert_eq!(plan.target, setup::SetupInstallTarget::MattHandoff);
+        assert_eq!(plan.label, "Install matt-handoff");
+        assert!(plan.command_display.contains("setup install matt-handoff"));
+    }
+
+    #[test]
+    fn setup_install_plan_maps_runner_sdk_missing_reason() {
+        let plan = setup_install_plan_for_compiler_error(
+            "agent:claude:handoff",
+            "sdk_not_found: runner=Claude; cli=/opt/homebrew/bin/claude; module=claude_agent_sdk",
+        )
+        .expect("setup plan");
+
+        assert_eq!(plan.target, setup::SetupInstallTarget::ClaudeSdk);
+        assert_eq!(plan.label, "Install Claude SDK");
+        assert!(plan.command_display.contains("setup install claude-sdk"));
+    }
+
+    #[test]
+    fn skill_picker_setup_plan_ignores_runner_sdk_missing_reason() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.data.compilers = vec!["agent:codex:moonbox-handoff".into()];
+        app.pending_compiler = 0;
+
+        assert!(app.pending_skill_setup_install_plan().is_none());
+    }
+
+    #[test]
+    fn launch_review_error_enter_queues_setup_install() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.show_launch = true;
+        app.pending_target = CliTool::Hermes;
+        app.set_launch_review_error_for_test(LaunchReviewErrorState {
+            target: CliTool::Hermes,
+            compiler_id: "agent:claude:handoff".into(),
+            message: "invalid compiler config agent:claude:handoff: sdk_not_found: runner=Claude"
+                .into(),
+            elapsed_ms: 12,
+        });
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        let plan = app.take_pending_setup_install().expect("setup install");
+        assert_eq!(plan.target, setup::SetupInstallTarget::ClaudeSdk);
+        assert!(app.status_message.contains("Install Claude SDK"));
     }
 }

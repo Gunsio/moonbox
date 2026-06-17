@@ -24,6 +24,7 @@ pub mod local_jsonl;
 pub mod model;
 pub mod redaction;
 pub mod replay_eval;
+pub mod setup;
 pub mod snapshot;
 pub mod sources;
 pub mod ssh;

@@ -40,6 +40,10 @@ and this project uses semantic versioning once tagged releases start.
   availability model shared by CLI and TUI for Inspect, Resume, Jump, Fork,
   Handoff, Copy, Copy Session ID, Export, and Archive; TUI `o` opens that action
   menu for the selected session.
+- `moonbox setup install codex-sdk|claude-sdk|matt-handoff` installs supported
+  runner SDK and community handoff-skill setup targets. Skill Picker, Launch,
+  and failed Handoff Review panels can suspend Moonbox, run the setup command,
+  then refresh catalog state on return.
 - TUI action menu `Fork` now calls provider-native session fork for Codex and
   Claude, keeps Hermes explicitly unavailable until it exposes a native fork
   command, and records launches as `native_fork` instead of `original_resume`.
