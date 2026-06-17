@@ -53,6 +53,7 @@ pub fn run() -> Result<()> {
         Command::Compilers(args) => print_compilers(args),
         Command::Ssh(args) => print_ssh_hosts(args),
         Command::Hooks(args) => print_hooks(args),
+        Command::Setup(args) => print_setup(args),
         Command::HookEvent(args) => {
             core::hooks::capture_event(hook_provider_arg(args.cli));
             Ok(())
@@ -648,6 +649,34 @@ fn print_hooks(args: cli::HooksArgs) -> Result<()> {
             print_hooks_apply(core::hooks::HookAction::Uninstall, args)
         }
     }
+}
+
+fn print_setup(args: cli::SetupArgs) -> Result<()> {
+    match args.command {
+        cli::SetupCommand::Install(args) => print_setup_install(args),
+    }
+}
+
+fn print_setup_install(args: cli::SetupInstallArgs) -> Result<()> {
+    let target = match args.target {
+        cli::SetupInstallTargetArg::CodexSdk => core::setup::SetupInstallTarget::CodexSdk,
+        cli::SetupInstallTargetArg::ClaudeSdk => core::setup::SetupInstallTarget::ClaudeSdk,
+        cli::SetupInstallTargetArg::MattHandoff => core::setup::SetupInstallTarget::MattHandoff,
+    };
+    let report = core::setup::install(target)?;
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "target": target.cli_arg(),
+                "destination": report.destination.map(|path| path.display().to_string()),
+                "message": report.message,
+            }))?
+        );
+    } else {
+        println!("{}: {}", report.target.label(), report.message);
+    }
+    Ok(())
 }
 
 fn print_hooks_status(args: cli::HooksStatusArgs) -> Result<()> {

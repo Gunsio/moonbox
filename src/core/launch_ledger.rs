@@ -592,6 +592,7 @@ fn safe_error_reason(error: &CoreError) -> String {
         CoreError::CapsuleStore { reason } => format!("capsule store error: {reason}"),
         CoreError::LaunchLedger { reason } => format!("launch ledger error: {reason}"),
         CoreError::Hooks { reason } => format!("hooks configuration failed: {reason}"),
+        CoreError::Setup { reason } => format!("setup failed: {reason}"),
         CoreError::Adapter(_) => "source adapter error".into(),
         CoreError::Compiler(_) => "compiler error".into(),
         CoreError::ReplayEval { reason } => format!("replay eval failed: {reason}"),

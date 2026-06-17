@@ -565,15 +565,15 @@ pub fn compiler_catalog_entries() -> Vec<CompilerPresetInfo> {
         push_unique_compiler(&mut compilers, preset_info(&preset));
     }
     let handoff_skills = handoff::discover_handoff_skills();
-    if handoff_skills.is_empty() {
+    let community_handoff_installed = handoff_skills.iter().any(|skill| skill.id == "handoff");
+    for skill in handoff_skills {
+        for runner in [AgentRunner::Codex, AgentRunner::Claude] {
+            push_unique_compiler(&mut compilers, handoff_skill_info(runner, &skill));
+        }
+    }
+    if !community_handoff_installed {
         for runner in [AgentRunner::Codex, AgentRunner::Claude] {
             push_unique_compiler(&mut compilers, missing_handoff_skill_info(runner));
-        }
-    } else {
-        for skill in handoff_skills {
-            for runner in [AgentRunner::Codex, AgentRunner::Claude] {
-                push_unique_compiler(&mut compilers, handoff_skill_info(runner, &skill));
-            }
         }
     }
     for id in FIXTURE_COMPILER_IDS {
@@ -594,9 +594,15 @@ fn handoff_skill_info(runner: AgentRunner, skill: &handoff::HandoffSkill) -> Com
             skill.description
         )
     } else {
+        let source_label = match skill.source {
+            handoff::HandoffSkillSource::MattPocock => "Matt Pocock handoff skill",
+            handoff::HandoffSkillSource::Local => "local handoff skill",
+            handoff::HandoffSkillSource::BuiltIn => "built-in Moonbox handoff skill",
+        };
         format!(
-            "{} runner using community handoff skill: {}",
+            "{} runner using {}: {}",
             runner.label(),
+            source_label,
             if skill.description.trim().is_empty() {
                 skill.name.as_str()
             } else {
@@ -646,17 +652,17 @@ fn missing_handoff_skill_info(runner: AgentRunner) -> CompilerPresetInfo {
         command: preflight.command,
         args: vec![
             "skill=not-installed".into(),
-            "install=community handoff skill".into(),
+            "install=matt-handoff skill".into(),
         ],
         timeout_ms: env::var("MOONBOX_AGENT_HANDOFF_TIMEOUT_MS")
             .ok()
             .and_then(|value| value.parse::<u64>().ok()),
         reason: format!(
-            "skill_not_installed: install a generic handoff skill into CODEX_HOME/skills or set MOONBOX_SKILLS_DIRS; runner preflight: {}",
+            "skill_not_installed: install matt-handoff into CODEX_HOME/skills or set MOONBOX_SKILLS_DIRS; runner preflight: {}",
             preflight.reason
         ),
         description: Some(format!(
-            "{} runner placeholder for the community `handoff` skill.",
+            "{} runner placeholder for the Matt Pocock `matt-handoff` skill.",
             runner.label()
         )),
         homepage: Some(COMMUNITY_HANDOFF_SKILL_HOMEPAGE.into()),
@@ -668,7 +674,8 @@ fn handoff_skill_homepage(skill: &handoff::HandoffSkill) -> Option<String> {
     if skill.is_builtin() {
         return Some(MOONBOX_HANDOFF_SKILL_HOMEPAGE.into());
     }
-    (skill.id == "handoff").then(|| COMMUNITY_HANDOFF_SKILL_HOMEPAGE.into())
+    (skill.source == handoff::HandoffSkillSource::MattPocock)
+        .then(|| COMMUNITY_HANDOFF_SKILL_HOMEPAGE.into())
 }
 
 pub fn compiler_is_builtin(id: &str) -> bool {
@@ -1274,7 +1281,7 @@ sleep 1
     }
 
     #[test]
-    fn installed_generic_handoff_skill_keeps_community_homepage() {
+    fn installed_generic_handoff_skill_does_not_claim_matt_homepage() {
         let skill = handoff::HandoffSkill {
             id: "handoff".into(),
             name: "handoff".into(),
@@ -1283,8 +1290,14 @@ sleep 1
             source: handoff::HandoffSkillSource::Local,
         };
 
+        assert_eq!(handoff_skill_homepage(&skill), None);
+
+        let matt = handoff::HandoffSkill {
+            source: handoff::HandoffSkillSource::MattPocock,
+            ..skill.clone()
+        };
         assert_eq!(
-            handoff_skill_homepage(&skill).as_deref(),
+            handoff_skill_homepage(&matt).as_deref(),
             Some(COMMUNITY_HANDOFF_SKILL_HOMEPAGE)
         );
 
@@ -1313,6 +1326,26 @@ sleep 1
         assert_eq!(
             info.homepage.as_deref(),
             Some("https://github.com/Gunsio/moonbox")
+        );
+    }
+
+    #[test]
+    fn missing_community_handoff_placeholder_stays_visible_with_builtin_skill() {
+        let entries = compiler_catalog_entries();
+
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.id == "agent:codex:moonbox-handoff")
+        );
+        let community_placeholder = entries
+            .iter()
+            .find(|entry| entry.id == "agent:codex:handoff")
+            .expect("matt-handoff placeholder");
+        assert!(community_placeholder.reason.contains("skill_not_installed"));
+        assert_eq!(
+            compiler_skill_clipboard_reference(community_placeholder).as_deref(),
+            Some(COMMUNITY_HANDOFF_SKILL_HOMEPAGE)
         );
     }
 

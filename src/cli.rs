@@ -43,6 +43,8 @@ pub enum Command {
     Ssh(JsonArgs),
     /// Inspect or configure opt-in Claude/Codex hook event capture.
     Hooks(HooksArgs),
+    /// Install Moonbox-managed runner SDKs or supported handoff skills.
+    Setup(SetupArgs),
     /// Append one provider hook event to Moonbox's local spool.
     #[command(name = "hook-event")]
     HookEvent(HookEventArgs),
@@ -92,6 +94,33 @@ pub struct JsonArgs {
 pub struct HooksArgs {
     #[command(subcommand)]
     pub command: Option<HooksCommand>,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct SetupArgs {
+    #[command(subcommand)]
+    pub command: SetupCommand,
+}
+
+#[derive(Debug, Subcommand, Clone)]
+pub enum SetupCommand {
+    /// Install one supported Moonbox setup target.
+    Install(SetupInstallArgs),
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct SetupInstallArgs {
+    #[arg(value_enum)]
+    pub target: SetupInstallTargetArg,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum SetupInstallTargetArg {
+    CodexSdk,
+    ClaudeSdk,
+    MattHandoff,
 }
 
 #[derive(Debug, Subcommand, Clone)]

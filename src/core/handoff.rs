@@ -218,6 +218,7 @@ pub struct HandoffSkill {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HandoffSkillSource {
     BuiltIn,
+    MattPocock,
     Local,
 }
 
@@ -237,6 +238,7 @@ impl HandoffSkill {
     pub fn source_label(&self) -> &'static str {
         match self.source {
             HandoffSkillSource::BuiltIn => "Built-in / Moonbox",
+            HandoffSkillSource::MattPocock => "mattpocock/skills",
             HandoffSkillSource::Local => "Local",
         }
     }
@@ -260,11 +262,7 @@ pub fn compiler_id(runner: AgentRunner, skill_id: &str) -> String {
 }
 
 pub fn skill_display_label(skill_id: &str) -> &str {
-    if skill_id == "handoff" {
-        "matt-handoff"
-    } else {
-        skill_id
-    }
+    skill_id
 }
 
 pub fn parse_compiler_id(id: &str) -> Option<AgentCompilerSpec> {
@@ -1376,7 +1374,17 @@ fn managed_sdk_python_path(moonbox_home: &Path, runner: AgentRunner) -> PathBuf 
         .join("python")
 }
 
-fn managed_sdk_setup_hint(runner: AgentRunner) -> Option<String> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunnerSdkInstallPlan {
+    pub runner: AgentRunner,
+    pub python: String,
+    pub venv_root: PathBuf,
+    pub managed_python: PathBuf,
+    pub package: String,
+    pub display_command: String,
+}
+
+pub fn runner_sdk_install_plan(runner: AgentRunner) -> Option<RunnerSdkInstallPlan> {
     let python = common_python_candidates()
         .into_iter()
         .find(|command| command.starts_with("/opt/homebrew/") && command_available(command))
@@ -1395,12 +1403,25 @@ fn managed_sdk_setup_hint(runner: AgentRunner) -> Option<String> {
         .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".moonbox")))?;
     let managed_python = managed_sdk_python_path(&moonbox_home, runner);
     let venv_root = managed_python.parent()?.parent()?;
-    Some(format!(
+    let package = runner.sdk_package().to_string();
+    let display_command = format!(
         "{python} -m venv {} && {} -m pip install {}",
         venv_root.display(),
         managed_python.display(),
-        runner.sdk_package()
-    ))
+        package
+    );
+    Some(RunnerSdkInstallPlan {
+        runner,
+        python: python.to_string(),
+        venv_root: venv_root.to_path_buf(),
+        managed_python,
+        package,
+        display_command,
+    })
+}
+
+fn managed_sdk_setup_hint(runner: AgentRunner) -> Option<String> {
+    runner_sdk_install_plan(runner).map(|plan| plan.display_command)
 }
 fn runner_python_missing_reason(runner: AgentRunner, command: &str) -> String {
     format!(
@@ -1527,8 +1548,22 @@ fn parse_skill_file(path: &Path) -> Option<HandoffSkill> {
         name,
         description,
         path: path.to_path_buf(),
-        source: HandoffSkillSource::Local,
+        source: detect_local_skill_source(path),
     })
+}
+
+fn detect_local_skill_source(path: &Path) -> HandoffSkillSource {
+    let Some(skill_dir) = path.parent() else {
+        return HandoffSkillSource::Local;
+    };
+    let Ok(contents) = fs::read_to_string(skill_dir.join(".moonbox-source")) else {
+        return HandoffSkillSource::Local;
+    };
+    if contents.contains("github.com/mattpocock/skills") || contents.contains("mattpocock/skills") {
+        HandoffSkillSource::MattPocock
+    } else {
+        HandoffSkillSource::Local
+    }
 }
 
 #[derive(Default)]
@@ -2062,8 +2097,8 @@ Write the handoff.
     }
 
     #[test]
-    fn display_label_disambiguates_matt_pocock_handoff_skill() {
-        assert_eq!(skill_display_label("handoff"), "matt-handoff");
+    fn display_label_keeps_local_handoff_name_literal() {
+        assert_eq!(skill_display_label("handoff"), "handoff");
         assert_eq!(skill_display_label("moonbox-handoff"), "moonbox-handoff");
     }
 

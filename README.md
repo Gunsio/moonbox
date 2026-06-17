@@ -676,6 +676,14 @@ report; the runner does not get permission to scan or mutate source session
 stores. Empty agent artifacts fail validation before Moonbox shows the Review
 as runnable.
 
+Moonbox can install supported setup targets directly:
+`moonbox setup install codex-sdk`, `moonbox setup install claude-sdk`, and
+`moonbox setup install matt-handoff`. The TUI uses the same commands when a
+Skill Picker row, Launch target, or failed Handoff Review is blocked by a
+missing runner SDK or missing `matt-handoff` skill: `Enter` suspends Moonbox,
+runs the installer, then returns and refreshes the catalog. Press `y` in those
+setup states to copy the setup command.
+
 The TUI keeps agent handoff generation to one background worker at a time.
 Handoff generation is always an explicit user action: choosing a skill in the
 Skill Picker only saves the selected handoff skill, and pressing `Enter` in the
@@ -684,10 +692,8 @@ the launch flow or pressing `Enter` returns to that job's progress panel instead
 of starting another SDK process. The panel shows the selected target,
 skill/compiler id, current stage, elapsed time, and configured timeout; `Esc`
 hides the panel while the job continues in the background until it finishes or
-Moonbox exits. Entering the Skill Picker or retrying a failed Review refreshes
-the compiler catalog and SDK preflight state, so installing a runner SDK while
-Moonbox is open can be recovered by pressing `r` to retry instead of restarting
-the app.
+Moonbox exits. Entering the Skill Picker, installing a setup target, or retrying
+a failed Review refreshes the compiler catalog and SDK preflight state.
 
 The production handoff path is skill-first: pick a source session, target
 executor, handoff skill, and runner SDK, then review the generated handoff
@@ -868,8 +874,9 @@ Moonbox has two separate actions for a selected session:
 - `S`: open Skill Picker. Agent-backed handoff rows are collapsed by skill and
   show `moonbox-handoff` as the bundled Moonbox source, or the installed local
   path for community skills; runner SDK setup is checked before launch.
-  Built-in draft compilers are not handoff skill choices in the TUI. Press `y`
-  to copy the skill reference.
+  Built-in draft compilers are not handoff skill choices in the TUI. Press
+  `Enter` on missing setup to install it, or `y` to copy the skill reference or
+  setup command.
 - `,`: open Settings. M95 exposes Smart Enter / tmux jump there with preview and
   persistence; hooks install/uninstall remains a CLI command.
 
@@ -1527,6 +1534,10 @@ Stable interfaces matter more than any single framework:
   catalog and Handoff Review runner path as community skills. The built-in skill
   consumes only Moonbox's bounded context pack, reports `built-in` as its path,
   and does not write to user skill homes.
+- M115a: Runner / Skill Setup Install Flow; missing `matt-handoff`, Codex SDK,
+  and Claude SDK states now offer an Enter-to-install path from Skill Picker,
+  Launch, and failed Handoff Review panels, with Moonbox suspended while the
+  setup command runs and catalog state refreshed on return.
 
 ### Remaining Milestones
 

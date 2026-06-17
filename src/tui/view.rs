@@ -263,12 +263,18 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn selected_skill_label(app: &App) -> String {
-    app.data
-        .compilers
-        .get(app.selected_compiler)
-        .map(|compiler_id| compiler_skill_label(compiler_id))
-        .or_else(|| app.data.compilers.get(app.selected_compiler).cloned())
-        .unwrap_or_else(|| app.data.capsule.compiler.clone())
+    let Some(compiler_id) = app.data.compilers.get(app.selected_compiler) else {
+        return app.data.capsule.compiler.clone();
+    };
+    if let Some(info) = app
+        .compiler_catalog
+        .iter()
+        .find(|entry| entry.id == *compiler_id)
+        && let Some(spec) = handoff::parse_compiler_id(compiler_id)
+    {
+        return agent_skill_display_label(info, &spec.skill_id);
+    }
+    compiler_skill_label(compiler_id)
 }
 
 fn selected_runner_label(app: &App, language: crate::core::config::UiLanguage) -> String {
@@ -4015,7 +4021,7 @@ fn render_skill_picker(frame: &mut Frame, root: Rect, app: &App) {
     let area = modal_area(root, 78, 72);
     frame.render_widget(Clear, area);
     let language = app.effective_language();
-    let catalog = compiler::compiler_catalog_entries();
+    let catalog = &app.compiler_catalog;
     let mut lines = vec![
         Line::from(Span::styled(
             i18n::text(language, Text::ChooseCompilerSkill),
@@ -4107,7 +4113,10 @@ fn render_skill_picker(frame: &mut Frame, root: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         )));
     }
-    let apply_label = if app.show_launch {
+    let pending_setup = app.pending_skill_setup_install_plan();
+    let apply_label = if pending_setup.is_some() {
+        localized(language, "Install", "安装")
+    } else if app.show_launch {
         localized(language, "Apply + generate", "应用并生成")
     } else {
         i18n::text(language, Text::Apply)
@@ -4567,8 +4576,22 @@ fn fallback_compiler_info(id: &str) -> CompilerPresetInfo {
 
 fn skill_picker_row_title(info: &CompilerPresetInfo) -> String {
     handoff::parse_compiler_id(&info.id)
-        .map(|spec| handoff::skill_display_label(&spec.skill_id).to_string())
+        .map(|spec| agent_skill_display_label(info, &spec.skill_id))
         .unwrap_or_else(|| info.id.clone())
+}
+
+fn agent_skill_display_label(info: &CompilerPresetInfo, skill_id: &str) -> String {
+    if skill_id == "handoff"
+        && (info.reason.contains("skill_not_installed")
+            || info
+                .homepage
+                .as_deref()
+                .is_some_and(|homepage| homepage.contains("mattpocock/skills")))
+    {
+        "matt-handoff".into()
+    } else {
+        handoff::skill_display_label(skill_id).to_string()
+    }
 }
 
 fn skill_picker_status_label(
@@ -4871,8 +4894,8 @@ fn compiler_setup_hint(
     if reason.contains("skill_not_installed") {
         return localized(
             language,
-            "Install a generic handoff skill; press y to copy the install link.",
-            "安装通用 handoff skill；按 y 复制安装链接。",
+            "Press Enter to install matt-handoff; y copies the install source.",
+            "按 Enter 安装 matt-handoff；按 y 复制安装来源。",
         )
         .into();
     }
@@ -4885,9 +4908,13 @@ fn compiler_setup_hint(
             }
         });
         return if language == crate::core::config::UiLanguage::ZhHans {
-            format!("CLI 已安装，但 Python SDK 未被 Moonbox 找到。执行：{install}")
+            format!(
+                "CLI 已安装，但 Python SDK 未被 Moonbox 找到。按 Enter 安装；按 y 复制命令：{install}"
+            )
         } else {
-            format!("CLI is installed, but the Python SDK is not visible. Run: {install}")
+            format!(
+                "CLI is installed, but the Python SDK is not visible. Press Enter to install; y copies: {install}"
+            )
         };
     }
     if reason.contains("python_command_not_found:") {
@@ -5017,17 +5044,15 @@ fn skill_picker_description(
             )
             .into();
         }
-        if description.ends_with(" runner placeholder for the community `handoff` skill.") {
+        if description.ends_with(" runner placeholder for the Matt Pocock `matt-handoff` skill.") {
             return localized(
                 language,
-                "Community handoff skill for transferring context to another agent.",
-                "社区 handoff skill，用于把上下文交给另一个 agent 接手。",
+                "Matt Pocock matt-handoff skill for transferring context to another agent.",
+                "Matt Pocock matt-handoff skill，用于把上下文交给另一个 agent 接手。",
             )
             .into();
         }
-        if let Some((_, skill_description)) =
-            description.split_once(" runner using community handoff skill: ")
-        {
+        if let Some(skill_description) = agent_handoff_skill_description(description) {
             return localized_external_skill_description_for_language(language, skill_description);
         }
     }
@@ -5057,23 +5082,42 @@ fn localized_compiler_description(info: &CompilerPresetInfo) -> Option<String> {
         _ if description == "Environment-provided compiler skill." => {
             "由环境变量提供的 compiler skill。".to_string()
         }
-        _ if description.ends_with(" runner placeholder for the community `handoff` skill.") => {
+        _ if description
+            .ends_with(" runner placeholder for the Matt Pocock `matt-handoff` skill.") =>
+        {
             let runner = description
-                .strip_suffix(" runner placeholder for the community `handoff` skill.")
+                .strip_suffix(" runner placeholder for the Matt Pocock `matt-handoff` skill.")
                 .unwrap_or("Agent");
-            format!("{runner} runner 的社区 `handoff` skill 占位项。")
+            format!("{runner} runner 的 Matt Pocock `matt-handoff` skill 占位项。")
         }
-        _ if description.contains(" runner using community handoff skill: ") => {
-            let (runner, skill_description) =
-                description.split_once(" runner using community handoff skill: ")?;
+        _ if agent_handoff_skill_description(description).is_some() => {
+            let (runner, skill_description) = split_agent_handoff_skill_description(description)?;
             format!(
-                "{runner} runner 使用社区 handoff skill：{}",
+                "{runner} runner 使用 handoff skill：{}",
                 localized_external_skill_description(skill_description)
             )
         }
         _ => return None,
     };
     Some(localized)
+}
+
+fn agent_handoff_skill_description(description: &str) -> Option<&str> {
+    split_agent_handoff_skill_description(description)
+        .map(|(_, skill_description)| skill_description)
+}
+
+fn split_agent_handoff_skill_description(description: &str) -> Option<(&str, &str)> {
+    for marker in [
+        " runner using Matt Pocock handoff skill: ",
+        " runner using local handoff skill: ",
+        " runner using community handoff skill: ",
+    ] {
+        if let Some((runner, skill_description)) = description.split_once(marker) {
+            return Some((runner, skill_description));
+        }
+    }
+    None
 }
 
 fn localized_external_skill_description(description: &str) -> String {
@@ -5426,26 +5470,45 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             )),
         ];
         lines.extend(launch_failure_reason_lines(language, &error.message));
+        let setup_plan = app.launch_review_error_setup_install_plan();
+        let next_line = if setup_plan.is_some() {
+            localized(
+                language,
+                "Next: press Enter to install the missing setup, or S to choose another handoff skill.",
+                "下一步：按 Enter 安装缺失配置，或按 S 选择其他 handoff skill。",
+            )
+        } else {
+            localized(
+                language,
+                "Next: press r to retry with the current skill, or S to choose another handoff skill.",
+                "下一步：按 r 用当前 skill 重试，或按 S 选择其他 handoff skill。",
+            )
+        };
         lines.extend([
             Line::raw(""),
-            Line::from(Span::styled(
-                localized(
-                    language,
-                    "Next: press r to retry with the current skill, or S to choose another handoff skill.",
-                    "下一步：按 r 用当前 skill 重试，或按 S 选择其他 handoff skill。",
-                ),
-                Style::default().fg(theme::gold()),
-            )),
+            Line::from(Span::styled(next_line, Style::default().fg(theme::gold()))),
             Line::raw(""),
-            Line::from(vec![
-                action_button("r", i18n::text(language, Text::Retry)),
-                Span::raw("  "),
-                action_button("S", i18n::text(language, Text::Skill)),
-                Span::raw("  "),
-                disabled_action_button("Enter/y", i18n::text(language, Text::Unavailable)),
-                Span::raw("  "),
-                action_button("Esc", i18n::text(language, Text::Back)),
-            ]),
+            if setup_plan.is_some() {
+                Line::from(vec![
+                    action_button("Enter", localized(language, "Install", "安装")),
+                    Span::raw("  "),
+                    action_button("r", i18n::text(language, Text::Retry)),
+                    Span::raw("  "),
+                    action_button("S", i18n::text(language, Text::Skill)),
+                    Span::raw("  "),
+                    action_button("Esc", i18n::text(language, Text::Back)),
+                ])
+            } else {
+                Line::from(vec![
+                    action_button("r", i18n::text(language, Text::Retry)),
+                    Span::raw("  "),
+                    action_button("S", i18n::text(language, Text::Skill)),
+                    Span::raw("  "),
+                    disabled_action_button("Enter/y", i18n::text(language, Text::Unavailable)),
+                    Span::raw("  "),
+                    action_button("Esc", i18n::text(language, Text::Back)),
+                ])
+            },
             Line::from(Span::styled(
                 i18n::text(language, Text::ScrollOnlyKeys),
                 Style::default().fg(theme::muted()),
@@ -6086,6 +6149,7 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         ]);
     }
     let can_regenerate_handoff = validation_can_regenerate_handoff(&pending_validation);
+    let selected_setup = app.selected_compiler_setup_install_plan();
     lines.extend([
         if pending_needs_handoff_skill {
             Line::raw("")
@@ -6102,6 +6166,17 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                     } else {
                         theme::red()
                     })
+                    .add_modifier(Modifier::BOLD),
+            ))
+        } else if selected_setup.is_some() {
+            Line::from(Span::styled(
+                localized(
+                    language,
+                    "Press Enter to install the missing runner or skill setup.",
+                    "按 Enter 安装缺失的 runner 或 skill 配置。",
+                ),
+                Style::default()
+                    .fg(theme::gold())
                     .add_modifier(Modifier::BOLD),
             ))
         } else {
@@ -6127,6 +6202,12 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
                     "j/k 选择目标   S Skill   R Runner   enter/y 已阻塞   Esc 取消"
                 } else {
                     "j/k target   S skill   R runner   enter/y blocked   Esc cancel"
+                }
+            } else if selected_setup.is_some() {
+                if language == crate::core::config::UiLanguage::ZhHans {
+                    "j/k 选择目标   S Skill   R Runner   Enter 安装   y 复制命令   Esc 取消"
+                } else {
+                    "j/k target   S skill   R runner   Enter install   y copy command   Esc cancel"
                 }
             } else {
                 if language == crate::core::config::UiLanguage::ZhHans {
@@ -9606,10 +9687,11 @@ mod tests {
             "/opt/homebrew/bin/python3 -m pip install claude-agent-sdk",
         );
         assert_screen_contains(&screen, "仅安装 Claude CLI 还不足以运行当前 SDK runner。");
-        assert_screen_contains(&screen, "下一步：按 r 用当前 skill 重试");
+        assert_screen_contains(&screen, "下一步：按 Enter 安装缺失配置");
+        assert_screen_contains(&screen, "Enter 安装");
         assert_screen_contains(&screen, "r 重试");
         assert_screen_contains(&screen, "S 技能");
-        assert_screen_contains(&screen, "Enter/y 不可用");
+        assert!(!screen.contains("Enter/y 不可用"), "{screen}");
     }
 
     #[test]

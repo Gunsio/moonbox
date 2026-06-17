@@ -4,7 +4,7 @@ mod theme;
 mod view;
 
 use std::io::{self, Write};
-use std::process::ExitStatus;
+use std::process::{Command, ExitStatus};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -18,7 +18,7 @@ use crossterm::{
 use ratatui::DefaultTerminal;
 
 use crate::{
-    app::{App, SessionFilter, TmuxJumpPlan, TuiExitAction},
+    app::{App, SessionFilter, SetupInstallPlan, TmuxJumpPlan, TuiExitAction},
     core::{
         config, launcher,
         model::{CliTool, LaunchExecution, LaunchPlan, OriginalSessionPlan},
@@ -54,6 +54,9 @@ pub fn run(terminal: &mut DefaultTerminal, mut app: App) -> Result<Option<TuiExi
             }
             if let Some(plan) = app.take_pending_launch() {
                 suspend_and_launch(terminal, &mut app, plan)?;
+            }
+            if let Some(plan) = app.take_pending_setup_install() {
+                suspend_and_setup_install(terminal, &mut app, plan)?;
             }
         }
     }
@@ -139,6 +142,29 @@ fn suspend_and_launch(
     Ok(())
 }
 
+fn suspend_and_setup_install(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    plan: Box<SetupInstallPlan>,
+) -> Result<()> {
+    suspend_terminal()?;
+    let result = run_setup_install(&plan);
+    restore_terminal(terminal)?;
+    let (success, outcome) = match result {
+        Ok(status) if status.success() => (true, "installed; state refreshed".into()),
+        Ok(status) => (
+            false,
+            match status.code() {
+                Some(code) => format!("installer exited with code {code}"),
+                None => "installer exited without a status code".into(),
+            },
+        ),
+        Err(error) => (false, format!("installer failed to start: {error}")),
+    };
+    app.complete_setup_install(&plan, outcome, success);
+    Ok(())
+}
+
 fn suspend_terminal() -> Result<()> {
     disable_raw_mode()?;
     execute!(io::stdout(), LeaveAlternateScreen)?;
@@ -167,6 +193,18 @@ fn run_target_handoff(plan: &LaunchPlan) -> Result<LaunchExecution, crate::core:
             reason: error.to_string(),
         })?;
     workbench::execute_tui_launch_plan(plan.clone())
+}
+
+fn run_setup_install(plan: &SetupInstallPlan) -> io::Result<ExitStatus> {
+    println!("Moonbox setup: {}", plan.label);
+    println!("Command: {}", plan.command_display);
+    println!("Moonbox will return when the installer exits.\n");
+    io::stdout().flush()?;
+    Command::new(std::env::current_exe()?)
+        .arg("setup")
+        .arg("install")
+        .arg(plan.target.cli_arg())
+        .status()
 }
 
 fn original_exit_message(cli: &str, status: ExitStatus) -> String {

@@ -14,6 +14,7 @@ pub enum CoreError {
     LaunchBlocked { reason: String },
     LaunchStart { command: String, reason: String },
     Hooks { reason: String },
+    Setup { reason: String },
     ReplayEval { reason: String },
     DataSpaceLoad { space: String, reason: String },
     SshConfigRead { path: String, reason: String },
@@ -42,6 +43,7 @@ impl fmt::Display for CoreError {
                 write!(f, "cannot start target launch `{command}`: {reason}")
             }
             Self::Hooks { reason } => write!(f, "hooks configuration error: {reason}"),
+            Self::Setup { reason } => write!(f, "setup error: {reason}"),
             Self::ReplayEval { reason } => write!(f, "replay eval failed: {reason}"),
             Self::DataSpaceLoad { space, reason } => {
                 write!(f, "cannot load data space {space}: {reason}")
