@@ -28,8 +28,8 @@ use crate::{
     },
 };
 
-pub fn docs_screenshot_svg(width: u16, height: u16) -> Result<String> {
-    snapshot::docs_screenshot_svg(width, height)
+pub fn docs_screenshot_svg(width: u16, height: u16, scene: &str) -> Result<String> {
+    snapshot::docs_screenshot_svg(width, height, scene)
 }
 
 pub fn run(terminal: &mut DefaultTerminal, mut app: App) -> Result<Option<TuiExitAction>> {

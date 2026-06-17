@@ -1204,7 +1204,13 @@ fn print_launch_plan_text(plan: &core::model::LaunchPlan) {
 }
 
 fn print_docs_snapshot(args: cli::DocsSnapshotArgs) -> Result<()> {
-    let svg = tui::docs_screenshot_svg(args.width, args.height)?;
+    let scene = match args.scene {
+        cli::DocsSnapshotScene::Handoff => "handoff",
+        cli::DocsSnapshotScene::ActionMenu => "action-menu",
+        cli::DocsSnapshotScene::Yank => "yank",
+        cli::DocsSnapshotScene::TimelineDetails => "timeline-details",
+    };
+    let svg = tui::docs_screenshot_svg(args.width, args.height, scene)?;
     if let Some(path) = args.output {
         fs::write(path, svg)?;
     } else {
