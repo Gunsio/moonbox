@@ -244,13 +244,13 @@ The first implementation focuses on the product shell:
 - `moonbox sessions --filter <source>` lists one source while keeping default output as the time-sorted global session index
 - `moonbox sessions --json` keeps the stable session array shape and annotates each session with `source_provenance`, `source_path`, and `parse_skip_count`
 - `moonbox actions --session <id> --json` reports the selected session's
-  Inspect / Resume / Jump / Fork / Handoff / Copy / Copy Session ID / Export /
-  Archive availability, reason, and safety constraints without executing
-  actions
+  Inspect / Resume / Jump / Fork / Handoff / Yank / Archive availability,
+  reason, and safety constraints without executing actions
 - TUI `o` opens the selected session's action menu. `j` / `k` selects Resume,
-  Handoff, Fork, Jump, Inspect, Copy, Copy Session ID, Export, or Archive, and
-  `enter` runs the selected available action. Archive / Unarchive is a TUI
-  overlay action stored in Moonbox config and does not write provider stores.
+  Handoff, Fork, Jump, Inspect, Yank, or Archive, and `enter` runs the selected
+  available action. `y` opens the Yank panel for copy-only actions. Archive /
+  Unarchive is a TUI overlay action stored in Moonbox config and does not write
+  provider stores.
 - `moonbox snapshot` captures a workspace continuation snapshot with git HEAD,
   branch, staged/unstaged/untracked paths, bounded diff previews, key project
   files, environment summary, and explicitly requested test-command results
@@ -344,10 +344,10 @@ The first implementation focuses on the product shell:
 - Session inventory uses user-readable context size terms such as token count
   and raw source size instead of exposing internal `events` terminology in the
   list; parsed timeline counts remain in Session Details as `Timeline Items`
-- Copyable launch/original wrapper commands via `y` with OSC52 clipboard
-  support; main-list `enter` temporarily hands the full terminal to the selected
-  session's original CLI and then returns to Moonbox when that CLI exits, while
-  `x` opens the target handoff flow
+- Yank panel copy actions via `y` with OSC52 clipboard support: copy the first
+  user input, last AI output, selected Session ID, ready handoff text, or
+  compact portable JSON without launching provider processes. Original preview
+  still uses `y` to copy its guarded wrapper command.
 - Serializable core models for future adapters
 - `SourceAdapter` contract and fixture-backed adapter fallback layer
 - Fallible adapter discovery; bad source data returns structured errors instead of panics
@@ -977,6 +977,7 @@ commands, remains available through the dry-run JSON surfaces and
 | `/` | Filter sessions by text |
 | `f` | Cycle session source filter |
 | `o` | Open session action menu |
+| `y` | Open Yank panel |
 | `[` / `]` | Previous / next session source filter |
 | `a` | Archive / unarchive selected session |
 | `s` | Star / unstar selected session |
@@ -1007,6 +1008,14 @@ commands, remains available through the dry-run JSON surfaces and
 | `enter` | Review target handoff command and remember target |
 | `y` | Unavailable before review |
 | `q` / `Esc` | Cancel without changing target |
+
+### Yank Panel Keys
+
+| Key | Action |
+| --- | --- |
+| `j` / `k` | Move yank action selection |
+| `enter` | Copy selected content |
+| `q` / `Esc` | Close Yank panel |
 
 ### Handoff Review Keys
 
@@ -1518,8 +1527,8 @@ Stable interfaces matter more than any single framework:
   older remote Moonbox binaries that do not return anatomy show a clear
   `remote-unavailable` note instead of misleading local path errors.
 - M105: Session Action Foundation; CLI and TUI now share a read-only action
-  availability model for Inspect, Resume, Jump, Fork, Handoff, Copy, Copy
-  Session ID, Export, and Archive, and TUI `o` opens that action menu for the
+  availability model for Inspect, Resume, Jump, Fork, Handoff, Yank, and
+  Archive, and TUI `o` opens that action menu for the
   selected session.
 - M106: Archive Overlay; TUI `a` and the action menu archive or unarchive the
   selected session through a Moonbox config overlay, default lists hide archived
@@ -1538,6 +1547,10 @@ Stable interfaces matter more than any single framework:
   and Claude SDK states now offer an Enter-to-install path from Skill Picker,
   Launch, and failed Handoff Review panels, with Moonbox suspended while the
   setup command runs and catalog state refreshed on return.
+- M112: Yank Panel / Copy Basics; TUI `y` opens a Yank panel for copy-only
+  actions, action menu collapses copy/export rows into Yank, and the clipboard
+  path can copy first user input, last AI output, Session ID, ready handoff
+  text, or compact portable JSON without launching provider processes.
 
 ### Remaining Milestones
 

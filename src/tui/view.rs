@@ -14,7 +14,7 @@ use crate::{
     app::{
         ActionMenuEntry, App, ArchiveFeedbackKind, CommandPaletteEntry,
         DATA_SPACE_CONFIG_FIELD_COUNT, EnterRouteKind, Focus, HandoffTrailFrame, HookWaitingItem,
-        LaunchReviewStage, SessionFilter, SettingsField,
+        LaunchReviewStage, SessionFilter, SettingsField, SharePanelActionKind, SharePanelEntry,
     },
     core::image_preview::{ImagePreviewStatus, PreviewCell, PreviewRgb, TimelineImagePreview},
     core::model::{
@@ -85,6 +85,9 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
     if app.show_action_menu {
         render_action_menu(frame, root, app);
+    }
+    if app.show_share_panel {
+        render_share_panel(frame, root, app);
     }
     if app.show_open_original {
         render_open_original(frame, root, app);
@@ -2776,6 +2779,14 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
         return vec![
             ("j/k", i18n::text(language, Text::Action)),
             ("enter", i18n::text(language, Text::Choose)),
+            ("y", localized(language, "Yank", "复制")),
+            ("Esc/q", i18n::text(language, Text::Close)),
+        ];
+    }
+    if app.show_share_panel {
+        return vec![
+            ("j/k", localized(language, "Yank", "复制")),
+            ("enter", i18n::text(language, Text::Copy)),
             ("Esc/q", i18n::text(language, Text::Close)),
         ];
     }
@@ -2862,6 +2873,7 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("+", i18n::text(language, Text::Zoom)),
             ("-", i18n::text(language, Text::Restore)),
             ("o", i18n::text(language, Text::Action)),
+            ("y", localized(language, "Yank", "复制")),
             ("enter", localized_enter_key_hint(app)),
             ("x/H", i18n::text(language, Text::Handoff)),
             ("tab", i18n::text(language, Text::Next)),
@@ -7166,6 +7178,216 @@ fn render_action_menu(frame: &mut Frame, root: Rect, app: &App) {
     );
 }
 
+fn render_share_panel(frame: &mut Frame, root: Rect, app: &App) {
+    let language = app.effective_language();
+    let area = modal_area(root, 70, 84);
+    frame.render_widget(Clear, area);
+    let mut lines = Vec::new();
+    if let Some(session) = app.current_session() {
+        lines.push(Line::from(Span::styled(
+            localized(language, "Yank", "复制"),
+            Style::default()
+                .fg(theme::gold())
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::raw(""));
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{}: ", i18n::text(language, Text::Session)),
+                Style::default().fg(theme::blue()),
+            ),
+            Span::raw(format!("{} / {}", session.cli, session.id)),
+        ]));
+        lines.push(Line::raw(""));
+        for entry in app.share_panel_entries() {
+            lines.extend(share_panel_entry_lines(entry, language));
+        }
+        lines.push(Line::raw(""));
+        lines.push(Line::from(Span::styled(
+            localized(
+                language,
+                "j/k choose   enter copy   Esc/q close",
+                "j/k 选择   enter 复制   Esc/q 关闭",
+            ),
+            Style::default().fg(theme::muted()),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            i18n::text(language, Text::NoSelectedSession),
+            Style::default()
+                .fg(theme::gold())
+                .add_modifier(Modifier::BOLD),
+        )));
+    }
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(panel_block(localized(language, " Yank ", " 复制 "), true))
+            .wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
+fn share_panel_entry_lines(
+    entry: SharePanelEntry,
+    language: crate::core::config::UiLanguage,
+) -> Vec<Line<'static>> {
+    let marker = if entry.selected { ">" } else { " " };
+    let (action_icon, action_icon_color) = share_panel_action_icon(entry.kind, entry.status);
+    let (status_icon, status_icon_color) = action_menu_status_icon(entry.status);
+    let label_style = if entry.selected {
+        Style::default()
+            .fg(action_status_color(entry.status))
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(action_status_color(entry.status))
+    };
+    vec![
+        Line::from(vec![
+            Span::styled(marker, Style::default().fg(theme::gold())),
+            Span::raw(" "),
+            Span::styled(
+                action_icon,
+                Style::default()
+                    .fg(action_icon_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(share_panel_action_label(entry.kind, language), label_style),
+            Span::raw("  "),
+            Span::styled(
+                status_icon,
+                Style::default()
+                    .fg(status_icon_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                action_menu_status_label(entry.status, language),
+                Style::default().fg(action_status_color(entry.status)),
+            ),
+        ]),
+        Line::from(vec![
+            Span::raw("    "),
+            Span::styled("└", Style::default().fg(theme::border())),
+            Span::raw(" "),
+            Span::styled(
+                share_panel_reason_label(entry.kind, &entry.reason, language),
+                Style::default().fg(theme::border()),
+            ),
+        ]),
+    ]
+}
+
+fn share_panel_action_icon(
+    kind: SharePanelActionKind,
+    status: SessionActionAvailability,
+) -> (&'static str, Color) {
+    let color = if matches!(status, SessionActionAvailability::Unavailable) {
+        theme::muted()
+    } else {
+        match kind {
+            SharePanelActionKind::FirstUserInput => theme::green(),
+            SharePanelActionKind::LastAiOutput => theme::cyan(),
+            SharePanelActionKind::SessionId => theme::blue(),
+            SharePanelActionKind::HandoffContent => theme::purple(),
+            SharePanelActionKind::PortableJson => theme::gold(),
+        }
+    };
+    let icon = match kind {
+        SharePanelActionKind::FirstUserInput => "↑",
+        SharePanelActionKind::LastAiOutput => "⧉",
+        SharePanelActionKind::SessionId => "#",
+        SharePanelActionKind::HandoffContent => "→",
+        SharePanelActionKind::PortableJson => "{}",
+    };
+    (icon, color)
+}
+
+fn share_panel_action_label(
+    kind: SharePanelActionKind,
+    language: crate::core::config::UiLanguage,
+) -> &'static str {
+    match kind {
+        SharePanelActionKind::FirstUserInput => {
+            localized(language, "First user input", "第一条用户输入")
+        }
+        SharePanelActionKind::LastAiOutput => localized(language, "Last AI output", "最后 AI 输出"),
+        SharePanelActionKind::SessionId => localized(language, "Session ID", "Session ID"),
+        SharePanelActionKind::HandoffContent => localized(language, "Handoff content", "交接内容"),
+        SharePanelActionKind::PortableJson => localized(language, "Portable JSON", "portable JSON"),
+    }
+}
+
+fn share_panel_reason_label(
+    kind: SharePanelActionKind,
+    reason: &str,
+    language: crate::core::config::UiLanguage,
+) -> String {
+    if language == crate::core::config::UiLanguage::English {
+        return reason.into();
+    }
+    match kind {
+        SharePanelActionKind::FirstUserInput => match reason {
+            "Copy the first user message from the loaded timeline." => {
+                "复制已加载 timeline 里的第一条用户输入。".into()
+            }
+            "Timeline is still loading; try again after the preview is ready." => {
+                "Timeline 仍在加载；预览完成后再复制。".into()
+            }
+            "Loaded timeline has no user input to copy." => {
+                "已加载 timeline 没有可复制的用户输入。".into()
+            }
+            "Load session details before copying the first user input." => {
+                "复制第一条用户输入前需要先加载会话详情。".into()
+            }
+            _ => reason.into(),
+        },
+        SharePanelActionKind::LastAiOutput => match reason {
+            "Copy the latest assistant message from the loaded timeline." => {
+                "复制已加载 timeline 里的最后一条智能体输出。".into()
+            }
+            "Timeline is still loading; try again after the preview is ready." => {
+                "Timeline 仍在加载；预览完成后再复制。".into()
+            }
+            "Loaded timeline has no assistant output to copy." => {
+                "已加载 timeline 没有可复制的智能体输出。".into()
+            }
+            "Load session details before copying the latest assistant output." => {
+                "复制最后智能体输出前需要先加载会话详情。".into()
+            }
+            _ => reason.into(),
+        },
+        SharePanelActionKind::SessionId => match reason {
+            "Copy the selected provider session id." => {
+                "复制当前选中会话的 provider session id。".into()
+            }
+            "No session is selected." => "当前没有选中会话。".into(),
+            _ => reason.into(),
+        },
+        SharePanelActionKind::HandoffContent => match reason {
+            "Copy the ready handoff artifact without launching a target session." => {
+                "复制已生成的交接文档，不启动目标会话。".into()
+            }
+            "Handoff generation is already running." => "交接文档正在生成中。".into(),
+            "Generate a handoff artifact, then copy it without launching the target." => {
+                "生成交接文档后复制，不启动目标会话。".into()
+            }
+            _ => reason.into(),
+        },
+        SharePanelActionKind::PortableJson => match reason {
+            "No session is selected." => "当前没有选中会话。".into(),
+            "Timeline is still loading; compact JSON waits for loaded session context." => {
+                "Timeline 仍在加载；compact JSON 需要已加载的会话上下文。".into()
+            }
+            "Copy a compact Moonbox JSON envelope for this selected session." => {
+                "复制当前会话的 Moonbox compact JSON 信封。".into()
+            }
+            _ => reason.into(),
+        },
+    }
+}
+
 fn action_menu_entry_lines(
     entry: ActionMenuEntry,
     language: crate::core::config::UiLanguage,
@@ -7231,10 +7453,7 @@ fn action_menu_action_icon(action: &SessionAvailableAction) -> (&'static str, Co
             SessionAvailableActionKind::Fork => theme::purple(),
             SessionAvailableActionKind::Jump => theme::blue(),
             SessionAvailableActionKind::Inspect => theme::blue(),
-            SessionAvailableActionKind::Copy | SessionAvailableActionKind::CopySessionId => {
-                theme::cyan()
-            }
-            SessionAvailableActionKind::Export => theme::gold(),
+            SessionAvailableActionKind::Yank => theme::cyan(),
             SessionAvailableActionKind::Archive => theme::gold(),
         }
     };
@@ -7244,9 +7463,7 @@ fn action_menu_action_icon(action: &SessionAvailableAction) -> (&'static str, Co
         SessionAvailableActionKind::Fork => "Y",
         SessionAvailableActionKind::Jump => "↗",
         SessionAvailableActionKind::Inspect => "i",
-        SessionAvailableActionKind::Copy => "⧉",
-        SessionAvailableActionKind::CopySessionId => "#",
-        SessionAvailableActionKind::Export => "↓",
+        SessionAvailableActionKind::Yank => "⧉",
         SessionAvailableActionKind::Archive => {
             if action.label == "Unarchive" {
                 "□"
@@ -7277,11 +7494,7 @@ fn action_menu_action_label(
         SessionAvailableActionKind::Fork => localized(language, "Fork", "分叉"),
         SessionAvailableActionKind::Jump => i18n::text(language, Text::Jump),
         SessionAvailableActionKind::Inspect => localized(language, "Inspect", "详情"),
-        SessionAvailableActionKind::Copy => localized(language, "Copy", "复制 AI 输出"),
-        SessionAvailableActionKind::CopySessionId => {
-            localized(language, "Copy Session ID", "复制 Session ID")
-        }
-        SessionAvailableActionKind::Export => localized(language, "Export", "导出"),
+        SessionAvailableActionKind::Yank => localized(language, "Yank", "复制"),
         SessionAvailableActionKind::Archive => {
             if action.label == "Unarchive" {
                 localized(language, "Unarchive", "取消归档")
@@ -7322,9 +7535,7 @@ fn action_menu_reason_label(
             }
             _ => action.reason.clone(),
         },
-        SessionAvailableActionKind::Copy => "复制最后一条 AI 输出将在后续里程碑实现。".into(),
-        SessionAvailableActionKind::CopySessionId => "复制 Session ID 将在后续里程碑实现。".into(),
-        SessionAvailableActionKind::Export => "导出会话动作将在后续里程碑实现。".into(),
+        SessionAvailableActionKind::Yank => "打开复制面板，不启动 provider 进程。".into(),
         SessionAvailableActionKind::Handoff => {
             if action.reason.starts_with("SSH data space is read-only") {
                 "SSH 数据空间只读；仍可生成受保护的交接文档。".into()
@@ -7682,15 +7893,16 @@ mod tests {
         assert_screen_contains(&screen, "Resume");
         assert_screen_contains(&screen, "Handoff");
         assert_screen_contains(&screen, "Fork");
-        assert_screen_contains(&screen, "Copy");
-        assert_screen_contains(&screen, "Copy Session ID");
-        assert_screen_contains(&screen, "Export");
+        assert_screen_contains(&screen, "Yank");
         assert_screen_contains(&screen, "Archive");
         assert_screen_contains(&screen, "↩ Resume");
         assert_screen_contains(&screen, "→ Handoff");
+        assert_screen_contains(&screen, "⧉ Yank");
         assert_screen_contains(&screen, "▣ Archive");
         assert_screen_contains(&screen, "unavailable");
         assert_screen_contains(&screen, "j/k choose");
+        assert!(!screen.contains("Copy Session ID"), "{screen}");
+        assert!(!screen.contains("Export"), "{screen}");
     }
 
     #[test]
@@ -7711,16 +7923,12 @@ mod tests {
         assert_screen_contains(&screen, "Y 分叉  ✓ 可用");
         assert_screen_contains(&screen, "↗ 跳转  · 不可用");
         assert_screen_contains(&screen, "i 详情  ✓ 可用");
-        assert_screen_contains(&screen, "⧉ 复制 AI 输出  · 不可用");
-        assert_screen_contains(&screen, "# 复制 Session ID  · 不可用");
-        assert_screen_contains(&screen, "↓ 导出  · 不可用");
+        assert_screen_contains(&screen, "⧉ 复制  ✓ 可用");
         assert_screen_contains(&screen, "▣ 归档  ✓ 可用");
         assert_screen_contains(&screen, "└ 可通过本地 provider CLI 恢复该会话。");
         assert_screen_contains(&screen, "可调用 Codex 原生 session fork。");
         assert_screen_contains(&screen, "Hooks 未启用，无法获得实时 tmux 状态。");
-        assert_screen_contains(&screen, "复制最后一条 AI 输出将在后续里程碑实现。");
-        assert_screen_contains(&screen, "复制 Session ID 将在后续里程碑实现。");
-        assert_screen_contains(&screen, "导出会话动作将在后续里程碑实现。");
+        assert_screen_contains(&screen, "打开复制面板，不启动 provider 进程。");
         assert_screen_contains(
             &screen,
             "归档状态会写入 Moonbox overlay，不会修改来源存储。",
@@ -7733,6 +7941,29 @@ mod tests {
             !screen.contains("Whole-session fork is planned"),
             "{screen}"
         );
+    }
+
+    #[test]
+    fn share_panel_renders_yank_actions() {
+        let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.set_ui_preferences_for_test(crate::core::config::UiPreferencesConfig {
+            language: crate::core::config::UiLanguage::ZhHans,
+            theme: crate::core::config::UiThemeName::Moonbox,
+        });
+        app.handle_key(key('y'));
+
+        let screen = render_text(&app, 120, 36);
+
+        assert_screen_contains(&screen, "复制");
+        assert_screen_contains(&screen, "↑ 第一条用户输入");
+        assert_screen_contains(&screen, "⧉ 最后 AI 输出");
+        assert_screen_contains(&screen, "# Session ID");
+        assert_screen_contains(&screen, "→ 交接内容");
+        assert_screen_contains(&screen, "{} portable JSON");
+        assert_screen_contains(&screen, "复制已加载 timeline 里的第一条用户输入。");
+        assert_screen_contains(&screen, "复制当前选中会话的 provider session id。");
+        assert_screen_contains(&screen, "j/k 选择");
+        assert_screen_contains(&screen, "enter 复制");
     }
 
     #[test]

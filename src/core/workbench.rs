@@ -389,12 +389,26 @@ pub fn launch_plan_with_options(
     let Some(source_session) = selected_session(session_id)? else {
         return Ok(None);
     };
-    let Some((source_session, timeline, generated_capsule)) =
-        data::launch_artifacts_for_session_id(&source_session.id, target)?
-    else {
-        return Ok(None);
+    let (source_session, timeline, capsule, capsule_path) = if let Some(path) = capsule_path {
+        let Some((source_session, timeline)) =
+            data::launch_context_for_session_id(&source_session.id)?
+        else {
+            return Ok(None);
+        };
+        (
+            source_session,
+            timeline,
+            read_capsule_for_plan(path)?,
+            Some(path.into()),
+        )
+    } else {
+        let Some((source_session, timeline, capsule)) =
+            data::launch_artifacts_for_session_id(&source_session.id, target)?
+        else {
+            return Ok(None);
+        };
+        (source_session, timeline, capsule, None)
     };
-    let (capsule, capsule_path) = capsule_for_plan(&generated_capsule, capsule_path)?;
     let continuation = continuation::build_continuation_protocol(
         &source_session,
         target,
@@ -579,13 +593,7 @@ fn selected_compiler(compiler_id: Option<&str>) -> String {
         .unwrap_or_else(compiler::default_compiler_id)
 }
 
-fn capsule_for_plan(
-    generated: &WorkCapsule,
-    capsule_path: Option<&str>,
-) -> Result<(WorkCapsule, Option<String>), CoreError> {
-    let Some(path) = capsule_path else {
-        return Ok((generated.clone(), None));
-    };
+fn read_capsule_for_plan(path: &str) -> Result<WorkCapsule, CoreError> {
     let contents = fs::read_to_string(path).map_err(|error| CoreError::CapsuleRead {
         path: path.into(),
         reason: error.to_string(),
@@ -596,10 +604,7 @@ fn capsule_for_plan(
             reason: error.to_string(),
         }
     })?;
-    Ok((
-        redaction::redact_work_capsule_for_export(capsule),
-        Some(path.into()),
-    ))
+    Ok(redaction::redact_work_capsule_for_export(capsule))
 }
 
 pub fn moonbox_execute_command(

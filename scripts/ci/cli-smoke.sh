@@ -59,15 +59,15 @@ grep -q "codex-cxcp-design" "$output_dir/sessions.json"
 grep -q "claude-qc-platform" "$output_dir/sessions.json"
 grep -q "hermes-cxcp-502" "$output_dir/sessions.json"
 
-"$moonbox" capsule --session codex-cxcp-design --target hermes --rewind evt-091 --json > "$output_dir/capsule.json"
+"$moonbox" capsule --session codex-cxcp-design --target hermes --rewind evt-091 --compiler engineering-handoff --json > "$output_dir/capsule.json"
 grep -q '"source_cli": "codex"' "$output_dir/capsule.json"
 grep -q '"target_cli": "hermes"' "$output_dir/capsule.json"
 
-"$moonbox" compile-request --session codex-cxcp-design --target hermes --rewind evt-091 --json > "$output_dir/compile-request.json"
+"$moonbox" compile-request --session codex-cxcp-design --target hermes --rewind evt-091 --compiler engineering-handoff --json > "$output_dir/compile-request.json"
 grep -q '"compiler": "engineering-handoff"' "$output_dir/compile-request.json"
 grep -q '"target_cli": "hermes"' "$output_dir/compile-request.json"
 
-"$moonbox" compile-output --session codex-cxcp-design --target hermes --rewind evt-091 --json > "$output_dir/compile-output.json"
+"$moonbox" compile-output --session codex-cxcp-design --target hermes --rewind evt-091 --compiler engineering-handoff --json > "$output_dir/compile-output.json"
 grep -q '"handoff_label": "moonbox/hermes-rewind-evt-091"' "$output_dir/compile-output.json"
 
 "$moonbox" compilers --json > "$output_dir/compilers.json"
@@ -94,11 +94,11 @@ grep -q '"name": "target_codex_binary"' "$output_dir/doctor.json"
 grep -q '"dry_run": true' "$output_dir/open.json"
 grep -q '"program": "codex"' "$output_dir/open.json"
 
-"$moonbox" launch --target hermes --session codex-cxcp-design --json > "$output_dir/launch.json"
+"$moonbox" launch --target hermes --session codex-cxcp-design --capsule "$output_dir/capsule.json" --json > "$output_dir/launch.json"
 grep -q '"dry_run": true' "$output_dir/launch.json"
 grep -q '"ready": true' "$output_dir/launch.json"
 
-"$moonbox" verify --target hermes --session codex-cxcp-design --json > "$output_dir/verify.json"
+"$moonbox" verify --target hermes --session codex-cxcp-design --capsule "$output_dir/capsule.json" --json > "$output_dir/verify.json"
 grep -q '"status": "pass"' "$output_dir/verify.json"
 
 "$moonbox" replay-eval --json > "$output_dir/replay-eval.json"

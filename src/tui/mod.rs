@@ -4,6 +4,8 @@ mod theme;
 mod view;
 
 use std::io::{self, Write};
+#[cfg(target_os = "macos")]
+use std::process::Stdio;
 use std::process::{Command, ExitStatus};
 use std::sync::mpsc;
 use std::thread;
@@ -108,9 +110,32 @@ pub fn run_with_loading(
 }
 
 fn copy_to_terminal_clipboard(text: &str) -> Result<()> {
+    let _ = copy_to_system_clipboard(text);
     let encoded = base64_encode(text.as_bytes());
     print!("\x1b]52;c;{encoded}\x07");
     io::stdout().flush()?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn copy_to_system_clipboard(text: &str) -> Result<()> {
+    let mut child = Command::new("pbcopy")
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(|error| color_eyre::eyre::eyre!("pbcopy failed to start: {error}"))?;
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin.write_all(text.as_bytes())?;
+    }
+    let status = child.wait()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(color_eyre::eyre::eyre!("pbcopy exited with {status}"))
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn copy_to_system_clipboard(_text: &str) -> Result<()> {
     Ok(())
 }
 
