@@ -9,6 +9,10 @@ and this project uses semantic versioning once tagged releases start.
 
 ### Added
 
+- Session-management vision documentation now records Moonbox as an agent
+  workflow decision support system, adds an unresolved session-management
+  question list, and points milestone sync to the new lightweight Feishu plan
+  document.
 - Root agent operating rules covering one-milestone-per-PR governance, fixture-safe
   tests, read-only source stores, and documentation sync expectations.
 - Rust + Ratatui TUI workbench with Vim-style navigation.
