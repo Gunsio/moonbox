@@ -1520,6 +1520,12 @@ Stable interfaces matter more than any single framework:
   artifact staging examples, and Homebrew formula templates now target
   `0.1.4` / `v0.1.4` so the M100 exact artifact review flow can ship through
   tagged GitHub release artifacts.
+- M104: Session Action Roadmap; the next usability foundation work is split
+  into concrete milestones for the shared action model, archive overlay,
+  whole-session fork, hook-backed live state, header/footer information
+  architecture, deterministic primary action, built-in handoff skill, shortcut
+  rebalance, settings/setup closure, Luoshen theme polish, and post-feature
+  quality audit.
 - M92: Remote / SSH Session Detail Parity; SSH data spaces now hydrate selected
   session details from the remote `compile-request --json` response, preserving
   remote-computed bounded anatomy in the same Details / Zoom Details rendering
