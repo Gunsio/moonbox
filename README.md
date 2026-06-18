@@ -19,12 +19,14 @@ explicitly ask it to run a guarded action.
   time-sorted TUI.
 - **Timeline rewind**: inspect turns, tool evidence, images, and compact
   boundaries before choosing where to continue.
-- **Action menu**: use `o` to pick Resume, Handoff, New Session, Fork, Jump,
-  Inspect, Yank, or Archive from one availability-aware menu.
+- **Action menu**: use `o` to pick Resume, Handoff, Lark Doc, New Session,
+  Fork, Jump, Inspect, Yank, or Archive from one availability-aware menu.
 - **Yank panel**: use `y` for copy-only workflows such as first user input,
   last AI output, session id, handoff text, and portable JSON.
 - **Handoff review**: generate or review a continuation artifact before a target
   agent receives it.
+- **Lark export**: preview or create a readable Feishu/Lark handoff document
+  from the selected session in the TUI.
 - **Themes and hotkeys**: Vim-style navigation, contextual footer hints, and the
   first-party Luoshen theme pack.
 
@@ -111,6 +113,17 @@ Fixture-safe verification commands:
 MOONBOX_SESSION_MODE=fixture moon sessions --json --filter codex
 MOONBOX_SESSION_MODE=fixture moon doctor --json
 moon completions zsh > /tmp/_moon
+```
+
+Create a Lark handoff document from the TUI with `o Enter`. Moonbox generates
+the handoff with the configured runner, creates the Feishu/Lark document when
+`lark-cli` is ready, or starts the install/update flow when it is not.
+
+The same flow is available from CLI for automation:
+
+```bash
+moon export --session <session-id> --to lark --mode handoff
+moon export --session <session-id> --to lark --mode handoff --execute
 ```
 
 ### Homebrew

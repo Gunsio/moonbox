@@ -13,6 +13,7 @@ pub enum CoreError {
     LaunchLedger { reason: String },
     LaunchBlocked { reason: String },
     LaunchStart { command: String, reason: String },
+    LarkExport { reason: String },
     Hooks { reason: String },
     Setup { reason: String },
     ReplayEval { reason: String },
@@ -42,6 +43,7 @@ impl fmt::Display for CoreError {
             Self::LaunchStart { command, reason } => {
                 write!(f, "cannot start target launch `{command}`: {reason}")
             }
+            Self::LarkExport { reason } => write!(f, "lark export failed: {reason}"),
             Self::Hooks { reason } => write!(f, "hooks configuration error: {reason}"),
             Self::Setup { reason } => write!(f, "setup error: {reason}"),
             Self::ReplayEval { reason } => write!(f, "replay eval failed: {reason}"),

@@ -20,7 +20,7 @@ use crossterm::{
 use ratatui::DefaultTerminal;
 
 use crate::{
-    app::{App, SessionFilter, SetupInstallPlan, TmuxJumpPlan, TuiExitAction},
+    app::{App, LarkExportTuiPlan, SessionFilter, SetupInstallPlan, TmuxJumpPlan, TuiExitAction},
     core::{
         config, launcher,
         model::{CliTool, LaunchExecution, LaunchPlan, OriginalSessionPlan},
@@ -62,6 +62,9 @@ pub fn run(terminal: &mut DefaultTerminal, mut app: App) -> Result<Option<TuiExi
             }
             if let Some(plan) = app.take_pending_setup_install() {
                 suspend_and_setup_install(terminal, &mut app, plan)?;
+            }
+            if let Some(plan) = app.take_pending_lark_export() {
+                suspend_and_lark_export(terminal, &mut app, plan)?;
             }
         }
     }
@@ -193,6 +196,29 @@ fn suspend_and_setup_install(
     Ok(())
 }
 
+fn suspend_and_lark_export(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    plan: Box<LarkExportTuiPlan>,
+) -> Result<()> {
+    suspend_terminal()?;
+    let result = run_lark_export(&plan);
+    restore_terminal(terminal)?;
+    let (success, outcome) = match result {
+        Ok(status) if status.success() => (true, "document created".into()),
+        Ok(status) => (
+            false,
+            match status.code() {
+                Some(code) => format!("export exited with code {code}"),
+                None => "export exited without a status code".into(),
+            },
+        ),
+        Err(error) => (false, format!("export failed to start: {error}")),
+    };
+    app.complete_lark_export(&plan, outcome, success);
+    Ok(())
+}
+
 fn suspend_terminal() -> Result<()> {
     disable_raw_mode()?;
     execute!(io::stdout(), LeaveAlternateScreen)?;
@@ -233,6 +259,65 @@ fn run_setup_install(plan: &SetupInstallPlan) -> io::Result<ExitStatus> {
         .arg("install")
         .arg(plan.target.cli_arg())
         .status()
+}
+
+fn run_lark_export(plan: &LarkExportTuiPlan) -> io::Result<ExitStatus> {
+    println!("Moonbox Lark export");
+    println!("Session: {}", plan.session_id);
+    println!("Target: {}", plan.target);
+    println!("Rewind: {}", plan.rewind);
+    println!("Compiler: {}", plan.compiler);
+    println!("Title: {}", plan.title);
+    println!("Command: {}", plan.command_display);
+    println!("Creating the Feishu/Lark document from the reviewed handoff Markdown.");
+    println!("Moonbox will return when the export exits.\n");
+    io::stdout().flush()?;
+    let output = Command::new(lark_cli_bin())
+        .arg("docs")
+        .arg("+create")
+        .arg("--api-version")
+        .arg("v2")
+        .arg("--as")
+        .arg("user")
+        .arg("--doc-format")
+        .arg("markdown")
+        .arg("--content")
+        .arg(&plan.markdown)
+        .output()?;
+    io::stdout().write_all(&output.stdout)?;
+    io::stderr().write_all(&output.stderr)?;
+    if output.status.success()
+        && std::env::var_os("MOONBOX_LARK_DISABLE_OPEN").is_none()
+        && let Some(url) = extract_first_url(&String::from_utf8_lossy(&output.stdout))
+            .or_else(|| extract_first_url(&String::from_utf8_lossy(&output.stderr)))
+    {
+        let _ = Command::new("open").arg(url).status();
+    }
+    Ok(output.status)
+}
+
+fn lark_cli_bin() -> std::path::PathBuf {
+    std::env::var_os("MOONBOX_LARK_CLI_BIN")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("lark-cli"))
+}
+
+fn extract_first_url(text: &str) -> Option<String> {
+    if let Some(start) = text.find("http") {
+        let tail = &text[start..];
+        let end = tail
+            .find(|ch: char| ch.is_whitespace() || matches!(ch, '"' | '\'' | ',' | ')' | ']' | '}'))
+            .unwrap_or(tail.len());
+        return Some(tail[..end].trim_end_matches('.').to_string());
+    }
+    text.split_whitespace().find_map(|part| {
+        let clean = part.trim_matches(|ch: char| {
+            ch == '"' || ch == '\'' || ch == ',' || ch == ')' || ch == ']' || ch == '}'
+        });
+        clean
+            .starts_with("http")
+            .then(|| clean.trim_end_matches('.').to_string())
+    })
 }
 
 fn original_exit_message(cli: &str, status: ExitStatus) -> String {

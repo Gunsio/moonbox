@@ -47,6 +47,7 @@ pub fn run() -> Result<()> {
         Command::Open(args) => print_open_command(args),
         Command::OpenApp(args) => print_open_app_plan(args),
         Command::Capsule(args) => print_capsule(args),
+        Command::Export(args) => print_export(args),
         Command::Launches(args) => print_launches(args),
         Command::CompileRequest(args) => print_compile_request(args),
         Command::CompileOutput(args) => print_compile_output(args),
@@ -334,6 +335,119 @@ fn generated_capsule(args: cli::CompileArgs) -> Result<Option<core::model::WorkC
         args.rewind.as_deref(),
         args.compiler.as_deref(),
     )?)
+}
+
+fn print_export(args: cli::ExportArgs) -> Result<()> {
+    match (args.to, args.mode) {
+        (cli::ExportDestinationArg::Lark, cli::ExportModeArg::Handoff) => {
+            print_lark_handoff_export(args)
+        }
+    }
+}
+
+fn print_lark_handoff_export(args: cli::ExportArgs) -> Result<()> {
+    let target = launch_target(args.compile.target);
+    let options = core::lark::LarkExportOptions {
+        parent_token: args.parent_token,
+        parent_position: args.parent_position,
+    };
+    let setup_command = Some(core::setup::setup_command_display_for_current_exe(
+        core::setup::SetupInstallTarget::LarkCli,
+    ));
+    if args.execute {
+        core::workbench::require_explicit_session(args.compile.session.as_deref(), "lark export")?;
+        let request = core::workbench::compile_request_for_selection(
+            args.compile.session.as_deref(),
+            target,
+            args.compile.rewind.as_deref(),
+            args.compile.compiler.as_deref(),
+        )?;
+        if let Some(request) = request {
+            let capsule = core::workbench::compile_capsule(
+                &request.source_session.id,
+                request.target_cli,
+                &request.rewind_event_id,
+                &request.compiler,
+            )?
+            .ok_or_else(|| core::error::CoreError::LarkExport {
+                reason: format!(
+                    "session {} disappeared before handoff generation",
+                    request.source_session.id
+                ),
+            })?;
+            let execution = core::lark::execute_export(&capsule, &options, setup_command)?;
+            if args.compile.json {
+                println!("{}", serde_json::to_string_pretty(&execution)?);
+            } else {
+                println!("export: lark handoff execute");
+                println!("session: {}", execution.plan.session);
+                println!("title: {}", execution.plan.title);
+                println!("compiler: {}", execution.plan.compiler);
+                if let Some(url) = execution.url {
+                    println!("url: {url}");
+                } else {
+                    println!("url: unavailable");
+                }
+                if let Some(error) = execution.browser_error {
+                    println!("browser: {error}");
+                } else {
+                    println!(
+                        "browser: {}",
+                        if execution.browser_opened {
+                            "opened"
+                        } else {
+                            "skipped"
+                        }
+                    );
+                }
+            }
+        } else {
+            println!("No session selected");
+        }
+        return Ok(());
+    }
+
+    let request = core::workbench::compile_request_for_selection(
+        args.compile.session.as_deref(),
+        target,
+        args.compile.rewind.as_deref(),
+        args.compile.compiler.as_deref(),
+    )?;
+    if let Some(request) = request {
+        let plan = core::lark::dry_run_plan(&request, &options, setup_command);
+        if args.compile.json {
+            println!("{}", serde_json::to_string_pretty(&plan)?);
+        } else {
+            println!("export: lark handoff dry-run");
+            println!("session: {}", plan.session);
+            println!("title: {}", plan.title);
+            println!("compiler: {}", plan.compiler);
+            println!("rewind: {}", plan.rewind);
+            println!(
+                "lark-cli: {:?}  {}",
+                plan.lark_cli.state, plan.lark_cli.reason
+            );
+            if let Some(version) = &plan.lark_cli.version {
+                println!("lark-cli version: {version}");
+            }
+            if let Some(command) = &plan.lark_cli.setup_command {
+                println!("setup: {command}");
+            }
+            println!("execute_ready: {}", plan.execute_ready);
+            println!("command: {}", plan.command.join(" "));
+            println!("sections:");
+            for section in &plan.sections {
+                println!("  - {section}");
+            }
+            println!("risks:");
+            for risk in &plan.risks {
+                println!("  - {risk}");
+            }
+        }
+    } else {
+        println!("No session selected");
+    }
+    Ok(())
 }
 
 fn print_capsule_save(args: cli::CapsuleSaveArgs) -> Result<()> {
@@ -667,6 +781,7 @@ fn print_setup_install(args: cli::SetupInstallArgs) -> Result<()> {
         cli::SetupInstallTargetArg::CodexSdk => core::setup::SetupInstallTarget::CodexSdk,
         cli::SetupInstallTargetArg::ClaudeSdk => core::setup::SetupInstallTarget::ClaudeSdk,
         cli::SetupInstallTargetArg::MattHandoff => core::setup::SetupInstallTarget::MattHandoff,
+        cli::SetupInstallTargetArg::LarkCli => core::setup::SetupInstallTarget::LarkCli,
     };
     let report = core::setup::install(target)?;
     if args.json {

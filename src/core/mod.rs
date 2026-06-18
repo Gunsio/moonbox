@@ -18,6 +18,7 @@ pub mod handoff;
 pub mod hermes;
 pub mod hooks;
 pub mod image_preview;
+pub mod lark;
 pub mod launch_ledger;
 pub mod launcher;
 pub mod local_jsonl;

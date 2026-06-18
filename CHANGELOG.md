@@ -47,6 +47,17 @@ and this project uses semantic versioning once tagged releases start.
 - TUI action menu `New Session` starts the selected target CLI from the first
   user prompt in the source session, carrying image and attachment references as
   explicit path text instead of claiming provider-native image transfer.
+- TUI action menu `Lark Doc` runs from `o Enter`: it uses the same loading and
+  review flow as normal Handoff, shows the generated handoff Markdown first,
+  then creates and opens a Feishu/Lark document when `Enter` is pressed on the
+  preview. It suspends Moonbox for document creation or `lark-cli`
+  install/update when needed. The same capability is available as
+  `moonbox export --to lark --mode handoff`, which previews and, with
+  `--execute`, creates the document through `lark-cli docs +create
+  --api-version v2 --as user`.
+- TUI action menu `Resume` now requires the explicit `r` shortcut; pressing
+  `Enter` on Resume stays inside Moonbox, so `o Enter` cannot accidentally open
+  the original provider session.
 - TUI `y` opens a Yank panel with copy-only actions for first user input, last
   AI output, Session ID, ready handoff text, and compact portable JSON, while
   keeping provider source stores read-only and avoiding target session launch.
@@ -387,6 +398,10 @@ and this project uses semantic versioning once tagged releases start.
 
 ### Fixed
 
+- Lark handoff export execution now compiles the selected session with the
+  configured handoff runner and writes the generated Markdown artifact directly
+  into the Feishu/Lark document, instead of exporting a fallback capsule summary
+  or a temporary artifact path.
 - Handoff Review success for agent-backed community skills is now skill-first:
   Moonbox reads the generated temporary Markdown artifact, shows that Markdown
   as the default Review body, removes capsule/verifier wrapper text from the

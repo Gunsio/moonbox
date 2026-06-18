@@ -568,7 +568,7 @@ fn warn_if_launch_ledger_fails(result: Result<launch_ledger::LaunchRecord, CoreE
     }
 }
 
-fn require_explicit_session(
+pub(crate) fn require_explicit_session(
     session_id: Option<&str>,
     action: &'static str,
 ) -> Result<(), CoreError> {

@@ -26,6 +26,7 @@ use crate::{
     core::{
         actions::{SessionActionAvailability, SessionAvailableAction, SessionAvailableActionKind},
         compiler, handoff, hooks,
+        lark::LarkCliState,
     },
 };
 
@@ -88,6 +89,9 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
     if app.show_share_panel {
         render_share_panel(frame, root, app);
+    }
+    if app.show_lark_export {
+        render_lark_export(frame, root, app);
     }
     if app.show_open_original {
         render_open_original(frame, root, app);
@@ -3629,6 +3633,7 @@ fn render_settings(frame: &mut Frame, root: Rect, app: &App) {
         saved: i18n::on_off(language, app.smart_enter_tmux_enabled()),
         dirty: app.settings_smart_enter_dirty(),
     }));
+    lines.extend(settings_lark_cli_row(app, language, settings_row_layout));
     lines.extend([
         Line::raw(""),
         Line::from(Span::styled(
@@ -3786,7 +3791,97 @@ fn settings_field_icon(field: SettingsField) -> (&'static str, Color) {
         SettingsField::Language => ("文", theme::blue()),
         SettingsField::Theme => ("◈", theme::purple()),
         SettingsField::SmartEnter => ("↵", theme::green()),
+        SettingsField::LarkCli => ("☁", theme::cyan()),
     }
+}
+
+fn settings_lark_cli_row(
+    app: &App,
+    language: crate::core::config::UiLanguage,
+    layout: SettingsRowLayout,
+) -> Vec<Line<'static>> {
+    let focused = app.settings_field_is_focused(SettingsField::LarkCli);
+    let marker = if focused { ">" } else { " " };
+    let marker_color = if focused {
+        theme::gold()
+    } else {
+        theme::border()
+    };
+    let label_color = if focused {
+        theme::gold()
+    } else {
+        theme::blue()
+    };
+    let readiness = &app.lark_cli_readiness;
+    let (status_icon, status_text, status_color) = match readiness.state {
+        LarkCliState::Ready => ("✓", localized(language, "Ready", "就绪"), theme::green()),
+        LarkCliState::Missing => ("!", localized(language, "Missing", "未安装"), theme::red()),
+        LarkCliState::Unsupported => (
+            "!",
+            localized(language, "Unsupported", "不支持"),
+            theme::orange(),
+        ),
+    };
+    let detail = if readiness.state == LarkCliState::Ready {
+        format!(
+            "{} {}",
+            localized(language, "Version", "版本"),
+            readiness
+                .version
+                .clone()
+                .unwrap_or_else(|| localized(language, "unknown", "未知").into())
+        )
+    } else {
+        readiness.reason.clone()
+    };
+    let action = if readiness.state == LarkCliState::Ready {
+        localized(language, "Enter refresh", "Enter 刷新")
+    } else {
+        localized(language, "Enter install/update", "Enter 安装/更新")
+    };
+    vec![
+        Line::from(vec![
+            Span::styled(format!("{marker} "), Style::default().fg(marker_color)),
+            Span::styled(
+                "☁",
+                Style::default()
+                    .fg(theme::cyan())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                fit_display_width("Lark CLI", layout.label_width),
+                Style::default().fg(label_color).add_modifier(if focused {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                status_icon,
+                Style::default()
+                    .fg(status_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(status_text, Style::default().fg(status_color)),
+        ]),
+        Line::from(vec![
+            Span::raw("    "),
+            Span::styled("└", Style::default().fg(theme::border())),
+            Span::raw(" "),
+            Span::styled(
+                fit_display_width(&detail, layout.draft_width),
+                Style::default().fg(theme::border()),
+            ),
+            Span::raw(" ".repeat(layout.gap_width)),
+            Span::styled(
+                fit_display_width(action, layout.saved_width),
+                Style::default().fg(theme::border()),
+            ),
+        ]),
+    ]
 }
 
 fn settings_row_layout(
@@ -6928,15 +7023,24 @@ fn render_skill_handoff_review(
 
     let skill = handoff::skill_display_label(capsule.handoff_skill.as_deref().unwrap_or("handoff"));
     let artifact = capsule.handoff_artifact.as_deref().unwrap_or_default();
+    let lark_export = app.launch_review_lark_export;
     let mut lines = vec![
         Line::from(Span::styled(
-            localized(language, "Handoff ready", "Handoff 已生成"),
+            if lark_export {
+                localized(language, "Lark handoff ready", "飞书 Handoff 已生成")
+            } else {
+                localized(language, "Handoff ready", "Handoff 已生成")
+            },
             Style::default()
                 .fg(theme::gold())
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
-            if language == crate::core::config::UiLanguage::ZhHans {
+            if lark_export && language == crate::core::config::UiLanguage::ZhHans {
+                "下面这份完整 handoff 文档将被写入飞书。".into()
+            } else if lark_export {
+                "This full handoff document will be written to Feishu/Lark.".into()
+            } else if language == crate::core::config::UiLanguage::ZhHans {
                 format!("下面是 {} 将读取的完整 handoff 文档。", capsule.target_cli)
             } else {
                 format!(
@@ -6995,7 +7099,14 @@ fn render_skill_handoff_review(
     );
 
     let mut footer_actions = vec![
-        action_button("Enter/r", localized(language, "Start", "启动")),
+        if lark_export {
+            action_button(
+                "Enter",
+                localized(language, "Create Lark Doc", "创建飞书文档"),
+            )
+        } else {
+            action_button("Enter/r", localized(language, "Start", "启动"))
+        },
         Span::raw("  "),
         action_button("y", localized(language, "Copy text", "复制全文")),
         Span::raw("  "),
@@ -7014,11 +7125,19 @@ fn render_skill_handoff_review(
     let footer_lines = vec![
         Line::from(footer_actions),
         Line::from(Span::styled(
-            localized(
-                language,
-                "j/k/gg/G scroll; Enter starts the target agent with this handoff file.",
-                "j/k/gg/G 滚动；Enter 会让目标 agent 读取这份 handoff 文档。",
-            ),
+            if lark_export {
+                localized(
+                    language,
+                    "j/k/gg/G scroll; Enter creates and opens a Lark document with this handoff.",
+                    "j/k/gg/G 滚动；Enter 会用这份 handoff 创建并打开飞书文档。",
+                )
+            } else {
+                localized(
+                    language,
+                    "j/k/gg/G scroll; Enter starts the target agent with this handoff file.",
+                    "j/k/gg/G 滚动；Enter 会让目标 agent 读取这份 handoff 文档。",
+                )
+            },
             Style::default().fg(theme::muted()),
         )),
     ];
@@ -7669,8 +7788,8 @@ fn render_action_menu(frame: &mut Frame, root: Rect, app: &App) {
         lines.push(Line::from(Span::styled(
             localized(
                 language,
-                "j/k choose   enter run selected action   Esc/q close",
-                "j/k 选择   enter 执行动作   Esc/q 关闭",
+                "j/k choose   enter run action   r resume   Esc/q close",
+                "j/k 选择   enter 执行动作   r 恢复   Esc/q 关闭",
             ),
             Style::default().fg(theme::muted()),
         )));
@@ -7735,6 +7854,117 @@ fn render_share_panel(frame: &mut Frame, root: Rect, app: &App) {
             .wrap(Wrap { trim: true }),
         area,
     );
+}
+
+fn render_lark_export(frame: &mut Frame, root: Rect, app: &App) {
+    let language = app.effective_language();
+    let area = modal_area(root, 72, 70);
+    frame.render_widget(Clear, area);
+    let mut lines = Vec::new();
+    if let Some(plan) = app.lark_export_plan.as_ref() {
+        lines.push(Line::from(Span::styled(
+            localized(language, "Lark handoff document", "飞书交接文档"),
+            Style::default()
+                .fg(theme::gold())
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::raw(""));
+        lines.extend([
+            lark_export_detail_line(language, "Session", "会话", plan.session.clone()),
+            lark_export_detail_line(language, "Title", "标题", plan.title.clone()),
+            lark_export_detail_line(language, "Target", "目标", plan.target_cli.clone()),
+            lark_export_detail_line(language, "Compiler", "编译器", plan.compiler.clone()),
+            lark_export_detail_line(language, "Rewind", "回退点", plan.rewind.clone()),
+        ]);
+        lines.push(Line::raw(""));
+        let status_color = if plan.execute_ready {
+            theme::green()
+        } else {
+            theme::red()
+        };
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{}: ", localized(language, "Lark CLI", "Lark CLI")),
+                Style::default().fg(theme::blue()),
+            ),
+            Span::styled(
+                if plan.execute_ready {
+                    localized(language, "ready", "就绪")
+                } else {
+                    localized(language, "blocked", "阻塞")
+                },
+                Style::default()
+                    .fg(status_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                plan.lark_cli.reason.clone(),
+                Style::default().fg(theme::muted()),
+            ),
+        ]));
+        lines.push(Line::raw(""));
+        lines.push(Line::from(Span::styled(
+            localized(language, "Sections", "章节"),
+            Style::default()
+                .fg(theme::blue())
+                .add_modifier(Modifier::BOLD),
+        )));
+        for section in &plan.sections {
+            lines.push(Line::from(vec![
+                Span::styled("• ", Style::default().fg(theme::cyan())),
+                Span::styled(section.clone(), Style::default().fg(theme::text())),
+            ]));
+        }
+        lines.push(Line::raw(""));
+        lines.push(Line::from(Span::styled(
+            if plan.execute_ready {
+                localized(
+                    language,
+                    "Enter create document   y copy command   Esc/q close",
+                    "Enter 创建文档   y 复制命令   Esc/q 关闭",
+                )
+            } else {
+                localized(
+                    language,
+                    "Enter install/update lark-cli   y copy command   Esc/q close",
+                    "Enter 安装/更新 lark-cli   y 复制命令   Esc/q 关闭",
+                )
+            },
+            Style::default().fg(theme::muted()),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            localized(language, "No Lark export plan", "没有飞书导出计划"),
+            Style::default().fg(theme::gold()),
+        )));
+    }
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(panel_block(
+                localized(language, " Lark Export ", " 飞书导出 "),
+                true,
+            ))
+            .scroll((app.modal_scroll, 0))
+            .wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
+fn lark_export_detail_line(
+    language: crate::core::config::UiLanguage,
+    english_label: &'static str,
+    zh_label: &'static str,
+    value: String,
+) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(
+            format!("{}: ", localized(language, english_label, zh_label)),
+            Style::default().fg(theme::blue()),
+        ),
+        Span::styled(value, Style::default().fg(theme::text())),
+    ])
 }
 
 fn share_panel_entry_lines(
@@ -7959,6 +8189,7 @@ fn action_menu_action_icon(action: &SessionAvailableAction) -> (&'static str, Co
         match action.kind {
             SessionAvailableActionKind::Resume => theme::green(),
             SessionAvailableActionKind::Handoff => theme::cyan(),
+            SessionAvailableActionKind::LarkExport => theme::cyan(),
             SessionAvailableActionKind::NewSession => theme::gold(),
             SessionAvailableActionKind::Fork => theme::purple(),
             SessionAvailableActionKind::Jump => theme::blue(),
@@ -7970,6 +8201,7 @@ fn action_menu_action_icon(action: &SessionAvailableAction) -> (&'static str, Co
     let icon = match action.kind {
         SessionAvailableActionKind::Resume => "↩",
         SessionAvailableActionKind::Handoff => "→",
+        SessionAvailableActionKind::LarkExport => "☁",
         SessionAvailableActionKind::NewSession => "+",
         SessionAvailableActionKind::Fork => "⤴",
         SessionAvailableActionKind::Jump => "↗",
@@ -8002,6 +8234,7 @@ fn action_menu_action_label(
     match action.kind {
         SessionAvailableActionKind::Resume => i18n::text(language, Text::Resume),
         SessionAvailableActionKind::Handoff => localized(language, "Handoff", "交接"),
+        SessionAvailableActionKind::LarkExport => localized(language, "Lark Doc", "飞书文档"),
         SessionAvailableActionKind::NewSession => localized(language, "New Session", "新会话"),
         SessionAvailableActionKind::Fork => localized(language, "Fork", "分叉"),
         SessionAvailableActionKind::Jump => i18n::text(language, Text::Jump),
@@ -8060,6 +8293,13 @@ fn action_menu_reason_label(
                 "SSH 数据空间只读；仍可生成受保护的交接文档。".into()
             } else {
                 "可生成交给目标智能体的接续文档。".into()
+            }
+        }
+        SessionAvailableActionKind::LarkExport => {
+            if action.reason.starts_with("SSH data space is read-only") {
+                "SSH 数据空间只读；飞书导出需要本地会话上下文。".into()
+            } else {
+                "生成并创建当前会话的飞书交接文档。".into()
             }
         }
         SessionAvailableActionKind::Archive => {
@@ -8421,19 +8661,20 @@ mod tests {
         assert_screen_contains(&screen, "Session actions");
         assert_screen_contains(&screen, "Resume");
         assert_screen_contains(&screen, "Handoff");
+        assert_screen_contains(&screen, "Lark Doc");
         assert_screen_contains(&screen, "New Session");
         assert_screen_contains(&screen, "Fork");
         assert_screen_contains(&screen, "Yank");
         assert_screen_contains(&screen, "Archive");
         assert_screen_contains(&screen, "↩ Resume");
         assert_screen_contains(&screen, "→ Handoff");
+        assert_screen_contains(&screen, "☁ Lark Doc");
         assert_screen_contains(&screen, "+ New Session");
         assert_screen_contains(&screen, "⧉ Yank");
         assert_screen_contains(&screen, "▣ Archive");
         assert_screen_contains(&screen, "unavailable");
         assert_screen_contains(&screen, "j/k choose");
         assert!(!screen.contains("Copy Session ID"), "{screen}");
-        assert!(!screen.contains("Export"), "{screen}");
     }
 
     #[test]
@@ -8451,6 +8692,7 @@ mod tests {
         assert_screen_contains(&screen, "会话动作");
         assert_screen_contains(&screen, "↩ 恢复  ✓ 可用");
         assert_screen_contains(&screen, "→ 交接  ✓ 可用");
+        assert_screen_contains(&screen, "☁ 飞书文档  ✓ 可用");
         assert_screen_contains(&screen, "+ 新会话  ✓ 可用");
         assert_screen_contains(&screen, "⤴ 分叉  ✓ 可用");
         assert_screen_contains(&screen, "↗ 跳转  · 不可用");
@@ -8458,6 +8700,7 @@ mod tests {
         assert_screen_contains(&screen, "⧉ 复制  ✓ 可用");
         assert_screen_contains(&screen, "▣ 归档  ✓ 可用");
         assert_screen_contains(&screen, "└ 可通过本地 provider CLI 恢复该会话。");
+        assert_screen_contains(&screen, "生成并创建当前会话的飞书交接文档。");
         assert_screen_contains(&screen, "可调用 Codex 原生 session fork。");
         assert_screen_contains(&screen, "Hooks 未启用，无法获得实时 tmux 状态。");
         assert_screen_contains(&screen, "打开复制面板，不启动 provider 进程。");
@@ -8757,6 +9000,21 @@ mod tests {
         assert_screen_contains(&on_screen, "Jump");
         assert_screen_contains(&on_screen, "Preview changes before saving.");
         assert!(!on_screen.contains("source session stores"), "{on_screen}");
+    }
+
+    #[test]
+    fn settings_overlay_shows_lark_cli_readiness_as_action_status() {
+        let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.show_settings = true;
+        app.settings_field = SettingsField::LarkCli;
+
+        let screen = render_text(&app, 150, 36);
+
+        assert_screen_contains(&screen, "Lark CLI");
+        assert!(
+            screen.contains("Enter install/update") || screen.contains("Enter refresh"),
+            "{screen}"
+        );
     }
 
     #[test]

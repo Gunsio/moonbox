@@ -7,6 +7,7 @@ use std::{
 use super::{
     error::CoreError,
     handoff::{self, AgentRunner},
+    lark::{self, LarkCliState},
 };
 
 const MATT_HANDOFF_SKILL_SOURCE: &str =
@@ -19,6 +20,7 @@ pub enum SetupInstallTarget {
     CodexSdk,
     ClaudeSdk,
     MattHandoff,
+    LarkCli,
 }
 
 impl SetupInstallTarget {
@@ -27,6 +29,7 @@ impl SetupInstallTarget {
             Self::CodexSdk => "Codex SDK runner",
             Self::ClaudeSdk => "Claude SDK runner",
             Self::MattHandoff => "matt-handoff skill",
+            Self::LarkCli => "lark-cli",
         }
     }
 
@@ -35,6 +38,7 @@ impl SetupInstallTarget {
             Self::CodexSdk => "codex-sdk",
             Self::ClaudeSdk => "claude-sdk",
             Self::MattHandoff => "matt-handoff",
+            Self::LarkCli => "lark-cli",
         }
     }
 }
@@ -51,6 +55,7 @@ pub fn install(target: SetupInstallTarget) -> Result<SetupInstallReport, CoreErr
         SetupInstallTarget::CodexSdk => install_runner_sdk(AgentRunner::Codex),
         SetupInstallTarget::ClaudeSdk => install_runner_sdk(AgentRunner::Claude),
         SetupInstallTarget::MattHandoff => install_matt_handoff(),
+        SetupInstallTarget::LarkCli => install_lark_cli(),
     }
 }
 
@@ -146,6 +151,60 @@ fn install_matt_handoff() -> Result<SetupInstallReport, CoreError> {
     })
 }
 
+fn install_lark_cli() -> Result<SetupInstallReport, CoreError> {
+    let readiness = lark::readiness(None);
+    if readiness.state == LarkCliState::Ready {
+        return Ok(SetupInstallReport {
+            target: SetupInstallTarget::LarkCli,
+            destination: None,
+            message: format!(
+                "lark-cli is already ready ({})",
+                readiness
+                    .version
+                    .unwrap_or_else(|| "unknown version".into())
+            ),
+        });
+    }
+
+    println!("Moonbox setup: lark-cli");
+    if readiness.version.is_some() {
+        println!("Existing lark-cli does not support docs +create v2; running lark-cli update.");
+        run_status(
+            "update lark-cli",
+            Command::new("lark-cli").arg("update").status(),
+        )?;
+    } else {
+        println!("lark-cli was not found; installing @larksuiteoapi/lark-cli globally via npm.");
+        run_status(
+            "install lark-cli",
+            Command::new("npm")
+                .arg("install")
+                .arg("-g")
+                .arg("@larksuiteoapi/lark-cli")
+                .status(),
+        )?;
+    }
+
+    let after = lark::readiness(None);
+    if after.state == LarkCliState::Ready {
+        Ok(SetupInstallReport {
+            target: SetupInstallTarget::LarkCli,
+            destination: None,
+            message: format!(
+                "lark-cli ready ({})",
+                after.version.unwrap_or_else(|| "unknown version".into())
+            ),
+        })
+    } else {
+        Err(CoreError::Setup {
+            reason: format!(
+                "lark-cli setup completed but readiness is still blocked: {}",
+                after.reason
+            ),
+        })
+    }
+}
+
 fn installed_handoff_skill_dir() -> Option<PathBuf> {
     handoff_skill_roots()
         .into_iter()
@@ -212,5 +271,6 @@ mod tests {
         assert_eq!(SetupInstallTarget::CodexSdk.cli_arg(), "codex-sdk");
         assert_eq!(SetupInstallTarget::ClaudeSdk.cli_arg(), "claude-sdk");
         assert_eq!(SetupInstallTarget::MattHandoff.cli_arg(), "matt-handoff");
+        assert_eq!(SetupInstallTarget::LarkCli.cli_arg(), "lark-cli");
     }
 }
