@@ -271,7 +271,7 @@ fn selected_skill_label(app: &App) -> String {
         .data
         .compilers
         .get(app.selected_compiler)
-        .or_else(|| Some(&app.data.capsule.compiler))
+        .or(Some(&app.data.capsule.compiler))
     else {
         return "-".into();
     };
@@ -3429,7 +3429,7 @@ fn hint_line(hints: &[KeyHint]) -> Line<'static> {
     Line::from(spans)
 }
 
-fn hint_lines_for_width<'a>(hints: &'a [KeyHint], width: u16) -> Vec<&'a [KeyHint]> {
+fn hint_lines_for_width(hints: &[KeyHint], width: u16) -> Vec<&[KeyHint]> {
     if hints.is_empty() {
         return Vec::new();
     }
