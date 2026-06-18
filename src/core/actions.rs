@@ -10,6 +10,7 @@ pub enum SessionAvailableActionKind {
     Jump,
     Fork,
     Handoff,
+    LarkExport,
     NewSession,
     Yank,
     Archive,
@@ -23,6 +24,7 @@ impl SessionAvailableActionKind {
             Self::Jump => "jump",
             Self::Fork => "fork",
             Self::Handoff => "handoff",
+            Self::LarkExport => "lark_export",
             Self::NewSession => "new_session",
             Self::Yank => "yank",
             Self::Archive => "archive",
@@ -36,6 +38,7 @@ impl SessionAvailableActionKind {
             Self::Jump => "Jump",
             Self::Fork => "Fork",
             Self::Handoff => "Handoff",
+            Self::LarkExport => "Lark Doc",
             Self::NewSession => "New Session",
             Self::Yank => "Yank",
             Self::Archive => "Archive",
@@ -71,6 +74,7 @@ pub enum SessionActionSafety {
     LaunchesProviderProcess,
     SelectsTmuxPane,
     GeneratesHandoffArtifact,
+    WritesExternalDocument,
     SendsPromptCopy,
 }
 
@@ -142,6 +146,7 @@ pub fn session_action_set(
         jump_action(context),
         fork_action(session, context),
         handoff_action(context),
+        lark_export_action(context),
         new_session_action(context),
         share_action(),
         archive_action(),
@@ -321,6 +326,29 @@ fn handoff_action(context: &SessionActionContext) -> SessionAvailableAction {
             SessionActionSafety::GeneratesHandoffArtifact,
         ],
         vec!["x"],
+    )
+}
+
+fn lark_export_action(context: &SessionActionContext) -> SessionAvailableAction {
+    if !context.local_data_space {
+        return action(
+            SessionAvailableActionKind::LarkExport,
+            SessionActionAvailability::Blocked,
+            "SSH data space is read-only; Lark export requires local session context.",
+            vec![SessionActionSafety::SourceStoreReadOnly],
+            Vec::new(),
+        );
+    }
+    action(
+        SessionAvailableActionKind::LarkExport,
+        SessionActionAvailability::Available,
+        "Generate and create a Feishu/Lark handoff document for this session.",
+        vec![
+            SessionActionSafety::SourceStoreReadOnly,
+            SessionActionSafety::GeneratesHandoffArtifact,
+            SessionActionSafety::WritesExternalDocument,
+        ],
+        Vec::new(),
     )
 }
 

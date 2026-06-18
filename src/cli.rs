@@ -31,6 +31,8 @@ pub enum Command {
     OpenApp(OpenAppArgs),
     /// Print, save, inspect, import, export, or launch Work Capsules.
     Capsule(CapsuleArgs),
+    /// Export a selected session handoff to an external destination.
+    Export(ExportArgs),
     /// List, inspect, or link local launch ledger records.
     Launches(LaunchesArgs),
     /// Print the compiler request contract.
@@ -121,6 +123,7 @@ pub enum SetupInstallTargetArg {
     CodexSdk,
     ClaudeSdk,
     MattHandoff,
+    LarkCli,
 }
 
 #[derive(Debug, Subcommand, Clone)]
@@ -259,6 +262,37 @@ pub struct CompileArgs {
     /// Compiler id to use. Defaults to the configured external compiler or engineering-handoff.
     #[arg(long)]
     pub compiler: Option<String>,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct ExportArgs {
+    #[command(flatten)]
+    pub compile: CompileArgs,
+    /// Export destination.
+    #[arg(long, value_enum)]
+    pub to: ExportDestinationArg,
+    /// Export content mode. Only handoff is supported in this milestone.
+    #[arg(long, value_enum, default_value_t = ExportModeArg::Handoff)]
+    pub mode: ExportModeArg,
+    /// Actually create the remote document. Without this flag Moonbox prints a dry-run plan.
+    #[arg(long)]
+    pub execute: bool,
+    /// Optional Lark parent folder or Wiki token passed through to lark-cli.
+    #[arg(long)]
+    pub parent_token: Option<String>,
+    /// Optional Lark parent position passed through to lark-cli.
+    #[arg(long)]
+    pub parent_position: Option<i32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ExportDestinationArg {
+    Lark,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ExportModeArg {
+    Handoff,
 }
 
 #[derive(Debug, Args, Clone, Default)]

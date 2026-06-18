@@ -18,12 +18,13 @@ use crate::core::{
     error::CoreError,
     handoff, hooks,
     image_preview::{TimelineImagePreview, build_timeline_image_previews},
-    launcher,
+    lark, launcher,
     model::{
-        CliTool, CompilerPresetInfo, ContinuationOptions, DoctorReport, LaunchExecution,
-        LaunchExecutionStatus, LaunchPlan, LaunchValidation, LaunchValidationState,
-        OriginalSessionPlan, SessionAction, SessionSummary, SourceProvenance, TimelineAttachment,
-        TimelineEvent, TimelineKind, VerificationReport, WorkCapsule, WorkbenchData,
+        CliTool, CompilerPresetInfo, CompilerPresetStatus, ContinuationOptions, DoctorReport,
+        LaunchExecution, LaunchExecutionStatus, LaunchPlan, LaunchValidation,
+        LaunchValidationState, OriginalSessionPlan, SessionAction, SessionSummary,
+        SourceProvenance, TimelineAttachment, TimelineEvent, TimelineKind, VerificationReport,
+        WorkCapsule, WorkbenchData,
     },
     setup, tmux, verifier, workbench,
 };
@@ -84,21 +85,34 @@ pub struct SetupInstallPlan {
     pub compiler_id: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct LarkExportTuiPlan {
+    pub session_id: String,
+    pub target: CliTool,
+    pub rewind: String,
+    pub compiler: String,
+    pub command_display: String,
+    pub title: String,
+    pub markdown: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsField {
     Language,
     Theme,
     SmartEnter,
+    LarkCli,
 }
 
 impl SettingsField {
-    const ALL: [Self; 3] = [Self::Language, Self::Theme, Self::SmartEnter];
+    const ALL: [Self; 4] = [Self::Language, Self::Theme, Self::SmartEnter, Self::LarkCli];
 
     fn index(self) -> usize {
         match self {
             Self::Language => 0,
             Self::Theme => 1,
             Self::SmartEnter => 2,
+            Self::LarkCli => 3,
         }
     }
 
@@ -182,10 +196,11 @@ fn action_is_runnable(status: SessionActionAvailability) -> bool {
     )
 }
 
-fn action_menu_order() -> [SessionAvailableActionKind; 8] {
+fn action_menu_order() -> [SessionAvailableActionKind; 9] {
     [
         SessionAvailableActionKind::Resume,
         SessionAvailableActionKind::Handoff,
+        SessionAvailableActionKind::LarkExport,
         SessionAvailableActionKind::NewSession,
         SessionAvailableActionKind::Fork,
         SessionAvailableActionKind::Jump,
@@ -1160,6 +1175,8 @@ pub struct App {
     pub show_action_menu: bool,
     pub action_menu_selection: usize,
     pub show_share_panel: bool,
+    pub show_lark_export: bool,
+    pub launch_review_lark_export: bool,
     pub share_panel_selection: usize,
     pub show_open_original: bool,
     pub show_doctor: bool,
@@ -1191,6 +1208,7 @@ pub struct App {
     pub settings_theme: config::UiThemeName,
     pub settings_field: SettingsField,
     pub settings_smart_enter_tmux: bool,
+    pub lark_cli_readiness: lark::LarkCliReadiness,
     pub pending_target: CliTool,
     pub pending_compiler: usize,
     pub status_message: String,
@@ -1223,6 +1241,8 @@ pub struct App {
     pending_launch: Option<Box<LaunchPlan>>,
     pending_tmux_jump: Option<Box<TmuxJumpPlan>>,
     pending_setup_install: Option<Box<SetupInstallPlan>>,
+    pending_lark_export: Option<Box<LarkExportTuiPlan>>,
+    pub lark_export_plan: Option<lark::LarkExportPlan>,
     exit_action: Option<TuiExitAction>,
     should_quit: bool,
 }
@@ -1266,6 +1286,9 @@ impl App {
         let settings_smart_enter_tmux = hooks_config.smart_enter_tmux;
         let settings_language = ui_preferences.language;
         let settings_theme = ui_preferences.theme;
+        let lark_cli_readiness = lark::readiness(Some(
+            setup::setup_command_display_for_current_exe(setup::SetupInstallTarget::LarkCli),
+        ));
         #[cfg(not(test))]
         let starred_sessions = config::load_starred_sessions();
         #[cfg(test)]
@@ -1296,6 +1319,8 @@ impl App {
             show_action_menu: false,
             action_menu_selection: 0,
             show_share_panel: false,
+            show_lark_export: false,
+            launch_review_lark_export: false,
             share_panel_selection: 0,
             show_open_original: false,
             show_doctor: false,
@@ -1326,6 +1351,7 @@ impl App {
             settings_theme,
             settings_field: SettingsField::Language,
             settings_smart_enter_tmux,
+            lark_cli_readiness,
             pending_target: target,
             pending_compiler: selected_compiler,
             status_message: if session_details_loaded {
@@ -1366,6 +1392,8 @@ impl App {
             pending_launch: None,
             pending_tmux_jump: None,
             pending_setup_install: None,
+            pending_lark_export: None,
+            lark_export_plan: None,
             exit_action: None,
             should_quit: false,
             visible_session_indices: Vec::new(),
@@ -1421,6 +1449,10 @@ impl App {
         self.pending_setup_install.take()
     }
 
+    pub fn take_pending_lark_export(&mut self) -> Option<Box<LarkExportTuiPlan>> {
+        self.pending_lark_export.take()
+    }
+
     pub fn take_exit_action(&mut self) -> Option<TuiExitAction> {
         self.exit_action.take()
     }
@@ -1432,6 +1464,7 @@ impl App {
         success: bool,
     ) {
         if success {
+            self.refresh_lark_cli_readiness();
             let selected_id = plan
                 .compiler_id
                 .clone()
@@ -1447,8 +1480,37 @@ impl App {
             }
             self.launch_review_error = None;
         }
+        if plan.target == setup::SetupInstallTarget::LarkCli {
+            self.refresh_lark_cli_readiness();
+        }
         self.set_status(format!("{}: {outcome}", plan.label));
         self.pending_g = false;
+    }
+
+    pub fn complete_lark_export(
+        &mut self,
+        plan: &LarkExportTuiPlan,
+        outcome: String,
+        success: bool,
+    ) {
+        self.show_lark_export = false;
+        self.lark_export_plan = None;
+        self.refresh_lark_cli_readiness();
+        self.set_status(format!(
+            "Lark export {}: {}",
+            if success { "completed" } else { "failed" },
+            outcome
+        ));
+        self.pending_g = false;
+        if success {
+            self.modal_scroll = 0;
+        } else {
+            self.show_action_menu = true;
+            self.set_status(format!(
+                "Lark export failed for {}: {outcome}",
+                plan.session_id
+            ));
+        }
     }
 
     pub fn complete_tmux_jump(&mut self, plan: Box<TmuxJumpPlan>, result: Result<(), String>) {
@@ -2708,6 +2770,7 @@ impl App {
                     self.show_launch = false;
                     self.launch_review = false;
                     self.launch_review_details = false;
+                    self.launch_review_lark_export = false;
                     self.modal_scroll = 0;
                     self.clear_handoff_trail();
                     self.set_status("Launch review closed");
@@ -2760,9 +2823,15 @@ impl App {
                     if needs_handoff_skill {
                         self.open_skill_picker();
                         self.set_status("Choose an AI handoff skill before Handoff Review");
+                    } else if self.launch_review_lark_export && skill_handoff_ready {
+                        self.launch_review_details = false;
+                        self.queue_lark_export_from_review();
                     } else if can_regenerate_handoff {
                         self.launch_review_details = false;
                         self.confirm_launch_target();
+                    } else if self.launch_review_lark_export {
+                        self.launch_review_details = false;
+                        self.queue_lark_export_from_review();
                     } else {
                         self.launch_review_details = false;
                         self.queue_target_handoff();
@@ -2842,6 +2911,10 @@ impl App {
             self.handle_share_panel_key(key);
             return;
         }
+        if self.show_lark_export {
+            self.handle_lark_export_key(key);
+            return;
+        }
         if self.show_action_menu {
             self.handle_action_menu_key(key);
             return;
@@ -2896,6 +2969,11 @@ impl App {
             self.share_panel_selection = 0;
             self.modal_scroll = 0;
             self.set_status("Yank closed");
+        } else if self.show_lark_export {
+            self.show_lark_export = false;
+            self.lark_export_plan = None;
+            self.modal_scroll = 0;
+            self.set_status("Lark export closed");
         } else if self.show_doctor {
             self.show_doctor = false;
             self.modal_scroll = 0;
@@ -2974,6 +3052,7 @@ impl App {
         self.settings_language = self.ui_preferences.language;
         self.settings_theme = self.ui_preferences.theme;
         self.settings_smart_enter_tmux = self.hooks_config.smart_enter_tmux;
+        self.refresh_lark_cli_readiness();
         self.settings_field = SettingsField::Language;
         self.show_settings = true;
         self.modal_scroll = 0;
@@ -2991,7 +3070,13 @@ impl App {
             }
             KeyCode::Char('h') | KeyCode::Left => self.cycle_focused_setting(false),
             KeyCode::Char('r') => self.reset_settings_draft(),
-            KeyCode::Enter => self.save_settings(),
+            KeyCode::Enter => {
+                if self.settings_field == SettingsField::LarkCli {
+                    self.queue_lark_cli_setup_install();
+                } else {
+                    self.save_settings();
+                }
+            }
             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.save_settings()
             }
@@ -3040,6 +3125,10 @@ impl App {
                 };
                 self.set_status(format!("Smart Enter draft: {state}"));
             }
+            SettingsField::LarkCli => {
+                self.refresh_lark_cli_readiness();
+                self.set_status(format!("Lark CLI: {}", self.lark_cli_readiness.reason));
+            }
         }
         self.pending_g = false;
     }
@@ -3048,8 +3137,31 @@ impl App {
         self.settings_language = config::UiLanguage::default();
         self.settings_theme = config::UiThemeName::default();
         self.settings_smart_enter_tmux = false;
+        self.refresh_lark_cli_readiness();
         self.set_status("Settings draft reset to defaults");
         self.pending_g = false;
+    }
+
+    fn refresh_lark_cli_readiness(&mut self) {
+        self.lark_cli_readiness = lark::readiness(Some(
+            setup::setup_command_display_for_current_exe(setup::SetupInstallTarget::LarkCli),
+        ));
+    }
+
+    fn queue_lark_cli_setup_install(&mut self) {
+        if self.lark_cli_readiness.state == lark::LarkCliState::Ready {
+            self.set_status("Lark CLI is ready");
+            self.pending_g = false;
+            return;
+        }
+        self.queue_setup_install(SetupInstallPlan {
+            target: setup::SetupInstallTarget::LarkCli,
+            label: "Install lark-cli".into(),
+            command_display: setup::setup_command_display_for_current_exe(
+                setup::SetupInstallTarget::LarkCli,
+            ),
+            compiler_id: None,
+        });
     }
 
     fn save_settings(&mut self) {
@@ -3349,9 +3461,14 @@ impl App {
     }
 
     fn ensure_launch_handoff_skill_default(&mut self) {
-        if !self
-            .current_session()
-            .is_some_and(|session| session.source_provenance != SourceProvenance::Fixture)
+        self.ensure_handoff_skill_default(false);
+    }
+
+    fn ensure_handoff_skill_default(&mut self, include_fixture: bool) {
+        if !include_fixture
+            && !self
+                .current_session()
+                .is_some_and(|session| session.source_provenance != SourceProvenance::Fixture)
         {
             return;
         }
@@ -3368,6 +3485,43 @@ impl App {
         if let Some(compiler) = self.data.compilers.get(self.selected_compiler).cloned() {
             self.data.capsule.compiler = compiler;
         }
+    }
+
+    fn select_lark_handoff_skill_default(&mut self) {
+        let current_ready_agent = self
+            .data
+            .compilers
+            .get(self.selected_compiler)
+            .is_some_and(|compiler_id| handoff::parse_compiler_id(compiler_id).is_some())
+            && self.selected_compiler_setup_install_plan().is_none();
+        if current_ready_agent {
+            if let Some(compiler) = self.data.compilers.get(self.selected_compiler).cloned() {
+                self.data.capsule.compiler = compiler;
+            }
+            return;
+        }
+
+        let ready_candidate = self
+            .skill_picker_candidate_indices()
+            .into_iter()
+            .find(|index| {
+                self.setup_install_plan_for_compiler_index(*index, SetupInstallScope::Launch)
+                    .is_none()
+                    && self.data.compilers.get(*index).is_some_and(|compiler_id| {
+                        self.compiler_catalog.iter().any(|info| {
+                            info.id == *compiler_id && info.status == CompilerPresetStatus::Ready
+                        })
+                    })
+            });
+        if let Some(candidate) = ready_candidate {
+            self.selected_compiler = candidate;
+            if let Some(compiler) = self.data.compilers.get(self.selected_compiler).cloned() {
+                self.data.capsule.compiler = compiler;
+            }
+            return;
+        }
+
+        self.ensure_handoff_skill_default(true);
     }
 
     fn cycle_handoff_runner(&mut self) {
@@ -3870,10 +4024,32 @@ impl App {
             return;
         }
         self.show_action_menu = true;
-        self.action_menu_selection = 0;
+        self.action_menu_selection = self.preferred_action_menu_selection();
         self.modal_scroll = 0;
-        self.set_status("Choose session action");
+        if let Some(entry) = self.selected_action_menu_entry() {
+            self.set_status(format!("Choose session action: {}", entry.action.label));
+        } else {
+            self.set_status("Choose session action");
+        }
         self.pending_g = false;
+    }
+
+    fn preferred_action_menu_selection(&self) -> usize {
+        let entries = self.action_menu_entries();
+        [
+            SessionAvailableActionKind::LarkExport,
+            SessionAvailableActionKind::Handoff,
+            SessionAvailableActionKind::Yank,
+            SessionAvailableActionKind::Inspect,
+            SessionAvailableActionKind::Resume,
+        ]
+        .into_iter()
+        .find_map(|kind| {
+            entries.iter().position(|entry| {
+                entry.action.kind == kind && action_is_runnable(entry.action.status)
+            })
+        })
+        .unwrap_or(0)
     }
 
     fn open_share_panel(&mut self) {
@@ -3899,7 +4075,8 @@ impl App {
             KeyCode::Char('j') | KeyCode::Down => self.move_action_menu_selection(true),
             KeyCode::Char('k') | KeyCode::Up => self.move_action_menu_selection(false),
             KeyCode::Char('y') => self.open_share_panel(),
-            KeyCode::Enter => self.execute_action_menu_selection(),
+            KeyCode::Char('r') => self.execute_action_menu_resume_shortcut(),
+            KeyCode::Enter => self.execute_action_menu_selection_from_enter(),
             _ => {}
         }
     }
@@ -3921,6 +4098,34 @@ impl App {
         if let Some(entry) = self.selected_action_menu_entry() {
             self.set_status(format!("Action candidate: {}", entry.action.label));
         }
+    }
+
+    fn execute_action_menu_selection_from_enter(&mut self) {
+        let Some(entry) = self.selected_action_menu_entry() else {
+            self.set_status("No session action selected");
+            self.pending_g = false;
+            return;
+        };
+        if entry.action.kind == SessionAvailableActionKind::Resume {
+            self.set_status("Resume requires explicit r from Action Menu");
+            self.pending_g = false;
+            return;
+        }
+        self.execute_action_menu_selection();
+    }
+
+    fn execute_action_menu_resume_shortcut(&mut self) {
+        let Some(index) = self
+            .action_menu_entries()
+            .iter()
+            .position(|entry| entry.action.kind == SessionAvailableActionKind::Resume)
+        else {
+            self.set_status("Resume is unavailable");
+            self.pending_g = false;
+            return;
+        };
+        self.action_menu_selection = index;
+        self.execute_action_menu_selection();
     }
 
     fn execute_action_menu_selection(&mut self) {
@@ -3948,6 +4153,10 @@ impl App {
                     self.open_launch_picker_for_remote_session();
                 }
             }
+            SessionAvailableActionKind::LarkExport => {
+                self.show_action_menu = false;
+                self.start_lark_export_from_action_menu();
+            }
             SessionAvailableActionKind::NewSession => {
                 self.show_action_menu = false;
                 self.queue_seed_prompt_session();
@@ -3972,6 +4181,139 @@ impl App {
                 self.toggle_archived_session();
             }
         }
+    }
+
+    fn handle_lark_export_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => self.back_or_quit(),
+            KeyCode::Enter => self.confirm_lark_export_review(),
+            KeyCode::Char('y') => self.copy_lark_export_command(),
+            KeyCode::Char('j') | KeyCode::Down => self.scroll_modal(true, 1),
+            KeyCode::Char('k') | KeyCode::Up => self.scroll_modal(false, 1),
+            _ => {}
+        }
+    }
+
+    fn start_lark_export_from_action_menu(&mut self) {
+        let Some(plan) = self.build_lark_export_plan() else {
+            return;
+        };
+        self.lark_cli_readiness = plan.lark_cli.clone();
+        self.lark_export_plan = Some(plan);
+        self.confirm_lark_export_review();
+    }
+
+    fn build_lark_export_plan(&mut self) -> Option<lark::LarkExportPlan> {
+        if !self.current_data_space().is_local() {
+            self.set_status("Lark export requires local session context");
+            self.pending_g = false;
+            return None;
+        }
+        let Some(session) = self.current_session() else {
+            self.set_status("No session selected");
+            self.pending_g = false;
+            return None;
+        };
+        let compiler = self
+            .data
+            .compilers
+            .get(self.selected_compiler)
+            .cloned()
+            .unwrap_or_else(|| self.data.capsule.compiler.clone());
+        match workbench::compile_request_for_selection(
+            Some(&session.id),
+            self.data.target,
+            Some(&self.rewind_event_id),
+            Some(&compiler),
+        ) {
+            Ok(Some(request)) => {
+                let plan = lark::dry_run_plan(
+                    &request,
+                    &lark::LarkExportOptions::default(),
+                    Some(setup::setup_command_display_for_current_exe(
+                        setup::SetupInstallTarget::LarkCli,
+                    )),
+                );
+                Some(plan)
+            }
+            Ok(None) => {
+                self.set_status("No session selected");
+                None
+            }
+            Err(error) => {
+                self.set_status(format!("Lark export failed: {error}"));
+                None
+            }
+        }
+    }
+
+    fn confirm_lark_export_review(&mut self) {
+        let Some(plan) = self.lark_export_plan.clone() else {
+            self.set_status("No Lark export plan");
+            self.pending_g = false;
+            return;
+        };
+        if plan.lark_cli.state != lark::LarkCliState::Ready {
+            self.queue_lark_cli_setup_install();
+            return;
+        }
+        self.refresh_compiler_catalog();
+        self.select_lark_handoff_skill_default();
+        self.launch_review_lark_export = true;
+        self.pending_target = self.data.target;
+        self.show_lark_export = false;
+        self.confirm_launch_target();
+    }
+
+    fn queue_lark_export_from_review(&mut self) {
+        if self.lark_cli_readiness.state != lark::LarkCliState::Ready {
+            self.queue_lark_cli_setup_install();
+            return;
+        }
+        let Some(markdown) = self.data.capsule.handoff_artifact.clone() else {
+            self.set_status("Generate handoff before creating Lark Doc");
+            self.pending_g = false;
+            return;
+        };
+        let session_id = self.data.capsule.source_session.clone();
+        let target = self.data.capsule.target_cli;
+        let rewind = self.rewind_event_id.clone();
+        let compiler = self.data.capsule.compiler.clone();
+        let command_display =
+            "lark-cli docs +create --api-version v2 --as user --doc-format markdown --content <reviewed handoff markdown>"
+                .to_string();
+        self.pending_lark_export = Some(Box::new(LarkExportTuiPlan {
+            session_id,
+            target,
+            rewind,
+            compiler,
+            command_display,
+            title: self.data.capsule.handoff_label.clone(),
+            markdown,
+        }));
+        self.show_launch = false;
+        self.launch_review = false;
+        self.launch_review_details = false;
+        self.launch_review_lark_export = false;
+        self.show_lark_export = false;
+        self.lark_export_plan = None;
+        self.set_status("Opening Lark Doc");
+        self.pending_g = false;
+    }
+
+    fn copy_lark_export_command(&mut self) {
+        let Some(plan) = self.lark_export_plan.as_ref() else {
+            self.set_status("No Lark export command");
+            return;
+        };
+        self.clipboard_text = Some(lark_export_command_display(
+            &plan.session,
+            &plan.target_cli,
+            &plan.rewind,
+            &plan.compiler,
+        ));
+        self.set_status("Lark export command copied");
+        self.pending_g = false;
     }
 
     fn handle_share_panel_key(&mut self, key: KeyEvent) {
@@ -4529,6 +4871,7 @@ impl App {
     }
 
     fn open_launch_picker(&mut self) {
+        self.launch_review_lark_export = false;
         if self.reveal_pending_launch_review() {
             return;
         }
@@ -6089,6 +6432,7 @@ fn setup_install_plan_for_compiler_error_with_scope(
             setup::SetupInstallTarget::CodexSdk => "Install Codex SDK".into(),
             setup::SetupInstallTarget::ClaudeSdk => "Install Claude SDK".into(),
             setup::SetupInstallTarget::MattHandoff => "Install matt-handoff".into(),
+            setup::SetupInstallTarget::LarkCli => "Install lark-cli".into(),
         },
         command_display: setup::setup_command_display_for_current_exe(target),
         compiler_id: Some(compiler_id.to_string()),
@@ -6273,6 +6617,30 @@ fn share_action_label(kind: SharePanelActionKind) -> &'static str {
     }
 }
 
+fn lark_export_command_display(
+    session_id: &str,
+    target: &str,
+    rewind: &str,
+    compiler: &str,
+) -> String {
+    format!(
+        "moon export --session {} --target {} --rewind {} --compiler {} --to lark --mode handoff --execute",
+        shellish_quote(session_id),
+        shellish_quote(target),
+        shellish_quote(rewind),
+        shellish_quote(compiler)
+    )
+}
+
+fn shellish_quote(value: &str) -> String {
+    if value.bytes().all(|byte| {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'/' | b':' | b'=')
+    }) {
+        return value.into();
+    }
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 fn parse_original_resume_mode(value: Option<&str>) -> OriginalResumeMode {
     if value.is_some_and(|value| value.trim().eq_ignore_ascii_case("exec")) {
         OriginalResumeMode::Exec
@@ -6389,6 +6757,34 @@ mod tests {
             !app.is_launch_review_pending(),
             "launch review did not finish"
         );
+    }
+
+    fn seed_ready_handoff_artifact(app: &mut App, artifact: &str) {
+        let session = app.current_session().expect("session").clone();
+        let compiler_id = "agent:codex:moonbox-handoff".to_string();
+        if !app
+            .data
+            .compilers
+            .iter()
+            .any(|compiler| compiler == &compiler_id)
+        {
+            app.data.compilers.insert(0, compiler_id.clone());
+        }
+        app.selected_compiler = compiler_index_for_id(&app.data, &compiler_id, 0);
+        app.data.capsule.source_cli = session.cli;
+        app.data.capsule.source_session = session.id;
+        app.data.capsule.target_cli = app.data.target;
+        app.data.capsule.compiler = compiler_id;
+        app.data.capsule.rewind_point = format!("{} / reviewed", app.rewind_event_id);
+        app.data.capsule.handoff_label = format!(
+            "moonbox/{}-rewind-{}",
+            app.data.target.id(),
+            app.rewind_event_id
+        );
+        app.data.capsule.handoff_artifact = Some(artifact.into());
+        app.data.capsule.handoff_artifact_path = None;
+        app.data.capsule.handoff_runner = Some("Codex".into());
+        app.data.capsule.handoff_skill = Some("handoff".into());
     }
 
     #[test]
@@ -8192,6 +8588,8 @@ Host devbox
         let entries = app.action_menu_entries();
 
         assert!(app.show_action_menu);
+        assert_eq!(app.action_menu_selection, 1);
+        assert_eq!(app.status_message, "Choose session action: Handoff");
         assert_eq!(entries[0].action.kind, SessionAvailableActionKind::Resume);
         assert_eq!(entries[0].action.status, SessionActionAvailability::Blocked);
         assert_eq!(entries[1].action.kind, SessionAvailableActionKind::Handoff);
@@ -8201,9 +8599,14 @@ Host devbox
         );
         assert_eq!(
             entries[2].action.kind,
-            SessionAvailableActionKind::NewSession
+            SessionAvailableActionKind::LarkExport
         );
         assert_eq!(entries[2].action.status, SessionActionAvailability::Blocked);
+        assert_eq!(
+            entries[3].action.kind,
+            SessionAvailableActionKind::NewSession
+        );
+        assert_eq!(entries[3].action.status, SessionActionAvailability::Blocked);
     }
 
     #[test]
@@ -8304,8 +8707,9 @@ Host devbox
     }
 
     #[test]
-    fn action_menu_default_resume_queues_original_resume() {
+    fn action_menu_defaults_to_lark_doc_not_original_resume() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        seed_ready_handoff_artifact(&mut app, "# Generated Handoff\n\nContinue from preview.");
         app.handle_key(key('o'));
 
         assert!(app.show_action_menu);
@@ -8314,25 +8718,98 @@ Host devbox
         assert_eq!(entries[1].action.kind, SessionAvailableActionKind::Handoff);
         assert_eq!(
             entries[2].action.kind,
-            SessionAvailableActionKind::NewSession
+            SessionAvailableActionKind::LarkExport
         );
         assert_eq!(
             entries[2].action.status,
             SessionActionAvailability::Available
         );
-        assert_eq!(entries[3].action.kind, SessionAvailableActionKind::Fork);
-        assert_eq!(entries[6].action.kind, SessionAvailableActionKind::Yank);
         assert_eq!(
-            entries[6].action.status,
+            entries[3].action.kind,
+            SessionAvailableActionKind::NewSession
+        );
+        assert_eq!(
+            entries[3].action.status,
             SessionActionAvailability::Available
         );
-        assert_eq!(entries[7].action.kind, SessionAvailableActionKind::Archive);
+        assert_eq!(entries[4].action.kind, SessionAvailableActionKind::Fork);
+        assert_eq!(entries[7].action.kind, SessionAvailableActionKind::Yank);
         assert_eq!(
             entries[7].action.status,
             SessionActionAvailability::Available
         );
+        assert_eq!(entries[8].action.kind, SessionAvailableActionKind::Archive);
+        assert_eq!(
+            entries[8].action.status,
+            SessionActionAvailability::Available
+        );
+        assert_eq!(app.action_menu_selection, 2);
+        assert_eq!(app.status_message, "Choose session action: Lark Doc");
 
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(!app.show_action_menu);
+        assert!(!app.should_quit());
+        assert!(app.take_exit_action().is_none());
+        assert!(app.take_pending_resume().is_none());
+        assert!(!app.show_lark_export);
+        assert!(app.take_pending_lark_export().is_none());
+        if let Some(plan) = app.take_pending_setup_install() {
+            assert_eq!(plan.target, setup::SetupInstallTarget::LarkCli);
+            assert!(app.status_message.starts_with("Installing "));
+            assert!(app.status_message.contains("lark-cli"));
+            return;
+        }
+
+        assert!(app.show_launch);
+        assert!(app.launch_review_lark_export);
+        assert!(!app.is_launch_review_pending());
+        settle_launch_review(&mut app);
+        assert!(app.launch_review);
+        assert!(app.launch_review_lark_export);
+        assert!(app.data.capsule.handoff_artifact.is_some());
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        let Some(plan) = app.take_pending_lark_export() else {
+            if let Some(plan) = app.take_pending_setup_install() {
+                assert_eq!(plan.target, setup::SetupInstallTarget::LarkCli);
+                assert!(app.status_message.starts_with("Installing "));
+                assert!(app.status_message.contains("lark-cli"));
+                return;
+            }
+            panic!(
+                "expected pending Lark export after reviewed handoff; status={}",
+                app.status_message
+            );
+        };
+        assert_eq!(plan.session_id, "codex-cxcp-design");
+        assert_eq!(plan.target, CliTool::Hermes);
+        assert_eq!(plan.rewind, "evt-091");
+        assert_eq!(plan.compiler, "agent:codex:moonbox-handoff");
+        assert!(plan.command_display.contains("lark-cli docs +create"));
+        assert!(!plan.markdown.trim().is_empty());
+        assert!(!plan.markdown.contains("/tmp/"));
+        assert_eq!(app.status_message, "Opening Lark Doc");
+    }
+
+    #[test]
+    fn action_menu_explicit_resume_queues_original_resume() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.handle_key(key('o'));
+        app.handle_key(key('k'));
+        app.handle_key(key('k'));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(app.show_action_menu);
+        assert!(!app.should_quit());
+        assert!(app.take_exit_action().is_none());
+        assert!(app.take_pending_resume().is_none());
+        assert_eq!(
+            app.status_message,
+            "Resume requires explicit r from Action Menu"
+        );
+
+        app.handle_key(key('r'));
 
         assert!(!app.show_action_menu);
         assert!(!app.should_quit());
@@ -8349,13 +8826,47 @@ Host devbox
     fn action_menu_can_open_handoff_new_session_and_native_fork() {
         let mut handoff = new_app(CliTool::Codex, CliTool::Hermes);
         handoff.handle_key(key('o'));
-        handoff.handle_key(key('j'));
+        handoff.handle_key(key('k'));
         handoff.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
         assert!(!handoff.show_action_menu);
         assert!(handoff.show_launch);
         assert_eq!(handoff.status_message, "Choose target CLI");
         assert!(handoff.take_pending_resume().is_none());
+
+        let mut lark_export = new_app(CliTool::Codex, CliTool::Hermes);
+        seed_ready_handoff_artifact(
+            &mut lark_export,
+            "# Generated Handoff\n\nWrite this exact preview to Lark.",
+        );
+        lark_export.handle_key(key('o'));
+        lark_export.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(!lark_export.show_action_menu);
+        assert!(!lark_export.show_lark_export);
+        assert!(lark_export.take_pending_lark_export().is_none());
+        assert!(lark_export.take_pending_resume().is_none());
+        if let Some(plan) = lark_export.take_pending_setup_install() {
+            assert_eq!(plan.target, setup::SetupInstallTarget::LarkCli);
+            assert!(lark_export.status_message.starts_with("Installing "));
+            assert!(lark_export.status_message.contains("lark-cli"));
+        } else {
+            assert!(lark_export.show_launch);
+            assert!(lark_export.launch_review_lark_export);
+            assert!(!lark_export.is_launch_review_pending());
+            settle_launch_review(&mut lark_export);
+            assert!(lark_export.launch_review);
+            assert!(lark_export.launch_review_lark_export);
+            lark_export.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+            let Some(plan) = lark_export.take_pending_lark_export() else {
+                panic!("expected pending Lark export after reviewed handoff");
+            };
+            assert_eq!(plan.session_id, "codex-cxcp-design");
+            assert_eq!(plan.target, CliTool::Hermes);
+            assert!(!plan.markdown.trim().is_empty());
+            assert!(!plan.markdown.contains("/tmp/"));
+            assert_eq!(lark_export.status_message, "Opening Lark Doc");
+        }
 
         let mut seeded = new_app(CliTool::Codex, CliTool::Hermes);
         seeded.data.timeline[0].metadata.attachments = vec![
@@ -8374,7 +8885,6 @@ Host devbox
             },
         ];
         seeded.handle_key(key('o'));
-        seeded.handle_key(key('j'));
         seeded.handle_key(key('j'));
         seeded.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
@@ -8406,7 +8916,6 @@ Host devbox
         fork.handle_key(key('o'));
         fork.handle_key(key('j'));
         fork.handle_key(key('j'));
-        fork.handle_key(key('j'));
         fork.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
         assert!(!fork.show_action_menu);
@@ -8428,7 +8937,7 @@ Host devbox
     fn action_menu_opens_share_panel() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.handle_key(key('o'));
-        for _ in 0..6 {
+        for _ in 0..5 {
             app.handle_key(key('j'));
         }
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
@@ -8513,7 +9022,7 @@ Host devbox
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         let session_id = app.current_session().expect("session").id.clone();
         app.handle_key(key('o'));
-        for _ in 0..7 {
+        for _ in 0..6 {
             app.handle_key(key('j'));
         }
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));

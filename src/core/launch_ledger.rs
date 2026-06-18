@@ -591,6 +591,7 @@ fn safe_error_reason(error: &CoreError) -> String {
         CoreError::CapsuleParse { reason, .. } => format!("cannot parse capsule: {reason}"),
         CoreError::CapsuleStore { reason } => format!("capsule store error: {reason}"),
         CoreError::LaunchLedger { reason } => format!("launch ledger error: {reason}"),
+        CoreError::LarkExport { reason } => format!("lark export failed: {reason}"),
         CoreError::Hooks { reason } => format!("hooks configuration failed: {reason}"),
         CoreError::Setup { reason } => format!("setup failed: {reason}"),
         CoreError::Adapter(_) => "source adapter error".into(),
