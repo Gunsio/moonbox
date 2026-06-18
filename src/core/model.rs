@@ -1030,6 +1030,7 @@ impl LaunchValidation {
 pub enum SessionAction {
     OriginalResume,
     NativeFork,
+    NewSession,
     TargetHandoff,
     AppDeepLink,
 }

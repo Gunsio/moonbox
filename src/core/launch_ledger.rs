@@ -658,6 +658,7 @@ fn action_to_db(action: SessionAction) -> &'static str {
     match action {
         SessionAction::OriginalResume => "original_resume",
         SessionAction::NativeFork => "native_fork",
+        SessionAction::NewSession => "new_session",
         SessionAction::TargetHandoff => "target_handoff",
         SessionAction::AppDeepLink => "app_deep_link",
     }
@@ -667,6 +668,7 @@ fn action_from_db(value: String) -> rusqlite::Result<SessionAction> {
     match value.as_str() {
         "original_resume" => Ok(SessionAction::OriginalResume),
         "native_fork" => Ok(SessionAction::NativeFork),
+        "new_session" => Ok(SessionAction::NewSession),
         "target_handoff" => Ok(SessionAction::TargetHandoff),
         "app_deep_link" => Ok(SessionAction::AppDeepLink),
         _ => conversion_error(2, format!("unknown launch action {value}")),

@@ -19,8 +19,8 @@ explicitly ask it to run a guarded action.
   time-sorted TUI.
 - **Timeline rewind**: inspect turns, tool evidence, images, and compact
   boundaries before choosing where to continue.
-- **Action menu**: use `o` to pick Resume, Handoff, Fork, Jump, Inspect, Yank,
-  or Archive from one availability-aware menu.
+- **Action menu**: use `o` to pick Resume, Handoff, New Session, Fork, Jump,
+  Inspect, Yank, or Archive from one availability-aware menu.
 - **Yank panel**: use `y` for copy-only workflows such as first user input,
   last AI output, session id, handoff text, and portable JSON.
 - **Handoff review**: generate or review a continuation artifact before a target

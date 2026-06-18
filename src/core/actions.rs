@@ -10,6 +10,7 @@ pub enum SessionAvailableActionKind {
     Jump,
     Fork,
     Handoff,
+    NewSession,
     Yank,
     Archive,
 }
@@ -22,6 +23,7 @@ impl SessionAvailableActionKind {
             Self::Jump => "jump",
             Self::Fork => "fork",
             Self::Handoff => "handoff",
+            Self::NewSession => "new_session",
             Self::Yank => "yank",
             Self::Archive => "archive",
         }
@@ -34,6 +36,7 @@ impl SessionAvailableActionKind {
             Self::Jump => "Jump",
             Self::Fork => "Fork",
             Self::Handoff => "Handoff",
+            Self::NewSession => "New Session",
             Self::Yank => "Yank",
             Self::Archive => "Archive",
         }
@@ -68,6 +71,7 @@ pub enum SessionActionSafety {
     LaunchesProviderProcess,
     SelectsTmuxPane,
     GeneratesHandoffArtifact,
+    SendsPromptCopy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -138,6 +142,7 @@ pub fn session_action_set(
         jump_action(context),
         fork_action(session, context),
         handoff_action(context),
+        new_session_action(context),
         share_action(),
         archive_action(),
     ];
@@ -319,6 +324,29 @@ fn handoff_action(context: &SessionActionContext) -> SessionAvailableAction {
     )
 }
 
+fn new_session_action(context: &SessionActionContext) -> SessionAvailableAction {
+    if !context.local_data_space {
+        return action(
+            SessionAvailableActionKind::NewSession,
+            SessionActionAvailability::Blocked,
+            "SSH data space is read-only; starting a new target session requires a local target CLI.",
+            vec![SessionActionSafety::SourceStoreReadOnly],
+            Vec::new(),
+        );
+    }
+    action(
+        SessionAvailableActionKind::NewSession,
+        SessionActionAvailability::Available,
+        "Start the target CLI with the first user prompt and attachment paths.",
+        vec![
+            SessionActionSafety::SourceStoreReadOnly,
+            SessionActionSafety::LaunchesProviderProcess,
+            SessionActionSafety::SendsPromptCopy,
+        ],
+        Vec::new(),
+    )
+}
+
 fn share_action() -> SessionAvailableAction {
     action(
         SessionAvailableActionKind::Yank,
@@ -417,6 +445,13 @@ mod tests {
             actions
                 .action(SessionAvailableActionKind::Yank)
                 .expect("yank")
+                .status,
+            SessionActionAvailability::Available
+        );
+        assert_eq!(
+            actions
+                .action(SessionAvailableActionKind::NewSession)
+                .expect("new session")
                 .status,
             SessionActionAvailability::Available
         );
