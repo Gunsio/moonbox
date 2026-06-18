@@ -44,6 +44,9 @@ and this project uses semantic versioning once tagged releases start.
   runner SDK and community handoff-skill setup targets. Skill Picker, Launch,
   and failed Handoff Review panels can suspend Moonbox, run the setup command,
   then refresh catalog state on return.
+- TUI action menu `New Session` starts the selected target CLI from the first
+  user prompt in the source session, carrying image and attachment references as
+  explicit path text instead of claiming provider-native image transfer.
 - TUI `y` opens a Yank panel with copy-only actions for first user input, last
   AI output, Session ID, ready handoff text, and compact portable JSON, while
   keeping provider source stores read-only and avoiding target session launch.

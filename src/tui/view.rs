@@ -271,7 +271,7 @@ fn selected_skill_label(app: &App) -> String {
         .data
         .compilers
         .get(app.selected_compiler)
-        .or_else(|| Some(&app.data.capsule.compiler))
+        .or(Some(&app.data.capsule.compiler))
     else {
         return "-".into();
     };
@@ -3429,7 +3429,7 @@ fn hint_line(hints: &[KeyHint]) -> Line<'static> {
     Line::from(spans)
 }
 
-fn hint_lines_for_width<'a>(hints: &'a [KeyHint], width: u16) -> Vec<&'a [KeyHint]> {
+fn hint_lines_for_width(hints: &[KeyHint], width: u16) -> Vec<&[KeyHint]> {
     if hints.is_empty() {
         return Vec::new();
     }
@@ -7959,6 +7959,7 @@ fn action_menu_action_icon(action: &SessionAvailableAction) -> (&'static str, Co
         match action.kind {
             SessionAvailableActionKind::Resume => theme::green(),
             SessionAvailableActionKind::Handoff => theme::cyan(),
+            SessionAvailableActionKind::NewSession => theme::gold(),
             SessionAvailableActionKind::Fork => theme::purple(),
             SessionAvailableActionKind::Jump => theme::blue(),
             SessionAvailableActionKind::Inspect => theme::blue(),
@@ -7969,9 +7970,10 @@ fn action_menu_action_icon(action: &SessionAvailableAction) -> (&'static str, Co
     let icon = match action.kind {
         SessionAvailableActionKind::Resume => "↩",
         SessionAvailableActionKind::Handoff => "→",
-        SessionAvailableActionKind::Fork => "Y",
+        SessionAvailableActionKind::NewSession => "+",
+        SessionAvailableActionKind::Fork => "⤴",
         SessionAvailableActionKind::Jump => "↗",
-        SessionAvailableActionKind::Inspect => "i",
+        SessionAvailableActionKind::Inspect => "◎",
         SessionAvailableActionKind::Yank => "⧉",
         SessionAvailableActionKind::Archive => {
             if action.label == "Unarchive" {
@@ -8000,6 +8002,7 @@ fn action_menu_action_label(
     match action.kind {
         SessionAvailableActionKind::Resume => i18n::text(language, Text::Resume),
         SessionAvailableActionKind::Handoff => localized(language, "Handoff", "交接"),
+        SessionAvailableActionKind::NewSession => localized(language, "New Session", "新会话"),
         SessionAvailableActionKind::Fork => localized(language, "Fork", "分叉"),
         SessionAvailableActionKind::Jump => i18n::text(language, Text::Jump),
         SessionAvailableActionKind::Inspect => localized(language, "Inspect", "详情"),
@@ -8045,6 +8048,13 @@ fn action_menu_reason_label(
             _ => action.reason.clone(),
         },
         SessionAvailableActionKind::Yank => "打开复制面板，不启动 provider 进程。".into(),
+        SessionAvailableActionKind::NewSession => {
+            if action.reason.starts_with("SSH data space is read-only") {
+                "SSH 数据空间只读；新建目标会话需要本地 target CLI。".into()
+            } else {
+                "用第一条用户输入和附件路径引用启动目标 CLI。".into()
+            }
+        }
         SessionAvailableActionKind::Handoff => {
             if action.reason.starts_with("SSH data space is read-only") {
                 "SSH 数据空间只读；仍可生成受保护的交接文档。".into()
@@ -8411,11 +8421,13 @@ mod tests {
         assert_screen_contains(&screen, "Session actions");
         assert_screen_contains(&screen, "Resume");
         assert_screen_contains(&screen, "Handoff");
+        assert_screen_contains(&screen, "New Session");
         assert_screen_contains(&screen, "Fork");
         assert_screen_contains(&screen, "Yank");
         assert_screen_contains(&screen, "Archive");
         assert_screen_contains(&screen, "↩ Resume");
         assert_screen_contains(&screen, "→ Handoff");
+        assert_screen_contains(&screen, "+ New Session");
         assert_screen_contains(&screen, "⧉ Yank");
         assert_screen_contains(&screen, "▣ Archive");
         assert_screen_contains(&screen, "unavailable");
@@ -8439,9 +8451,10 @@ mod tests {
         assert_screen_contains(&screen, "会话动作");
         assert_screen_contains(&screen, "↩ 恢复  ✓ 可用");
         assert_screen_contains(&screen, "→ 交接  ✓ 可用");
-        assert_screen_contains(&screen, "Y 分叉  ✓ 可用");
+        assert_screen_contains(&screen, "+ 新会话  ✓ 可用");
+        assert_screen_contains(&screen, "⤴ 分叉  ✓ 可用");
         assert_screen_contains(&screen, "↗ 跳转  · 不可用");
-        assert_screen_contains(&screen, "i 详情  ✓ 可用");
+        assert_screen_contains(&screen, "◎ 详情  ✓ 可用");
         assert_screen_contains(&screen, "⧉ 复制  ✓ 可用");
         assert_screen_contains(&screen, "▣ 归档  ✓ 可用");
         assert_screen_contains(&screen, "└ 可通过本地 provider CLI 恢复该会话。");

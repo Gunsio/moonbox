@@ -54,6 +54,9 @@ pub fn run(terminal: &mut DefaultTerminal, mut app: App) -> Result<Option<TuiExi
             if let Some(plan) = app.take_pending_native_fork() {
                 suspend_and_resume(terminal, &mut app, plan)?;
             }
+            if let Some(plan) = app.take_pending_seed_prompt() {
+                suspend_and_resume(terminal, &mut app, plan)?;
+            }
             if let Some(plan) = app.take_pending_launch() {
                 suspend_and_launch(terminal, &mut app, plan)?;
             }

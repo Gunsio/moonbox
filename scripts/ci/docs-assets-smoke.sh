@@ -58,6 +58,7 @@ grep -Fq 'Acknowledgements' README.md
 
 grep -Fq 'Action Menu' docs/assets/moonbox-action-menu.svg
 grep -Fq 'Session actions' docs/assets/moonbox-action-menu.svg
+grep -Fq 'New Session' docs/assets/moonbox-action-menu.svg
 grep -Fq 'Yank' docs/assets/moonbox-yank.svg
 grep -Fq 'Portable JSON' docs/assets/moonbox-yank.svg
 grep -Fq 'Handoff Review' docs/assets/moonbox-handoff-review.svg

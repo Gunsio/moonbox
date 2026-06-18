@@ -131,6 +131,24 @@ pub fn native_fork_command(session: &SessionSummary) -> Option<TargetLaunchComma
     })
 }
 
+pub fn new_session_command(
+    target: CliTool,
+    session: &SessionSummary,
+    prompt: String,
+) -> TargetLaunchCommand {
+    let program = configured_target_binary(target);
+    let cwd = usable_cwd(&session.cwd);
+    let args = target_seed_args(target, cwd.as_deref(), prompt);
+    let display = shell_command(&program, &args);
+
+    TargetLaunchCommand {
+        program,
+        args,
+        cwd,
+        display,
+    }
+}
+
 pub fn execute_original_plan(
     mut plan: OriginalSessionPlan,
 ) -> Result<OriginalSessionExecution, CoreError> {
@@ -166,6 +184,7 @@ pub(crate) fn original_handoff_notice(plan: &OriginalSessionPlan) -> String {
     let cwd = plan.command.cwd.as_deref().unwrap_or("terminal default");
     let action = match plan.action {
         super::model::SessionAction::NativeFork => "Forking native session",
+        super::model::SessionAction::NewSession => "Starting new session",
         _ => "Opening original session",
     };
     format!(
@@ -302,6 +321,44 @@ fn target_args(target: CliTool, cwd: Option<&str>, prompt: String) -> Vec<String
             }
             args.push("--name".into());
             args.push("moonbox-handoff".into());
+            args.push(prompt);
+            args
+        }
+        CliTool::Hermes => {
+            let mut args = vec![
+                "chat".into(),
+                "--source".into(),
+                "moonbox".into(),
+                "--query".into(),
+                prompt,
+            ];
+            if env::var_os("MOONBOX_HERMES_TUI").is_some() {
+                args.insert(1, "--tui".into());
+            }
+            args
+        }
+    }
+}
+
+fn target_seed_args(target: CliTool, cwd: Option<&str>, prompt: String) -> Vec<String> {
+    match target {
+        CliTool::Codex => {
+            let mut args = Vec::new();
+            if let Some(cwd) = cwd {
+                args.push("-C".into());
+                args.push(cwd.into());
+            }
+            args.push(prompt);
+            args
+        }
+        CliTool::Claude => {
+            let mut args = Vec::new();
+            if let Some(cwd) = cwd {
+                args.push("--add-dir".into());
+                args.push(cwd.into());
+            }
+            args.push("--name".into());
+            args.push("moonbox-first-prompt".into());
             args.push(prompt);
             args
         }

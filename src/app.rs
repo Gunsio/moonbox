@@ -22,8 +22,8 @@ use crate::core::{
     model::{
         CliTool, CompilerPresetInfo, ContinuationOptions, DoctorReport, LaunchExecution,
         LaunchExecutionStatus, LaunchPlan, LaunchValidation, LaunchValidationState,
-        OriginalSessionPlan, SessionAction, SessionSummary, SourceProvenance, TimelineKind,
-        VerificationReport, WorkCapsule, WorkbenchData,
+        OriginalSessionPlan, SessionAction, SessionSummary, SourceProvenance, TimelineAttachment,
+        TimelineEvent, TimelineKind, VerificationReport, WorkCapsule, WorkbenchData,
     },
     setup, tmux, verifier, workbench,
 };
@@ -182,10 +182,11 @@ fn action_is_runnable(status: SessionActionAvailability) -> bool {
     )
 }
 
-fn action_menu_order() -> [SessionAvailableActionKind; 7] {
+fn action_menu_order() -> [SessionAvailableActionKind; 8] {
     [
         SessionAvailableActionKind::Resume,
         SessionAvailableActionKind::Handoff,
+        SessionAvailableActionKind::NewSession,
         SessionAvailableActionKind::Fork,
         SessionAvailableActionKind::Jump,
         SessionAvailableActionKind::Inspect,
@@ -779,6 +780,7 @@ struct PendingArchiveFeedback {
 pub enum TuiExitAction {
     OriginalResume(Box<OriginalSessionPlan>),
     NativeFork(Box<OriginalSessionPlan>),
+    NewSession(Box<OriginalSessionPlan>),
 }
 
 #[derive(Debug, Clone)]
@@ -1217,6 +1219,7 @@ pub struct App {
     clipboard_text: Option<String>,
     pending_resume: Option<Box<OriginalSessionPlan>>,
     pending_native_fork: Option<Box<OriginalSessionPlan>>,
+    pending_seed_prompt: Option<Box<OriginalSessionPlan>>,
     pending_launch: Option<Box<LaunchPlan>>,
     pending_tmux_jump: Option<Box<TmuxJumpPlan>>,
     pending_setup_install: Option<Box<SetupInstallPlan>>,
@@ -1359,6 +1362,7 @@ impl App {
             clipboard_text: None,
             pending_resume: None,
             pending_native_fork: None,
+            pending_seed_prompt: None,
             pending_launch: None,
             pending_tmux_jump: None,
             pending_setup_install: None,
@@ -1399,6 +1403,10 @@ impl App {
 
     pub fn take_pending_native_fork(&mut self) -> Option<Box<OriginalSessionPlan>> {
         self.pending_native_fork.take()
+    }
+
+    pub fn take_pending_seed_prompt(&mut self) -> Option<Box<OriginalSessionPlan>> {
+        self.pending_seed_prompt.take()
     }
 
     pub fn take_pending_launch(&mut self) -> Option<Box<LaunchPlan>> {
@@ -3940,6 +3948,10 @@ impl App {
                     self.open_launch_picker_for_remote_session();
                 }
             }
+            SessionAvailableActionKind::NewSession => {
+                self.show_action_menu = false;
+                self.queue_seed_prompt_session();
+            }
             SessionAvailableActionKind::Jump => {
                 self.show_action_menu = false;
                 self.queue_tmux_jump_or_resume();
@@ -4002,6 +4014,57 @@ impl App {
             SharePanelActionKind::HandoffContent => self.copy_share_handoff_content(),
             SharePanelActionKind::PortableJson => self.copy_share_portable_json(),
         }
+    }
+
+    fn queue_seed_prompt_session(&mut self) {
+        self.show_action_menu = false;
+        if !self.current_data_space().is_local() {
+            self.set_status("SSH sessions cannot start local target sessions");
+            self.pending_g = false;
+            return;
+        }
+        if !self.ensure_session_details_ready("New session") {
+            return;
+        }
+        let Some(session) = self.current_session().cloned() else {
+            self.set_status("No session selected");
+            self.pending_g = false;
+            return;
+        };
+        let Some((prompt, path_count, missing_path_count)) = self.first_user_seed_prompt() else {
+            self.set_status("No first user prompt to start from");
+            self.pending_g = false;
+            return;
+        };
+        let target = self.data.target;
+        let command = launcher::new_session_command(target, &session, prompt);
+        let plan = OriginalSessionPlan {
+            version: 1,
+            action: SessionAction::NewSession,
+            dry_run: true,
+            source_session: session.clone(),
+            command,
+        };
+        self.modal_scroll = 0;
+        let attachment_note = seed_prompt_attachment_note(path_count, missing_path_count);
+        match original_resume_mode_from_env() {
+            OriginalResumeMode::Suspend => {
+                self.pending_seed_prompt = Some(Box::new(plan));
+                self.set_status(format!(
+                    "Starting {target} from first prompt{attachment_note}: {} {}",
+                    session.cli, session.id
+                ));
+            }
+            OriginalResumeMode::Exec => {
+                self.exit_action = Some(TuiExitAction::NewSession(Box::new(plan)));
+                self.should_quit = true;
+                self.set_status(format!(
+                    "Opening {target} from first prompt{attachment_note}: {} {}",
+                    session.cli, session.id
+                ));
+            }
+        }
+        self.pending_g = false;
     }
 
     fn queue_native_fork(&mut self) {
@@ -5466,14 +5529,36 @@ impl App {
     }
 
     fn first_user_input(&self) -> Option<&str> {
+        self.first_user_event()
+            .and_then(|event| (!event.detail.trim().is_empty()).then_some(event.detail.trim()))
+    }
+
+    fn first_user_event(&self) -> Option<&TimelineEvent> {
         if !self.selected_session_timeline_loaded() {
             return None;
         }
-        self.data
-            .timeline
-            .iter()
-            .find(|event| event.kind == TimelineKind::User && !event.detail.trim().is_empty())
-            .map(|event| event.detail.trim())
+        self.data.timeline.iter().find(|event| {
+            event.kind == TimelineKind::User
+                && (!event.detail.trim().is_empty() || !event.metadata.attachments.is_empty())
+        })
+    }
+
+    fn first_user_seed_prompt(&self) -> Option<(String, usize, usize)> {
+        let event = self.first_user_event()?;
+        let mut prompt = event.detail.trim().to_string();
+        let (attachment_lines, path_count, missing_path_count) =
+            seed_prompt_attachment_lines(&event.metadata.attachments);
+        if !attachment_lines.is_empty() {
+            if !prompt.is_empty() {
+                prompt.push_str("\n\n");
+            }
+            prompt.push_str("Original first user message attachment path references:\n");
+            prompt.push_str(
+                "Use these local paths only if they are accessible in this target workspace.\n",
+            );
+            prompt.push_str(&attachment_lines.join("\n"));
+        }
+        (!prompt.trim().is_empty()).then_some((prompt, path_count, missing_path_count))
     }
 
     fn last_ai_output(&self) -> Option<&str> {
@@ -5897,6 +5982,65 @@ fn launch_validation_can_regenerate_handoff(validation: &LaunchValidation) -> bo
             .reasons
             .iter()
             .all(|reason| is_stale_handoff_compiler_mismatch(reason))
+}
+
+fn seed_prompt_attachment_lines(attachments: &[TimelineAttachment]) -> (Vec<String>, usize, usize) {
+    let mut path_count = 0usize;
+    let mut missing_path_count = 0usize;
+    let lines = attachments
+        .iter()
+        .enumerate()
+        .map(|(index, attachment)| {
+            let label = attachment
+                .name
+                .as_deref()
+                .or(attachment.id.as_deref())
+                .unwrap_or("attachment");
+            match attachment
+                .path
+                .as_deref()
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+            {
+                Some(path) => {
+                    path_count += 1;
+                    format!("- {label}: {path}")
+                }
+                None => {
+                    missing_path_count += 1;
+                    if label == "attachment" {
+                        format!(
+                            "- Attachment #{}: path unavailable in source metadata",
+                            index + 1
+                        )
+                    } else {
+                        format!("- {label}: path unavailable in source metadata")
+                    }
+                }
+            }
+        })
+        .collect::<Vec<_>>();
+    (lines, path_count, missing_path_count)
+}
+
+fn seed_prompt_attachment_note(path_count: usize, missing_path_count: usize) -> String {
+    match (path_count, missing_path_count) {
+        (0, 0) => String::new(),
+        (paths, 0) => format!(" ({paths} attachment path{})", plural_suffix(paths)),
+        (0, missing) => format!(
+            " ({missing} attachment{} without path)",
+            plural_suffix(missing)
+        ),
+        (paths, missing) => format!(
+            " ({paths} path{}, {missing} attachment{} without path)",
+            plural_suffix(paths),
+            plural_suffix(missing)
+        ),
+    }
+}
+
+fn plural_suffix(count: usize) -> &'static str {
+    if count == 1 { "" } else { "s" }
 }
 
 fn setup_install_plan_for_compiler_info(
@@ -8055,6 +8199,11 @@ Host devbox
             entries[1].action.status,
             SessionActionAvailability::Available
         );
+        assert_eq!(
+            entries[2].action.kind,
+            SessionAvailableActionKind::NewSession
+        );
+        assert_eq!(entries[2].action.status, SessionActionAvailability::Blocked);
     }
 
     #[test]
@@ -8163,15 +8312,23 @@ Host devbox
         let entries = app.action_menu_entries();
         assert_eq!(entries[0].action.kind, SessionAvailableActionKind::Resume);
         assert_eq!(entries[1].action.kind, SessionAvailableActionKind::Handoff);
-        assert_eq!(entries[2].action.kind, SessionAvailableActionKind::Fork);
-        assert_eq!(entries[5].action.kind, SessionAvailableActionKind::Yank);
         assert_eq!(
-            entries[5].action.status,
+            entries[2].action.kind,
+            SessionAvailableActionKind::NewSession
+        );
+        assert_eq!(
+            entries[2].action.status,
             SessionActionAvailability::Available
         );
-        assert_eq!(entries[6].action.kind, SessionAvailableActionKind::Archive);
+        assert_eq!(entries[3].action.kind, SessionAvailableActionKind::Fork);
+        assert_eq!(entries[6].action.kind, SessionAvailableActionKind::Yank);
         assert_eq!(
             entries[6].action.status,
+            SessionActionAvailability::Available
+        );
+        assert_eq!(entries[7].action.kind, SessionAvailableActionKind::Archive);
+        assert_eq!(
+            entries[7].action.status,
             SessionActionAvailability::Available
         );
 
@@ -8189,7 +8346,7 @@ Host devbox
     }
 
     #[test]
-    fn action_menu_can_open_handoff_and_native_fork() {
+    fn action_menu_can_open_handoff_new_session_and_native_fork() {
         let mut handoff = new_app(CliTool::Codex, CliTool::Hermes);
         handoff.handle_key(key('o'));
         handoff.handle_key(key('j'));
@@ -8200,8 +8357,54 @@ Host devbox
         assert_eq!(handoff.status_message, "Choose target CLI");
         assert!(handoff.take_pending_resume().is_none());
 
+        let mut seeded = new_app(CliTool::Codex, CliTool::Hermes);
+        seeded.data.timeline[0].metadata.attachments = vec![
+            TimelineAttachment {
+                id: Some("img-1".into()),
+                name: Some("Image #1".into()),
+                path: Some("/tmp/moonbox-first.png".into()),
+                mime_type: Some("image/png".into()),
+                ..Default::default()
+            },
+            TimelineAttachment {
+                id: Some("img-2".into()),
+                name: Some("Image #2".into()),
+                mime_type: Some("image/png".into()),
+                ..Default::default()
+            },
+        ];
+        seeded.handle_key(key('o'));
+        seeded.handle_key(key('j'));
+        seeded.handle_key(key('j'));
+        seeded.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(!seeded.show_action_menu);
+        assert!(!seeded.show_launch);
+        assert!(seeded.take_pending_resume().is_none());
+        let Some(plan) = seeded.take_pending_seed_prompt() else {
+            panic!("expected pending new session");
+        };
+        assert_eq!(plan.action, SessionAction::NewSession);
+        assert_eq!(plan.source_session.id, "codex-cxcp-design");
+        assert_eq!(plan.command.program, "hermes");
+        assert_eq!(plan.command.args[0], "chat");
+        assert_eq!(plan.command.args[1], "--source");
+        assert_eq!(plan.command.args[2], "moonbox");
+        assert_eq!(plan.command.args[3], "--query");
+        assert!(
+            plan.command.args[4]
+                .contains("Original first user message attachment path references:")
+        );
+        assert!(plan.command.args[4].contains("- Image #1: /tmp/moonbox-first.png"));
+        assert!(plan.command.args[4].contains("- Image #2: path unavailable in source metadata"));
+        assert_eq!(
+            seeded.status_message,
+            "Starting Hermes from first prompt (1 path, 1 attachment without path): Codex codex-cxcp-design"
+        );
+
         let mut fork = new_app(CliTool::Codex, CliTool::Hermes);
         fork.handle_key(key('o'));
+        fork.handle_key(key('j'));
         fork.handle_key(key('j'));
         fork.handle_key(key('j'));
         fork.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
@@ -8225,7 +8428,7 @@ Host devbox
     fn action_menu_opens_share_panel() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.handle_key(key('o'));
-        for _ in 0..5 {
+        for _ in 0..6 {
             app.handle_key(key('j'));
         }
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
@@ -8310,7 +8513,7 @@ Host devbox
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         let session_id = app.current_session().expect("session").id.clone();
         app.handle_key(key('o'));
-        for _ in 0..6 {
+        for _ in 0..7 {
             app.handle_key(key('j'));
         }
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
