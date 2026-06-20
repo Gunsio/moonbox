@@ -21,7 +21,8 @@ use crate::{
         AnatomyMetric, CliTool, CompilerPresetInfo, CompilerPresetKind, CompilerPresetStatus,
         LaunchValidationState, SessionAnatomyStatus, SessionRuntimeStatus, SessionStatus,
         SourceAdapterReport, SourceFidelityStatus, SourceProvenance, TimelineAttachment,
-        TimelineEvent, TimelineKind, VerificationReport, VerificationStatus, WorkCapsule,
+        TimelineEvent, TimelineKind, TimelineToolResult, VerificationReport, VerificationStatus,
+        WorkCapsule,
     },
     core::{
         actions::{SessionActionAvailability, SessionAvailableAction, SessionAvailableActionKind},
@@ -1213,28 +1214,29 @@ fn session_health_detail(session: &crate::core::model::SessionSummary) -> String
 fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
     let language = app.effective_language();
     let visible_groups = visible_timeline_groups(app);
-    let selected_group = selected_timeline_group_position(&visible_groups, app.selected_event);
     let mut lines = Vec::new();
-    for (group_idx, group) in visible_groups.iter().enumerate() {
-        let selected = group_idx == selected_group;
-        let active = selected && app.focus == Focus::Timeline;
+    for group in &visible_groups {
+        let head_selected = group.first.0 == app.selected_event;
+        let active = head_selected && app.focus == Focus::Timeline;
         let is_rewind = group.is_rewind(&app.rewind_event_id);
         let (label, color) = timeline_group_label(group, is_rewind, app.data.source);
         let accent = timeline_group_accent(color, is_rewind);
-        let marker_style = timeline_marker_style(active, selected, is_rewind);
+        let marker_style = timeline_marker_style(active, head_selected, is_rewind);
         let marker = if active && is_rewind {
             "▶◆"
         } else if active {
             "▶ "
         } else if is_rewind {
             "◆ "
-        } else if selected {
+        } else if head_selected {
             "● "
         } else {
-            "│ "
+            "  "
         };
         let time_style = if active {
             Style::default().fg(accent).add_modifier(Modifier::BOLD)
+        } else if matches!(group.kind(), TimelineKind::User | TimelineKind::Assistant) {
+            Style::default().fg(theme::muted())
         } else {
             Style::default().fg(color)
         };
@@ -1243,6 +1245,8 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
                 .fg(Color::Black)
                 .bg(accent)
                 .add_modifier(Modifier::BOLD)
+        } else if matches!(group.kind(), TimelineKind::User | TimelineKind::Assistant) {
+            Style::default().fg(color)
         } else {
             Style::default().fg(color).add_modifier(Modifier::BOLD)
         };
@@ -1269,18 +1273,22 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
         ));
 
         let detail_style = timeline_detail_style(active, is_rewind, group.kind());
-        for (event_offset, (_, event)) in group.events().enumerate() {
-            for (line_index, detail) in timeline_event_detail_lines(event, area.width)
-                .into_iter()
-                .enumerate()
-            {
-                let prefix =
-                    timeline_detail_prefix(active, group.is_ai_group(), event_offset, line_index);
-                lines.push(Line::from(vec![
-                    Span::styled(prefix, timeline_prefix_style(active, accent)),
-                    Span::styled(detail, detail_style),
-                ]));
-            }
+        for (line_index, detail) in timeline_event_detail_lines(group.primary_event(), area.width)
+            .into_iter()
+            .enumerate()
+        {
+            let prefix = timeline_detail_prefix(active, group.is_text_group(), 0, line_index);
+            lines.push(Line::from(vec![
+                Span::styled(prefix, timeline_prefix_style(active, accent)),
+                Span::styled(detail, detail_style),
+            ]));
+        }
+        for (line_index, line) in timeline_child_render_lines(app, &group.rest, area.width) {
+            let prefix = timeline_child_prefix(0, line_index);
+            lines.push(Line::from(vec![
+                Span::styled(prefix, Style::default().fg(theme::muted())),
+                line,
+            ]));
         }
         lines.push(Line::raw(""));
     }
@@ -1419,11 +1427,11 @@ fn timeline_scroll(app: &App, area: Rect) -> u16 {
     let selected_top = visible_groups
         .iter()
         .take(selected_group)
-        .map(|group| timeline_group_line_count(group, area.width))
+        .map(|group| timeline_group_line_count(group, area.width, app))
         .sum::<usize>();
     let selected_height = visible_groups
         .get(selected_group)
-        .map(|group| timeline_group_line_count(group, area.width))
+        .map(|group| timeline_group_line_count(group, area.width, app))
         .unwrap_or(1);
     let center_padding = viewport.saturating_sub(selected_height) / 2;
     usize_to_u16(selected_top.saturating_sub(center_padding))
@@ -1471,12 +1479,7 @@ fn timeline_header_line(header: TimelineHeader<'_>, area_width: u16) -> Line<'st
 }
 
 fn timeline_group_title<'a>(group: &TimelineGroup<'a>) -> Option<&'a str> {
-    let event = group.primary_event();
-    match group.kind() {
-        TimelineKind::User if event.title == "User" => None,
-        TimelineKind::Assistant if event.title == "Assistant" => None,
-        _ => Some(event.title.as_str()).filter(|title| !title.trim().is_empty()),
-    }
+    timeline_group_title_for_event(group.primary_event())
 }
 
 fn timeline_group_accent(color: Color, is_rewind: bool) -> Color {
@@ -1514,18 +1517,20 @@ fn timeline_marker_style(active: bool, selected: bool, is_rewind: bool) -> Style
 }
 
 fn timeline_detail_style(active: bool, is_rewind: bool, kind: TimelineKind) -> Style {
-    if active || is_rewind || kind == TimelineKind::RewindPoint {
+    if matches!(kind, TimelineKind::User | TimelineKind::Assistant)
+        || active
+        || is_rewind
+        || kind == TimelineKind::RewindPoint
+    {
         Style::default().fg(theme::text())
     } else {
         Style::default().fg(theme::muted())
     }
 }
 
-fn timeline_group_line_count(group: &TimelineGroup<'_>, area_width: u16) -> usize {
-    1 + group
-        .events()
-        .map(|(_, event)| timeline_event_detail_lines(event, area_width).len())
-        .sum::<usize>()
+fn timeline_group_line_count(group: &TimelineGroup<'_>, area_width: u16, app: &App) -> usize {
+    1 + timeline_event_detail_lines(group.primary_event(), area_width).len()
+        + timeline_child_render_lines(app, &group.rest, area_width).len()
         + 1
 }
 
@@ -1561,6 +1566,287 @@ fn timeline_event_detail_lines(event: &TimelineEvent, area_width: u16) -> Vec<St
     lines
 }
 
+fn timeline_child_event_lines(
+    app: &App,
+    event: &TimelineEvent,
+    area_width: u16,
+) -> Vec<Span<'static>> {
+    let tool_name = matches!(event.kind, TimelineKind::Tool)
+        .then(|| timeline_event_tool_name(event))
+        .flatten();
+    let details = if let Some(tool_name) = tool_name.as_deref() {
+        timeline_tool_detail_lines_for_app(app, event, tool_name, false)
+    } else {
+        timeline_event_detail_lines(event, area_width)
+    };
+    if matches!(tool_name.as_deref(), Some("exec_command" | "write_stdin"))
+        && let Some(detail) = details.first()
+    {
+        return vec![Span::styled(
+            format!("{} {}", timeline_command_icon(detail), detail),
+            Style::default().fg(theme::muted()),
+        )];
+    }
+    let label = tool_name
+        .as_deref()
+        .or_else(|| timeline_group_title_for_event(event))
+        .map(|title| format!("{} {}", timeline_child_icon(event.kind), title))
+        .unwrap_or_else(|| timeline_child_icon(event.kind).to_owned());
+    let mut lines = vec![Span::styled(label, Style::default().fg(theme::muted()))];
+    for detail in details.into_iter().take(2) {
+        lines.push(Span::styled(detail, Style::default().fg(theme::muted())));
+    }
+    lines
+}
+
+fn timeline_child_render_lines(
+    app: &App,
+    events: &[(usize, &TimelineEvent)],
+    area_width: u16,
+) -> Vec<(usize, Span<'static>)> {
+    if let Some(summary) = timeline_collapsed_child_group_summary(app, events, area_width) {
+        return vec![(
+            0,
+            Span::styled(summary, Style::default().fg(theme::muted())),
+        )];
+    }
+
+    let mut lines = Vec::new();
+    let mut index = 0;
+    while index < events.len() {
+        if let Some((count, summary)) = timeline_collapsed_command_burst_summary(app, events, index)
+        {
+            lines.push((
+                0,
+                Span::styled(summary, Style::default().fg(theme::muted())),
+            ));
+            index += count;
+            continue;
+        }
+        if let Some((count, summary)) =
+            timeline_collapsed_child_summary(app, events, index, area_width)
+        {
+            lines.push((
+                0,
+                Span::styled(
+                    format!("{summary} ×{}", format_compact_number(count as u64)),
+                    Style::default().fg(theme::muted()),
+                ),
+            ));
+            index += count;
+            continue;
+        }
+        for (line_index, line) in timeline_child_event_lines(app, events[index].1, area_width)
+            .into_iter()
+            .enumerate()
+        {
+            lines.push((line_index, line));
+        }
+        index += 1;
+    }
+    lines
+}
+
+fn timeline_collapsed_child_group_summary(
+    app: &App,
+    events: &[(usize, &TimelineEvent)],
+    area_width: u16,
+) -> Option<String> {
+    if events.len() <= 1 {
+        return None;
+    }
+    let mut summaries = Vec::<(String, String, usize)>::new();
+    for (_, event) in events {
+        let (signature, summary) = timeline_child_collapse_signature(app, event, area_width)?;
+        if let Some((_, _, count)) = summaries
+            .iter_mut()
+            .find(|(candidate, _, _)| *candidate == signature)
+        {
+            *count += 1;
+        } else {
+            summaries.push((signature, summary, 1));
+        }
+    }
+    Some(
+        summaries
+            .into_iter()
+            .map(|(_, summary, count)| {
+                if count == 1 {
+                    summary
+                } else {
+                    format!("{summary} ×{}", format_compact_number(count as u64))
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" · "),
+    )
+}
+
+fn timeline_collapsed_command_burst_summary(
+    app: &App,
+    events: &[(usize, &TimelineEvent)],
+    start: usize,
+) -> Option<(usize, String)> {
+    let mut counts = Vec::<(String, &'static str, usize)>::new();
+    let mut total = 0;
+    for (_, event) in events.iter().skip(start) {
+        let Some((program, icon)) = timeline_low_value_command_signature(app, event) else {
+            break;
+        };
+        total += 1;
+        if let Some((_, _, count)) = counts.iter_mut().find(|(name, _, _)| *name == program) {
+            *count += 1;
+        } else {
+            counts.push((program, icon, 1));
+        }
+    }
+    if total < 4 {
+        return None;
+    }
+    let summary = counts
+        .into_iter()
+        .map(|(program, icon, count)| {
+            if count == 1 {
+                format!("{icon} {program}")
+            } else {
+                format!("{icon} {program} ×{}", format_compact_number(count as u64))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" · ");
+    Some((total, summary))
+}
+
+fn timeline_low_value_command_signature(
+    app: &App,
+    event: &TimelineEvent,
+) -> Option<(String, &'static str)> {
+    if event.kind != TimelineKind::Tool {
+        return None;
+    }
+    let tool_name = timeline_event_tool_name(event)?;
+    if tool_name != "exec_command" {
+        return None;
+    }
+    let detail = timeline_tool_detail_lines_for_app(app, event, &tool_name, false)
+        .into_iter()
+        .next()?;
+    let program = timeline_command_basename(timeline_command_program(&detail));
+    if !timeline_command_is_low_value_reader(program) {
+        return None;
+    }
+    Some((program.to_owned(), timeline_command_icon(&detail)))
+}
+
+fn timeline_command_is_low_value_reader(program: &str) -> bool {
+    matches!(
+        program,
+        "rg" | "grep"
+            | "find"
+            | "fd"
+            | "ag"
+            | "ack"
+            | "which"
+            | "whereis"
+            | "command"
+            | "sed"
+            | "cat"
+            | "head"
+            | "tail"
+            | "nl"
+            | "ls"
+            | "wc"
+            | "file"
+            | "jq"
+            | "bat"
+            | "less"
+            | "more"
+    )
+}
+
+fn timeline_collapsed_child_summary(
+    app: &App,
+    events: &[(usize, &TimelineEvent)],
+    start: usize,
+    area_width: u16,
+) -> Option<(usize, String)> {
+    let (signature, summary) =
+        timeline_child_collapse_signature(app, events.get(start)?.1, area_width)?;
+    let count = events
+        .iter()
+        .skip(start)
+        .take_while(|(_, event)| {
+            timeline_child_collapse_signature(app, event, area_width)
+                .map(|(candidate, _)| candidate == signature)
+                .unwrap_or(false)
+        })
+        .count();
+    (count >= 2).then_some((count, summary))
+}
+
+fn timeline_child_collapse_signature(
+    app: &App,
+    event: &TimelineEvent,
+    _area_width: u16,
+) -> Option<(String, String)> {
+    if event.kind != TimelineKind::Tool {
+        return None;
+    }
+    let tool_name = timeline_event_tool_name(event).or_else(|| Some(event.title.clone()))?;
+    if tool_name == "apply_patch" {
+        return Some(("tool:apply_patch".into(), "✎ apply_patch".into()));
+    }
+    let detail = timeline_tool_detail_lines_for_app(app, event, &tool_name, false)
+        .into_iter()
+        .next();
+    if tool_name == "exec_command" {
+        let detail = detail?;
+        let program = timeline_command_basename(timeline_command_program(&detail));
+        if program.is_empty() {
+            return None;
+        }
+        return Some((
+            format!("cmd:{program}"),
+            format!("{} {program}", timeline_command_icon(&detail)),
+        ));
+    }
+    if tool_name == "write_stdin" {
+        return Some(("tool:write_stdin".into(), "◌ stdin".into()));
+    }
+    let label = detail.unwrap_or_else(|| tool_name.to_owned());
+    Some((
+        format!("tool:{tool_name}"),
+        format!(
+            "{} {}",
+            timeline_child_icon(event.kind),
+            review_snippet(&label, 36)
+        ),
+    ))
+}
+
+fn timeline_group_title_for_event(event: &TimelineEvent) -> Option<&str> {
+    match event.kind {
+        TimelineKind::User if event.title == "User" => None,
+        TimelineKind::Assistant if event.title == "Assistant" => None,
+        _ => Some(event.title.as_str()).filter(|title| !title.trim().is_empty()),
+    }
+}
+
+fn timeline_child_prefix(_child_offset: usize, line_index: usize) -> &'static str {
+    if line_index == 0 { "     " } else { "       " }
+}
+
+fn timeline_child_icon(kind: TimelineKind) -> &'static str {
+    match kind {
+        TimelineKind::Tool => "⚙",
+        TimelineKind::Compact => "≋",
+        TimelineKind::Error => "!",
+        TimelineKind::GitDiff => "±",
+        TimelineKind::RewindPoint => "◆",
+        TimelineKind::User | TimelineKind::Assistant => "•",
+    }
+}
+
 fn timeline_attachment_lines(attachments: &[TimelineAttachment], area_width: u16) -> Vec<String> {
     attachments
         .iter()
@@ -1587,6 +1873,31 @@ fn timeline_attachment_label(attachment: &TimelineAttachment) -> String {
         .map(|_| "image")
         .unwrap_or("attachment");
     format!("[{kind}] {label}")
+}
+
+fn timeline_event_tool_name(event: &TimelineEvent) -> Option<String> {
+    event
+        .metadata
+        .tool_calls
+        .iter()
+        .find_map(|call| call.name.as_deref())
+        .or_else(|| {
+            event
+                .metadata
+                .tool_results
+                .iter()
+                .find_map(|result| result.name.as_deref())
+        })
+        .or_else(|| {
+            let title = event.title.trim();
+            (!title.is_empty()
+                && !matches!(
+                    title,
+                    "Tool" | "Function Call" | "Custom Tool Call" | "Tool Call"
+                ))
+            .then_some(title)
+        })
+        .map(ToOwned::to_owned)
 }
 
 fn timeline_detail_lines(detail: &str, area_width: u16) -> Vec<String> {
@@ -1683,7 +1994,7 @@ impl<'a> TimelineGroup<'a> {
         }
     }
 
-    fn push(&mut self, event: (usize, &'a TimelineEvent)) {
+    fn push_child(&mut self, event: (usize, &'a TimelineEvent)) {
         self.rest.push(event);
     }
 
@@ -1717,7 +2028,7 @@ impl<'a> TimelineGroup<'a> {
         self.primary_event().kind
     }
 
-    fn is_ai_group(&self) -> bool {
+    fn is_text_group(&self) -> bool {
         self.kind() == TimelineKind::Assistant
     }
 
@@ -1729,16 +2040,19 @@ impl<'a> TimelineGroup<'a> {
 fn visible_timeline_groups(app: &App) -> Vec<TimelineGroup<'_>> {
     let mut groups: Vec<TimelineGroup<'_>> = Vec::new();
     for event in visible_timeline_events(app) {
-        if event.1.kind == TimelineKind::Assistant
-            && let Some(group) = groups.last_mut()
-            && group.is_ai_group()
-        {
-            group.push(event);
+        if timeline_event_is_child(event.1) {
+            if let Some(group) = groups.last_mut() {
+                group.push_child(event);
+            }
             continue;
         }
         groups.push(TimelineGroup::new(event));
     }
     groups
+}
+
+fn timeline_event_is_child(event: &TimelineEvent) -> bool {
+    matches!(event.kind, TimelineKind::Tool)
 }
 
 fn selected_timeline_group_position(
@@ -1769,10 +2083,6 @@ fn timeline_group_label(
     }
     match group.kind() {
         TimelineKind::User => ("USER".into(), theme::blue()),
-        TimelineKind::Assistant if group.len() > 1 => (
-            format!("{} x{}", assistant_source_label(source), group.len()),
-            theme::gold(),
-        ),
         TimelineKind::Assistant => (assistant_source_label(source).into(), theme::gold()),
         TimelineKind::Tool => ("TOOL".into(), theme::muted()),
         TimelineKind::Compact => ("COMPACT".into(), theme::cyan()),
@@ -1793,10 +2103,8 @@ fn assistant_source_label(source: CliTool) -> &'static str {
 fn timeline_group_time(group: &TimelineGroup<'_>) -> String {
     let first = &group.primary_event().time;
     let last = &group.last_event().time;
-    if group.len() == 1 {
+    if group.len() == 1 || first == last {
         first.clone()
-    } else if first == last {
-        format!("{first} x{}", group.len())
     } else {
         format!("{first}-{last}")
     }
@@ -1810,8 +2118,28 @@ fn visible_timeline_events(app: &App) -> Vec<(usize, &TimelineEvent)> {
         .timeline
         .iter()
         .enumerate()
-        .filter(|(_, event)| event.id == app.rewind_event_id || event.kind != TimelineKind::Tool)
+        .filter(|(_, event)| {
+            event.id == app.rewind_event_id
+                || (!timeline_event_is_display_noise(event) && !event.detail.trim().is_empty())
+        })
         .collect()
+}
+
+fn timeline_event_is_display_noise(event: &TimelineEvent) -> bool {
+    timeline_event_is_runtime_task(event) || timeline_event_is_function_call_output(event)
+}
+
+fn timeline_event_is_runtime_task(event: &TimelineEvent) -> bool {
+    event.kind == TimelineKind::Tool
+        && matches!(event.title.as_str(), "Task started" | "Task complete")
+        && event.metadata.runtime.is_some()
+}
+
+fn timeline_event_is_function_call_output(event: &TimelineEvent) -> bool {
+    event.kind == TimelineKind::Tool
+        && event.title == "Function Call Output"
+        && event.metadata.tool_calls.is_empty()
+        && !event.metadata.tool_results.is_empty()
 }
 
 fn render_capsule(frame: &mut Frame, area: Rect, app: &App) {
@@ -4868,11 +5196,12 @@ fn render_capsules(frame: &mut Frame, root: Rect, app: &App) {
 }
 
 fn render_timeline_detail(frame: &mut Frame, root: Rect, app: &App) {
-    let area = modal_area(root, 88, 82);
+    let area = modal_area(root, 100, 86);
     frame.render_widget(Clear, area);
     let visible_groups = visible_timeline_groups(app);
-    let selected_group = selected_timeline_group_position(&visible_groups, app.selected_event);
-    let Some(group) = visible_groups.get(selected_group) else {
+    let selected_group_index =
+        selected_timeline_group_position(&visible_groups, app.selected_event);
+    let Some(group) = visible_groups.get(selected_group_index) else {
         frame.render_widget(
             Paragraph::new(vec![Line::from(Span::styled(
                 "No timeline event selected",
@@ -4880,39 +5209,31 @@ fn render_timeline_detail(frame: &mut Frame, root: Rect, app: &App) {
                     .fg(theme::gold())
                     .add_modifier(Modifier::BOLD),
             ))])
-            .block(panel_block(" Timeline Detail ", true)),
+            .block(panel_block(" Timeline Inspector ", true)),
             area,
         );
         return;
     };
 
-    let mut lines = timeline_detail_group_header_lines(group, app);
-    for (position, (_, event)) in group.events().enumerate() {
-        if group.len() > 1 {
-            if position > 0 {
-                lines.push(Line::raw(""));
-            }
-            lines.push(timeline_detail_event_header_line(
-                position + 1,
-                group.len(),
-                event,
-            ));
-        }
-        lines.extend(timeline_detail_event_lines(
-            event,
-            group.len() == 1,
-            &app.timeline_image_previews,
-        ));
+    let (selected_index, selected_event) = group.first;
+    let selected_event_group = TimelineGroup::new((selected_index, selected_event));
+    let mut lines = timeline_detail_group_header_lines(&selected_event_group, app);
+    lines.extend(timeline_detail_event_lines(
+        selected_event,
+        &app.timeline_image_previews,
+    ));
+    if !group.rest.is_empty() {
+        lines.extend(timeline_detail_attached_child_lines(app, group));
     }
     lines.push(Line::raw(""));
     lines.push(Line::from(Span::styled(
-        "j/k scroll   PgUp/PgDn page   Esc/q close",
+        "j/k scroll   PgUp/PgDn page   y yank menu   Esc/q close",
         Style::default().fg(theme::muted()),
     )));
 
     frame.render_widget(
         Paragraph::new(lines)
-            .block(panel_block(" Timeline Detail ", true))
+            .block(panel_block(" Timeline Inspector ", true))
             .scroll((app.modal_scroll, 0))
             .wrap(Wrap { trim: false }),
         area,
@@ -4950,67 +5271,32 @@ fn timeline_detail_group_header_lines(group: &TimelineGroup<'_>, app: &App) -> V
             Style::default().fg(theme::muted()),
         ),
     ])];
-    if group.len() == 1 {
-        lines.push(Line::from(vec![
-            Span::styled("Title: ", Style::default().fg(theme::muted())),
-            Span::styled(primary.title.clone(), Style::default().fg(theme::text())),
-        ]));
-    } else {
-        lines.push(Line::from(vec![
-            Span::styled("Events: ", Style::default().fg(theme::muted())),
-            Span::styled(
-                group.len().to_string(),
-                Style::default()
-                    .fg(theme::gold())
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]));
+    if group.len() > 1 {
         lines.push(Line::raw(""));
     }
     lines
 }
 
-fn timeline_detail_event_header_line(
-    position: usize,
-    total: usize,
-    event: &TimelineEvent,
-) -> Line<'static> {
-    Line::from(vec![
-        Span::styled(
-            format!("{position}/{total} "),
-            Style::default().fg(theme::muted()),
-        ),
-        Span::styled(
-            format!("{} ", event.id),
-            Style::default()
-                .fg(theme::cyan())
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            timeline_kind_label(event.kind),
-            Style::default()
-                .fg(timeline_kind_color(event.kind))
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw("  "),
-        Span::styled(event.time.clone(), Style::default().fg(theme::muted())),
-    ])
+fn timeline_detail_attached_child_lines(
+    app: &App,
+    group: &TimelineGroup<'_>,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    lines.push(Line::raw(""));
+    for (_, event) in &group.rest {
+        lines.extend(timeline_detail_tool_lines(app, event));
+    }
+    lines
 }
 
 fn timeline_detail_event_lines(
     event: &TimelineEvent,
-    include_section_labels: bool,
     image_previews: &[TimelineImagePreview],
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     if !event.metadata.attachments.is_empty() {
         lines.push(Line::raw(""));
-        lines.push(Line::from(Span::styled(
-            "Attachments",
-            Style::default()
-                .fg(theme::blue())
-                .add_modifier(Modifier::BOLD),
-        )));
+        lines.push(timeline_detail_section("Attachments"));
         for attachment in &event.metadata.attachments {
             lines.push(Line::from(vec![
                 Span::raw("  "),
@@ -5027,27 +5313,691 @@ fn timeline_detail_event_lines(
         .collect::<Vec<_>>();
     if !event_image_previews.is_empty() {
         lines.push(Line::raw(""));
-        lines.push(Line::from(Span::styled(
-            "Image Preview",
-            Style::default()
-                .fg(theme::blue())
-                .add_modifier(Modifier::BOLD),
-        )));
+        lines.push(timeline_detail_section("Image Preview"));
         for preview in event_image_previews {
             lines.extend(timeline_image_preview_lines(preview));
         }
     }
 
-    if include_section_labels {
-        lines.push(Line::raw(""));
-        lines.push(Line::from(Span::styled(
-            "Body",
-            Style::default()
-                .fg(theme::blue())
-                .add_modifier(Modifier::BOLD),
-        )));
-    }
+    lines.push(Line::raw(""));
     lines.extend(timeline_detail_body_lines(&event.detail));
+    lines
+}
+
+fn timeline_detail_section(title: &'static str) -> Line<'static> {
+    Line::from(Span::styled(
+        title,
+        Style::default()
+            .fg(theme::blue())
+            .add_modifier(Modifier::BOLD),
+    ))
+}
+
+fn timeline_detail_tool_lines(app: &App, event: &TimelineEvent) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let name = timeline_event_tool_name(event).unwrap_or_else(|| "tool".into());
+    let details = timeline_tool_detail_lines_for_app(app, event, &name, true);
+    if name == "exec_command"
+        && let Some(command) = details.first()
+    {
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled(
+                format!("{} {}", timeline_command_icon(command), command),
+                Style::default()
+                    .fg(theme::muted())
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        for detail in details.into_iter().skip(1) {
+            lines.push(Line::from(vec![
+                Span::raw("    "),
+                Span::styled(detail, Style::default().fg(theme::muted())),
+            ]));
+        }
+        return lines;
+    }
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled(
+            timeline_child_icon(event.kind),
+            Style::default().fg(theme::muted()),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            name.clone(),
+            Style::default()
+                .fg(theme::muted())
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]));
+
+    for detail in details {
+        lines.push(Line::from(vec![
+            Span::raw("    "),
+            Span::styled(detail, Style::default().fg(theme::muted())),
+        ]));
+    }
+    lines
+}
+
+fn timeline_command_icon(command: &str) -> &'static str {
+    let trimmed = command.trim_start();
+    let program = timeline_command_program(trimmed);
+    let command_name = timeline_command_basename(program);
+    let second = timeline_command_second_token(trimmed);
+    if command_name.is_empty() {
+        return "›";
+    }
+    if trimmed.starts_with("wait ") || trimmed.starts_with("send stdin ") {
+        return "◌";
+    }
+    if command_name == "git" {
+        return "±";
+    }
+    if timeline_command_is_test(command_name, second) || program.starts_with("scripts/ci/") {
+        return "✓";
+    }
+    if matches!(
+        command_name,
+        "rg" | "grep" | "find" | "fd" | "ag" | "ack" | "which" | "whereis" | "command"
+    ) {
+        return "⌕";
+    }
+    if matches!(
+        command_name,
+        "ls" | "cat"
+            | "sed"
+            | "head"
+            | "tail"
+            | "wc"
+            | "file"
+            | "jq"
+            | "bat"
+            | "less"
+            | "more"
+            | "nl"
+            | "pwd"
+            | "env"
+            | "xmllint"
+            | "sqlite3"
+            | "shasum"
+            | "printf"
+            | "printenv"
+            | "strings"
+            | "stat"
+            | "screencapture"
+            | "rsvg-convert"
+    ) {
+        return "▤";
+    }
+    if matches!(
+        command_name,
+        "apply_patch" | "chmod" | "mkdir" | "mv" | "cp" | "rm" | "rsync" | "ln" | "touch"
+    ) {
+        return "✎";
+    }
+    if matches!(
+        command_name,
+        "ps" | "pgrep"
+            | "kill"
+            | "lsof"
+            | "tmux"
+            | "top"
+            | "htop"
+            | "sleep"
+            | "for"
+            | "if"
+            | "{"
+            | "launchctl"
+    ) {
+        return "◌";
+    }
+    if matches!(
+        command_name,
+        "curl"
+            | "wget"
+            | "open"
+            | "gh"
+            | "lark-cli"
+            | "bytedcli"
+            | "qc-attach"
+            | "posting"
+            | "osascript"
+            | "ssh"
+            | "codebase"
+            | "antd"
+            | "jc"
+            | "moon"
+            | "moonbox"
+            | "codex"
+            | "claude"
+            | "hermes"
+            | "wezterm"
+            | "feishu-cli"
+            | "wcf"
+            | "emo"
+            | "codex-session-to-cx"
+    ) {
+        return "↗";
+    }
+    if matches!(
+        command_name,
+        "cargo"
+            | "go"
+            | "npm"
+            | "pnpm"
+            | "yarn"
+            | "bun"
+            | "node"
+            | "deno"
+            | "uv"
+            | "make"
+            | "npx"
+            | "python"
+            | "python3"
+            | "bash"
+            | "sh"
+            | "zsh"
+            | "brew"
+            | "source"
+            | "test"
+            | "perl"
+            | "lint-staged"
+            | "prettier"
+    ) {
+        return "◆";
+    }
+    "›"
+}
+
+fn timeline_command_basename(program: &str) -> &str {
+    program.rsplit('/').next().unwrap_or(program)
+}
+
+fn timeline_command_program(command: &str) -> &str {
+    command
+        .split_whitespace()
+        .find(|token| !token.contains('='))
+        .unwrap_or("")
+}
+
+fn timeline_command_second_token(command: &str) -> Option<&str> {
+    let mut tokens = command
+        .split_whitespace()
+        .filter(|token| !token.contains('='));
+    tokens.next()?;
+    tokens.next()
+}
+
+fn timeline_command_is_test(program: &str, second: Option<&str>) -> bool {
+    matches!(program, "vitest" | "jest" | "pytest")
+        || matches!(
+            (program, second),
+            ("cargo", Some("test"))
+                | ("go", Some("test"))
+                | ("npm", Some("test"))
+                | ("pnpm", Some("test"))
+                | ("yarn", Some("test"))
+                | ("bun", Some("test"))
+        )
+}
+
+fn timeline_tool_detail_lines(
+    event: &TimelineEvent,
+    tool_name: &str,
+    full_log: bool,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    let argument_lines = event
+        .metadata
+        .tool_calls
+        .iter()
+        .find_map(|call| call.arguments.as_ref())
+        .map(|arguments| timeline_tool_argument_lines(arguments, tool_name, full_log))
+        .unwrap_or_default();
+    lines.extend(argument_lines);
+    for line in event.detail.lines().map(str::trim) {
+        if line.is_empty() || line == tool_name || lines.iter().any(|existing| existing == line) {
+            continue;
+        }
+        lines.push(line.to_owned());
+    }
+    for result in &event.metadata.tool_results {
+        if let Some(content) = result.content.as_deref() {
+            let content = content.trim();
+            if !content.is_empty() && !lines.iter().any(|existing| existing == content) {
+                if full_log {
+                    lines.extend(
+                        content
+                            .lines()
+                            .map(str::trim_end)
+                            .filter(|line| !line.trim().is_empty())
+                            .map(ToOwned::to_owned),
+                    );
+                } else {
+                    lines.push(review_snippet(content, 96));
+                }
+            }
+        }
+    }
+    lines
+}
+
+fn timeline_tool_detail_lines_for_app(
+    app: &App,
+    event: &TimelineEvent,
+    tool_name: &str,
+    full_log: bool,
+) -> Vec<String> {
+    let mut lines = timeline_tool_detail_lines(event, tool_name, full_log);
+    for result in timeline_matching_tool_results(app, event) {
+        append_timeline_tool_result_lines(&mut lines, result, full_log);
+    }
+    lines
+}
+
+fn timeline_matching_tool_results<'a>(
+    app: &'a App,
+    event: &TimelineEvent,
+) -> Vec<&'a TimelineToolResult> {
+    let call_ids = event
+        .metadata
+        .tool_calls
+        .iter()
+        .filter_map(|call| call.id.as_deref())
+        .collect::<Vec<_>>();
+    if call_ids.is_empty() {
+        return Vec::new();
+    }
+    app.data
+        .timeline
+        .iter()
+        .filter(|candidate| !std::ptr::eq(*candidate, event))
+        .filter(|candidate| timeline_event_is_function_call_output(candidate))
+        .flat_map(|candidate| candidate.metadata.tool_results.iter())
+        .filter(|result| {
+            result
+                .call_id
+                .as_deref()
+                .is_some_and(|call_id| call_ids.contains(&call_id))
+        })
+        .collect()
+}
+
+fn append_timeline_tool_result_lines(
+    lines: &mut Vec<String>,
+    result: &TimelineToolResult,
+    full_log: bool,
+) {
+    let Some(content) = result.content.as_deref() else {
+        return;
+    };
+    let content = content.trim();
+    if content.is_empty() || lines.iter().any(|existing| existing == content) {
+        return;
+    }
+    if full_log {
+        lines.extend(
+            content
+                .lines()
+                .map(str::trim_end)
+                .filter(|line| !line.trim().is_empty())
+                .map(ToOwned::to_owned),
+        );
+    } else {
+        lines.push(review_snippet(content, 96));
+    }
+}
+
+fn timeline_tool_argument_lines(
+    value: &serde_json::Value,
+    tool_name: &str,
+    full_log: bool,
+) -> Vec<String> {
+    match value {
+        serde_json::Value::String(text) => {
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(text) {
+                timeline_tool_argument_lines(&parsed, tool_name, full_log)
+            } else if full_log {
+                vec![text.trim().to_owned()]
+            } else {
+                vec![review_snippet(text.trim(), 120)]
+            }
+        }
+        serde_json::Value::Object(_) => {
+            if full_log {
+                timeline_tool_full_argument_lines(value)
+            } else {
+                timeline_tool_summary_text(value, tool_name)
+                    .map(|line| vec![line])
+                    .unwrap_or_default()
+            }
+        }
+        _ if full_log => vec![value.to_string()],
+        _ => vec![review_snippet(&value.to_string(), 120)],
+    }
+    .into_iter()
+    .filter(|text| !text.trim().is_empty())
+    .collect()
+}
+
+fn timeline_tool_summary_text(value: &serde_json::Value, tool_name: &str) -> Option<String> {
+    if let Some(command) = timeline_tool_command_text(value, false) {
+        return Some(command);
+    }
+    if tool_name == "exec_command" {
+        return timeline_exec_command_key_summary(value);
+    }
+    if tool_name == "write_stdin" {
+        return timeline_write_stdin_summary(value);
+    }
+    if tool_name == "update_plan" {
+        return timeline_update_plan_summary(value);
+    }
+    if tool_name == "spawn_agent" {
+        return timeline_spawn_agent_summary(value);
+    }
+    if tool_name == "wait_agent" {
+        return timeline_wait_agent_summary(value);
+    }
+    if tool_name == "request_user_input" {
+        return timeline_request_user_input_summary(value);
+    }
+    if tool_name == "js" {
+        return timeline_js_summary(value);
+    }
+    if tool_name == "get_goal" {
+        return Some("get goal".into());
+    }
+    if tool_name == "update_goal" {
+        return timeline_goal_summary(value);
+    }
+    if tool_name == "list_api_endpoints" {
+        return Some("list API endpoints".into());
+    }
+    timeline_json_focus_summary(value)
+}
+
+fn timeline_tool_command_text(value: &serde_json::Value, full_log: bool) -> Option<String> {
+    let map = value.as_object()?;
+    ["cmd", "command", "shell_command", "query"]
+        .iter()
+        .find_map(|key| map.get(*key).and_then(serde_json::Value::as_str))
+        .or_else(|| {
+            map.iter().find_map(|(key, value)| {
+                let value = value.as_str()?;
+                matches!(value, "cmd" | "command" | "shell_command" | "query").then(|| key.as_str())
+            })
+        })
+        .map(|text| {
+            if full_log {
+                text.trim().to_owned()
+            } else {
+                review_snippet(text.trim(), 120)
+            }
+        })
+}
+
+fn timeline_exec_command_key_summary(value: &serde_json::Value) -> Option<String> {
+    let map = value.as_object()?;
+    map.keys()
+        .find(|key| timeline_key_looks_like_command(key))
+        .map(|command| review_snippet(command, 120))
+}
+
+fn timeline_key_looks_like_command(key: &str) -> bool {
+    let key = key.trim();
+    if key.is_empty() {
+        return false;
+    }
+    key.contains(' ') || key.contains('/') || key.contains("&&") || key.contains('|')
+}
+
+fn timeline_write_stdin_summary(value: &serde_json::Value) -> Option<String> {
+    let map = value.as_object()?;
+    let session = map
+        .get("session_id")
+        .and_then(serde_json::Value::as_u64)
+        .map(|id| format!("session {}", format_compact_number(id)));
+    let chars = map
+        .get("chars")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let action = if chars.is_empty() {
+        map.get("yield_time_ms")
+            .and_then(serde_json::Value::as_u64)
+            .map(|ms| format!("wait {}", timeline_duration_label(ms)))
+            .unwrap_or_else(|| "wait".into())
+    } else {
+        format!("send stdin {} B", chars.len())
+    };
+    Some(join_compact_parts([Some(action), session]))
+}
+
+fn timeline_update_plan_summary(value: &serde_json::Value) -> Option<String> {
+    let plan = value.get("plan")?.as_array()?;
+    let in_progress = plan.iter().find_map(|item| {
+        let status = item.get("status").and_then(serde_json::Value::as_str)?;
+        if status == "in_progress" {
+            item.get("step").and_then(serde_json::Value::as_str)
+        } else {
+            None
+        }
+    });
+    Some(join_compact_parts([
+        Some(format!("plan {}", format_compact_number(plan.len() as u64))),
+        in_progress.map(|step| format!("doing {}", review_snippet(step, 48))),
+    ]))
+}
+
+fn timeline_spawn_agent_summary(value: &serde_json::Value) -> Option<String> {
+    let map = value.as_object()?;
+    let agent = map
+        .get("agent_type")
+        .and_then(serde_json::Value::as_str)
+        .map(|agent| format!("spawn {agent}"));
+    let fork = map
+        .get("fork_context")
+        .and_then(serde_json::Value::as_bool)
+        .filter(|fork| *fork)
+        .map(|_| "fork".to_owned());
+    let message = map
+        .get("message")
+        .and_then(serde_json::Value::as_str)
+        .map(|message| review_snippet(message, 56));
+    Some(join_compact_parts([agent, fork, message]))
+}
+
+fn timeline_wait_agent_summary(value: &serde_json::Value) -> Option<String> {
+    let targets = value
+        .get("targets")
+        .and_then(serde_json::Value::as_array)
+        .map(|targets| {
+            format!(
+                "wait {} agents",
+                format_compact_number(targets.len() as u64)
+            )
+        });
+    let timeout = value
+        .get("timeout_ms")
+        .and_then(serde_json::Value::as_u64)
+        .map(timeline_duration_label);
+    Some(join_compact_parts([targets, timeout]))
+}
+
+fn timeline_request_user_input_summary(value: &serde_json::Value) -> Option<String> {
+    let questions = value
+        .get("questions")
+        .and_then(serde_json::Value::as_array)
+        .map(|questions| {
+            format!(
+                "ask {} questions",
+                format_compact_number(questions.len() as u64)
+            )
+        });
+    let timeout = value
+        .get("autoResolutionMs")
+        .and_then(serde_json::Value::as_u64)
+        .map(timeline_duration_label);
+    Some(join_compact_parts([questions, timeout]))
+}
+
+fn timeline_js_summary(value: &serde_json::Value) -> Option<String> {
+    let title = value
+        .get("title")
+        .and_then(serde_json::Value::as_str)
+        .map(|title| format!("js {}", review_snippet(title, 56)));
+    let timeout = value
+        .get("timeout_ms")
+        .and_then(serde_json::Value::as_u64)
+        .map(timeline_duration_label);
+    let code = value
+        .get("code")
+        .and_then(serde_json::Value::as_str)
+        .map(|code| review_snippet(code, 56));
+    let summary = join_compact_parts([title, timeout, code]);
+    if summary.is_empty() {
+        None
+    } else {
+        Some(summary)
+    }
+}
+
+fn timeline_goal_summary(value: &serde_json::Value) -> Option<String> {
+    value
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .map(|status| format!("goal {status}"))
+}
+
+fn timeline_json_focus_summary(value: &serde_json::Value) -> Option<String> {
+    let map = value.as_object()?;
+    let mut parts = Vec::new();
+    for key in [
+        "action",
+        "operation",
+        "path",
+        "file",
+        "url",
+        "repository_full_name",
+        "repo_full_name",
+        "repo",
+        "branch",
+        "pr_number",
+        "run_id",
+        "job_id",
+        "commit_sha",
+        "session_id",
+        "server",
+        "target",
+        "status",
+        "limit",
+        "id",
+        "name",
+    ] {
+        let Some(value) = map.get(key) else {
+            continue;
+        };
+        if matches!(
+            key,
+            "max_output_tokens" | "yield_time_ms" | "timeout_ms" | "chars"
+        ) {
+            continue;
+        }
+        let Some(value) = json_scalar_summary(key, value) else {
+            continue;
+        };
+        parts.push(format!("{key} {value}"));
+        if parts.len() >= 3 {
+            break;
+        }
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" · "))
+    }
+}
+
+fn json_scalar_summary(_key: &str, value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(text) if !text.trim().is_empty() => {
+            Some(review_snippet(text.trim(), 64))
+        }
+        serde_json::Value::Number(number) => number
+            .as_u64()
+            .map(format_compact_number)
+            .or_else(|| number.as_i64().map(|value| value.to_string()))
+            .or_else(|| number.as_f64().map(|value| format!("{value:.1}"))),
+        serde_json::Value::Bool(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn format_compact_number(value: u64) -> String {
+    if value >= 1_000_000 {
+        let scaled = value as f64 / 1_000_000.0;
+        if scaled >= 10.0 {
+            format!("{scaled:.0}m")
+        } else {
+            format!("{scaled:.1}m")
+        }
+    } else if value >= 1_000 {
+        let scaled = value as f64 / 1_000.0;
+        if scaled >= 10.0 {
+            format!("{scaled:.0}k")
+        } else {
+            format!("{scaled:.1}k")
+        }
+    } else {
+        value.to_string()
+    }
+}
+
+fn join_compact_parts<const N: usize>(parts: [Option<String>; N]) -> String {
+    parts
+        .into_iter()
+        .flatten()
+        .filter(|part| !part.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+fn timeline_duration_label(ms: u64) -> String {
+    if ms >= 1_000 && ms.is_multiple_of(1_000) {
+        format!("{}s", ms / 1_000)
+    } else if ms >= 1_000 {
+        format!("{:.1}s", ms as f64 / 1_000.0)
+    } else {
+        format!("{ms}ms")
+    }
+}
+
+fn timeline_tool_full_argument_lines(value: &serde_json::Value) -> Vec<String> {
+    let Some(map) = value.as_object() else {
+        return vec![value.to_string()];
+    };
+    let mut lines = Vec::new();
+    if let Some(command) = timeline_tool_command_text(value, true) {
+        lines.push(command);
+    }
+    for (key, value) in map {
+        if matches!(key.as_str(), "cmd" | "command" | "shell_command" | "query") {
+            continue;
+        }
+        if value.is_null() {
+            continue;
+        }
+        let value = value
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| value.to_string());
+        lines.push(format!("{key}: {value}"));
+    }
+    if lines.is_empty() {
+        lines.push(value.to_string());
+    }
     lines
 }
 
@@ -5173,18 +6123,6 @@ fn timeline_kind_label(kind: TimelineKind) -> &'static str {
         TimelineKind::Error => "ERROR",
         TimelineKind::GitDiff => "GIT DIFF",
         TimelineKind::RewindPoint => "REWIND",
-    }
-}
-
-fn timeline_kind_color(kind: TimelineKind) -> Color {
-    match kind {
-        TimelineKind::User => theme::blue(),
-        TimelineKind::Assistant => theme::gold(),
-        TimelineKind::Tool => theme::muted(),
-        TimelineKind::Compact => theme::cyan(),
-        TimelineKind::Error => theme::red(),
-        TimelineKind::GitDiff => theme::green(),
-        TimelineKind::RewindPoint => theme::role_rewind(),
     }
 }
 
@@ -8655,7 +9593,7 @@ mod tests {
         let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
         app.handle_key(key('o'));
 
-        let screen = render_text(&app, 120, 36);
+        let screen = render_text(&app, 120, 52);
 
         assert_screen_contains(&screen, "Action Menu");
         assert_screen_contains(&screen, "Session actions");
@@ -8807,11 +9745,13 @@ mod tests {
         let inactive = timeline_detail_prefix(false, false, 0, 0);
         let active_ai_group = timeline_detail_prefix(true, true, 1, 0);
         let inactive_ai_group = timeline_detail_prefix(false, true, 1, 0);
+        let child = timeline_child_prefix(0, 0);
 
         assert_eq!(active.chars().count(), 5);
         assert_eq!(inactive.chars().count(), 5);
         assert_eq!(active_ai_group.chars().count(), 5);
         assert_eq!(inactive_ai_group.chars().count(), 5);
+        assert_eq!(child.chars().count(), 5);
     }
 
     #[test]
@@ -8856,7 +9796,7 @@ mod tests {
         assert_eq!(active.fg, Some(theme::text()));
         assert!(!inactive_rewind.add_modifier.contains(Modifier::BOLD));
         assert_eq!(inactive_rewind.fg, Some(theme::text()));
-        assert_eq!(inactive.fg, Some(theme::muted()));
+        assert_eq!(inactive.fg, Some(theme::text()));
     }
 
     #[test]
@@ -9688,12 +10628,13 @@ mod tests {
     }
 
     #[test]
-    fn main_timeline_hides_low_signal_tool_events() {
+    fn main_timeline_keeps_low_signal_tool_evidence_out_of_primary_flow() {
         let app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
         let screen = render_text(&app, 140, 40);
 
         assert_screen_contains(&screen, "REWIND");
-        assert!(!screen.contains("Tool: rg"), "{screen}");
+        assert!(!screen.contains("Function Call"), "{screen}");
+        assert!(!screen.contains("exec_command"), "{screen}");
     }
 
     #[test]
@@ -9794,7 +10735,7 @@ mod tests {
 
         let screen = render_text(&app, 120, 32);
 
-        assert_screen_contains(&screen, "Timeline Detail");
+        assert_screen_contains(&screen, "Timeline Inspector");
         assert_screen_contains(&screen, "evt-777");
         assert_screen_contains(&screen, "USER");
         assert_screen_contains(&screen, "Attachments");
@@ -9867,7 +10808,7 @@ mod tests {
     }
 
     #[test]
-    fn timeline_detail_overlay_expands_selected_assistant_group() {
+    fn timeline_detail_overlay_opens_the_selected_original_assistant_event() {
         let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
         app.focus = Focus::Timeline;
         app.show_timeline_detail = true;
@@ -9908,23 +10849,32 @@ mod tests {
         app.selected_event = 1;
         app.rewind_event_id = "evt-001".into();
 
-        let screen = render_text(&app, 120, 36);
+        let screen = render_text(&app, 120, 52);
 
-        assert_screen_contains(&screen, "evt-119..evt-121");
-        assert_screen_contains(&screen, "Codex x3 group");
-        assert_screen_contains(&screen, "Events:");
-        assert_screen_contains(&screen, "1/3");
-        assert_screen_contains(&screen, "2/3");
-        assert_screen_contains(&screen, "3/3");
+        assert_screen_contains(&screen, "evt-119");
+        assert!(!screen.contains("evt-119..evt-121"), "{screen}");
+        assert!(!screen.contains("Codex group"), "{screen}");
+        assert!(!screen.contains("1/3"), "{screen}");
+        assert!(!screen.contains("2/3"), "{screen}");
+        assert!(!screen.contains("3/3"), "{screen}");
+        assert!(!screen.contains("Codex · 3 messages"), "{screen}");
+        assert!(!screen.contains("grouped consecutive"), "{screen}");
+        assert!(!screen.contains("Evidence:"), "{screen}");
         assert!(!screen.contains("Title: Assistant"), "{screen}");
-        assert!(!screen.contains("Body"), "{screen}");
+        assert_screen_contains(&screen, "Body");
         assert_screen_contains(&screen, "我会从当前仓库和 GitHub 状态重新开始。");
-        assert_screen_contains(&screen, "复核结果：当前本地在 chore/restart-governance。");
-        assert_screen_contains(&screen, "新的 CI 全绿，我会合入治理 PR。");
+        assert!(
+            !screen.contains("复核结果：当前本地在 chore/restart-governance。"),
+            "{screen}"
+        );
+        assert!(
+            !screen.contains("新的 CI 全绿，我会合入治理 PR。"),
+            "{screen}"
+        );
     }
 
     #[test]
-    fn timeline_visually_groups_consecutive_assistant_events() {
+    fn timeline_keeps_consecutive_assistant_events_individually_visible() {
         let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
         app.focus = Focus::Timeline;
         app.data.timeline = vec![
@@ -9966,10 +10916,10 @@ mod tests {
 
         let screen = render_text(&app, 120, 28);
 
-        assert_screen_contains(&screen, "Codex x2");
+        assert_screen_contains(&screen, "Codex");
         assert_screen_contains(&screen, "先定位项目");
         assert_screen_contains(&screen, "继续分析缓存");
-        assert_eq!(screen.matches("Codex x2").count(), 1, "{screen}");
+        assert!(!screen.contains("Codex · 2 messages"), "{screen}");
         assert!(!screen.contains("ASSISTANT  Assistant"), "{screen}");
     }
 
@@ -10008,8 +10958,881 @@ mod tests {
 
         let screen = render_text(&app, 120, 28);
 
-        assert_screen_contains(&screen, "Claude Code x2");
+        assert_screen_contains(&screen, "Claude Code");
+        assert!(!screen.contains("Claude Code · 2 messages"), "{screen}");
         assert!(!screen.contains("AI x2"), "{screen}");
+    }
+
+    #[test]
+    fn timeline_renders_tools_as_attached_context_for_turn() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.data.timeline = vec![
+            TimelineEvent {
+                id: "evt-001".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::User,
+                title: "User".into(),
+                detail: "检查仓库".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-002".into(),
+                time: "10:01".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "我先看仓库状态。".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-003".into(),
+                time: "10:01".into(),
+                kind: TimelineKind::Tool,
+                title: "exec_command".into(),
+                detail: "git status --short".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-004".into(),
+                time: "10:02".into(),
+                kind: TimelineKind::Tool,
+                title: "exec_command".into(),
+                detail: "cargo test".into(),
+                metadata: crate::core::model::TimelineEventMetadata {
+                    tool_results: vec![crate::core::model::TimelineToolResult {
+                        is_error: Some(true),
+                        content: Some(
+                            "Chunk ID: abc\nProcess exited with code 1\nOriginal token count: 4\nOutput:\nfailed"
+                                .into(),
+                        ),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            },
+            TimelineEvent {
+                id: "evt-005".into(),
+                time: "10:03".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "测试失败，继续修。".into(),
+                metadata: Default::default(),
+            },
+        ];
+        app.selected_event = 1;
+        app.rewind_event_id = "evt-001".into();
+
+        let screen = render_text(&app, 120, 28);
+
+        assert_screen_contains(&screen, "Codex");
+        assert_screen_contains(&screen, "我先看仓库状态。");
+        assert_screen_contains(&screen, "± git · ✓ cargo");
+        assert_screen_contains(&screen, "测试失败，继续修。");
+        assert!(!screen.contains("git status --short"), "{screen}");
+        assert!(!screen.contains("cargo test"), "{screen}");
+        assert!(!screen.contains("⚙ exec_command"), "{screen}");
+        assert!(!screen.contains("exec_command"), "{screen}");
+        assert!(!screen.contains("TOOL  exec_command"), "{screen}");
+        assert!(!screen.contains("├ TOOL"), "{screen}");
+        assert!(!screen.contains("└ TOOL"), "{screen}");
+        assert!(!screen.contains("tools: 2 calls"), "{screen}");
+        assert!(!screen.contains("1 failed"), "{screen}");
+        assert!(!screen.contains("Chunk ID"), "{screen}");
+        assert!(!screen.contains("Process exited"), "{screen}");
+        assert!(!screen.contains("Original token count"), "{screen}");
+        assert!(!screen.contains("Output:"), "{screen}");
+        assert!(!screen.contains("Codex · 2 tools"), "{screen}");
+        assert!(!screen.contains("Codex · 2 msg · 2 tools"), "{screen}");
+    }
+
+    #[test]
+    fn timeline_child_tools_collapse_consecutive_apply_patch_rows() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.data.timeline = vec![
+            TimelineEvent {
+                id: "evt-001".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "我会分小块修改。".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-002".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Tool,
+                title: "apply_patch".into(),
+                detail: "*** Begin Patch\n*** Update File: src/tui/view.rs".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-003".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Tool,
+                title: "apply_patch".into(),
+                detail: "*** Begin Patch\n*** Update File: src/tui/view.rs".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-004".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Tool,
+                title: "apply_patch".into(),
+                detail: "*** Begin Patch\n*** Update File: src/tui/view.rs".into(),
+                metadata: Default::default(),
+            },
+        ];
+        app.selected_event = 0;
+
+        let screen = render_text(&app, 120, 20);
+
+        assert_screen_contains(&screen, "我会分小块修改。");
+        assert_screen_contains(&screen, "✎ apply_patch ×3");
+        assert!(!screen.contains("Begin Patch"), "{screen}");
+        assert!(!screen.contains("Update File"), "{screen}");
+    }
+
+    #[test]
+    fn timeline_child_tools_collapse_consecutive_same_command_program() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.data.timeline = vec![
+            TimelineEvent {
+                id: "evt-001".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "我会读取相邻代码。".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-002".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Tool,
+                title: "exec_command".into(),
+                detail: "sed -n '1,80p' src/tui/view.rs".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-003".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Tool,
+                title: "exec_command".into(),
+                detail: "sed -n '80,160p' src/tui/view.rs".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-004".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Tool,
+                title: "exec_command".into(),
+                detail: "rg timeline_child src/tui/view.rs".into(),
+                metadata: Default::default(),
+            },
+        ];
+        app.selected_event = 0;
+
+        let screen = render_text(&app, 120, 20);
+
+        assert_screen_contains(&screen, "我会读取相邻代码。");
+        assert_screen_contains(&screen, "▤ sed ×2 · ⌕ rg");
+        assert!(!screen.contains("sed -n '1,80p'"), "{screen}");
+        assert!(!screen.contains("sed -n '80,160p'"), "{screen}");
+        assert!(!screen.contains("rg timeline_child"), "{screen}");
+    }
+
+    #[test]
+    fn timeline_child_tools_collapse_reader_command_bursts_across_programs() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.data.timeline = vec![
+            TimelineEvent {
+                id: "evt-001".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "我会先扫字段和实现。".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-002".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Tool,
+                title: "exec_command".into(),
+                detail: "sed -n '1,80p' docs/domain-rules.md".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-003".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Tool,
+                title: "exec_command".into(),
+                detail: "rg -n 'MaterialTypeModel' packages/domain".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-004".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Tool,
+                title: "exec_command".into(),
+                detail: "sed -n '1,120p' packages/domain/material/index.ts".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-005".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Tool,
+                title: "exec_command".into(),
+                detail: "rg -n 'defineChannel' packages/domain".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-006".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Tool,
+                title: "exec_command".into(),
+                detail: "cargo test --lib timeline".into(),
+                metadata: Default::default(),
+            },
+        ];
+        app.selected_event = 0;
+
+        let screen = render_text(&app, 140, 24);
+
+        assert_screen_contains(&screen, "我会先扫字段和实现。");
+        assert_screen_contains(&screen, "▤ sed ×2 · ⌕ rg ×2 · ✓ cargo");
+        assert!(!screen.contains("cargo test --lib timeline"), "{screen}");
+        assert!(!screen.contains("MaterialTypeModel"), "{screen}");
+        assert!(!screen.contains("defineChannel"), "{screen}");
+        assert!(!screen.contains("docs/domain-rules.md"), "{screen}");
+    }
+
+    #[test]
+    fn timeline_child_tool_prefers_real_tool_name_and_command() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.data.timeline = vec![
+            TimelineEvent {
+                id: "evt-001".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::User,
+                title: "User".into(),
+                detail: "检查仓库".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-002".into(),
+                time: "10:01".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "我先看状态。".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-003".into(),
+                time: "10:01".into(),
+                kind: TimelineKind::Tool,
+                title: "Function Call".into(),
+                detail: "exec_command".into(),
+                metadata: crate::core::model::TimelineEventMetadata {
+                    tool_calls: vec![crate::core::model::TimelineToolCall {
+                        name: Some("exec_command".into()),
+                        arguments: Some(serde_json::json!({
+                            "cmd": "git status --short"
+                        })),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            },
+        ];
+        app.selected_event = 1;
+        app.rewind_event_id = "evt-001".into();
+
+        let screen = render_text(&app, 120, 24);
+
+        assert_screen_contains(&screen, "± git status --short");
+        assert!(!screen.contains("⚙ exec_command"), "{screen}");
+        assert!(!screen.contains("exec_command"), "{screen}");
+        assert!(!screen.contains("Function Call"), "{screen}");
+    }
+
+    #[test]
+    fn timeline_child_tool_extracts_command_from_json_string_arguments() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.data.timeline = vec![
+            TimelineEvent {
+                id: "evt-001".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::User,
+                title: "User".into(),
+                detail: "检查 qc-attach".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-002".into(),
+                time: "10:01".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "我先确认命令是否存在。".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-003".into(),
+                time: "10:01".into(),
+                kind: TimelineKind::Tool,
+                title: "Function Call".into(),
+                detail: "exec_command".into(),
+                metadata: crate::core::model::TimelineEventMetadata {
+                    tool_calls: vec![crate::core::model::TimelineToolCall {
+                        name: Some("exec_command".into()),
+                        arguments: Some(serde_json::json!(
+                            r#"{"cmd":"command -v qc-attach","workdir":"/Users/bytedance","yield_time_ms":1000}"#
+                        )),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            },
+        ];
+        app.selected_event = 1;
+        app.rewind_event_id = "evt-001".into();
+
+        let screen = render_text(&app, 120, 24);
+
+        assert_screen_contains(&screen, "⌕ command -v qc-attach");
+        assert!(!screen.contains("⚙ exec_command"), "{screen}");
+        assert!(!screen.contains("exec_command"), "{screen}");
+        assert!(!screen.contains("workdir"), "{screen}");
+        assert!(!screen.contains("yield_time_ms"), "{screen}");
+        assert!(!screen.contains("{\"cmd\""), "{screen}");
+    }
+
+    #[test]
+    fn timeline_child_tool_recovers_malformed_command_key_arguments() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.data.timeline = vec![
+            TimelineEvent {
+                id: "evt-001".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "我会读取代码片段。".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-002".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Tool,
+                title: "exec_command".into(),
+                detail: "exec_command".into(),
+                metadata: crate::core::model::TimelineEventMetadata {
+                    tool_calls: vec![crate::core::model::TimelineToolCall {
+                        name: Some("exec_command".into()),
+                        arguments: Some(serde_json::json!({
+                            "sed -n '760,940p' app.rs": "cmd",
+                            "workdir": "/repo",
+                            "yield_time_ms": 1000,
+                            "max_output_tokens": 12000
+                        })),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            },
+        ];
+        app.selected_event = 0;
+
+        let screen = render_text(&app, 120, 20);
+
+        assert_screen_contains(&screen, "▤ sed -n '760,940p' app.rs");
+        assert!(!screen.contains("workdir"), "{screen}");
+        assert!(!screen.contains("yield_time_ms"), "{screen}");
+        assert!(!screen.contains("\"cmd\""), "{screen}");
+    }
+
+    #[test]
+    fn timeline_child_tool_recovers_command_key_even_when_value_is_not_cmd() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.data.timeline = vec![
+            TimelineEvent {
+                id: "evt-001".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "我会读取 skill。".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-002".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Tool,
+                title: "exec_command".into(),
+                detail: "exec_command".into(),
+                metadata: crate::core::model::TimelineEventMetadata {
+                    tool_calls: vec![crate::core::model::TimelineToolCall {
+                        name: Some("exec_command".into()),
+                        arguments: Some(serde_json::json!({
+                            "sed -n '1,80p' skills/universal-page-explorer/SKILL.md": "foo"
+                        })),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            },
+        ];
+        app.selected_event = 0;
+
+        let screen = render_text(&app, 120, 20);
+
+        assert_screen_contains(&screen, "▤ sed -n '1,80p' skills/universal-page-explore");
+        assert!(!screen.contains("\"foo\""), "{screen}");
+    }
+
+    #[test]
+    fn timeline_child_tool_summarizes_write_stdin_json_in_outer_view() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.data.timeline = vec![
+            TimelineEvent {
+                id: "evt-001".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "我继续等待 runner 完成。".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-002".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Tool,
+                title: "write_stdin".into(),
+                detail: "write_stdin".into(),
+                metadata: crate::core::model::TimelineEventMetadata {
+                    tool_calls: vec![crate::core::model::TimelineToolCall {
+                        name: Some("write_stdin".into()),
+                        arguments: Some(serde_json::json!({
+                            "chars": "",
+                            "max_output_tokens": 50000,
+                            "session_id": 45294,
+                            "yield_time_ms": 30000
+                        })),
+                        ..Default::default()
+                    }],
+                    tool_results: vec![crate::core::model::TimelineToolResult {
+                        content: Some(
+                            "Chunk ID: abc\nWall time: 30.0024 seconds\nProcess running with session ID 45294"
+                                .into(),
+                        ),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            },
+        ];
+        app.selected_event = 0;
+
+        let screen = render_text(&app, 120, 20);
+
+        assert_screen_contains(&screen, "我继续等待 runner 完成。");
+        assert_screen_contains(&screen, "◌ wait 30s · session 45k");
+        assert!(!screen.contains("max_output_tokens"), "{screen}");
+        assert!(!screen.contains("yield_time_ms"), "{screen}");
+        assert!(!screen.contains("\"chars\""), "{screen}");
+        assert!(!screen.contains("write_stdin"), "{screen}");
+        assert!(!screen.contains("Chunk ID"), "{screen}");
+        assert!(!screen.contains("Process running"), "{screen}");
+    }
+
+    #[test]
+    fn timeline_child_tool_summarizes_common_structured_tools_from_session_scan() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.data.timeline = vec![
+            TimelineEvent {
+                id: "evt-001".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "我会拆分任务并检查 PR。".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-002".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Tool,
+                title: "update_plan".into(),
+                detail: "update_plan".into(),
+                metadata: crate::core::model::TimelineEventMetadata {
+                    tool_calls: vec![crate::core::model::TimelineToolCall {
+                        name: Some("update_plan".into()),
+                        arguments: Some(serde_json::json!({
+                            "plan": [
+                                {"step": "读取 session 样本", "status": "completed"},
+                                {"step": "补摘要规则", "status": "in_progress"},
+                                {"step": "跑回归测试", "status": "pending"}
+                            ]
+                        })),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            },
+            TimelineEvent {
+                id: "evt-003".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Tool,
+                title: "_get_pr_info".into(),
+                detail: "_get_pr_info".into(),
+                metadata: crate::core::model::TimelineEventMetadata {
+                    tool_calls: vec![crate::core::model::TimelineToolCall {
+                        name: Some("_get_pr_info".into()),
+                        arguments: Some(serde_json::json!({
+                            "repository_full_name": "Gunsio/moonbox",
+                            "pr_number": 124
+                        })),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            },
+            TimelineEvent {
+                id: "evt-004".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Tool,
+                title: "js".into(),
+                detail: "js".into(),
+                metadata: crate::core::model::TimelineEventMetadata {
+                    tool_calls: vec![crate::core::model::TimelineToolCall {
+                        name: Some("js".into()),
+                        arguments: Some(serde_json::json!({
+                            "title": "Scan Codex sessions",
+                            "timeout_ms": 120000,
+                            "code": "const files = await walk(root);"
+                        })),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            },
+        ];
+        app.selected_event = 0;
+
+        let screen = render_text(&app, 140, 24);
+
+        assert_screen_contains(&screen, "plan 3 · doing 补摘要规则");
+        assert_screen_contains(
+            &screen,
+            "repository_full_name Gunsio/moonbox · pr_number 124",
+        );
+        assert_screen_contains(&screen, "js Scan Codex sessions · 120s");
+        assert!(!screen.contains("\"plan\""), "{screen}");
+        assert!(!screen.contains("\"repository_full_name\""), "{screen}");
+        assert!(!screen.contains("\"timeout_ms\""), "{screen}");
+    }
+
+    #[test]
+    fn timeline_child_tool_summarizes_generic_json_arguments_in_outer_view() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.data.timeline = vec![
+            TimelineEvent {
+                id: "evt-001".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "我会更新目标文档。".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-002".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Tool,
+                title: "lark_update".into(),
+                detail: "lark_update".into(),
+                metadata: crate::core::model::TimelineEventMetadata {
+                    tool_calls: vec![crate::core::model::TimelineToolCall {
+                        name: Some("lark_update".into()),
+                        arguments: Some(serde_json::json!({
+                            "action": "update",
+                            "url": "https://bytedance.larkoffice.com/wiki/example",
+                            "max_output_tokens": 50000,
+                            "payload": {"blocks": 12}
+                        })),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            },
+        ];
+        app.selected_event = 0;
+
+        let screen = render_text(&app, 120, 20);
+
+        assert_screen_contains(&screen, "action update · url https://bytedance.larkof");
+        assert!(!screen.contains("max_output_tokens"), "{screen}");
+        assert!(!screen.contains("\"payload\""), "{screen}");
+        assert!(!screen.contains("{\"action\""), "{screen}");
+    }
+
+    #[test]
+    fn timeline_command_icons_cover_common_command_families() {
+        assert_eq!(timeline_command_icon("git status --short"), "±");
+        assert_eq!(timeline_command_icon("cargo test --locked"), "✓");
+        assert_eq!(timeline_command_icon("pnpm test"), "✓");
+        assert_eq!(timeline_command_icon("rg timeline src"), "⌕");
+        assert_eq!(timeline_command_icon("command -v qc-attach"), "⌕");
+        assert_eq!(timeline_command_icon("ls -la"), "▤");
+        assert_eq!(timeline_command_icon("mkdir -p /tmp/moonbox"), "✎");
+        assert_eq!(timeline_command_icon("tmux list-panes"), "◌");
+        assert_eq!(timeline_command_icon("lark-cli docs +fetch --url ..."), "↗");
+        assert_eq!(timeline_command_icon("cargo build --locked"), "◆");
+        assert_eq!(
+            timeline_command_icon("nl -ba ~/.codex/config.toml | sed -n '14,28p'"),
+            "▤"
+        );
+        assert_eq!(
+            timeline_command_icon("npx -y @larksuite/whiteboard-cli -v"),
+            "◆"
+        );
+        assert_eq!(timeline_command_icon("ssh host.example 'pwd'"), "↗");
+        assert_eq!(timeline_command_icon("python3 - <<'PY'"), "◆");
+        assert_eq!(timeline_command_icon("codebase --version"), "↗");
+        assert_eq!(timeline_command_icon("xmllint --noout doc.svg"), "▤");
+        assert_eq!(timeline_command_icon("scripts/ci/full-gate.sh"), "✓");
+        assert_eq!(timeline_command_icon("pwd"), "▤");
+        assert_eq!(timeline_command_icon("brew install httpie"), "◆");
+        assert_eq!(
+            timeline_command_icon("/Users/bytedance/.local/bin/moonbox --version"),
+            "↗"
+        );
+        assert_eq!(timeline_command_icon("unknown-tool --flag"), "›");
+    }
+
+    #[test]
+    fn timeline_skips_leading_tool_events() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.data.timeline = vec![
+            TimelineEvent {
+                id: "evt-000".into(),
+                time: "10:00".into(),
+                kind: TimelineKind::Tool,
+                title: "Session".into(),
+                detail: "cwd: /repo".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-001".into(),
+                time: "10:01".into(),
+                kind: TimelineKind::User,
+                title: "User".into(),
+                detail: "开始".into(),
+                metadata: Default::default(),
+            },
+        ];
+        app.selected_event = 1;
+        app.rewind_event_id = "evt-001".into();
+
+        let screen = render_text(&app, 100, 20);
+
+        assert_screen_contains(&screen, "开始");
+        assert!(!screen.contains("TOOL  Session"), "{screen}");
+        assert!(!screen.contains("⚙ Session"), "{screen}");
+        assert!(!screen.contains("cwd: /repo"), "{screen}");
+    }
+
+    #[test]
+    fn timeline_detail_overlay_lists_attached_tool_events_for_selected_turn() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.show_timeline_detail = true;
+        app.data.timeline = vec![
+            TimelineEvent {
+                id: "evt-001".into(),
+                time: "12:21".into(),
+                kind: TimelineKind::User,
+                title: "User".into(),
+                detail: "retry".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-007".into(),
+                time: "12:22".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "我先读取文档，再检查代码。".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-008".into(),
+                time: "12:22".into(),
+                kind: TimelineKind::Tool,
+                title: "Function Call".into(),
+                detail: "exec_command".into(),
+                metadata: crate::core::model::TimelineEventMetadata {
+                    tool_calls: vec![crate::core::model::TimelineToolCall {
+                        id: Some("call_docs_fetch".into()),
+                        name: Some("exec_command".into()),
+                        arguments: Some(serde_json::json!({
+                            "cmd": "lark-cli docs +fetch --url ..."
+                        })),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            },
+            TimelineEvent {
+                id: "evt-009".into(),
+                time: "12:22".into(),
+                kind: TimelineKind::Tool,
+                title: "Function Call Output".into(),
+                detail: "fetched document body".into(),
+                metadata: crate::core::model::TimelineEventMetadata {
+                    tool_results: vec![crate::core::model::TimelineToolResult {
+                        call_id: Some("call_docs_fetch".into()),
+                        content: Some("document line one\ndocument line two".into()),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            },
+        ];
+        app.selected_event = 1;
+        app.rewind_event_id = "evt-001".into();
+
+        let screen = render_text(&app, 140, 42);
+
+        assert_screen_contains(&screen, "evt-007");
+        assert_screen_contains(&screen, "ASSISTANT");
+        assert_screen_contains(&screen, "我先读取文档，再检查代码。");
+        assert_screen_contains(&screen, "↗ lark-cli docs +fetch --url ...");
+        assert_screen_contains(&screen, "document line one");
+        assert_screen_contains(&screen, "document line two");
+        assert!(!screen.contains("exec_command"), "{screen}");
+        assert!(!screen.contains("Function Call Output"), "{screen}");
+        assert!(!screen.contains("fetched document body"), "{screen}");
+        assert!(!screen.contains("Attached Events"), "{screen}");
+        assert!(!screen.contains("TOOL"), "{screen}");
+        assert!(!screen.contains("Function Call"), "{screen}");
+        assert!(!screen.contains("Evidence"), "{screen}");
+        assert!(!screen.contains("Raw"), "{screen}");
+        assert!(!screen.contains("Body"), "{screen}");
+        assert!(!screen.contains("evt-007..evt-008"), "{screen}");
+    }
+
+    #[test]
+    fn timeline_detail_overlay_treats_selected_tool_as_attached_context() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.show_timeline_detail = true;
+        app.data.timeline = vec![
+            TimelineEvent {
+                id: "evt-001".into(),
+                time: "12:21".into(),
+                kind: TimelineKind::User,
+                title: "User".into(),
+                detail: "retry".into(),
+                metadata: Default::default(),
+            },
+            TimelineEvent {
+                id: "evt-007".into(),
+                time: "12:22".into(),
+                kind: TimelineKind::Assistant,
+                title: "Assistant".into(),
+                detail: "按 lark-doc / lark-wiki 技能要求，我先补读认证与 docs fetch 的参数说明。"
+                    .into(),
+                metadata: crate::core::model::TimelineEventMetadata {
+                    raw_refs: vec![crate::core::model::TimelineEventRawRef {
+                        source_path: Some("/tmp/session.jsonl".into()),
+                        line_number: Some(7),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            },
+            TimelineEvent {
+                id: "evt-008".into(),
+                time: "12:22".into(),
+                kind: TimelineKind::Tool,
+                title: "exec_command".into(),
+                detail: "lark-cli docs +fetch --url ...".into(),
+                metadata: crate::core::model::TimelineEventMetadata {
+                    tool_calls: vec![crate::core::model::TimelineToolCall {
+                        name: Some("exec_command".into()),
+                        arguments: Some(serde_json::json!({
+                            "cmd": "lark-cli docs +fetch --url https://bytedance.larkoffice.com/wiki/..."
+                        })),
+                        ..Default::default()
+                    }],
+                    raw_refs: vec![crate::core::model::TimelineEventRawRef {
+                        source_path: Some("/tmp/session.jsonl".into()),
+                        line_number: Some(8),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            },
+            TimelineEvent {
+                id: "evt-009".into(),
+                time: "12:22".into(),
+                kind: TimelineKind::Tool,
+                title: "exec_command".into(),
+                detail: "cargo test --test qc-page-explorer".into(),
+                metadata: crate::core::model::TimelineEventMetadata {
+                    tool_calls: vec![crate::core::model::TimelineToolCall {
+                        name: Some("exec_command".into()),
+                        arguments: Some(serde_json::json!({
+                            "cmd": "cargo test --test qc-page-explorer"
+                        })),
+                        ..Default::default()
+                    }],
+                    tool_results: vec![crate::core::model::TimelineToolResult {
+                        is_error: Some(true),
+                        content: Some("test failed\nstderr line\nexit code 101".into()),
+                        ..Default::default()
+                    }],
+                    raw_refs: vec![crate::core::model::TimelineEventRawRef {
+                        source_path: Some("/tmp/session.jsonl".into()),
+                        line_number: Some(9),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            },
+        ];
+        app.selected_event = 2;
+        app.rewind_event_id = "evt-001".into();
+
+        let screen = render_text(&app, 140, 54);
+
+        assert_screen_contains(&screen, "Timeline Inspector");
+        assert_screen_contains(&screen, "evt-007");
+        assert_screen_contains(&screen, "ASSISTANT");
+        assert_screen_contains(&screen, "按 lark-doc / lark-wiki 技能要求");
+        assert_screen_contains(
+            &screen,
+            "↗ lark-cli docs +fetch --url https://bytedance.larkoffice.com/wiki/...",
+        );
+        assert_screen_contains(&screen, "✓ cargo test --test qc-page-explorer");
+        assert_screen_contains(&screen, "test failed");
+        assert_screen_contains(&screen, "stderr line");
+        assert_screen_contains(&screen, "exit code 101");
+        assert!(!screen.contains("exec_command"), "{screen}");
+        assert!(!screen.contains("Overview"), "{screen}");
+        assert!(!screen.contains("assistant messages:"), "{screen}");
+        assert!(!screen.contains("categories:"), "{screen}");
+        assert!(!screen.contains("Attached Events"), "{screen}");
+        assert!(!screen.contains("TOOL"), "{screen}");
+        assert!(!screen.contains("Function Call"), "{screen}");
+        assert!(!screen.contains("Evidence"), "{screen}");
+        assert!(!screen.contains("Raw"), "{screen}");
+        assert!(!screen.contains("Body"), "{screen}");
+        assert!(!screen.contains("1/3 evt-007 ASSISTANT"), "{screen}");
     }
 
     #[test]

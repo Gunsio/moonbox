@@ -1905,7 +1905,7 @@ fn capsule_and_compile_surfaces_accept_explicit_session_target_rewind_and_compil
     assert_eq!(capsule["raw_source_map"]["rewind_event_id"], "evt-074");
     assert_eq!(capsule["redaction"]["enabled"], true);
     assert_eq!(capsule["redaction"]["policy"], "standard");
-    assert!(capsule["raw_refs"].as_array().expect("raw refs").len() >= 1);
+    assert!(!capsule["raw_refs"].as_array().expect("raw refs").is_empty());
     assert!(
         capsule["raw_refs"]
             .as_array()

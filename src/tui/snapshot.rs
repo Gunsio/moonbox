@@ -56,9 +56,23 @@ fn docs_scene_app(scene: &str) -> Result<App> {
         }
         "timeline-details" => {
             app.focus = Focus::Timeline;
-            app.selected_event = app.data.timeline.len().saturating_sub(1);
+            app.selected_event = app
+                .data
+                .timeline
+                .iter()
+                .position(|event| {
+                    !event.metadata.attachments.is_empty() || !event.metadata.raw_refs.is_empty()
+                })
+                .or_else(|| {
+                    app.data
+                        .timeline
+                        .iter()
+                        .position(|event| event.kind == crate::core::model::TimelineKind::Tool)
+                })
+                .unwrap_or_else(|| app.data.timeline.len().saturating_sub(1));
             app.zoomed_focus = Some(Focus::Timeline);
-            app.status_message = "Timeline zoom".into();
+            app.show_timeline_detail = true;
+            app.status_message = "Timeline Inspector".into();
         }
         "handoff" => {
             app.data.compilers.insert(0, "agent:codex:handoff".into());
@@ -269,9 +283,10 @@ mod tests {
     fn docs_screenshot_contains_timeline_details_scene() {
         let svg = docs_screenshot_svg(120, 36, "timeline-details").expect("svg");
 
-        assert!(svg.contains("Timeline"));
-        assert!(svg.contains("Action Path"));
-        assert!(!svg.contains("Session Details"));
+        assert!(svg.contains("Timeline Inspector"));
+        assert!(!svg.contains("Evidence"));
+        assert!(!svg.contains("Raw"));
+        assert!(!svg.contains("Actions"));
         assert!(svg.contains("<svg"));
     }
 }

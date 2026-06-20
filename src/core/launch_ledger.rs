@@ -107,10 +107,10 @@ pub fn default_ledger_path() -> Result<PathBuf, CoreError> {
 
     #[cfg(test)]
     {
-        return Ok(env::temp_dir().join(format!(
+        Ok(env::temp_dir().join(format!(
             "moonbox-launch-ledger-test-{}.sqlite",
             std::process::id()
-        )));
+        )))
     }
 
     #[cfg(not(test))]

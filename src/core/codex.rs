@@ -26,7 +26,8 @@ use super::{
         SourceCapabilities, SourceCapability, SourceCapabilityStatus, SourceFidelity,
         SourceFidelityStatus, SourceProvenance, TimelineApproval, TimelineEvent,
         TimelineEventMetadata, TimelineEventRawRef, TimelineFileChange, TimelineKind,
-        TimelineRuntimeMetadata, TimelineToolCall, TokenBreakdown, unknown_runtime_reason,
+        TimelineRuntimeMetadata, TimelineToolCall, TimelineToolResult, TokenBreakdown,
+        unknown_runtime_reason,
     },
 };
 
@@ -966,8 +967,12 @@ fn timeline_event(
     let image_markup =
         extract_timeline_image_markup(&timeline_detail(&record.payload, record_type, payload_type));
     let detail = image_markup.text;
+    let mut metadata = timeline_metadata(&record, session_id, path, line_number, kind);
     if detail.is_empty()
         && image_markup.attachments.is_empty()
+        && metadata.tool_calls.is_empty()
+        && metadata.tool_results.is_empty()
+        && metadata.runtime.is_none()
         && !matches!(kind, TimelineKind::Error)
     {
         return None;
@@ -977,7 +982,6 @@ fn timeline_event(
     {
         return None;
     }
-    let mut metadata = timeline_metadata(&record, session_id, path, line_number, kind);
     metadata.attachments.extend(image_markup.attachments);
 
     Some(TimelineEvent {
@@ -1019,6 +1023,7 @@ fn timeline_metadata(
         message_ids,
         provider_item_ids,
         tool_calls: tool_calls_from_codex_payload(&record.payload, payload_type.as_deref()),
+        tool_results: tool_results_from_codex_payload(&record.payload, payload_type.as_deref()),
         approvals: approvals_from_payload(
             &record.payload,
             record_type.as_deref(),
@@ -1130,6 +1135,9 @@ fn tool_calls_from_codex_payload(
     payload: &Value,
     payload_type: Option<&str>,
 ) -> Vec<TimelineToolCall> {
+    if payload_type == Some("function_call_output") {
+        return Vec::new();
+    }
     let is_tool_call = payload_type.is_some_and(|value| value.contains("call"))
         || payload.get("arguments").is_some()
         || payload.get("input").is_some();
@@ -1148,6 +1156,39 @@ fn tool_calls_from_codex_payload(
         ),
         raw: Some(payload.clone()),
     }]
+}
+
+fn tool_results_from_codex_payload(
+    payload: &Value,
+    payload_type: Option<&str>,
+) -> Vec<TimelineToolResult> {
+    if payload_type != Some("function_call_output") {
+        return Vec::new();
+    }
+    vec![TimelineToolResult {
+        call_id: first_string(payload, &["call_id", "id", "item_id"]),
+        name: first_string(payload, &["name", "tool_name", "function_name", "command"]),
+        content: first_string(payload, &["output", "content", "result"]),
+        is_error: function_call_output_is_error(payload),
+        raw: Some(payload.clone()),
+    }]
+}
+
+fn function_call_output_is_error(payload: &Value) -> Option<bool> {
+    first_string(payload, &["status"])
+        .map(|status| {
+            let status = status.to_ascii_lowercase();
+            status.contains("fail") || status.contains("error")
+        })
+        .or_else(|| {
+            first_string(payload, &["output"]).and_then(|output| {
+                output
+                    .lines()
+                    .find_map(|line| line.trim().strip_prefix("Process exited with code "))
+                    .and_then(|code| code.parse::<i32>().ok())
+                    .map(|code| code != 0)
+            })
+        })
 }
 
 fn approvals_from_payload(
@@ -1416,9 +1457,11 @@ mod tests {
             &root,
             "2026/06/06/rollout-2026-06-06T08-00-00-test.jsonl",
             r#"{"timestamp":"2026-06-06T08:00:00.000Z","type":"session_meta","payload":{"id":"codex-real-2","cwd":"/repo"}}
+{"timestamp":"2026-06-06T08:00:30.000Z","type":"event_msg","payload":{"type":"task_started"}}
 {"timestamp":"2026-06-06T08:01:00.000Z","type":"event_msg","payload":{"type":"user_message","message_id":"msg-codex-1","message":"Start here"}}
 {"timestamp":"2026-06-06T08:02:00.000Z","type":"event_msg","payload":{"type":"agent_message","message":"Done"}}
 {"timestamp":"2026-06-06T08:03:00.000Z","type":"event_msg","payload":{"type":"error","message":"resume failed"}}
+{"timestamp":"2026-06-06T08:04:00.000Z","type":"event_msg","payload":{"type":"task_complete","duration_ms":72278}}
 "#,
         );
 
@@ -1429,18 +1472,31 @@ mod tests {
         assert_eq!(timeline.source_cli, CliTool::Codex);
         assert_eq!(timeline.source_session, "codex-real-2");
         assert_eq!(timeline.events[0].kind, TimelineKind::Tool);
-        assert_eq!(timeline.events[1].kind, TimelineKind::User);
-        assert_eq!(timeline.events[2].kind, TimelineKind::Assistant);
-        assert_eq!(timeline.events[3].kind, TimelineKind::Error);
-        assert_eq!(timeline.events[1].metadata.message_ids, vec!["msg-codex-1"]);
+        assert_eq!(timeline.events[1].title, "Task started");
+        assert_eq!(timeline.events[1].kind, TimelineKind::Tool);
+        assert_eq!(timeline.events[2].kind, TimelineKind::User);
+        assert_eq!(timeline.events[3].kind, TimelineKind::Assistant);
+        assert_eq!(timeline.events[4].kind, TimelineKind::Error);
+        assert_eq!(timeline.events[5].title, "Task complete");
+        assert_eq!(timeline.events[5].kind, TimelineKind::Tool);
+        let canonical_text = timeline
+            .events
+            .iter()
+            .map(|event| format!("{} {}", event.title, event.detail))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(canonical_text.contains("Task started"));
+        assert!(canonical_text.contains("Task complete"));
+        assert!(canonical_text.contains("completed in 72278 ms"));
+        assert_eq!(timeline.events[2].metadata.message_ids, vec!["msg-codex-1"]);
         assert_eq!(
-            timeline.events[1].metadata.raw_refs[0]
+            timeline.events[2].metadata.raw_refs[0]
                 .source_session
                 .as_deref(),
             Some("codex-real-2")
         );
         assert_eq!(
-            timeline.events[1].metadata.raw_refs[0]
+            timeline.events[2].metadata.raw_refs[0]
                 .provider_kind
                 .as_deref(),
             Some("user_message")
@@ -1640,6 +1696,58 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn load_timeline_preserves_function_call_output_as_canonical_event() {
+        let root = test_root("timeline-tool-output");
+        write_session(
+            &root,
+            "2026/06/06/rollout-2026-06-06T08-00-00-tool-output.jsonl",
+            r#"{"timestamp":"2026-06-06T08:00:00.000Z","type":"session_meta","payload":{"id":"codex-tool-output","cwd":"/repo"}}
+{"timestamp":"2026-06-06T08:01:00.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"我先读取文件。"}]}}
+{"timestamp":"2026-06-06T08:01:01.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"sed -n '1,180p' file.js\",\"workdir\":\"/repo\",\"yield_time_ms\":10000,\"max_output_tokens\":12000}","call_id":"call_read_file"}}
+{"timestamp":"2026-06-06T08:01:02.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_read_file","output":"Chunk ID: abc123\nWall time: 0.0000 seconds\nProcess exited with code 0\nOriginal token count: 4\nOutput:\nline one\nline two\nline three\n"}}
+"#,
+        );
+
+        let timeline = CodexSourceAdapter::new(&root)
+            .load_timeline("codex-tool-output")
+            .expect("timeline");
+        let tool_events = timeline
+            .events
+            .iter()
+            .filter(|event| event.kind == TimelineKind::Tool)
+            .collect::<Vec<_>>();
+
+        assert_eq!(tool_events.len(), 3, "{:#?}", timeline.events);
+        let call = tool_events
+            .iter()
+            .find(|event| event.title == "Function Call")
+            .expect("function call event");
+        assert_eq!(call.metadata.tool_calls.len(), 1);
+        assert_eq!(
+            call.metadata.tool_calls[0].id.as_deref(),
+            Some("call_read_file")
+        );
+        assert!(call.metadata.tool_results.is_empty());
+        let output_event = tool_events
+            .iter()
+            .find(|event| event.title == "Function Call Output")
+            .expect("function call output event");
+        assert_eq!(output_event.metadata.tool_calls.len(), 0);
+        assert_eq!(output_event.metadata.tool_results.len(), 1);
+        assert_eq!(
+            output_event.metadata.tool_results[0].call_id.as_deref(),
+            Some("call_read_file")
+        );
+        let output = output_event.metadata.tool_results[0]
+            .content
+            .as_deref()
+            .expect("output");
+        assert!(output.contains("line one"), "{output}");
+        assert!(output.contains("line two"), "{output}");
+        assert!(output.contains("line three"), "{output}");
     }
 
     #[test]

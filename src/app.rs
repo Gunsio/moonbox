@@ -6446,9 +6446,10 @@ fn is_stale_handoff_compiler_mismatch(reason: &str) -> bool {
 }
 
 fn timeline_event_is_visible(data: &WorkbenchData, rewind_event_id: &str, index: usize) -> bool {
-    data.timeline
-        .get(index)
-        .is_some_and(|event| event.id == rewind_event_id || event.kind != TimelineKind::Tool)
+    data.timeline.get(index).is_some_and(|event| {
+        event.id == rewind_event_id
+            || (!matches!(event.kind, TimelineKind::Tool) && !event.detail.trim().is_empty())
+    })
 }
 
 fn timeline_event_is_rewind_anchor(event: &crate::core::model::TimelineEvent) -> bool {
@@ -6460,14 +6461,14 @@ fn session_overlay_key(session: &SessionSummary) -> String {
 }
 
 fn first_visible_timeline_event(data: &WorkbenchData, rewind_event_id: &str) -> usize {
-    visible_timeline_group_heads(data, rewind_event_id)
+    visible_timeline_navigation_indices(data, rewind_event_id)
         .first()
         .copied()
         .unwrap_or(0)
 }
 
 fn last_visible_timeline_event(data: &WorkbenchData, rewind_event_id: &str) -> usize {
-    visible_timeline_group_heads(data, rewind_event_id)
+    visible_timeline_navigation_indices(data, rewind_event_id)
         .last()
         .copied()
         .unwrap_or_else(|| data.timeline.len().saturating_sub(1))
@@ -6480,6 +6481,16 @@ fn nearest_visible_timeline_event(
 ) -> usize {
     if timeline_event_is_visible(data, rewind_event_id, selected_event) {
         return selected_event;
+    }
+    if data
+        .timeline
+        .get(selected_event)
+        .is_some_and(|event| matches!(event.kind, TimelineKind::Tool))
+        && let Some(index) = (0..selected_event)
+            .rev()
+            .find(|index| timeline_event_is_visible(data, rewind_event_id, *index))
+    {
+        return index;
     }
     (selected_event.saturating_add(1)..data.timeline.len())
         .find(|index| timeline_event_is_visible(data, rewind_event_id, *index))
@@ -6496,14 +6507,14 @@ fn next_visible_timeline_event(
     rewind_event_id: &str,
     selected_event: usize,
 ) -> usize {
-    let group_heads = visible_timeline_group_heads(data, rewind_event_id);
-    let current = selected_visible_timeline_group_position(
+    let navigation_indices = visible_timeline_navigation_indices(data, rewind_event_id);
+    let current = selected_visible_timeline_position(
         data,
         rewind_event_id,
         selected_event,
-        &group_heads,
+        &navigation_indices,
     );
-    group_heads
+    navigation_indices
         .get(current.saturating_add(1))
         .copied()
         .unwrap_or_else(|| nearest_visible_timeline_event(data, rewind_event_id, selected_event))
@@ -6514,48 +6525,41 @@ fn previous_visible_timeline_event(
     rewind_event_id: &str,
     selected_event: usize,
 ) -> usize {
-    let group_heads = visible_timeline_group_heads(data, rewind_event_id);
-    let current = selected_visible_timeline_group_position(
+    let navigation_indices = visible_timeline_navigation_indices(data, rewind_event_id);
+    let current = selected_visible_timeline_position(
         data,
         rewind_event_id,
         selected_event,
-        &group_heads,
+        &navigation_indices,
     );
     current
         .checked_sub(1)
-        .and_then(|index| group_heads.get(index))
+        .and_then(|index| navigation_indices.get(index))
         .copied()
         .unwrap_or_else(|| nearest_visible_timeline_event(data, rewind_event_id, selected_event))
 }
 
-fn visible_timeline_group_heads(data: &WorkbenchData, rewind_event_id: &str) -> Vec<usize> {
-    let mut heads = Vec::new();
-    let mut previous_kind = None;
-    for (index, event) in data.timeline.iter().enumerate() {
-        if !timeline_event_is_visible(data, rewind_event_id, index) {
-            continue;
-        }
-        let continues_ai_group =
-            event.kind == TimelineKind::Assistant && previous_kind == Some(TimelineKind::Assistant);
-        if !continues_ai_group {
-            heads.push(index);
-        }
-        previous_kind = Some(event.kind);
-    }
-    heads
+fn visible_timeline_navigation_indices(data: &WorkbenchData, rewind_event_id: &str) -> Vec<usize> {
+    data.timeline
+        .iter()
+        .enumerate()
+        .filter_map(|(index, _)| {
+            timeline_event_is_visible(data, rewind_event_id, index).then_some(index)
+        })
+        .collect()
 }
 
-fn selected_visible_timeline_group_position(
+fn selected_visible_timeline_position(
     data: &WorkbenchData,
     rewind_event_id: &str,
     selected_event: usize,
-    group_heads: &[usize],
+    navigation_indices: &[usize],
 ) -> usize {
-    if group_heads.is_empty() {
+    if navigation_indices.is_empty() {
         return 0;
     }
     let visible_event = nearest_visible_timeline_event(data, rewind_event_id, selected_event);
-    group_heads
+    navigation_indices
         .iter()
         .enumerate()
         .rev()
@@ -6861,7 +6865,7 @@ mod tests {
     }
 
     #[test]
-    fn timeline_navigation_moves_by_visible_ai_groups() {
+    fn timeline_navigation_moves_by_visible_original_events() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.focus = Focus::Timeline;
         app.data.timeline = vec![
@@ -6884,14 +6888,22 @@ mod tests {
             crate::core::model::TimelineEvent {
                 id: "evt-003".into(),
                 time: "10:02".into(),
+                kind: TimelineKind::Tool,
+                title: "exec_command".into(),
+                detail: "rg cxcp".into(),
+                metadata: Default::default(),
+            },
+            crate::core::model::TimelineEvent {
+                id: "evt-004".into(),
+                time: "10:03".into(),
                 kind: TimelineKind::Assistant,
                 title: "Assistant".into(),
                 detail: "继续分析缓存。".into(),
                 metadata: Default::default(),
             },
             crate::core::model::TimelineEvent {
-                id: "evt-004".into(),
-                time: "10:03".into(),
+                id: "evt-005".into(),
+                time: "10:04".into(),
                 kind: TimelineKind::User,
                 title: "User".into(),
                 detail: "下一步".into(),
