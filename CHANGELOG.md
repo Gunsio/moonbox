@@ -69,6 +69,18 @@ and this project uses semantic versioning once tagged releases start.
   restore, and gives the selected row short feedback before the list compacts.
 - TUI header and loading screen show the running Moonbox package version so
   stale installed binaries are visible during local validation.
+- Session rows and details now surface context health from provider evidence:
+  Codex uses rollout token-count events for used/window tokens, Claude derives
+  usage from real JSONL usage records, and Hermes resolves known model windows
+  without pretending missing usage is a percentage. Model windows resolve by
+  agent and model: Codex/Hermes can use the local Codex models cache, while
+  Claude `gpt-5.5*` and observed long-context Opus 4.x models use
+  Claude-specific defaults that can be overridden in Moonbox config. Claude
+  compact counts also infer derived compaction from real usage-token drops when
+  no explicit compact marker is present. Session rows keep token/source-size
+  inventory next to context health, and details show
+  compact/handoff markers without low-value adapter, anatomy, empty metric, and
+  source diagnostic rows in the default view.
 - TUI action menu localizes action labels and availability reasons in
   Simplified Chinese.
 - First-class `moon` binary alias installed alongside `moonbox`.

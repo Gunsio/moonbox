@@ -60,6 +60,17 @@ pub struct HooksConfig {
     pub spool_max_files: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextModelConfig {
+    pub model: String,
+    #[serde(default)]
+    pub agent: Option<CliTool>,
+    #[serde(default)]
+    pub window_tokens: Option<usize>,
+    #[serde(default)]
+    pub quality_cliff_tokens: Option<usize>,
+}
+
 impl Default for HooksConfig {
     fn default() -> Self {
         Self {
@@ -213,6 +224,8 @@ struct UserConfig {
     #[serde(default)]
     compiler_presets: Vec<CompilerPresetConfig>,
     #[serde(default)]
+    context_models: Vec<ContextModelConfig>,
+    #[serde(default)]
     ssh_hosts: Vec<SshHostConfig>,
     #[serde(default)]
     starred_sessions: Vec<String>,
@@ -264,6 +277,18 @@ pub fn load_ssh_host_configs() -> Vec<SshHostConfig> {
         .unwrap_or_default()
         .into_iter()
         .filter(|host| !host.name.trim().is_empty() && !host.host.trim().is_empty())
+        .collect()
+}
+
+pub fn load_context_model_configs() -> Vec<ContextModelConfig> {
+    load_user_config()
+        .map(|config| config.context_models)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|entry| {
+            !entry.model.trim().is_empty()
+                && (entry.window_tokens.is_some() || entry.quality_cliff_tokens.is_some())
+        })
         .collect()
 }
 
@@ -473,6 +498,9 @@ mod tests {
 	  "compiler_presets": [
     {"id": "handoff", "command": "/bin/moonbox-handoff", "args": ["--mode", "handoff"], "timeout_ms": 12000, "description": "Compresses source timelines for target CLIs.", "homepage": "https://github.com/example/handoff", "github_stars": 42}
   ],
+  "context_models": [
+    {"agent": "claude", "model": "gpt-5.5*", "window_tokens": 1000000, "quality_cliff_tokens": 500000}
+  ],
   "ssh_hosts": [
     {"name": "dev", "hostname": "dev.example.com", "user": "moon", "port": 2222, "identity_file": "~/.ssh/dev", "tags": ["dev"]}
   ],
@@ -507,6 +535,10 @@ mod tests {
             config.compiler_presets[0].description.as_deref(),
             Some("Compresses source timelines for target CLIs.")
         );
+        assert_eq!(config.context_models[0].agent, Some(CliTool::Claude));
+        assert_eq!(config.context_models[0].model, "gpt-5.5*");
+        assert_eq!(config.context_models[0].window_tokens, Some(1_000_000));
+        assert_eq!(config.context_models[0].quality_cliff_tokens, Some(500_000));
         assert_eq!(
             config.compiler_presets[0].homepage.as_deref(),
             Some("https://github.com/example/handoff")

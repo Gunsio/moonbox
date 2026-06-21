@@ -19,6 +19,9 @@ explicitly ask it to run a guarded action.
   time-sorted TUI.
 - **Timeline rewind**: inspect turns, tool evidence, images, and compact
   boundaries before choosing where to continue.
+- **Context health**: see provider-backed context usage, agent/model-resolved
+  windows, quality-cliff estimates, and compact markers; unknown usage stays
+  explicit instead of being turned into a fake percentage.
 - **Action menu**: use `o` to pick Resume, Handoff, Lark Doc, New Session,
   Fork, Jump, Inspect, Yank, or Archive from one availability-aware menu.
 - **Yank panel**: use `y` for copy-only workflows such as first user input,

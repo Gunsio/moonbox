@@ -119,6 +119,8 @@ pub struct SessionSummary {
     #[serde(default)]
     pub provider_metadata: Option<ProviderSessionMetadata>,
     #[serde(default)]
+    pub context_health: Option<ContextHealth>,
+    #[serde(default)]
     pub anatomy: Option<SessionAnatomy>,
 }
 
@@ -250,6 +252,45 @@ pub struct ProviderSessionMetadata {
     pub search: Option<ProviderSearchMetadata>,
     #[serde(default)]
     pub continuation_points: Vec<ProviderContinuationPoint>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceConfidence {
+    Exact,
+    Derived,
+    Estimated,
+    #[default]
+    Unknown,
+}
+
+impl Display for EvidenceConfidence {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Exact => f.write_str("exact"),
+            Self::Derived => f.write_str("derived"),
+            Self::Estimated => f.write_str("estimated"),
+            Self::Unknown => f.write_str("unknown"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextHealth {
+    #[serde(default)]
+    pub used_tokens: Option<usize>,
+    #[serde(default)]
+    pub window_tokens: Option<usize>,
+    #[serde(default)]
+    pub quality_cliff_tokens: Option<usize>,
+    #[serde(default)]
+    pub compact_layers: usize,
+    #[serde(default)]
+    pub handoff_markers: usize,
+    #[serde(default)]
+    pub confidence: EvidenceConfidence,
+    #[serde(default)]
+    pub source: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

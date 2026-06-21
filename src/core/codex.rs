@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     env, fs,
-    io::BufRead,
+    io::{BufRead, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
 };
 
@@ -22,16 +22,17 @@ use super::{
         text_from_value, title_case, truncate, truncate_timeline_detail,
     },
     model::{
-        CanonicalTimeline, CliTool, SessionRuntimeStatus, SessionStatus, SessionSummary,
-        SourceCapabilities, SourceCapability, SourceCapabilityStatus, SourceFidelity,
-        SourceFidelityStatus, SourceProvenance, TimelineApproval, TimelineEvent,
-        TimelineEventMetadata, TimelineEventRawRef, TimelineFileChange, TimelineKind,
-        TimelineRuntimeMetadata, TimelineToolCall, TimelineToolResult, TokenBreakdown,
-        unknown_runtime_reason,
+        CanonicalTimeline, CliTool, ContextHealth, EvidenceConfidence, SessionRuntimeStatus,
+        SessionStatus, SessionSummary, SourceCapabilities, SourceCapability,
+        SourceCapabilityStatus, SourceFidelity, SourceFidelityStatus, SourceProvenance,
+        TimelineApproval, TimelineEvent, TimelineEventMetadata, TimelineEventRawRef,
+        TimelineFileChange, TimelineKind, TimelineRuntimeMetadata, TimelineToolCall,
+        TimelineToolResult, TokenBreakdown, unknown_runtime_reason,
     },
 };
 
 const CODEX_TOOL: CliTool = CliTool::Codex;
+const CODEX_CONTEXT_TAIL_BYTES: u64 = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct CodexSourceAdapter {
@@ -66,6 +67,10 @@ struct SummaryBuilder {
     updated_at: Option<String>,
     branch: Option<String>,
     token_count: Option<usize>,
+    context_used_tokens: Option<usize>,
+    context_window_tokens: Option<usize>,
+    compact_layers: usize,
+    handoff_markers: usize,
     event_count: usize,
     malformed_lines: usize,
     summary_truncated: bool,
@@ -302,6 +307,28 @@ impl CodexSourceAdapter {
         } else {
             "real Codex SQLite thread index".into()
         };
+        let context_health = if rollout_exists {
+            context_health_from_rollout_tail(Path::new(source_path)).or_else(|| {
+                context_health_from_token_count(
+                    normalized_token_count(row.token_count),
+                    None,
+                    0,
+                    0,
+                    EvidenceConfidence::Derived,
+                    "codex sqlite thread index",
+                )
+            })
+        } else {
+            context_health_from_token_count(
+                normalized_token_count(row.token_count),
+                None,
+                0,
+                0,
+                EvidenceConfidence::Derived,
+                "codex sqlite thread index",
+            )
+        };
+
         SessionSummary {
             id: row.id.clone(),
             cli: CODEX_TOOL,
@@ -328,6 +355,7 @@ impl CodexSourceAdapter {
                 .flatten(),
             parse_skip_count: 0,
             provider_metadata: None,
+            context_health,
             anatomy: None,
         }
     }
@@ -818,6 +846,10 @@ impl SummaryBuilder {
             updated_at: timestamp_from_filename(path),
             branch: None,
             token_count: None,
+            context_used_tokens: None,
+            context_window_tokens: None,
+            compact_layers: 0,
+            handoff_markers: 0,
             event_count: 0,
             malformed_lines: 0,
             summary_truncated: false,
@@ -834,6 +866,12 @@ impl SummaryBuilder {
         let record_type = record.record_type.as_deref().unwrap_or_default();
         let payload_type = string_field(&record.payload, "type").unwrap_or_default();
         self.has_error |= is_error_record(record_type, payload_type);
+        if record_type == "compacted" {
+            self.compact_layers += 1;
+        }
+        if codex_record_has_handoff_marker(&record) {
+            self.handoff_markers += 1;
+        }
 
         match record_type {
             "session_meta" => self.observe_session_meta(&record.payload),
@@ -891,6 +929,21 @@ impl SummaryBuilder {
         {
             self.token_count = Some(count);
         }
+        if string_field(payload, "type") == Some("token_count") {
+            if let Some(count) = payload
+                .get("info")
+                .and_then(|info| info.get("last_token_usage"))
+                .and_then(|usage| usize_field(usage, "total_tokens"))
+            {
+                self.context_used_tokens = Some(count);
+            }
+            if let Some(window) = payload
+                .get("info")
+                .and_then(|info| usize_field(info, "model_context_window"))
+            {
+                self.context_window_tokens = Some(window);
+            }
+        }
     }
 
     fn finish(self) -> SessionSummary {
@@ -943,9 +996,126 @@ impl SummaryBuilder {
             source_size_bytes: source_size_bytes(&self.path),
             parse_skip_count: self.malformed_lines,
             provider_metadata: None,
+            context_health: context_health_from_token_count(
+                self.context_used_tokens.or(self.token_count),
+                self.context_window_tokens,
+                self.compact_layers,
+                self.handoff_markers,
+                if self.context_used_tokens.is_some() && self.context_window_tokens.is_some() {
+                    EvidenceConfidence::Exact
+                } else if self.context_used_tokens.is_some() || self.token_count.is_some() {
+                    EvidenceConfidence::Derived
+                } else {
+                    EvidenceConfidence::Unknown
+                },
+                "codex token_count event",
+            ),
             anatomy: None,
         }
     }
+}
+
+fn context_health_from_token_count(
+    used_tokens: Option<usize>,
+    window_tokens: Option<usize>,
+    compact_layers: usize,
+    handoff_markers: usize,
+    confidence: EvidenceConfidence,
+    source: &str,
+) -> Option<ContextHealth> {
+    let used_tokens = used_tokens.filter(|tokens| *tokens > 0);
+    let window_tokens = window_tokens.filter(|tokens| *tokens > 0);
+    (used_tokens.is_some() || window_tokens.is_some() || compact_layers > 0 || handoff_markers > 0)
+        .then(|| ContextHealth {
+            used_tokens,
+            window_tokens,
+            quality_cliff_tokens: Some(120_000),
+            compact_layers,
+            handoff_markers,
+            confidence,
+            source: source.into(),
+        })
+}
+
+fn usize_field(value: &Value, key: &str) -> Option<usize> {
+    value
+        .get(key)
+        .and_then(Value::as_u64)
+        .and_then(|count| usize::try_from(count).ok())
+}
+
+fn codex_record_has_handoff_marker(record: &CodexRecord) -> bool {
+    serde_json::to_string(&record.payload)
+        .ok()
+        .is_some_and(|text| {
+            [
+                "moonbox-continuation-handoff",
+                "Handoff skill",
+                "Target CLI",
+                "handoff artifact",
+                "交接文档",
+            ]
+            .iter()
+            .any(|needle| text.contains(needle))
+        })
+}
+
+fn context_health_from_rollout_tail(path: &Path) -> Option<ContextHealth> {
+    let mut file = fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    let start = len.saturating_sub(CODEX_CONTEXT_TAIL_BYTES);
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut bytes = Vec::with_capacity((len - start).min(CODEX_CONTEXT_TAIL_BYTES) as usize);
+    file.read_to_end(&mut bytes).ok()?;
+    let text = String::from_utf8_lossy(&bytes);
+    let mut lines = text.lines();
+    if start > 0 {
+        lines.next();
+    }
+
+    let mut used_tokens = None;
+    let mut window_tokens = None;
+    for line in lines {
+        let Ok(record) = serde_json::from_str::<CodexRecord>(line) else {
+            continue;
+        };
+        if record.record_type.as_deref() != Some("event_msg")
+            || string_field(&record.payload, "type") != Some("token_count")
+        {
+            continue;
+        }
+        if let Some(count) = record
+            .payload
+            .get("info")
+            .and_then(|info| info.get("last_token_usage"))
+            .and_then(|usage| usize_field(usage, "total_tokens"))
+            .or_else(|| find_token_count(&record.payload))
+        {
+            used_tokens = Some(count);
+        }
+        if let Some(window) = record
+            .payload
+            .get("info")
+            .and_then(|info| usize_field(info, "model_context_window"))
+        {
+            window_tokens = Some(window);
+        }
+    }
+
+    context_health_from_token_count(
+        used_tokens,
+        window_tokens,
+        0,
+        0,
+        if used_tokens.is_some() && window_tokens.is_some() {
+            EvidenceConfidence::Exact
+        } else if used_tokens.is_some() {
+            EvidenceConfidence::Derived
+        } else {
+            EvidenceConfidence::Unknown
+        },
+        "codex rollout tail token_count",
+    )
 }
 
 fn source_size_bytes(path: &Path) -> Option<u64> {
@@ -1362,7 +1532,9 @@ mod tests {
             "2026/06/06/rollout-2026-06-06T08-00-00-test.jsonl",
             r#"{"timestamp":"2026-06-06T08:00:00.000Z","type":"session_meta","payload":{"id":"codex-real-1","cwd":"/repo","git":{"branch":"main"}}}
 {"timestamp":"2026-06-06T08:01:00.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Implement a real adapter"}]}}
-{"timestamp":"2026-06-06T08:02:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_tokens":42}}}
+{"timestamp":"2026-06-06T08:02:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_tokens":42,"last_token_usage":{"total_tokens":169790},"model_context_window":258400}}}
+{"timestamp":"2026-06-06T08:03:00.000Z","type":"compacted","payload":{"type":"compact"}}
+{"timestamp":"2026-06-06T08:04:00.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"moonbox-continuation-handoff ready"}]}}
 "#,
         );
 
@@ -1376,6 +1548,12 @@ mod tests {
         assert_eq!(sessions[0].cwd, "/repo");
         assert_eq!(sessions[0].branch.as_deref(), Some("main"));
         assert_eq!(sessions[0].token_count, Some(42));
+        let context_health = sessions[0].context_health.as_ref().expect("context health");
+        assert_eq!(context_health.used_tokens, Some(169_790));
+        assert_eq!(context_health.window_tokens, Some(258_400));
+        assert_eq!(context_health.compact_layers, 1);
+        assert_eq!(context_health.handoff_markers, 1);
+        assert_eq!(context_health.confidence, EvidenceConfidence::Exact);
         assert_eq!(sessions[0].resume_command, "codex resume codex-real-1");
         assert_eq!(
             sessions[0].source_size_bytes,

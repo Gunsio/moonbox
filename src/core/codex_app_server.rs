@@ -331,6 +331,7 @@ pub(crate) fn app_thread_summary(thread: CodexAppThread) -> SessionSummary {
         source_size_bytes: None,
         parse_skip_count: 0,
         provider_metadata: None,
+        context_health: None,
         anatomy: None,
     }
 }

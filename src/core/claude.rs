@@ -20,12 +20,13 @@ use super::{
         stable_value_digest, text_from_value, title_case, truncate, truncate_timeline_detail,
     },
     model::{
-        CanonicalTimeline, CliTool, SessionRuntimeStatus, SessionStatus, SessionSummary,
-        SourceFidelity, SourceFidelityStatus, SourceProvenance, TimelineAttachment,
-        TimelineCostMetadata, TimelineEvent, TimelineEventMetadata, TimelineEventRawRef,
-        TimelineFileChange, TimelineKind, TimelineRuntimeMetadata, TimelineToolCall,
-        TimelineToolResult, TokenBreakdown, unknown_runtime_reason,
+        CanonicalTimeline, CliTool, ContextHealth, EvidenceConfidence, SessionRuntimeStatus,
+        SessionStatus, SessionSummary, SourceFidelity, SourceFidelityStatus, SourceProvenance,
+        TimelineAttachment, TimelineCostMetadata, TimelineEvent, TimelineEventMetadata,
+        TimelineEventRawRef, TimelineFileChange, TimelineKind, TimelineRuntimeMetadata,
+        TimelineToolCall, TimelineToolResult, TokenBreakdown, unknown_runtime_reason,
     },
+    model_context::resolve_model_context_window,
 };
 
 const CLAUDE_TOOL: CliTool = CliTool::Claude;
@@ -116,7 +117,13 @@ struct SummaryBuilder {
     cwd: Option<String>,
     updated_at: Option<String>,
     branch: Option<String>,
+    model: Option<String>,
     token_count: Option<usize>,
+    context_used_tokens: Option<usize>,
+    previous_context_used_tokens: Option<usize>,
+    compact_markers: usize,
+    derived_compact_markers: usize,
+    handoff_markers: usize,
     event_count: usize,
     malformed_lines: usize,
     summary_truncated: bool,
@@ -328,7 +335,13 @@ impl ClaudeSourceAdapter {
     }
 
     fn parse_list_summary(&self, path: &Path) -> Result<SessionSummary, AdapterError> {
-        self.parse_summary_limited(path, self.summary_line_limit)
+        let mut summary = self.parse_summary_limited(path, self.summary_line_limit)?;
+        if self.summary_line_limit.is_some() {
+            let full_summary = self.parse_summary_limited(path, None)?;
+            summary.token_count = full_summary.token_count;
+            summary.context_health = full_summary.context_health;
+        }
+        Ok(summary)
     }
 
     fn parse_summary_limited(
@@ -758,7 +771,13 @@ impl SummaryBuilder {
             cwd: None,
             updated_at: None,
             branch: None,
+            model: None,
             token_count: None,
+            context_used_tokens: None,
+            previous_context_used_tokens: None,
+            compact_markers: 0,
+            derived_compact_markers: 0,
+            handoff_markers: 0,
             event_count: 0,
             malformed_lines: 0,
             summary_truncated: false,
@@ -781,6 +800,11 @@ impl SummaryBuilder {
         if self.branch.is_none() {
             self.branch = record.git_branch.clone();
         }
+        if self.model.is_none()
+            && let Some(model) = claude_record_model(&record)
+        {
+            self.model = Some(model);
+        }
         if let Some(title) = record.ai_title.as_deref().and_then(normalized_text) {
             self.title = Some(truncate(&title, 160));
         }
@@ -788,6 +812,12 @@ impl SummaryBuilder {
         let record_type = record.record_type();
         if is_ai_outcome_record(&record) {
             self.latest_ai_outcome_error = record_is_error(&record);
+        }
+        if claude_record_has_compact_marker(record_type, &record) {
+            self.compact_markers += 1;
+        }
+        if claude_record_has_handoff_marker(&record) {
+            self.handoff_markers += 1;
         }
         if self.title.is_none()
             && record_type == "user"
@@ -803,6 +833,14 @@ impl SummaryBuilder {
             && let Some(count) = usage_token_count(&record.message)
         {
             self.token_count = Some(self.token_count.unwrap_or(0).max(count));
+            if count > 0 {
+                if context_usage_drop_indicates_compact(self.previous_context_used_tokens, count) {
+                    self.compact_markers += 1;
+                    self.derived_compact_markers += 1;
+                }
+                self.previous_context_used_tokens = Some(count);
+                self.context_used_tokens = Some(count);
+            }
         }
         self.metadata.observe(&record);
     }
@@ -861,9 +899,126 @@ impl SummaryBuilder {
             source_size_bytes: source_size_bytes(&self.path),
             parse_skip_count: self.malformed_lines,
             provider_metadata: None,
+            context_health: claude_context_health(
+                self.context_used_tokens.or(self.token_count),
+                self.model.as_deref(),
+                self.compact_markers,
+                self.derived_compact_markers,
+                self.handoff_markers,
+            ),
             anatomy: None,
         }
     }
+}
+
+fn claude_context_health(
+    used_tokens: Option<usize>,
+    model: Option<&str>,
+    compact_markers: usize,
+    derived_compact_markers: usize,
+    handoff_markers: usize,
+) -> Option<ContextHealth> {
+    let used_tokens = used_tokens.filter(|tokens| *tokens > 0);
+    let window_resolution =
+        model.and_then(|model| resolve_model_context_window(CLAUDE_TOOL, model));
+    let window_tokens = window_resolution
+        .as_ref()
+        .map(|resolution| resolution.window_tokens);
+    let quality_cliff_tokens = window_resolution
+        .as_ref()
+        .and_then(|resolution| resolution.quality_cliff_tokens);
+    let mut source = match (
+        model.filter(|model| !model.trim().is_empty()),
+        window_resolution,
+    ) {
+        (Some(model), Some(resolution)) => {
+            format!("claude usage event · model {model} · {}", resolution.source)
+        }
+        (Some(model), None) => format!("claude usage event · model {model}"),
+        (None, _) => "claude usage event".into(),
+    };
+    if derived_compact_markers > 0 {
+        source.push_str(&format!(
+            " · usage drop compact inference {derived_compact_markers}"
+        ));
+    }
+    (used_tokens.is_some() || compact_markers > 0 || handoff_markers > 0).then(|| ContextHealth {
+        used_tokens,
+        window_tokens,
+        quality_cliff_tokens,
+        compact_layers: compact_markers,
+        handoff_markers,
+        confidence: if used_tokens.is_some() {
+            EvidenceConfidence::Derived
+        } else {
+            EvidenceConfidence::Estimated
+        },
+        source,
+    })
+}
+
+fn context_usage_drop_indicates_compact(previous: Option<usize>, current: usize) -> bool {
+    let Some(previous) = previous else {
+        return false;
+    };
+    current > 0
+        && previous > current.saturating_add(10_000)
+        && current.saturating_mul(100) < previous.saturating_mul(80)
+}
+
+fn claude_record_model(record: &ClaudeRecord) -> Option<String> {
+    [
+        record.string_extra(&["model", "model_name", "modelName"]),
+        string_field(&record.message, &["model", "model_name", "modelName"]),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|model| is_real_model_name(model))
+}
+
+fn string_field(value: &Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .filter_map(|key| value.get(*key))
+        .find_map(text_from_value)
+}
+
+fn is_real_model_name(model: &str) -> bool {
+    let model = model.trim();
+    !model.is_empty() && !model.eq_ignore_ascii_case("<synthetic>") && model != "synthetic"
+}
+
+fn claude_record_has_compact_marker(record_type: &str, record: &ClaudeRecord) -> bool {
+    record_type == "summary"
+        || record_type.contains("compact")
+        || record
+            .subtype
+            .as_deref()
+            .is_some_and(|subtype| subtype.contains("compact"))
+}
+
+fn claude_record_has_handoff_marker(record: &ClaudeRecord) -> bool {
+    claude_record_text(record).is_some_and(|text| {
+        [
+            "moonbox-continuation-handoff",
+            "Handoff skill",
+            "Target CLI",
+            "handoff artifact",
+            "交接文档",
+        ]
+        .iter()
+        .any(|needle| text.contains(needle))
+    })
+}
+
+fn claude_record_text(record: &ClaudeRecord) -> Option<String> {
+    serde_json::to_string(&[
+        &record.message,
+        &record.result,
+        &record.error,
+        &record.tool_use_result,
+        &record.last_prompt,
+    ])
+    .ok()
 }
 
 fn source_size_bytes(path: &Path) -> Option<u64> {
@@ -1532,6 +1687,10 @@ mod tests {
         assert_eq!(sessions[0].cwd, "/repo");
         assert_eq!(sessions[0].branch.as_deref(), Some("main"));
         assert_eq!(sessions[0].token_count, Some(35));
+        let context_health = sessions[0].context_health.as_ref().expect("context health");
+        assert_eq!(context_health.used_tokens, Some(35));
+        assert_eq!(context_health.window_tokens, None);
+        assert_eq!(context_health.confidence, EvidenceConfidence::Derived);
         assert_eq!(sessions[0].resume_command, "claude --resume claude-real-1");
         assert_eq!(
             sessions[0].source_size_bytes,
@@ -1541,6 +1700,110 @@ mod tests {
                     .len()
             )
         );
+    }
+
+    #[test]
+    fn derives_claude_context_window_from_real_model_name() {
+        let root = test_root("model-window");
+        write_session(
+            &root,
+            "repo/claude-window.jsonl",
+            r#"{"type":"assistant","sessionId":"claude-window","timestamp":"2026-05-19T07:56:10.994Z","cwd":"/repo","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"Done"}],"usage":{"input_tokens":40000,"cache_read_input_tokens":50000,"output_tokens":3000}}}
+"#,
+        );
+
+        let sessions = ClaudeSourceAdapter::new(&root)
+            .list_sessions()
+            .expect("sessions");
+
+        let context_health = sessions[0].context_health.as_ref().expect("context health");
+        assert_eq!(context_health.used_tokens, Some(93_000));
+        assert_eq!(context_health.window_tokens, Some(200_000));
+        assert!(context_health.source.contains("claude-sonnet-4-20250514"));
+    }
+
+    #[test]
+    fn derives_claude_context_from_modern_message_usage_shape() {
+        let root = test_root("modern-usage-shape");
+        write_session(
+            &root,
+            "repo/claude-modern-usage.jsonl",
+            r#"{"type":"assistant","sessionId":"claude-modern-usage","timestamp":"2026-05-19T07:56:10.994Z","cwd":"/repo","message":{"role":"assistant","model":"gpt-5.5-2026-04-24","content":[{"type":"text","text":"Done"}],"usage":{"input_tokens":21002,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":750,"server_tool_use":{"web_search_requests":0,"web_fetch_requests":0},"service_tier":"standard","cache_creation":{"ephemeral_1h_input_tokens":0,"ephemeral_5m_input_tokens":0},"inference_geo":"","iterations":[],"speed":"standard"}}}
+"#,
+        );
+
+        let sessions = ClaudeSourceAdapter::new(&root)
+            .list_sessions()
+            .expect("sessions");
+
+        let context_health = sessions[0].context_health.as_ref().expect("context health");
+        assert_eq!(context_health.used_tokens, Some(21_752));
+        assert_eq!(context_health.window_tokens, Some(1_000_000));
+    }
+
+    #[test]
+    fn ignores_synthetic_zero_usage_after_real_claude_usage() {
+        let root = test_root("synthetic-zero-usage");
+        write_session(
+            &root,
+            "repo/claude-synthetic-zero.jsonl",
+            r#"{"type":"assistant","sessionId":"claude-synthetic-zero","timestamp":"2026-05-19T07:56:10.994Z","cwd":"/repo","message":{"role":"assistant","model":"gpt-5.5-2026-04-24","content":[{"type":"text","text":"Done"}],"usage":{"input_tokens":21002,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":750}}}
+{"type":"assistant","sessionId":"claude-synthetic-zero","timestamp":"2026-05-19T08:56:10.994Z","cwd":"/repo","error":"rate_limit","message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"API Error"}],"usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}}
+"#,
+        );
+
+        let sessions = ClaudeSourceAdapter::new(&root)
+            .list_sessions()
+            .expect("sessions");
+
+        let context_health = sessions[0].context_health.as_ref().expect("context health");
+        assert_eq!(context_health.used_tokens, Some(21_752));
+        assert_eq!(context_health.window_tokens, Some(1_000_000));
+        assert_eq!(context_health.compact_layers, 0);
+    }
+
+    #[test]
+    fn infers_claude_compact_from_context_usage_drop() {
+        let root = test_root("compact-usage-drop");
+        write_session(
+            &root,
+            "repo/claude-compact-drop.jsonl",
+            r#"{"type":"assistant","sessionId":"claude-compact-drop","timestamp":"2026-05-19T07:56:10.994Z","cwd":"/repo","message":{"role":"assistant","model":"gpt-5.5-2026-04-24","content":[{"type":"text","text":"Before compact"}],"usage":{"input_tokens":100000,"cache_read_input_tokens":10000,"output_tokens":6245}}}
+{"type":"assistant","sessionId":"claude-compact-drop","timestamp":"2026-05-19T08:56:10.994Z","cwd":"/repo","message":{"role":"assistant","model":"gpt-5.5-2026-04-24","content":[{"type":"text","text":"After compact"}],"usage":{"input_tokens":50000,"cache_read_input_tokens":5000,"output_tokens":5675}}}
+"#,
+        );
+
+        let sessions = ClaudeSourceAdapter::new(&root)
+            .list_sessions()
+            .expect("sessions");
+
+        let context_health = sessions[0].context_health.as_ref().expect("context health");
+        assert_eq!(context_health.used_tokens, Some(60_675));
+        assert_eq!(context_health.window_tokens, Some(1_000_000));
+        assert_eq!(context_health.quality_cliff_tokens, Some(500_000));
+        assert_eq!(context_health.compact_layers, 1);
+        assert_eq!(context_health.confidence, EvidenceConfidence::Derived);
+    }
+
+    #[test]
+    fn keeps_unknown_window_for_unresolved_model_name() {
+        let root = test_root("unknown-model-window");
+        write_session(
+            &root,
+            "repo/claude-unknown-window.jsonl",
+            r#"{"type":"assistant","sessionId":"claude-unknown-window","timestamp":"2026-05-19T07:56:10.994Z","cwd":"/repo","message":{"role":"assistant","model":"private-experimental-model","content":[{"type":"text","text":"Done"}],"usage":{"input_tokens":90000,"output_tokens":3000}}}
+"#,
+        );
+
+        let sessions = ClaudeSourceAdapter::new(&root)
+            .list_sessions()
+            .expect("sessions");
+
+        let context_health = sessions[0].context_health.as_ref().expect("context health");
+        assert_eq!(context_health.used_tokens, Some(93_000));
+        assert_eq!(context_health.window_tokens, None);
+        assert_eq!(context_health.quality_cliff_tokens, None);
+        assert!(context_health.source.contains("private-experimental-model"));
     }
 
     #[test]
@@ -2041,6 +2304,35 @@ not-json-after-limit"#,
                 .expect("health")
                 .contains("summary preview truncated")
         );
+    }
+
+    #[test]
+    fn list_summary_keeps_context_health_beyond_summary_line_limit() {
+        let root = test_root("summary-line-limit-context");
+        write_session(
+            &root,
+            "repo/claude-limited-context.jsonl",
+            r#"{"type":"user","sessionId":"claude-limited-context","timestamp":"2026-06-06T10:00:00.000Z","cwd":"/repo","message":{"content":"visible title"}}
+{"type":"assistant","sessionId":"claude-limited-context","timestamp":"2026-06-06T10:01:00.000Z","cwd":"/repo","message":{"role":"assistant","model":"gpt-5.5-2026-04-24","content":[{"type":"text","text":"before"}],"usage":{"input_tokens":100000,"cache_read_input_tokens":10000,"output_tokens":6245}}}
+{"type":"assistant","sessionId":"claude-limited-context","timestamp":"2026-06-06T10:02:00.000Z","cwd":"/repo","message":{"role":"assistant","model":"gpt-5.5-2026-04-24","content":[{"type":"text","text":"after"}],"usage":{"input_tokens":50000,"cache_read_input_tokens":5000,"output_tokens":5675}}}"#,
+        );
+        let adapter = ClaudeSourceAdapter::with_all_limits(&root, Some(10), None, Some(1));
+
+        let sessions = adapter.list_sessions().expect("sessions");
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].title, "visible title");
+        assert!(
+            sessions[0]
+                .health_reason
+                .as_deref()
+                .expect("health")
+                .contains("summary preview truncated")
+        );
+        let context_health = sessions[0].context_health.as_ref().expect("context health");
+        assert_eq!(context_health.used_tokens, Some(60_675));
+        assert_eq!(context_health.window_tokens, Some(1_000_000));
+        assert_eq!(context_health.compact_layers, 1);
     }
 
     fn test_root(name: &str) -> PathBuf {

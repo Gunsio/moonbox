@@ -20,12 +20,14 @@ use super::{
         truncate, truncate_timeline_detail,
     },
     model::{
-        CanonicalTimeline, CliTool, ProviderContinuationPoint, ProviderHandoffMetadata,
-        ProviderScrollContext, ProviderSearchMetadata, ProviderSessionMetadata,
-        SessionRuntimeStatus, SessionStatus, SessionSummary, SourceFidelity, SourceFidelityStatus,
-        SourceProvenance, TimelineEvent, TimelineEventMetadata, TimelineEventRawRef, TimelineKind,
-        TimelineToolCall, TokenBreakdown, unknown_runtime_reason,
+        CanonicalTimeline, CliTool, ContextHealth, EvidenceConfidence, ProviderContinuationPoint,
+        ProviderHandoffMetadata, ProviderScrollContext, ProviderSearchMetadata,
+        ProviderSessionMetadata, SessionRuntimeStatus, SessionStatus, SessionSummary,
+        SourceFidelity, SourceFidelityStatus, SourceProvenance, TimelineEvent,
+        TimelineEventMetadata, TimelineEventRawRef, TimelineKind, TimelineToolCall, TokenBreakdown,
+        unknown_runtime_reason,
     },
+    model_context::resolve_model_context_window,
 };
 
 const HERMES_TOOL: CliTool = CliTool::Hermes;
@@ -60,6 +62,7 @@ struct HermesSessionRow {
     handoff_platform: Option<String>,
     handoff_error: Option<String>,
     rewind_count: usize,
+    compact_count: usize,
     archived: bool,
     active_message_count: usize,
     preview: String,
@@ -421,6 +424,11 @@ impl HermesSourceAdapter {
             source_size_bytes: None,
             parse_skip_count: 0,
             provider_metadata: Some(provider_metadata),
+            context_health: hermes_context_health(
+                token_count,
+                row.model.as_deref(),
+                row.compact_count,
+            ),
             anatomy: None,
         }
     }
@@ -679,6 +687,7 @@ fn session_select_sql(
         {handoff_platform},
         {handoff_error},
         {rewind_count} as rewind_count,
+        coalesce((select count(*) from messages m where m.session_id = s.id and {message_active} and {message_role} in ('summary', 'compact')), 0) as compact_count,
         {archived} as archived,
         coalesce((select count(*) from messages m where m.session_id = s.id and {message_active}), 0) as active_message_count,
         coalesce(
@@ -744,9 +753,10 @@ fn session_row(row: &Row<'_>) -> rusqlite::Result<HermesSessionRow> {
         handoff_platform: row.get(19)?,
         handoff_error: row.get(20)?,
         rewind_count: integer(row, 21)?,
-        archived: row.get(22)?,
-        active_message_count: integer(row, 23)?,
-        preview: row.get(24)?,
+        compact_count: integer(row, 22)?,
+        archived: row.get(23)?,
+        active_message_count: integer(row, 24)?,
+        preview: row.get(25)?,
     })
 }
 
@@ -1005,6 +1015,47 @@ fn total_tokens(row: &HermesSessionRow) -> Option<usize> {
         .checked_add(row.cache_write_tokens)?
         .checked_add(row.reasoning_tokens)
         .filter(|tokens| *tokens > 0)
+}
+
+fn hermes_context_health(
+    token_count: Option<usize>,
+    model: Option<&str>,
+    compact_count: usize,
+) -> Option<ContextHealth> {
+    let used_tokens = token_count.filter(|tokens| *tokens > 0);
+    let window_resolution =
+        model.and_then(|model| resolve_model_context_window(HERMES_TOOL, model));
+    let window_tokens = window_resolution
+        .as_ref()
+        .map(|resolution| resolution.window_tokens);
+    let quality_cliff_tokens = window_resolution
+        .as_ref()
+        .and_then(|resolution| resolution.quality_cliff_tokens);
+    (used_tokens.is_some() || window_tokens.is_some() || compact_count > 0).then(|| {
+        let source = match (
+            model.filter(|model| !model.trim().is_empty()),
+            &window_resolution,
+        ) {
+            (Some(model), Some(resolution)) => {
+                format!(
+                    "hermes sqlite session · model {model} · {}",
+                    resolution.source
+                )
+            }
+            (Some(model), None) => format!("hermes sqlite session · model {model}"),
+            (None, _) => "hermes sqlite session".into(),
+        };
+
+        ContextHealth {
+            used_tokens,
+            window_tokens,
+            quality_cliff_tokens,
+            compact_layers: compact_count,
+            handoff_markers: 0,
+            confidence: EvidenceConfidence::Derived,
+            source,
+        }
+    })
 }
 
 fn session_status(
@@ -1412,6 +1463,18 @@ mod tests {
     fn lists_hermes_sessions_from_sqlite_store() {
         let root = test_root("list");
         write_state_db(&root);
+        Connection::open(root.join("state.db"))
+            .expect("db")
+            .execute(
+                "insert into messages (session_id, role, content, timestamp, active) values (?1, ?2, ?3, ?4, 1)",
+                params![
+                    "hermes-feishu",
+                    "compact",
+                    "Conversation summary",
+                    1780641496.5
+                ],
+            )
+            .expect("compact message");
         write_sessions_json(
             &root,
             r#"{
@@ -1447,7 +1510,11 @@ mod tests {
             metadata.session_key.as_deref(),
             Some("agent:main:feishu:dm:chat")
         );
-        assert_eq!(metadata.model.as_deref(), Some("claude-sonnet"));
+        assert_eq!(metadata.model.as_deref(), Some("claude-sonnet-4-6"));
+        let context_health = sessions[0].context_health.as_ref().expect("context health");
+        assert_eq!(context_health.used_tokens, Some(88));
+        assert_eq!(context_health.window_tokens, Some(1_000_000));
+        assert_eq!(context_health.compact_layers, 1);
         assert_eq!(metadata.parent_session_id.as_deref(), Some("parent-feishu"));
         assert_eq!(metadata.archived, Some(false));
         assert_eq!(
@@ -1568,6 +1635,17 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn hermes_context_health_keeps_known_window_without_usage() {
+        let context_health =
+            hermes_context_health(None, Some("claude-sonnet-4-6"), 0).expect("context health");
+
+        assert_eq!(context_health.used_tokens, None);
+        assert_eq!(context_health.window_tokens, Some(1_000_000));
+        assert_eq!(context_health.compact_layers, 0);
+        assert!(context_health.source.contains("claude-sonnet-4-6"));
     }
 
     #[test]
@@ -1722,7 +1800,7 @@ mod tests {
                 reasoning_tokens, cwd, title, handoff_state, handoff_platform, handoff_error, archived
             ) values
                 ('hermes-cli', 'cli', 'local-user', 'gpt-5', '{"temperature":0.2}', 'CLI system prompt', null, 1780640474, 2, 0, 10, 5, 0, 0, 0, '/repo', 'CLI bugfix', null, null, null, 0),
-                ('hermes-feishu', 'feishu', 'ou_feishu', 'claude-sonnet', '{"mode":"ops"}', 'Feishu system prompt snapshot', 'parent-feishu', 1780641494, 5, 1, 0, 0, 0, 0, 0, null, null, 'ready', 'feishu', null, 0),
+                ('hermes-feishu', 'feishu', 'ou_feishu', 'claude-sonnet-4-6', '{"mode":"ops"}', 'Feishu system prompt snapshot', 'parent-feishu', 1780641494, 5, 1, 0, 0, 0, 0, 0, null, null, 'ready', 'feishu', null, 0),
                 ('hermes-discord-archived', 'discord', 'discord-user', 'gpt-5', null, null, null, 1780649999, 1, 0, 1, 1, 0, 0, 0, null, 'Archived Discord', null, null, null, 1);
             insert into messages (session_id, role, content, timestamp, active) values
                 ('hermes-cli', 'user', 'Fix CLI state', 1780640475, 1),

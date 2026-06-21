@@ -23,6 +23,7 @@ pub mod launch_ledger;
 pub mod launcher;
 pub mod local_jsonl;
 pub mod model;
+pub mod model_context;
 pub mod redaction;
 pub mod replay_eval;
 pub mod setup;

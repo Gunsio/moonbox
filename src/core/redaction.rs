@@ -259,6 +259,9 @@ fn redact_session_summary(
     session.provider_metadata = session
         .provider_metadata
         .map(|metadata| redact_provider_metadata(metadata, policy, stats));
+    if let Some(health) = session.context_health.as_mut() {
+        health.source = redact_text(&health.source, policy, stats);
+    }
     session
 }
 
@@ -1042,6 +1045,7 @@ mod tests {
                     }],
                     ..ProviderSessionMetadata::default()
                 }),
+                context_health: None,
                 anatomy: None,
             },
             rewind_event_id: "evt-001".into(),

@@ -678,6 +678,7 @@ fn fallback_session(source: CliTool) -> SessionSummary {
         source_size_bytes: None,
         parse_skip_count: 0,
         provider_metadata: None,
+        context_health: None,
         anatomy: None,
     }
 }

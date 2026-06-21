@@ -19,14 +19,15 @@ use crate::{
     core::image_preview::{ImagePreviewStatus, PreviewCell, PreviewRgb, TimelineImagePreview},
     core::model::{
         AnatomyMetric, CliTool, CompilerPresetInfo, CompilerPresetKind, CompilerPresetStatus,
-        LaunchValidationState, SessionAnatomyStatus, SessionRuntimeStatus, SessionStatus,
-        SourceAdapterReport, SourceFidelityStatus, SourceProvenance, TimelineAttachment,
-        TimelineEvent, TimelineKind, TimelineToolResult, VerificationReport, VerificationStatus,
-        WorkCapsule,
+        ContextHealth, LaunchValidationState, SessionRuntimeStatus, SessionStatus,
+        SourceProvenance, TimelineAttachment, TimelineEvent, TimelineKind, TimelineToolResult,
+        VerificationReport, VerificationStatus, WorkCapsule,
     },
     core::{
         actions::{SessionActionAvailability, SessionAvailableAction, SessionAvailableActionKind},
-        compiler, handoff, hooks,
+        compiler,
+        config::UiLanguage,
+        handoff, hooks,
         lark::LarkCliState,
     },
 };
@@ -811,7 +812,7 @@ fn session_list_secondary_line(
         Style::default().fg(theme::muted())
     };
     spans.push(Span::styled(
-        session_inventory_metric(session),
+        session_list_metric_for_width(session, usize::from(width.saturating_sub(8))),
         metric_style,
     ));
     spans.push(Span::styled(" · ", Style::default().fg(theme::border())));
@@ -882,7 +883,7 @@ fn session_list_secondary_at(
 ) -> String {
     let updated = relative_time_label(&session.updated_at, now_unix_seconds)
         .unwrap_or_else(|| session.updated.clone());
-    let metric = session_inventory_metric(session);
+    let metric = session_list_metric(session);
     match session
         .branch
         .as_deref()
@@ -952,22 +953,222 @@ fn session_inventory_metric(session: &crate::core::model::SessionSummary) -> Str
     parts.join(" · ")
 }
 
+fn session_list_metric(session: &crate::core::model::SessionSummary) -> String {
+    session_list_metric_for_width(session, usize::MAX)
+}
+
+fn session_list_metric_for_width(
+    session: &crate::core::model::SessionSummary,
+    width: usize,
+) -> String {
+    let inventory = session_inventory_metric(session);
+    let Some(context) = session
+        .context_health
+        .as_ref()
+        .and_then(|health| context_health_metric_for_width(health, width))
+    else {
+        return inventory;
+    };
+
+    if inventory == "size unknown" || inventory == "timeline indexed" {
+        context
+    } else {
+        format!("{inventory} · {context}")
+    }
+}
+
+#[cfg(test)]
+fn context_health_metric(health: &ContextHealth) -> Option<String> {
+    context_health_metric_for_width(health, usize::MAX)
+}
+
+fn context_health_metric_for_width(health: &ContextHealth, _width: usize) -> Option<String> {
+    if health.used_tokens.is_none()
+        && health.window_tokens.is_none()
+        && health.compact_layers == 0
+        && health.handoff_markers == 0
+    {
+        return None;
+    }
+
+    let text = if let (Some(used), Some(window)) = (health.used_tokens, health.window_tokens) {
+        let pct = context_percent(used, window)?;
+        format!("{pct}%")
+    } else if let Some(used) = health.used_tokens {
+        format!("{}/?", format_token_count(Some(used)))
+    } else if let Some(window) = health.window_tokens {
+        format!("?/{}", format_token_count(Some(window)))
+    } else {
+        return None;
+    };
+
+    Some(text)
+}
+
+fn context_health_bar_line(language: UiLanguage, health: &ContextHealth) -> Option<Line<'static>> {
+    let (used, window) = (health.used_tokens?, health.window_tokens?);
+    let pct = context_percent(used, window)?;
+    let filled = context_bar_filled_cells(used, window);
+    let cliff = context_bar_cliff_cell(health.quality_cliff_tokens, window);
+    let status_style = Style::default()
+        .fg(context_health_style(health))
+        .add_modifier(Modifier::BOLD);
+    let empty_style = Style::default().fg(theme::muted());
+    let mut spans = vec![
+        Span::styled(
+            format!("{}: ", localized(language, "Context", "上下文")),
+            Style::default().fg(theme::muted()),
+        ),
+        Span::styled(
+            format!(
+                "{} / {} · {pct}% ",
+                format_token_count(Some(used)),
+                format_token_count(Some(window))
+            ),
+            status_style,
+        ),
+        Span::styled("▐", Style::default().fg(theme::border())),
+    ];
+    for index in 0..CONTEXT_BAR_WIDTH {
+        if Some(index) == cliff {
+            spans.push(Span::styled("┃", Style::default().fg(theme::gold())));
+        } else if index < filled {
+            spans.push(Span::styled("█", status_style));
+        } else {
+            spans.push(Span::styled("░", empty_style));
+        }
+    }
+    spans.push(Span::styled("▌", Style::default().fg(theme::border())));
+    Some(Line::from(spans))
+}
+
+fn context_percent(used: usize, window: usize) -> Option<usize> {
+    (window > 0).then(|| ((used as f64 / window as f64) * 100.0).round() as usize)
+}
+
+const CONTEXT_BAR_WIDTH: usize = 8;
+
+fn context_bar_filled_cells(used: usize, window: usize) -> usize {
+    if window == 0 {
+        0
+    } else {
+        ((used.min(window) * CONTEXT_BAR_WIDTH) + window / 2) / window
+    }
+}
+
+fn context_bar_cliff_cell(cliff: Option<usize>, window: usize) -> Option<usize> {
+    cliff
+        .filter(|threshold| window > 0 && *threshold < window)
+        .map(|threshold| ((threshold * CONTEXT_BAR_WIDTH) + window / 2) / window)
+        .filter(|index| *index < CONTEXT_BAR_WIDTH)
+}
+
+fn session_context_health_lines(
+    language: UiLanguage,
+    session: &crate::core::model::SessionSummary,
+) -> Vec<Line<'static>> {
+    let Some(health) = session.context_health.as_ref() else {
+        return Vec::new();
+    };
+    if health.used_tokens.is_none()
+        && health.window_tokens.is_none()
+        && health.compact_layers == 0
+        && health.handoff_markers == 0
+    {
+        return Vec::new();
+    }
+
+    let usage = match (health.used_tokens, health.window_tokens) {
+        (Some(_), Some(_)) => None,
+        (Some(used), None) => Some(format!(
+            "{} used · window unavailable",
+            format_token_count(Some(used))
+        )),
+        (None, Some(window)) => Some(format!(
+            "usage unavailable / {} window",
+            format_token_count(Some(window))
+        )),
+        (None, None) => Some("unknown".into()),
+    };
+    let threshold = health
+        .quality_cliff_tokens
+        .map(|tokens| format!("{} · estimated", format_token_count(Some(tokens))));
+    let source = if health.source.is_empty() {
+        health.confidence.to_string()
+    } else {
+        review_snippet(&format!("{} · {}", health.source, health.confidence), 96)
+    };
+
+    let mut lines = Vec::new();
+    if let Some(bar) = context_health_bar_line(language, health) {
+        lines.push(bar);
+    }
+    if let Some(usage) = usage {
+        lines.push(metadata_line(
+            localized(language, "Context", "上下文"),
+            usage,
+            Style::default().fg(theme::text()),
+        ));
+    }
+    if let Some(threshold) = threshold {
+        lines.push(metadata_line(
+            localized(language, "Quality Cliff", "质量线"),
+            threshold,
+            Style::default().fg(theme::muted()),
+        ));
+    }
+    lines.extend([
+        metadata_line(
+            localized(language, "Compacts", "压缩"),
+            context_compact_summary(language, health),
+            Style::default().fg(theme::text()),
+        ),
+        metadata_line(
+            localized(language, "Evidence", "证据"),
+            source,
+            Style::default().fg(theme::muted()),
+        ),
+    ]);
+    lines
+}
+
+fn context_compact_summary(language: UiLanguage, health: &ContextHealth) -> String {
+    let compact = match health.compact_layers {
+        0 => localized(language, "none", "无").into(),
+        count => format!("{count}"),
+    };
+    if health.handoff_markers > 0 {
+        format!(
+            "{compact} · {} {}",
+            localized(language, "handoff", "handoff"),
+            health.handoff_markers
+        )
+    } else {
+        compact
+    }
+}
+
+fn context_health_style(health: &ContextHealth) -> Color {
+    match (health.used_tokens, health.window_tokens) {
+        (Some(used), Some(window)) if window > 0 && used >= window => theme::red(),
+        (Some(used), Some(_))
+            if health
+                .quality_cliff_tokens
+                .is_some_and(|cliff| used >= cliff) =>
+        {
+            theme::gold()
+        }
+        (Some(_), Some(_)) => theme::green(),
+        (Some(_), None) => theme::gold(),
+        _ => theme::muted(),
+    }
+}
+
 fn session_portrait_detail(app: &App, session: &crate::core::model::SessionSummary) -> String {
     if let Some(counts) = hydrated_session_shape(app, session) {
         format!("{} · cached timeline", session_shape_count_text(counts),)
     } else {
-        format!(
-            "{} · indexed summary only",
-            session_inventory_metric(session)
-        )
-    }
-}
-
-fn session_portrait_summary(app: &App, session: &crate::core::model::SessionSummary) -> String {
-    if let Some(counts) = hydrated_session_shape(app, session) {
-        session_shape_count_text(counts)
-    } else {
-        session_inventory_metric(session)
+        format!("{} · indexed summary only", session_list_metric(session))
     }
 }
 
@@ -1155,10 +1356,6 @@ fn format_token_count(token_count: Option<usize>) -> String {
     }
 }
 
-fn format_source_size_opt(bytes: Option<u64>) -> String {
-    bytes.map(format_source_size).unwrap_or_else(|| "-".into())
-}
-
 fn format_source_size(bytes: u64) -> String {
     const KIB: f64 = 1024.0;
     const MIB: f64 = KIB * 1024.0;
@@ -1180,18 +1377,6 @@ fn session_health_style(status: SessionStatus) -> Style {
         SessionStatus::Healthy => Style::default().fg(theme::green()),
         SessionStatus::Warning => Style::default().fg(theme::gold()),
         SessionStatus::Failed => Style::default()
-            .fg(theme::red())
-            .add_modifier(Modifier::BOLD),
-    }
-}
-
-fn source_provenance_style(provenance: SourceProvenance) -> Style {
-    match provenance {
-        SourceProvenance::Real => Style::default()
-            .fg(theme::green())
-            .add_modifier(Modifier::BOLD),
-        SourceProvenance::Fixture => Style::default().fg(theme::blue()),
-        SourceProvenance::Missing => Style::default()
             .fg(theme::red())
             .add_modifier(Modifier::BOLD),
     }
@@ -2338,7 +2523,7 @@ fn render_zoomed_capsule(frame: &mut Frame, area: Rect, app: &App, capsule: &Wor
     if inner.height < 18 || inner.width < 82 {
         let mut lines = session_detail_lines(app, area.width);
         if let Some(session) = app.current_session() {
-            lines.extend(session_anatomy_zoom_lines(session));
+            lines.extend(session_anatomy_zoom_lines(language, session));
         }
         lines.extend(compact_capsule_lines(capsule));
         frame.render_widget(
@@ -2370,26 +2555,38 @@ fn render_zoomed_capsule(frame: &mut Frame, area: Rect, app: &App, capsule: &Wor
 
     frame.render_widget(
         Paragraph::new(overview_lines)
-            .block(panel_block(" Overview ", false))
+            .block(panel_block(
+                localized(language, " Overview ", " 概览 "),
+                false,
+            ))
             .wrap(Wrap { trim: true }),
         rows[0],
     );
     frame.render_widget(
         Paragraph::new(zoomed_anatomy_column_lines(app))
-            .block(panel_block(" Session Anatomy ", false))
+            .block(panel_block(
+                localized(language, " Session Anatomy ", " 会话结构 "),
+                false,
+            ))
             .scroll((app.capsule_scroll, 0))
             .wrap(Wrap { trim: true }),
         body_cols[0],
     );
     frame.render_widget(
         Paragraph::new(zoomed_handoff_column_lines(app, capsule))
-            .block(panel_block(" Handoff ", false))
+            .block(panel_block(
+                localized(language, " Handoff ", " Handoff "),
+                false,
+            ))
             .wrap(Wrap { trim: true }),
         right_rows[0],
     );
     frame.render_widget(
         Paragraph::new(session_path_footer_lines(app, right_rows[1].width))
-            .block(panel_block(" Location ", false))
+            .block(panel_block(
+                localized(language, " Location ", " 位置 "),
+                false,
+            ))
             .wrap(Wrap { trim: true }),
         right_rows[1],
     );
@@ -2400,10 +2597,11 @@ fn session_overview_lines(app: &App, width: u16) -> Vec<Line<'static>> {
 }
 
 fn zoomed_anatomy_column_lines(app: &App) -> Vec<Line<'static>> {
+    let language = app.effective_language();
     let Some(session) = app.current_session() else {
         return Vec::new();
     };
-    session_anatomy_zoom_lines(session)
+    session_anatomy_zoom_lines(language, session)
 }
 
 fn zoomed_handoff_column_lines(app: &App, capsule: &WorkCapsule) -> Vec<Line<'static>> {
@@ -2521,7 +2719,6 @@ fn session_detail_lines(app: &App, width: u16) -> Vec<Line<'static>> {
         ];
     };
 
-    let path_width = session_path_width(width, app.zoomed_focus == Some(Focus::Capsule));
     let mut lines = vec![
         Line::from(Span::styled(
             i18n::text(language, Text::RealSessionMetadata),
@@ -2536,136 +2733,87 @@ fn session_detail_lines(app: &App, width: u16) -> Vec<Line<'static>> {
         ),
         metadata_line(
             localized(language, "Source", "来源"),
-            format!("{} · {}", session.cli, session.source_provenance),
-            source_provenance_style(session.source_provenance),
-        ),
-        source_fidelity_line(app, session.cli),
-        metadata_line(
-            localized(language, "Portrait", "画像"),
-            session_portrait_summary(app, session),
-            Style::default().fg(theme::text()),
+            session.cli.to_string(),
+            Style::default()
+                .fg(source_tool_color(session.cli))
+                .add_modifier(Modifier::BOLD),
         ),
     ];
 
-    if !app.selected_session_context_loaded() {
-        let context_detail = if app.selected_session_timeline_loaded() {
-            localized(
-                language,
-                "timeline preview loaded; Review generates handoff",
-                "timeline 预览已加载；Review 才生成 handoff",
-            )
-        } else if app.is_session_preview_pending() {
+    if app.is_session_preview_pending() {
+        lines.push(metadata_line(
+            localized(language, "Context", "上下文"),
             localized(
                 language,
                 "loading timeline preview",
                 "正在加载 timeline 预览",
-            )
-        } else {
-            localized(
-                language,
-                "inventory only; preview pending",
-                "仅 inventory；预览待加载",
-            )
-        };
-        lines.push(metadata_line(
-            localized(language, "Context", "上下文"),
-            context_detail,
+            ),
             Style::default().fg(theme::gold()),
         ));
     }
 
-    lines.extend(session_anatomy_summary_lines(session));
+    lines.extend(session_context_health_lines(language, session));
 
-    lines.extend([
-        metadata_line(
-            localized(language, "Updated", "更新时间"),
-            session.updated.clone(),
-            Style::default().fg(theme::text()),
-        ),
-        metadata_line(
+    lines.push(metadata_line(
+        localized(language, "Updated", "更新时间"),
+        session.updated.clone(),
+        Style::default().fg(theme::text()),
+    ));
+    if session.runtime_status != SessionRuntimeStatus::Unknown {
+        lines.push(metadata_line(
             "Runtime",
             session_runtime_detail(session),
             session_runtime_style(session.runtime_status),
-        ),
-        metadata_line(
-            i18n::text(language, Text::Cwd),
-            compact_path(&session.cwd, path_width),
-            Style::default().fg(theme::text()),
-        ),
-        metadata_line(
+        ));
+    }
+    lines.push(metadata_line(
+        i18n::text(language, Text::Cwd),
+        compact_path(&session.cwd, session_path_width(width, false)),
+        Style::default().fg(theme::text()),
+    ));
+    if let Some(branch) = session
+        .branch
+        .as_deref()
+        .filter(|branch| !branch.is_empty())
+    {
+        lines.push(metadata_line(
             localized(language, "Branch", "分支"),
-            session.branch.as_deref().unwrap_or("-").to_string(),
+            branch.to_string(),
             Style::default().fg(theme::text()),
-        ),
-        metadata_line(
-            i18n::text(language, Text::TimelineItems),
-            session.event_count.to_string(),
-            Style::default().fg(theme::muted()),
-        ),
-        metadata_line(
-            i18n::text(language, Text::Tokens),
-            format_token_count(session.token_count),
-            Style::default().fg(theme::text()),
-        ),
-        metadata_line(
-            i18n::text(language, Text::RawSize),
-            format_source_size_opt(session.source_size_bytes),
-            Style::default().fg(theme::muted()),
-        ),
-        metadata_line(
+        ));
+    }
+    if session.status != SessionStatus::Healthy || session.parse_skip_count > 0 {
+        lines.push(metadata_line(
             i18n::text(language, Text::SourceHealth),
             session_health_detail(session),
             session_health_style(session.status),
-        ),
-    ]);
-    if let Some(path) = &session.source_path {
-        lines.push(metadata_line(
-            i18n::text(language, Text::Path),
-            compact_path(path, path_width.saturating_add(18)),
-            Style::default().fg(theme::muted()),
         ));
+    }
+    if session.context_health.is_none() {
+        lines.extend(session_anatomy_summary_lines(language, session));
     }
     lines
 }
 
 fn session_anatomy_summary_lines(
+    language: UiLanguage,
     session: &crate::core::model::SessionSummary,
 ) -> Vec<Line<'static>> {
     let Some(anatomy) = session.anatomy.as_ref() else {
         return Vec::new();
     };
 
-    let mut lines = vec![metadata_line(
-        "Anatomy",
-        anatomy_status_text(anatomy.status, anatomy.sampled),
-        anatomy_status_style(anatomy.status),
-    )];
+    let mut lines = Vec::new();
     if let Some(compact) = &anatomy.compact {
         lines.push(metadata_line(
-            "Context Window",
+            localized(language, "Context Window", "上下文窗口"),
             format!(
-                "{} · {} after compact",
+                "{} · {}{}",
                 format_source_size(compact.tail_bytes),
-                compact.tail_lines
+                plural_rows(language, compact.tail_lines),
+                localized(language, " after compact", " 在压缩后")
             ),
             Style::default().fg(theme::gold()),
-        ));
-    } else if anatomy.status != SessionAnatomyStatus::Missing {
-        lines.push(metadata_line(
-            "Context Window",
-            "no compact boundary in analyzed scope",
-            Style::default().fg(theme::muted()),
-        ));
-    }
-    if let Some(signal) = anatomy
-        .value_signals
-        .iter()
-        .find(|signal| signal.group == "Trust")
-    {
-        lines.push(metadata_line(
-            "Trust",
-            format!("{} · {}", signal.value, review_snippet(&signal.detail, 72)),
-            anatomy_status_style(anatomy.status),
         ));
     }
     if let Some(metric) = anatomy
@@ -2674,69 +2822,98 @@ fn session_anatomy_summary_lines(
         .find(|metric| metric.label == "control:skill")
     {
         lines.push(metadata_line(
-            "Skill Usage",
-            control_block_count(metric.count),
+            localized(language, "Skill Usage", "Skill 使用"),
+            control_block_count(language, metric.count),
             Style::default().fg(theme::cyan()),
         ));
     }
     lines
 }
 
-fn session_anatomy_zoom_lines(session: &crate::core::model::SessionSummary) -> Vec<Line<'static>> {
+fn session_anatomy_zoom_lines(
+    language: UiLanguage,
+    session: &crate::core::model::SessionSummary,
+) -> Vec<Line<'static>> {
     let mut lines = vec![Line::raw("")];
     let Some(anatomy) = session.anatomy.as_ref() else {
         lines.push(Line::from(Span::styled(
-            "Session Anatomy",
+            localized(language, "Session Anatomy", "会话结构"),
             Style::default()
                 .fg(theme::blue())
                 .add_modifier(Modifier::BOLD),
         )));
         lines.push(Line::from(Span::styled(
-            "No anatomy has been loaded for this session yet.",
+            localized(
+                language,
+                "No anatomy has been loaded for this session yet.",
+                "当前 session 尚未加载结构分析。",
+            ),
             Style::default().fg(theme::muted()),
         )));
         return lines;
     };
 
     lines.push(Line::from(Span::styled(
-        "Session Anatomy",
+        localized(language, "Session Anatomy", "会话结构"),
         Style::default()
             .fg(theme::blue())
             .add_modifier(Modifier::BOLD),
     )));
     lines.push(review_label_line(
-        "Scope",
+        localized(language, "Scope", "范围"),
         format!(
-            "{} · {} analyzed{}",
+            "{} · {}{}",
             anatomy.scan_scope,
             format_source_size(anatomy.analyzed_bytes),
-            if anatomy.sampled { " · sampled" } else { "" }
+            if anatomy.sampled {
+                localized(language, " analyzed · sampled", " 已分析 · 抽样")
+            } else {
+                localized(language, " analyzed", " 已分析")
+            }
         ),
         theme::cyan(),
     ));
     if let Some(lines_count) = anatomy.total_lines {
         lines.push(review_label_line(
-            "Rows",
+            localized(language, "Rows", "行数"),
             format!(
-                "{lines_count} parsed · {} malformed",
-                anatomy.malformed_lines
+                "{} · {}",
+                parsed_rows(language, lines_count),
+                anatomy
+                    .malformed_lines
+                    .checked_sub(0)
+                    .map(|count| malformed_rows(language, count))
+                    .unwrap_or_else(|| malformed_rows(language, anatomy.malformed_lines))
             ),
             theme::muted(),
         ));
     } else {
         lines.push(review_label_line(
-            "Rows",
-            format!("sample parsed · {} malformed", anatomy.malformed_lines),
+            localized(language, "Rows", "行数"),
+            format!(
+                "{} · {}",
+                localized(language, "sample parsed", "已解析抽样"),
+                malformed_rows(language, anatomy.malformed_lines)
+            ),
             theme::muted(),
         ));
     }
 
     lines.push(Line::raw(""));
-    lines.push(section_header("Value Signals"));
+    lines.push(section_header(localized(
+        language,
+        "Value Signals",
+        "价值信号",
+    )));
     for signal in &anatomy.value_signals {
         lines.push(Line::from(vec![
             Span::styled(
-                format!("{}. {} / {}: ", signal.rank, signal.group, signal.label),
+                format!(
+                    "{}. {} / {}: ",
+                    signal.rank,
+                    anatomy_signal_label(language, &signal.group),
+                    anatomy_signal_label(language, &signal.label)
+                ),
                 Style::default()
                     .fg(value_signal_color(signal.rank))
                     .add_modifier(Modifier::BOLD),
@@ -2753,33 +2930,60 @@ fn session_anatomy_zoom_lines(session: &crate::core::model::SessionSummary) -> V
 
     if let Some(compact) = &anatomy.compact {
         lines.push(Line::raw(""));
-        lines.push(section_header("Compact Frontier"));
+        lines.push(section_header(localized(
+            language,
+            "Compact Frontier",
+            "压缩边界",
+        )));
         lines.push(review_label_line(
-            "Boundary",
+            localized(language, "Boundary", "边界"),
             match compact.line_number {
-                Some(line) => format!("{} at line {line}", compact.label),
-                None => format!("{} in analyzed sample", compact.label),
+                Some(line) => format!(
+                    "{} {} {line}",
+                    compact.label,
+                    localized(language, "at line", "位于行")
+                ),
+                None => format!(
+                    "{} {}",
+                    compact.label,
+                    localized(language, "in analyzed sample", "位于分析抽样")
+                ),
             },
             theme::gold(),
         ));
         lines.push(review_label_line(
-            "Active Tail",
+            localized(language, "Active Tail", "活跃尾部"),
             format!(
                 "{} · {}",
                 format_source_size(compact.tail_bytes),
-                plural_rows(compact.tail_lines)
+                plural_rows(language, compact.tail_lines)
             ),
             theme::gold(),
         ));
     }
 
-    append_metric_section(&mut lines, "Size Profile", &anatomy.size_profile);
-    append_metric_section(&mut lines, "Event Profile", &anatomy.event_profile);
-    append_metric_section(&mut lines, "Content Profile", &anatomy.content_profile);
+    append_metric_section(
+        language,
+        &mut lines,
+        localized(language, "Size Profile", "大小分布"),
+        &anatomy.size_profile,
+    );
+    append_metric_section(
+        language,
+        &mut lines,
+        localized(language, "Event Profile", "事件分布"),
+        &anatomy.event_profile,
+    );
+    append_metric_section(
+        language,
+        &mut lines,
+        localized(language, "Content Profile", "内容分布"),
+        &anatomy.content_profile,
+    );
 
     if !anatomy.sidecars.is_empty() {
         lines.push(Line::raw(""));
-        lines.push(section_header("Sidecars"));
+        lines.push(section_header(localized(language, "Sidecars", "附属文件")));
         for sidecar in &anatomy.sidecars {
             lines.push(Line::from(vec![
                 Span::styled(
@@ -2792,7 +2996,7 @@ fn session_anatomy_zoom_lines(session: &crate::core::model::SessionSummary) -> V
                     format!(
                         "{} · {}",
                         format_source_size(sidecar.bytes),
-                        plural_files(sidecar.file_count)
+                        plural_files(language, sidecar.file_count)
                     ),
                     Style::default().fg(theme::text()),
                 ),
@@ -2802,7 +3006,7 @@ fn session_anatomy_zoom_lines(session: &crate::core::model::SessionSummary) -> V
 
     if !anatomy.notes.is_empty() {
         lines.push(Line::raw(""));
-        lines.push(section_header("Notes"));
+        lines.push(section_header(localized(language, "Notes", "备注")));
         for note in &anatomy.notes {
             lines.push(Line::from(Span::styled(
                 format!("- {}", review_snippet(note, 128)),
@@ -2815,6 +3019,7 @@ fn session_anatomy_zoom_lines(session: &crate::core::model::SessionSummary) -> V
 }
 
 fn append_metric_section(
+    language: UiLanguage,
     lines: &mut Vec<Line<'static>>,
     title: &'static str,
     metrics: &[AnatomyMetric],
@@ -2823,7 +3028,11 @@ fn append_metric_section(
     lines.push(section_header(title));
     if metrics.is_empty() {
         lines.push(Line::from(Span::styled(
-            "No rows in analyzed scope.",
+            localized(
+                language,
+                "No rows in analyzed scope.",
+                "分析范围内没有记录。",
+            ),
             Style::default().fg(theme::muted()),
         )));
         return;
@@ -2840,7 +3049,7 @@ fn append_metric_section(
                 format!(
                     "{} · {}",
                     format_source_size(metric.bytes),
-                    plural_rows(metric.count)
+                    plural_rows(language, metric.count)
                 ),
                 Style::default().fg(theme::text()),
             ),
@@ -2857,31 +3066,6 @@ fn section_header(title: &'static str) -> Line<'static> {
     ))
 }
 
-fn anatomy_status_text(status: SessionAnatomyStatus, sampled: bool) -> String {
-    let label = match status {
-        SessionAnatomyStatus::Missing => "missing",
-        SessionAnatomyStatus::Ready => "ready",
-        SessionAnatomyStatus::Partial => "partial",
-        SessionAnatomyStatus::Failed => "failed",
-    };
-    if sampled {
-        format!("{label} · tail sampled")
-    } else {
-        label.into()
-    }
-}
-
-fn anatomy_status_style(status: SessionAnatomyStatus) -> Style {
-    match status {
-        SessionAnatomyStatus::Ready => Style::default().fg(theme::green()),
-        SessionAnatomyStatus::Partial => Style::default().fg(theme::gold()),
-        SessionAnatomyStatus::Missing => Style::default().fg(theme::muted()),
-        SessionAnatomyStatus::Failed => Style::default()
-            .fg(theme::red())
-            .add_modifier(Modifier::BOLD),
-    }
-}
-
 fn value_signal_color(rank: u8) -> Color {
     match rank {
         1 => theme::gold(),
@@ -2891,73 +3075,61 @@ fn value_signal_color(rank: u8) -> Color {
     }
 }
 
-fn plural_rows(count: usize) -> String {
-    if count == 1 {
-        "1 row".into()
-    } else {
-        format!("{count} rows")
+fn plural_rows(language: UiLanguage, count: usize) -> String {
+    match language {
+        UiLanguage::English if count == 1 => "1 row".into(),
+        UiLanguage::English => format!("{count} rows"),
+        UiLanguage::ZhHans => format!("{count} 行"),
     }
 }
 
-fn control_block_count(count: usize) -> String {
-    if count == 1 {
-        "1 control block".into()
-    } else {
-        format!("{count} control blocks")
+fn parsed_rows(language: UiLanguage, count: usize) -> String {
+    match language {
+        UiLanguage::English if count == 1 => "1 row parsed".into(),
+        UiLanguage::English => format!("{count} rows parsed"),
+        UiLanguage::ZhHans => format!("已解析 {count} 行"),
     }
 }
 
-fn plural_files(count: usize) -> String {
-    if count == 1 {
-        "1 file".into()
-    } else {
-        format!("{count} files")
+fn malformed_rows(language: UiLanguage, count: usize) -> String {
+    match language {
+        UiLanguage::English if count == 1 => "1 malformed".into(),
+        UiLanguage::English => format!("{count} malformed"),
+        UiLanguage::ZhHans => format!("{count} 行异常"),
     }
 }
 
-fn source_fidelity_line(app: &App, cli: CliTool) -> Line<'static> {
-    let language = app.effective_language();
-    let Some(report) = source_adapter_report(app, cli) else {
-        return metadata_line(
-            localized(language, "Fidelity", "保真度"),
-            "missing · none",
-            source_fidelity_style(SourceFidelityStatus::Missing),
-        );
-    };
-    let value = source_fidelity_detail(report);
-    metadata_line(
-        localized(language, "Fidelity", "保真度"),
-        value,
-        source_fidelity_style(report.fidelity.status),
-    )
-}
-
-fn source_adapter_report(app: &App, cli: CliTool) -> Option<&SourceAdapterReport> {
-    app.data
-        .source_adapters
-        .iter()
-        .find(|report| report.cli == cli)
-}
-
-fn source_fidelity_detail(report: &SourceAdapterReport) -> String {
-    match report.fidelity.fallback_surface.as_deref() {
-        Some(fallback) => format!(
-            "{} · {} · fallback {}",
-            report.fidelity.status, report.fidelity.primary_surface, fallback
-        ),
-        None => format!(
-            "{} · {}",
-            report.fidelity.status, report.fidelity.primary_surface
-        ),
+fn control_block_count(language: UiLanguage, count: usize) -> String {
+    match language {
+        UiLanguage::English if count == 1 => "1 control block".into(),
+        UiLanguage::English => format!("{count} control blocks"),
+        UiLanguage::ZhHans => format!("{count} 个控制块"),
     }
 }
 
-fn source_fidelity_style(status: SourceFidelityStatus) -> Style {
-    match status {
-        SourceFidelityStatus::FullFidelity => Style::default().fg(theme::green()),
-        SourceFidelityStatus::Partial => Style::default().fg(theme::gold()),
-        SourceFidelityStatus::Fallback => Style::default().fg(theme::orange()),
-        SourceFidelityStatus::Missing => Style::default().fg(theme::red()),
+fn plural_files(language: UiLanguage, count: usize) -> String {
+    match language {
+        UiLanguage::English if count == 1 => "1 file".into(),
+        UiLanguage::English => format!("{count} files"),
+        UiLanguage::ZhHans => format!("{count} 个文件"),
+    }
+}
+
+fn anatomy_signal_label(language: UiLanguage, value: &str) -> String {
+    if language == UiLanguage::English {
+        return value.to_string();
+    }
+    match value {
+        "Continuation" => "延续性".into(),
+        "Active tail" => "活跃尾部".into(),
+        "Token profile" => "Token 分布".into(),
+        "Trust" => "可信度".into(),
+        "Source health" => "来源健康".into(),
+        "Debug" => "调试".into(),
+        "Largest source slice" => "最大来源片段".into(),
+        "Trace" => "追踪".into(),
+        "Source file" => "来源文件".into(),
+        _ => value.to_string(),
     }
 }
 
@@ -4315,40 +4487,51 @@ fn settings_effect(app: &App, language: crate::core::config::UiLanguage) -> &'st
 }
 
 fn render_data_spaces(frame: &mut Frame, root: Rect, app: &App) {
+    let language = app.effective_language();
     let area = modal_area(root, 70, 62);
     frame.render_widget(Clear, area);
 
     let selected_index = app
         .data_space_selection
         .min(app.data_spaces.len().saturating_sub(1));
-    let selected = app.data_spaces.get(selected_index);
     let mut lines = vec![
         Line::from(Span::styled(
-            "Data Spaces",
+            localized(language, "Data Spaces", "数据空间"),
             Style::default()
                 .fg(theme::gold())
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
-            "Local plus SSH spaces saved in Moonbox. OpenSSH hosts are not auto-loaded.",
+            localized(
+                language,
+                "Local plus SSH spaces saved in Moonbox. OpenSSH hosts are not auto-loaded.",
+                "本机与 Moonbox 保存的 SSH 数据空间；不会自动加载 OpenSSH hosts。",
+            ),
             Style::default().fg(theme::muted()),
         )),
         Line::raw(""),
     ];
 
     if let Some(error) = &app.data_space_error {
-        lines.push(Line::from(Span::styled(
-            "Load Failed",
-            Style::default()
-                .fg(theme::red())
-                .add_modifier(Modifier::BOLD),
-        )));
+        lines.push(Line::from(vec![
+            Span::styled("! ", Style::default().fg(theme::red())),
+            Span::styled(
+                localized(language, "Load Failed", "加载失败"),
+                Style::default()
+                    .fg(theme::red())
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
         lines.push(Line::from(Span::styled(
             review_snippet(error, 118),
             Style::default().fg(theme::red()),
         )));
         lines.push(Line::from(Span::styled(
-            "Install moonbox on the remote host, or set MOONBOX_REMOTE_BIN to an absolute remote path.",
+            localized(
+                language,
+                "Install moonbox on the remote host, or set MOONBOX_REMOTE_BIN to an absolute remote path.",
+                "在远端安装 moonbox，或把 MOONBOX_REMOTE_BIN 设成远端绝对路径。",
+            ),
             Style::default().fg(theme::muted()),
         )));
         lines.push(Line::raw(""));
@@ -4356,40 +4539,32 @@ fn render_data_spaces(frame: &mut Frame, root: Rect, app: &App) {
 
     if app.data_spaces.is_empty() {
         lines.push(Line::from(Span::styled(
-            "No data spaces configured",
+            localized(language, "No data spaces configured", "还没有配置数据空间"),
             Style::default()
                 .fg(theme::red())
                 .add_modifier(Modifier::BOLD),
         )));
     } else {
         for (index, space) in app.data_spaces.iter().enumerate() {
-            lines.push(data_space_row(
+            lines.extend(data_space_row_lines(
                 space,
                 index == selected_index,
                 index == app.selected_data_space,
+                language,
             ));
         }
-    }
-
-    lines.push(Line::raw(""));
-    lines.push(Line::from(Span::styled(
-        "Selected Configuration",
-        Style::default()
-            .fg(theme::blue())
-            .add_modifier(Modifier::BOLD),
-    )));
-    if let Some(space) = selected {
-        lines.extend(data_space_detail_lines(space));
-    } else {
-        lines.push(Line::from(Span::styled(
-            "No selected data space",
-            Style::default().fg(theme::muted()),
-        )));
     }
     if let Some(name) = &app.data_space_delete_confirmation {
         lines.push(Line::raw(""));
         lines.push(Line::from(Span::styled(
-            format!("Press x again to delete {name} from Moonbox config."),
+            format!(
+                "{} {name}",
+                localized(
+                    language,
+                    "Press x again to delete data space:",
+                    "再次按 x 删除数据空间："
+                )
+            ),
             Style::default()
                 .fg(theme::orange())
                 .add_modifier(Modifier::BOLD),
@@ -4398,7 +4573,11 @@ fn render_data_spaces(frame: &mut Frame, root: Rect, app: &App) {
 
     lines.push(Line::raw(""));
     lines.push(Line::from(Span::styled(
-        "n/a add SSH   x delete   j/k choose   Enter load   r reload   Esc close",
+        localized(
+            language,
+            "n/a add SSH   x delete   j/k choose   Enter load   r reload   Esc close",
+            "n/a 添加 SSH   x 删除   j/k 选择   Enter 加载   r 刷新   Esc 关闭",
+        ),
         Style::default().fg(theme::muted()),
     )));
 
@@ -4523,14 +4702,25 @@ fn data_space_config_field_line(app: &App, index: usize) -> Line<'static> {
     ])
 }
 
-fn data_space_row(
+fn data_space_row_lines(
     space: &crate::core::dataspace::DataSpaceEntry,
     selected: bool,
     active: bool,
-) -> Line<'static> {
+    language: crate::core::config::UiLanguage,
+) -> Vec<Line<'static>> {
     let marker = if selected { "›" } else { " " };
-    let state = if active { "ACTIVE" } else { "      " };
-    let kind = if space.is_local() { "LOCAL" } else { "SSH" };
+    let icon = if space.is_local() { "◆" } else { "↗" };
+    let status_icon = if active { "✓" } else { "·" };
+    let status = if active {
+        localized(language, "active", "当前")
+    } else {
+        localized(language, "available", "可用")
+    };
+    let kind = if space.is_local() {
+        localized(language, "Local", "本地")
+    } else {
+        "SSH"
+    };
     let kind_color = if space.is_local() {
         theme::cyan()
     } else {
@@ -4543,83 +4733,102 @@ fn data_space_row(
     } else {
         Style::default().fg(theme::text())
     };
-
-    Line::from(vec![
-        Span::styled(format!("{marker:<2}"), Style::default().fg(theme::cyan())),
-        Span::styled(format!("{state:<7}"), data_space_state_style(active)),
-        Span::styled(format!("{kind:<6}"), Style::default().fg(kind_color)),
-        Span::styled(
-            format!("{:<20}", review_snippet(&space.label, 20)),
-            label_style,
-        ),
-        Span::styled(
-            review_snippet(&space.detail, 42),
-            Style::default().fg(theme::muted()),
-        ),
-    ])
+    let description = if space.is_local() {
+        localized(
+            language,
+            "reads local Codex / Claude / Hermes stores",
+            "读取本机 Codex / Claude / Hermes 会话存储",
+        )
+    } else {
+        localized(language, "SSH read-only inventory", "SSH 只读会话清单")
+    };
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled(marker, Style::default().fg(theme::gold())),
+            Span::raw(" "),
+            Span::styled(
+                icon,
+                Style::default().fg(kind_color).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(review_snippet(&space.label, 30), label_style),
+            Span::raw("  "),
+            Span::styled(
+                status_icon,
+                Style::default().fg(data_space_status_color(active)),
+            ),
+            Span::raw(" "),
+            Span::styled(status, Style::default().fg(data_space_status_color(active))),
+            Span::raw("  "),
+            Span::styled(kind, Style::default().fg(kind_color)),
+        ]),
+        Line::from(vec![
+            Span::raw("    "),
+            Span::styled("└", Style::default().fg(theme::border())),
+            Span::raw(" "),
+            Span::styled(
+                format!("{} · {}", review_snippet(&space.detail, 46), description),
+                Style::default().fg(theme::border()),
+            ),
+        ]),
+    ];
+    if selected {
+        lines.extend(data_space_selected_detail_lines(space, language));
+    }
+    lines
 }
 
-fn data_space_state_style(active: bool) -> Style {
+fn data_space_status_color(active: bool) -> Color {
     if active {
-        Style::default()
-            .fg(theme::green())
-            .add_modifier(Modifier::BOLD)
+        theme::green()
     } else {
-        Style::default().fg(theme::muted())
+        theme::muted()
     }
 }
 
-fn data_space_detail_lines(space: &crate::core::dataspace::DataSpaceEntry) -> Vec<Line<'static>> {
-    let mut lines = vec![
-        detail_line("Name", &space.label, theme::text()),
-        detail_line(
-            "Kind",
-            if space.is_local() {
-                "Local source stores"
-            } else {
-                "SSH read-only inventory"
-            },
-            if space.is_local() {
-                theme::cyan()
-            } else {
-                theme::orange()
-            },
-        ),
-        detail_line("Target", &space.detail, theme::text()),
-        detail_line(
-            "Config",
-            space.config_source.as_deref().unwrap_or("unknown"),
-            theme::muted(),
-        ),
-    ];
+fn data_space_selected_detail_lines(
+    space: &crate::core::dataspace::DataSpaceEntry,
+    language: crate::core::config::UiLanguage,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![data_space_inline_detail(
+        localized(language, "Config", "配置"),
+        space.config_source.as_deref().unwrap_or("unknown"),
+    )];
     if let Some(path) = &space.config_path {
-        lines.push(detail_line("Path", path, theme::muted()));
+        lines.push(data_space_inline_detail(
+            localized(language, "Path", "路径"),
+            path,
+        ));
     }
     if space.is_local() {
-        lines.push(detail_line(
-            "Inventory",
-            "reads local Codex / Claude / Hermes stores",
-            theme::muted(),
+        lines.push(data_space_inline_detail(
+            localized(language, "Inventory", "清单"),
+            localized(language, "local provider stores", "本机 provider 会话存储"),
         ));
     } else {
-        lines.push(detail_line(
-            "Inventory",
+        lines.push(data_space_inline_detail(
+            localized(language, "Inventory", "清单"),
             &format!("ssh {} [moonbox|moon] sessions --json", space.detail),
-            theme::muted(),
         ));
-        lines.push(detail_line(
-            "Safety",
-            "read-only summary import; no remote resume or launch",
-            theme::muted(),
+        lines.push(data_space_inline_detail(
+            localized(language, "Safety", "安全"),
+            localized(
+                language,
+                "read-only summary import; no remote resume or launch",
+                "只读 summary 导入；不做远端 resume 或 launch",
+            ),
         ));
     }
     lines
 }
 
-fn detail_line(label: &'static str, value: &str, color: Color) -> Line<'static> {
+fn data_space_inline_detail(label: &'static str, value: &str) -> Line<'static> {
     Line::from(vec![
-        Span::styled(format!("{label:<10}"), Style::default().fg(theme::muted())),
-        Span::styled(value.to_owned(), Style::default().fg(color)),
+        Span::raw("    "),
+        Span::styled("┆", Style::default().fg(theme::border())),
+        Span::raw(" "),
+        Span::styled(format!("{label}: "), Style::default().fg(theme::blue())),
+        Span::styled(value.to_owned(), Style::default().fg(theme::muted())),
     ])
 }
 
@@ -9491,8 +9700,8 @@ mod tests {
         core::{
             dataspace,
             model::{
-                CliTool, SessionStatus, SourceProvenance, TimelineAttachment, TimelineEvent,
-                TimelineKind, VerificationStatus,
+                CliTool, SessionAnatomyStatus, SessionStatus, SourceProvenance, TimelineAttachment,
+                TimelineEvent, TimelineKind, VerificationStatus,
             },
         },
     };
@@ -10004,7 +10213,7 @@ mod tests {
         assert_screen_contains(&screen, "操作路径");
         assert_screen_contains(&screen, "状态");
         assert_screen_contains(&screen, "Moonbox session rewind design");
-        assert_screen_contains(&screen, "保真度: fallback · embedded_fixture");
+        assert!(!screen.contains("保真度:"), "{screen}");
     }
 
     #[test]
@@ -10351,6 +10560,72 @@ mod tests {
     }
 
     #[test]
+    fn session_list_metric_keeps_inventory_with_context_health() {
+        let mut session = test_session("2026-06-07T13:33:44+08:00", None);
+        session.token_count = Some(169_790);
+        session.source_size_bytes = Some(1_572_864);
+        session.context_health = Some(ContextHealth {
+            used_tokens: Some(169_790),
+            window_tokens: Some(258_400),
+            quality_cliff_tokens: Some(120_000),
+            compact_layers: 39,
+            handoff_markers: 4,
+            confidence: crate::core::model::EvidenceConfidence::Exact,
+            source: "codex token_count event".into(),
+        });
+
+        let metric = session_list_metric(&session);
+
+        assert_eq!(metric, "169K tokens · 1.5MB source · 66%");
+    }
+
+    #[test]
+    fn session_list_metric_collapses_context_bar_on_narrow_width() {
+        let mut session = test_session("2026-06-07T13:33:44+08:00", None);
+        session.context_health = Some(ContextHealth {
+            used_tokens: Some(195_760),
+            window_tokens: Some(258_400),
+            quality_cliff_tokens: Some(120_000),
+            compact_layers: 3,
+            handoff_markers: 1,
+            confidence: crate::core::model::EvidenceConfidence::Exact,
+            source: "codex rollout tail token_count".into(),
+        });
+
+        assert_eq!(session_list_metric_for_width(&session, 14), "76%");
+    }
+
+    #[test]
+    fn context_health_metric_without_window_does_not_claim_percent() {
+        let health = ContextHealth {
+            used_tokens: Some(72_000),
+            window_tokens: None,
+            quality_cliff_tokens: Some(120_000),
+            compact_layers: 2,
+            handoff_markers: 0,
+            confidence: crate::core::model::EvidenceConfidence::Derived,
+            source: "claude usage event".into(),
+        };
+
+        assert_eq!(context_health_metric(&health), Some("72K/?".into()));
+    }
+
+    #[test]
+    fn context_health_metric_without_usage_shows_known_window() {
+        let health = ContextHealth {
+            used_tokens: None,
+            window_tokens: Some(258_400),
+            quality_cliff_tokens: Some(120_000),
+            compact_layers: 0,
+            handoff_markers: 0,
+            confidence: crate::core::model::EvidenceConfidence::Derived,
+            source: "hermes sqlite session".into(),
+        };
+
+        assert_eq!(context_health_metric(&health), Some("?/258K".into()));
+    }
+
+    #[test]
     fn session_row_markers_keep_star_visible_with_health_status() {
         let mut session = test_session("2026-06-07T13:33:44+08:00", None);
 
@@ -10430,11 +10705,32 @@ mod tests {
         let screen = render_text(&app, 140, 64);
 
         assert_screen_contains(&screen, "42K tokens");
-        assert_screen_contains(&screen, "Timeline Items");
-        assert_screen_contains(&screen, "Portrait: user 1 / assistant 1 / tool");
-        assert_screen_contains(&screen, "user 1 / assistant 1 / tool");
-        assert_screen_contains(&screen, "4 / rewind 1");
+        assert_screen_contains(&screen, "Real Session Metadata");
+        assert!(!screen.contains("Timeline Items:"), "{screen}");
+        assert!(!screen.contains("Portrait:"), "{screen}");
         assert!(!screen.contains("shape U"), "{screen}");
+    }
+
+    #[test]
+    fn session_details_carry_full_context_bar() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.data.sessions[app.selected_session].context_health = Some(ContextHealth {
+            used_tokens: Some(119_000),
+            window_tokens: Some(258_400),
+            quality_cliff_tokens: Some(120_000),
+            compact_layers: 2,
+            handoff_markers: 1,
+            confidence: crate::core::model::EvidenceConfidence::Exact,
+            source: "codex rollout tail token_count".into(),
+        });
+
+        let screen = render_text(&app, 160, 64);
+
+        assert_screen_contains(&screen, "Context");
+        assert_screen_contains(&screen, "119K / 258K · 46% ▐████┃░░░▌");
+        assert!(!screen.contains("Token Budget"), "{screen}");
+        assert_screen_contains(&screen, "Compacts");
+        assert_screen_contains(&screen, "2 · handoff 1");
     }
 
     #[test]
@@ -10600,6 +10896,7 @@ mod tests {
             source_size_bytes: None,
             parse_skip_count: 0,
             provider_metadata: None,
+            context_health: None,
             anatomy: None,
         }
     }
@@ -12133,8 +12430,8 @@ mod tests {
         let screen = render_text(&app, 140, 40);
 
         assert_screen_contains(&screen, "Real Session Metadata");
-        assert_screen_contains(&screen, "Fidelity: fallback · embedded_fixture");
-        assert_screen_contains(&screen, "fallback · embedded_fixture");
+        assert!(!screen.contains("Fidelity:"), "{screen}");
+        assert!(!screen.contains("fallback · embedded_fixture"), "{screen}");
         assert_screen_contains(&screen, "Handoff Snapshot");
         assert_screen_contains(&screen, "draft_from_builtin_compiler");
         assert_screen_contains(&screen, "Risk: Built-in draft compiler");
@@ -12299,11 +12596,10 @@ mod tests {
         assert_screen_contains(&screen, "Session Anatomy");
         assert_screen_contains(&screen, "Handoff");
         assert_screen_contains(&screen, "Location");
-        assert_screen_contains(&screen, "Runtime:");
+        assert_screen_contains(&screen, "Title:");
+        assert_screen_contains(&screen, "Source:");
         assert_screen_contains(&screen, "Branch:");
-        assert_screen_contains(&screen, "Timeline Items:");
-        assert_screen_contains(&screen, "Tokens:");
-        assert_screen_contains(&screen, "Raw Size:");
+        assert_screen_contains(&screen, "Cwd:");
         assert_screen_contains(&screen, "Source Health:");
         assert_screen_contains(&screen, "Timeline Preview Loading");
     }
