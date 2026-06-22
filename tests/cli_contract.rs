@@ -2034,6 +2034,7 @@ fn lark_handoff_export_execute_calls_lark_cli_create_with_markdown_content() {
     let home = fixture_home(test_name);
     let args_path = home.join("fake-lark-args.txt");
     let content_path = home.join("fake-lark-content.xml");
+    let title_args_path = home.join("fake-lark-title-args.txt");
     let fake_compiler = write_executable_script(
         &home,
         "bin/fake-handoff-compiler",
@@ -2113,6 +2114,11 @@ if [ "$1" = "docs" ] && [ "$2" = "+create" ]; then
   echo '{"data":{"document":{"url":"https://example.test/docx/moonbox"}}}'
   exit 0
 fi
+if [ "$1" = "drive" ] && [ "$2" = "files" ] && [ "$3" = "patch" ]; then
+  printf '%s\n' "$@" > "$MOONBOX_FAKE_LARK_TITLE_ARGS"
+  echo '{"data":{"file_token":"moonbox"}}'
+  exit 0
+fi
 echo "unexpected lark-cli args: $*" >&2
 exit 2
 "#,
@@ -2138,6 +2144,7 @@ exit 2
             .env("MOONBOX_LARK_CLI_BIN", &fake_lark)
             .env("MOONBOX_FAKE_LARK_ARGS", &args_path)
             .env("MOONBOX_FAKE_LARK_CONTENT", &content_path)
+            .env("MOONBOX_FAKE_LARK_TITLE_ARGS", &title_args_path)
             .env("MOONBOX_LARK_DISABLE_OPEN", "1")
             .env("MOONBOX_COMPILER", &fake_compiler)
             .env("MOONBOX_COMPILER_ID", "lark-handoff-test")
@@ -2157,13 +2164,18 @@ exit 2
     assert!(args.contains("--doc-format\nmarkdown\n"));
 
     let content = fs::read_to_string(content_path).expect("fake lark content");
-    assert_eq!(
-        content,
-        "# Generated Handoff\nThis came from the configured handoff runner."
-    );
+    assert!(content.starts_with("# Moonbox Handoff - "));
+    assert!(content.contains("# Generated Handoff"));
+    assert!(content.contains("This came from the configured handoff runner."));
     assert!(!content.contains("Session Summary"));
     assert!(!content.contains("Handoff Result"));
     assert!(!content.contains("/tmp/"));
+
+    let title_args = fs::read_to_string(title_args_path).expect("fake lark title args");
+    assert!(title_args.contains("drive\nfiles\npatch\n"));
+    assert!(title_args.contains(r#""file_token":"moonbox""#));
+    assert!(title_args.contains(r#""type":"docx""#));
+    assert!(title_args.contains(r#""new_title":"Moonbox Handoff - moonbox/handoff-test""#));
 }
 
 #[test]

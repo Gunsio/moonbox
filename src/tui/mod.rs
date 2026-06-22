@@ -22,7 +22,7 @@ use ratatui::DefaultTerminal;
 use crate::{
     app::{App, LarkExportTuiPlan, SessionFilter, SetupInstallPlan, TmuxJumpPlan, TuiExitAction},
     core::{
-        config, launcher,
+        config, lark, launcher,
         model::{CliTool, LaunchExecution, LaunchPlan, OriginalSessionPlan},
         tmux, workbench,
     },
@@ -282,16 +282,38 @@ fn run_lark_export(plan: &LarkExportTuiPlan) -> io::Result<ExitStatus> {
         .arg("--doc-format")
         .arg("markdown")
         .arg("--content")
-        .arg(&plan.markdown)
+        .arg(lark::markdown_with_document_title(
+            &plan.title,
+            &plan.markdown,
+        ))
         .output()?;
     io::stdout().write_all(&output.stdout)?;
     io::stderr().write_all(&output.stderr)?;
     if output.status.success()
-        && std::env::var_os("MOONBOX_LARK_DISABLE_OPEN").is_none()
         && let Some(url) = extract_first_url(&String::from_utf8_lossy(&output.stdout))
             .or_else(|| extract_first_url(&String::from_utf8_lossy(&output.stderr)))
     {
-        let _ = Command::new("open").arg(url).status();
+        if let Some(request) = lark::title_patch_request(&url, &plan.title) {
+            let title_output = Command::new(lark_cli_bin())
+                .arg("drive")
+                .arg("files")
+                .arg("patch")
+                .arg("--as")
+                .arg("user")
+                .arg("--params")
+                .arg(request.params)
+                .arg("--data")
+                .arg(request.data)
+                .output()?;
+            io::stdout().write_all(&title_output.stdout)?;
+            io::stderr().write_all(&title_output.stderr)?;
+            if !title_output.status.success() {
+                return Ok(title_output.status);
+            }
+        }
+        if std::env::var_os("MOONBOX_LARK_DISABLE_OPEN").is_none() {
+            let _ = Command::new("open").arg(url).status();
+        }
     }
     Ok(output.status)
 }

@@ -5,7 +5,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::{
     error::CoreError,
@@ -66,6 +66,12 @@ pub struct LarkExportExecution {
     pub stdout: String,
     pub browser_opened: bool,
     pub browser_error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LarkTitlePatchRequest {
+    pub params: String,
+    pub data: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -178,7 +184,7 @@ pub fn execute_export(
             reason: "handoff runner did not produce a Markdown artifact for Lark export".into(),
         })?;
     let command = create_command_preview(&title, options);
-    let output = run_lark_create(content, options)?;
+    let output = run_lark_create(&markdown_with_document_title(&title, content), options)?;
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     if !output.status.success() {
@@ -199,6 +205,27 @@ pub fn execute_export(
     }
 
     let url = extract_first_url(&stdout).or_else(|| extract_first_url(&stderr));
+    if let Some(url) = url.as_deref() {
+        if let Some(output) = run_lark_title_patch(url, &title)? {
+            let patch_stderr = String::from_utf8_lossy(&output.stderr);
+            if !output.status.success() {
+                return Err(CoreError::LarkExport {
+                    reason: if patch_stderr.trim().is_empty() {
+                        format!(
+                            "lark-cli drive files patch exited with {}",
+                            status_label(&output)
+                        )
+                    } else {
+                        format!(
+                            "lark-cli drive files patch exited with {}: {}",
+                            status_label(&output),
+                            patch_stderr.trim()
+                        )
+                    },
+                });
+            }
+        }
+    }
     let (browser_opened, browser_error) = match url.as_deref() {
         Some(url) => open_lark_url(url),
         None => (
@@ -286,6 +313,64 @@ fn run_lark_create(content: &str, options: &LarkExportOptions) -> Result<Output,
     })
 }
 
+fn run_lark_title_patch(url: &str, title: &str) -> Result<Option<Output>, CoreError> {
+    let Some(request) = title_patch_request(url, title) else {
+        return Ok(None);
+    };
+    Command::new(lark_cli_bin())
+        .arg("drive")
+        .arg("files")
+        .arg("patch")
+        .arg("--as")
+        .arg("user")
+        .arg("--params")
+        .arg(request.params)
+        .arg("--data")
+        .arg(request.data)
+        .output()
+        .map(Some)
+        .map_err(|error| CoreError::LarkExport {
+            reason: format!("failed to start lark-cli drive files patch: {error}"),
+        })
+}
+
+pub fn title_patch_request(url: &str, title: &str) -> Option<LarkTitlePatchRequest> {
+    let (file_token, file_type) = lark_file_ref_from_url(url)?;
+    Some(LarkTitlePatchRequest {
+        params: json!({
+            "file_token": file_token,
+            "type": file_type,
+        })
+        .to_string(),
+        data: json!({
+            "new_title": title,
+        })
+        .to_string(),
+    })
+}
+
+fn lark_file_ref_from_url(url: &str) -> Option<(String, String)> {
+    let clean = url.split(['?', '#']).next().unwrap_or(url);
+    let mut segments = clean.split('/').filter(|segment| !segment.is_empty());
+    while let Some(segment) = segments.next() {
+        let file_type = match segment {
+            "docx" => Some("docx"),
+            "docs" | "doc" => Some("doc"),
+            "sheets" | "sheet" => Some("sheet"),
+            "base" | "bitable" => Some("bitable"),
+            "slides" => Some("slides"),
+            _ => None,
+        };
+        if let Some(file_type) = file_type
+            && let Some(token) = segments.next()
+            && !token.is_empty()
+        {
+            return Some((token.into(), file_type.into()));
+        }
+    }
+    None
+}
+
 fn run_lark_cli<const N: usize>(args: [&str; N]) -> std::io::Result<Output> {
     Command::new(lark_cli_bin()).args(args).output()
 }
@@ -315,13 +400,22 @@ fn output_contains(output: &Output, needle: &str) -> bool {
         || String::from_utf8_lossy(&output.stderr).contains(needle)
 }
 
-fn document_title(title: &str, session_id: &str) -> String {
+pub fn document_title(title: &str, session_id: &str) -> String {
     let clean = title.trim();
     if clean.is_empty() {
         format!("Moonbox Handoff - {session_id}")
     } else {
         format!("Moonbox Handoff - {}", truncate_chars(clean, 90))
     }
+}
+
+pub fn markdown_with_document_title(title: &str, markdown: &str) -> String {
+    let title = title.trim();
+    let markdown = markdown.trim();
+    if title.is_empty() || markdown.starts_with(&format!("# {title}\n")) {
+        return markdown.into();
+    }
+    format!("# {title}\n\n{markdown}")
 }
 
 fn truncate_chars(text: &str, max_chars: usize) -> String {
@@ -400,5 +494,48 @@ mod tests {
         let url =
             extract_first_url(r#"ok {"data":{"document":{"url":"https://example.test/doc"}}}"#);
         assert_eq!(url.as_deref(), Some("https://example.test/doc"));
+    }
+
+    #[test]
+    fn markdown_export_content_gets_document_title_heading() {
+        let content = markdown_with_document_title(
+            "Moonbox Handoff - session title",
+            "Reviewed handoff body",
+        );
+
+        assert_eq!(
+            content,
+            "# Moonbox Handoff - session title\n\nReviewed handoff body"
+        );
+    }
+
+    #[test]
+    fn markdown_export_content_does_not_duplicate_existing_title() {
+        let content = markdown_with_document_title(
+            "Moonbox Handoff - session title",
+            "# Moonbox Handoff - session title\n\nReviewed handoff body",
+        );
+
+        assert_eq!(
+            content,
+            "# Moonbox Handoff - session title\n\nReviewed handoff body"
+        );
+    }
+
+    #[test]
+    fn title_patch_request_extracts_docx_token_from_url() {
+        let request = title_patch_request(
+            "https://example.feishu.cn/docx/ABC123?from=moonbox",
+            "Moonbox Handoff - demo",
+        )
+        .expect("request");
+
+        assert!(request.params.contains(r#""file_token":"ABC123""#));
+        assert!(request.params.contains(r#""type":"docx""#));
+        assert!(
+            request
+                .data
+                .contains(r#""new_title":"Moonbox Handoff - demo""#)
+        );
     }
 }

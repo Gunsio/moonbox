@@ -4279,8 +4279,10 @@ impl App {
         let target = self.data.capsule.target_cli;
         let rewind = self.rewind_event_id.clone();
         let compiler = self.data.capsule.compiler.clone();
+        let title = lark::document_title(&self.data.capsule.handoff_label, &session_id);
+        let markdown = lark::markdown_with_document_title(&title, &markdown);
         let command_display =
-            "lark-cli docs +create --api-version v2 --as user --doc-format markdown --content <reviewed handoff markdown>"
+            "lark-cli docs +create --api-version v2 --as user --doc-format markdown --content <titled reviewed handoff markdown>"
                 .to_string();
         self.pending_lark_export = Some(Box::new(LarkExportTuiPlan {
             session_id,
@@ -4288,7 +4290,7 @@ impl App {
             rewind,
             compiler,
             command_display,
-            title: self.data.capsule.handoff_label.clone(),
+            title,
             markdown,
         }));
         self.show_launch = false;
@@ -8800,6 +8802,8 @@ Host devbox
         assert_eq!(plan.compiler, "agent:codex:moonbox-handoff");
         assert!(plan.command_display.contains("lark-cli docs +create"));
         assert!(!plan.markdown.trim().is_empty());
+        assert!(plan.markdown.starts_with("# Moonbox Handoff - "));
+        assert!(plan.markdown.contains("Continue from preview."));
         assert!(!plan.markdown.contains("/tmp/"));
         assert_eq!(app.status_message, "Opening Lark Doc");
     }
@@ -8876,6 +8880,8 @@ Host devbox
             assert_eq!(plan.session_id, "codex-cxcp-design");
             assert_eq!(plan.target, CliTool::Hermes);
             assert!(!plan.markdown.trim().is_empty());
+            assert!(plan.markdown.starts_with("# Moonbox Handoff - "));
+            assert!(plan.markdown.contains("Write this exact preview to Lark."));
             assert!(!plan.markdown.contains("/tmp/"));
             assert_eq!(lark_export.status_message, "Opening Lark Doc");
         }
