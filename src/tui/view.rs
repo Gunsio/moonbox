@@ -3975,6 +3975,71 @@ fn localized_enter_key_hint(app: &App) -> &'static str {
     }
 }
 
+fn picker_marker(selected: bool) -> Span<'static> {
+    Span::styled(
+        if selected {
+            ">  "
+        } else {
+            "\u{00a0}\u{00a0}\u{00a0}"
+        },
+        Style::default().fg(if selected {
+            theme::gold()
+        } else {
+            theme::border()
+        }),
+    )
+}
+
+fn picker_icon_cell(icon: &str, color: Color, bold: bool) -> Span<'static> {
+    let style = if bold {
+        Style::default().fg(color).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(color)
+    };
+    Span::styled(fit_display_width(icon, 2), style)
+}
+
+fn picker_label_style(selected: bool, normal_color: Color) -> Style {
+    if selected {
+        Style::default()
+            .fg(theme::text())
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(normal_color)
+    }
+}
+
+fn picker_status_style(selected: bool, color: Color) -> Style {
+    if selected {
+        Style::default().fg(color).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(color)
+    }
+}
+
+fn compact_action_status_style(selected: bool, status: SessionActionAvailability) -> Style {
+    let color = match status {
+        SessionActionAvailability::Warning => theme::gold(),
+        SessionActionAvailability::Blocked => theme::red(),
+        SessionActionAvailability::Available | SessionActionAvailability::Unavailable => {
+            if selected {
+                theme::cyan()
+            } else {
+                theme::border()
+            }
+        }
+    };
+    picker_status_style(selected, color)
+}
+
+fn picker_focus_color(selected: bool, normal_color: Color) -> Color {
+    if selected {
+        theme::text()
+    } else {
+        normal_color
+    }
+}
+
 fn status_line(app: &App) -> Line<'_> {
     let language = app.effective_language();
     let status_lower = app.status_message.to_ascii_lowercase();
@@ -7780,6 +7845,7 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
     }
 
     let mut target_lines = Vec::new();
+    let mut selected_target_description = None;
     for target in CliTool::ALL {
         let selected = target == app.pending_target;
         let selected = selected && !app.launch_review_lark_export;
@@ -7790,60 +7856,38 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             app.validate_launch_for_target(target).state
         };
         let validation_state = target_picker_validation_state(raw_validation_state);
-        let label_style = if selected {
-            Style::default()
-                .fg(validation_color(validation_state))
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(validation_color(validation_state))
-        };
-        let status_style = if selected {
-            Style::default()
-                .fg(validation_color(validation_state))
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(validation_color(validation_state))
-        };
-        let cursor = if selected { ">" } else { " " };
+        let status_color = validation_color(validation_state);
+        let label_style = picker_label_style(selected, status_color);
+        let status_style = picker_status_style(selected, status_color);
         let (target_icon, target_icon_color) = target_picker_icon(target);
         let (status_icon, status_icon_color) = target_picker_status_icon(validation_state);
+        if selected {
+            selected_target_description = Some(target_picker_description(
+                language,
+                target,
+                raw_validation_state,
+                needs_handoff_skill,
+                &app.validate_launch_for_target(target),
+            ));
+        }
         target_lines.push(Line::from(vec![
-            Span::styled(cursor, Style::default().fg(theme::gold())),
-            Span::raw(" "),
-            Span::styled(
+            picker_marker(selected),
+            picker_icon_cell(
                 target_icon,
-                Style::default()
-                    .fg(target_icon_color)
-                    .add_modifier(Modifier::BOLD),
+                picker_focus_color(selected, target_icon_color),
+                true,
             ),
             Span::raw(" "),
             Span::styled(format!("{target:<6}"), label_style),
             Span::raw("  "),
             Span::styled(
                 status_icon,
-                Style::default()
-                    .fg(status_icon_color)
-                    .add_modifier(Modifier::BOLD),
+                picker_status_style(selected, status_icon_color),
             ),
             Span::raw(" "),
             Span::styled(
                 target_picker_validation_label(language, raw_validation_state),
                 status_style,
-            ),
-        ]));
-        target_lines.push(Line::from(vec![
-            Span::raw("    "),
-            Span::styled("└", Style::default().fg(theme::border())),
-            Span::raw(" "),
-            Span::styled(
-                target_picker_description(
-                    language,
-                    target,
-                    raw_validation_state,
-                    needs_handoff_skill,
-                    &app.validate_launch_for_target(target),
-                ),
-                Style::default().fg(theme::border()),
             ),
         ]));
     }
@@ -7854,34 +7898,21 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         LaunchValidationState::Blocked
     };
     let lark_validation_state = target_picker_validation_state(lark_raw_state);
-    let lark_label_style = if lark_selected {
-        Style::default()
-            .fg(validation_color(lark_validation_state))
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(validation_color(lark_validation_state))
-    };
-    let lark_status_style = if lark_selected {
-        Style::default()
-            .fg(validation_color(lark_validation_state))
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(validation_color(lark_validation_state))
-    };
+    let lark_status_color = validation_color(lark_validation_state);
+    let lark_label_style = picker_label_style(lark_selected, lark_status_color);
+    let lark_status_style = picker_status_style(lark_selected, lark_status_color);
     let (lark_status_icon, lark_status_icon_color) =
         target_picker_status_icon(lark_validation_state);
+    if lark_selected {
+        selected_target_description = Some(lark_target_picker_description(
+            language,
+            app.lark_cli_readiness.state,
+            app.lark_cli_readiness.reason.as_str(),
+        ));
+    }
     target_lines.push(Line::from(vec![
-        Span::styled(
-            if lark_selected { ">" } else { " " },
-            Style::default().fg(theme::gold()),
-        ),
-        Span::raw(" "),
-        Span::styled(
-            "☁",
-            Style::default()
-                .fg(theme::blue())
-                .add_modifier(Modifier::BOLD),
-        ),
+        picker_marker(lark_selected),
+        picker_icon_cell("☁", picker_focus_color(lark_selected, theme::blue()), true),
         Span::raw(" "),
         Span::styled(
             format!("{:<8}", localized(language, "Lark Doc", "飞书文档")),
@@ -7890,27 +7921,12 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         Span::raw("  "),
         Span::styled(
             lark_status_icon,
-            Style::default()
-                .fg(lark_status_icon_color)
-                .add_modifier(Modifier::BOLD),
+            picker_status_style(lark_selected, lark_status_icon_color),
         ),
         Span::raw(" "),
         Span::styled(
             target_picker_validation_label(language, lark_raw_state),
             lark_status_style,
-        ),
-    ]));
-    target_lines.push(Line::from(vec![
-        Span::raw("    "),
-        Span::styled("└", Style::default().fg(theme::border())),
-        Span::raw(" "),
-        Span::styled(
-            lark_target_picker_description(
-                language,
-                app.lark_cli_readiness.state,
-                app.lark_cli_readiness.reason.as_str(),
-            ),
-            Style::default().fg(theme::border()),
         ),
     ]));
     let mut lines = vec![
@@ -7972,6 +7988,10 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         )),
     ];
     lines.extend(target_lines);
+    if let Some(description) = selected_target_description {
+        lines.push(Line::raw(""));
+        lines.push(picker_selected_detail_line(description));
+    }
     let pending_needs_handoff_skill = app.launch_requires_handoff_skill(app.pending_target);
     let lark_target_needs_setup =
         app.launch_review_lark_export && app.lark_cli_readiness.state != LarkCliState::Ready;
@@ -9220,54 +9240,67 @@ fn lark_export_detail_line(
     ])
 }
 
+fn picker_selected_detail_line(text: String) -> Line<'static> {
+    Line::from(vec![
+        Span::styled("└", Style::default().fg(theme::border())),
+        Span::raw(" "),
+        Span::styled(text, Style::default().fg(theme::border())),
+    ])
+}
+
+fn picker_entry_description_line(text: String) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(
+            "\u{00a0}\u{00a0}\u{00a0}",
+            Style::default().fg(theme::border()),
+        ),
+        Span::styled("└ ", Style::default().fg(theme::border())),
+        Span::raw("  "),
+        Span::styled(text, Style::default().fg(theme::border())),
+    ])
+}
+
 fn share_panel_entry_lines(
     entry: SharePanelEntry,
     language: crate::core::config::UiLanguage,
 ) -> Vec<Line<'static>> {
-    let marker = if entry.selected { ">" } else { " " };
     let (action_icon, action_icon_color) = share_panel_action_icon(entry.kind, entry.status);
-    let (status_icon, status_icon_color) = action_menu_status_icon(entry.status);
-    let label_style = if entry.selected {
-        Style::default()
-            .fg(action_status_color(entry.status))
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(action_status_color(entry.status))
-    };
-    vec![
-        Line::from(vec![
-            Span::styled(marker, Style::default().fg(theme::gold())),
-            Span::raw(" "),
-            Span::styled(
-                action_icon,
-                Style::default()
-                    .fg(action_icon_color)
-                    .add_modifier(Modifier::BOLD),
+    let mut row = vec![
+        picker_marker(entry.selected),
+        picker_icon_cell(
+            action_icon,
+            picker_focus_color(entry.selected, action_icon_color),
+            true,
+        ),
+        Span::raw(" "),
+        Span::styled(
+            share_panel_action_label(entry.kind, language),
+            picker_label_style(
+                entry.selected,
+                if matches!(entry.status, SessionActionAvailability::Unavailable) {
+                    theme::muted()
+                } else {
+                    theme::cyan()
+                },
             ),
-            Span::raw(" "),
-            Span::styled(share_panel_action_label(entry.kind, language), label_style),
+        ),
+    ];
+    if let Some((status_icon, _)) = action_menu_status_icon(entry.status) {
+        row.extend([
             Span::raw("  "),
             Span::styled(
                 status_icon,
-                Style::default()
-                    .fg(status_icon_color)
-                    .add_modifier(Modifier::BOLD),
+                compact_action_status_style(entry.selected, entry.status),
             ),
-            Span::raw(" "),
-            Span::styled(
-                action_menu_status_label(entry.status, language),
-                Style::default().fg(action_status_color(entry.status)),
-            ),
-        ]),
-        Line::from(vec![
-            Span::raw("    "),
-            Span::styled("└", Style::default().fg(theme::border())),
-            Span::raw(" "),
-            Span::styled(
-                share_panel_reason_label(entry.kind, &entry.reason, language),
-                Style::default().fg(theme::border()),
-            ),
-        ]),
+        ]);
+    }
+    vec![
+        Line::from(row),
+        picker_entry_description_line(share_panel_reason_label(
+            entry.kind,
+            &entry.reason,
+            language,
+        )),
     ]
 }
 
@@ -9279,7 +9312,7 @@ fn share_panel_action_icon(
         theme::muted()
     } else {
         match kind {
-            SharePanelActionKind::FirstUserInput => theme::green(),
+            SharePanelActionKind::FirstUserInput => theme::cyan(),
             SharePanelActionKind::LastAiOutput => theme::cyan(),
             SharePanelActionKind::SessionId => theme::blue(),
             SharePanelActionKind::HandoffContent => theme::purple(),
@@ -9384,54 +9417,39 @@ fn action_menu_entry_lines(
     entry: ActionMenuEntry,
     language: crate::core::config::UiLanguage,
 ) -> Vec<Line<'static>> {
-    let marker = if entry.selected { ">" } else { " " };
     let (action_icon, action_icon_color) = action_menu_action_icon(&entry.action);
-    let (status_icon, status_icon_color) = action_menu_status_icon(entry.action.status);
-    let label_style = if entry.selected {
-        Style::default()
-            .fg(action_status_color(entry.action.status))
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(action_status_color(entry.action.status))
-    };
-    let status = action_menu_status_label(entry.action.status, language);
-    vec![
-        Line::from(vec![
-            Span::styled(marker, Style::default().fg(theme::gold())),
-            Span::raw(" "),
-            Span::styled(
-                action_icon,
-                Style::default()
-                    .fg(action_icon_color)
-                    .add_modifier(Modifier::BOLD),
+    let mut row = vec![
+        picker_marker(entry.selected),
+        picker_icon_cell(
+            action_icon,
+            picker_focus_color(entry.selected, action_icon_color),
+            true,
+        ),
+        Span::raw(" "),
+        Span::styled(
+            action_menu_action_label(&entry.action, language),
+            picker_label_style(
+                entry.selected,
+                if matches!(entry.action.status, SessionActionAvailability::Unavailable) {
+                    theme::muted()
+                } else {
+                    theme::cyan()
+                },
             ),
-            Span::raw(" "),
-            Span::styled(
-                action_menu_action_label(&entry.action, language),
-                label_style,
-            ),
+        ),
+    ];
+    if let Some((status_icon, _)) = action_menu_status_icon(entry.action.status) {
+        row.extend([
             Span::raw("  "),
             Span::styled(
                 status_icon,
-                Style::default()
-                    .fg(status_icon_color)
-                    .add_modifier(Modifier::BOLD),
+                compact_action_status_style(entry.selected, entry.action.status),
             ),
-            Span::raw(" "),
-            Span::styled(
-                status,
-                Style::default().fg(action_status_color(entry.action.status)),
-            ),
-        ]),
-        Line::from(vec![
-            Span::raw("    "),
-            Span::styled("└", Style::default().fg(theme::border())),
-            Span::raw(" "),
-            Span::styled(
-                action_menu_reason_label(&entry.action, language),
-                Style::default().fg(theme::border()),
-            ),
-        ]),
+        ]);
+    }
+    vec![
+        Line::from(row),
+        picker_entry_description_line(action_menu_reason_label(&entry.action, language)),
     ]
 }
 
@@ -9440,7 +9458,7 @@ fn action_menu_action_icon(action: &SessionAvailableAction) -> (&'static str, Co
         theme::muted()
     } else {
         match action.kind {
-            SessionAvailableActionKind::Resume => theme::green(),
+            SessionAvailableActionKind::Resume => theme::cyan(),
             SessionAvailableActionKind::Handoff => theme::cyan(),
             SessionAvailableActionKind::LarkExport => theme::cyan(),
             SessionAvailableActionKind::NewSession => theme::gold(),
@@ -9471,12 +9489,12 @@ fn action_menu_action_icon(action: &SessionAvailableAction) -> (&'static str, Co
     (icon, color)
 }
 
-fn action_menu_status_icon(status: SessionActionAvailability) -> (&'static str, Color) {
+fn action_menu_status_icon(status: SessionActionAvailability) -> Option<(&'static str, Color)> {
     match status {
-        SessionActionAvailability::Available => ("✓", theme::green()),
-        SessionActionAvailability::Warning => ("!", theme::gold()),
-        SessionActionAvailability::Blocked => ("×", theme::red()),
-        SessionActionAvailability::Unavailable => ("·", theme::muted()),
+        SessionActionAvailability::Available => None,
+        SessionActionAvailability::Warning => Some(("!", theme::gold())),
+        SessionActionAvailability::Blocked => Some(("×", theme::red())),
+        SessionActionAvailability::Unavailable => Some(("·", theme::muted())),
     }
 }
 
@@ -9598,27 +9616,6 @@ fn localize_action_menu_jump_reason(reason: &str) -> String {
                 reason.to_string()
             }
         }
-    }
-}
-
-fn action_menu_status_label(
-    status: SessionActionAvailability,
-    language: crate::core::config::UiLanguage,
-) -> &'static str {
-    match status {
-        SessionActionAvailability::Available => localized(language, "available", "可用"),
-        SessionActionAvailability::Warning => localized(language, "warning", "警告"),
-        SessionActionAvailability::Blocked => localized(language, "blocked", "阻塞"),
-        SessionActionAvailability::Unavailable => localized(language, "unavailable", "不可用"),
-    }
-}
-
-fn action_status_color(status: SessionActionAvailability) -> Color {
-    match status {
-        SessionActionAvailability::Available => theme::green(),
-        SessionActionAvailability::Warning => theme::gold(),
-        SessionActionAvailability::Blocked => theme::red(),
-        SessionActionAvailability::Unavailable => theme::muted(),
     }
 }
 
@@ -9918,13 +9915,14 @@ mod tests {
         assert_screen_contains(&screen, "Fork");
         assert_screen_contains(&screen, "↩ Resume");
         assert_screen_contains(&screen, "→ Handoff");
-        assert_screen_contains(&screen, "+ New Session");
-        assert_screen_contains(&screen, "unavailable");
+        assert_screen_contains(&screen, "+  New Session");
+        assert_screen_contains(&screen, "↗ Jump  ·");
         assert_screen_contains(&screen, "j/k choose");
         assert!(!screen.contains("Lark Doc"), "{screen}");
         assert!(!screen.contains("◎ Inspect"), "{screen}");
         assert!(!screen.contains("⧉ Yank"), "{screen}");
         assert!(!screen.contains("▣ Archive"), "{screen}");
+        assert!(!screen.contains("Resume  ✓"), "{screen}");
         assert!(!screen.contains("Copy Session ID"), "{screen}");
     }
 
@@ -9941,14 +9939,16 @@ mod tests {
 
         assert_screen_contains(&screen, "动作菜单");
         assert_screen_contains(&screen, "会话动作");
-        assert_screen_contains(&screen, "↩ 恢复  ✓ 可用");
-        assert_screen_contains(&screen, "→ 交接  ✓ 可用");
-        assert_screen_contains(&screen, "+ 新会话  ✓ 可用");
-        assert_screen_contains(&screen, "⤴ 分叉  ✓ 可用");
-        assert_screen_contains(&screen, "↗ 跳转  · 不可用");
-        assert_screen_contains(&screen, "└ 可通过本地 provider CLI 恢复该会话。");
+        assert_screen_contains(&screen, "↩ 恢复");
+        assert_screen_contains(&screen, "→ 交接");
+        assert_screen_contains(&screen, "+  新会话");
+        assert_screen_contains(&screen, "⤴ 分叉");
+        assert_screen_contains(&screen, "↗ 跳转  ·");
+        assert_screen_contains(&screen, "可通过本地 provider CLI 恢复该会话。");
         assert_screen_contains(&screen, "可调用 Codex 原生 session fork。");
         assert_screen_contains(&screen, "Hooks 未启用，无法获得实时 tmux 状态。");
+        assert!(!screen.contains("可用"), "{screen}");
+        assert!(!screen.contains("不可用"), "{screen}");
         assert!(!screen.contains("飞书文档"), "{screen}");
         assert!(!screen.contains("◎ 详情"), "{screen}");
         assert!(!screen.contains("⧉ 复制"), "{screen}");
@@ -9977,7 +9977,7 @@ mod tests {
         assert_screen_contains(&screen, "复制");
         assert_screen_contains(&screen, "↑ 第一条用户输入");
         assert_screen_contains(&screen, "⧉ 最后 AI 输出");
-        assert_screen_contains(&screen, "# Session ID");
+        assert_screen_contains(&screen, "#  Session ID");
         assert_screen_contains(&screen, "→ 交接内容");
         assert_screen_contains(&screen, "{} portable JSON");
         assert_screen_contains(&screen, "复制已加载 timeline 里的第一条用户输入。");
@@ -12611,7 +12611,7 @@ mod tests {
 
         assert_screen_contains(&screen, "Launch");
         assert_screen_contains(&screen, "Choose target CLI");
-        assert_screen_contains(&screen, "H Hermes");
+        assert_screen_contains(&screen, "H  Hermes");
         assert_screen_contains(&screen, "× BLOCKED");
         assert_screen_contains(
             &screen,
@@ -12648,9 +12648,9 @@ mod tests {
             ),
         );
         assert_screen_contains(&screen, "R change");
-        assert_screen_contains(&screen, "C Codex");
+        assert_screen_contains(&screen, "C  Codex");
         assert_screen_contains(&screen, "λ Claude");
-        assert_screen_contains(&screen, "H Hermes");
+        assert_screen_contains(&screen, "H  Hermes");
         assert_screen_contains(&screen, "☁ Lark Doc");
         assert_screen_contains(&screen, "Review will load the selected session context.");
         assert_screen_contains(&screen, "available");
