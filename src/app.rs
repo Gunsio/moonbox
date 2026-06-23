@@ -4264,6 +4264,12 @@ impl App {
             self.queue_lark_cli_setup_install();
             return;
         }
+        if !self.reviewed_lark_export_matches_selection() {
+            self.launch_review = false;
+            self.launch_review_details = false;
+            self.confirm_launch_target();
+            return;
+        }
         let Some(markdown) = self.data.capsule.handoff_artifact.clone() else {
             self.set_status("Generate handoff before creating Lark Doc");
             self.pending_g = false;
@@ -4622,6 +4628,11 @@ impl App {
         self.selected_event = 0;
         self.rewind_event_id.clear();
         self.capsule_scroll = 0;
+        self.clear_handoff_artifact_state();
+        self.launch_review = false;
+        self.launch_review_details = false;
+        self.launch_review_lark_export = false;
+        self.lark_export_plan = None;
         if self.selected_session_timeline_loaded() {
             return;
         }
@@ -5789,8 +5800,19 @@ impl App {
     }
 
     fn skill_handoff_review_ready(&self) -> bool {
+        let Some(session) = self.current_session() else {
+            return false;
+        };
         let capsule = self.launch_capsule_for_target(self.pending_target);
-        capsule.handoff_artifact.is_some() && !compiler::compiler_is_builtin(&capsule.compiler)
+        let rewind_event_id = launch_rewind_event_id(&self.data, &self.rewind_event_id);
+        capsule.handoff_artifact.is_some()
+            && !compiler::compiler_is_builtin(&capsule.compiler)
+            && self.handoff_review_ready_for(
+                &session.id,
+                self.pending_target,
+                &capsule.compiler,
+                &rewind_event_id,
+            )
     }
 
     fn copy_handoff_artifact(&mut self) {
@@ -5948,6 +5970,56 @@ impl App {
             return None;
         }
         self.data.capsule.handoff_artifact.as_deref()
+    }
+
+    fn clear_handoff_artifact_state(&mut self) {
+        self.data.capsule.handoff_artifact = None;
+        self.data.capsule.handoff_artifact_path = None;
+        self.data.capsule.handoff_runner = None;
+        self.data.capsule.handoff_skill = None;
+        self.pending_share_handoff_copy = false;
+    }
+
+    fn reviewed_lark_export_matches_selection(&mut self) -> bool {
+        let Some(session) = self.current_session().cloned() else {
+            self.set_status("No session selected");
+            self.pending_g = false;
+            return false;
+        };
+        if self.data.capsule.source_session != session.id
+            || self.data.capsule.source_cli != session.cli
+        {
+            self.set_status(format!(
+                "Regenerating Lark handoff for selected session: {}",
+                session.id
+            ));
+            return false;
+        }
+        let rewind_event_id = launch_rewind_event_id(&self.data, &self.rewind_event_id);
+        let capsule_rewind = self
+            .data
+            .capsule
+            .rewind_point
+            .split_whitespace()
+            .next()
+            .unwrap_or_default();
+        if capsule_rewind != rewind_event_id {
+            self.set_status("Regenerating Lark handoff for selected rewind");
+            return false;
+        }
+        if let Some(plan) = self.lark_export_plan.as_ref()
+            && (plan.session != self.data.capsule.source_session
+                || plan.source_cli != self.data.capsule.source_cli.id()
+                || plan.target_cli != self.data.capsule.target_cli.id()
+                || plan.rewind != rewind_event_id)
+        {
+            self.set_status(format!(
+                "Regenerating Lark handoff for selected session: {}",
+                session.id
+            ));
+            return false;
+        }
+        true
     }
 
     fn compact_portable_json(&self, session: &SessionSummary) -> serde_json::Value {
@@ -8913,6 +8985,63 @@ Host devbox
         assert!(plan.markdown.contains("Continue from preview."));
         assert!(!plan.markdown.contains("/tmp/"));
         assert_eq!(app.status_message, "Opening Lark Doc");
+    }
+
+    #[test]
+    fn session_change_clears_ready_handoff_artifact() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        seed_ready_handoff_artifact(&mut app, "# Old Handoff\n\nDo not reuse.");
+        let mut next_session = app.current_session().expect("session").clone();
+        next_session.id = "codex-next-session".into();
+        next_session.title = "next session".into();
+        app.data.sessions.push(next_session);
+        let next_index = app.data.sessions.len() - 1;
+        app.refresh_visible_sessions();
+
+        app.select_session_index(next_index);
+
+        assert_eq!(
+            app.current_session().map(|session| session.id.as_str()),
+            Some("codex-next-session")
+        );
+        assert!(app.data.capsule.handoff_artifact.is_none());
+        assert!(app.data.capsule.handoff_artifact_path.is_none());
+        assert!(!app.launch_review);
+        assert!(!app.launch_review_lark_export);
+        assert!(!app.skill_handoff_review_ready());
+    }
+
+    #[test]
+    fn lark_doc_enter_does_not_export_stale_session_handoff() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        seed_ready_handoff_artifact(&mut app, "# Old Handoff\n\nWrong source session.");
+        let old_session = app.data.capsule.source_session.clone();
+        let mut next_session = app.current_session().expect("session").clone();
+        next_session.id = "codex-current-session".into();
+        next_session.title = "current session".into();
+        app.data.sessions.push(next_session);
+        app.selected_session = app.data.sessions.len() - 1;
+        app.refresh_visible_sessions();
+        app.show_launch = true;
+        app.launch_review = true;
+        app.launch_review_lark_export = true;
+        app.lark_cli_readiness.state = lark::LarkCliState::Ready;
+        app.lark_cli_readiness.supports_docs_create_v2 = true;
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert_ne!(
+            app.current_session().map(|session| session.id.as_str()),
+            Some(old_session.as_str())
+        );
+        assert!(app.take_pending_lark_export().is_none());
+        assert!(app.is_launch_review_pending());
+        assert_eq!(
+            app.pending_launch_review
+                .as_ref()
+                .map(|pending| pending.session_id.as_str()),
+            Some("codex-current-session")
+        );
     }
 
     #[test]
