@@ -273,7 +273,9 @@ mod tests {
         assert!(action.contains("Action Menu"));
         assert!(action.contains("Session actions"));
         assert!(action.contains("Resume"));
-        assert!(action.contains("Archive"));
+        assert!(action.contains("New Session"));
+        assert!(action.contains("Fork"));
+        assert!(!action.contains("Archive"));
         assert!(yank.contains("Yank"));
         assert!(yank.contains("First user input"));
         assert!(yank.contains("Portable JSON"));

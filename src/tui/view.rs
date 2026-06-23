@@ -7782,6 +7782,7 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
     let mut target_lines = Vec::new();
     for target in CliTool::ALL {
         let selected = target == app.pending_target;
+        let selected = selected && !app.launch_review_lark_export;
         let needs_handoff_skill = app.launch_requires_handoff_skill(target);
         let raw_validation_state = if needs_handoff_skill {
             LaunchValidationState::Blocked
@@ -7846,6 +7847,72 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
             ),
         ]));
     }
+    let lark_selected = app.launch_review_lark_export;
+    let lark_raw_state = if app.lark_cli_readiness.state == LarkCliState::Ready {
+        LaunchValidationState::Ready
+    } else {
+        LaunchValidationState::Blocked
+    };
+    let lark_validation_state = target_picker_validation_state(lark_raw_state);
+    let lark_label_style = if lark_selected {
+        Style::default()
+            .fg(validation_color(lark_validation_state))
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(validation_color(lark_validation_state))
+    };
+    let lark_status_style = if lark_selected {
+        Style::default()
+            .fg(validation_color(lark_validation_state))
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(validation_color(lark_validation_state))
+    };
+    let (lark_status_icon, lark_status_icon_color) =
+        target_picker_status_icon(lark_validation_state);
+    target_lines.push(Line::from(vec![
+        Span::styled(
+            if lark_selected { ">" } else { " " },
+            Style::default().fg(theme::gold()),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            "☁",
+            Style::default()
+                .fg(theme::blue())
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            format!("{:<8}", localized(language, "Lark Doc", "飞书文档")),
+            lark_label_style,
+        ),
+        Span::raw("  "),
+        Span::styled(
+            lark_status_icon,
+            Style::default()
+                .fg(lark_status_icon_color)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            target_picker_validation_label(language, lark_raw_state),
+            lark_status_style,
+        ),
+    ]));
+    target_lines.push(Line::from(vec![
+        Span::raw("    "),
+        Span::styled("└", Style::default().fg(theme::border())),
+        Span::raw(" "),
+        Span::styled(
+            lark_target_picker_description(
+                language,
+                app.lark_cli_readiness.state,
+                app.lark_cli_readiness.reason.as_str(),
+            ),
+            Style::default().fg(theme::border()),
+        ),
+    ]));
     let mut lines = vec![
         Line::from(Span::styled(
             i18n::text(language, Text::ChooseTargetCli),
@@ -7906,8 +7973,10 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
     ];
     lines.extend(target_lines);
     let pending_needs_handoff_skill = app.launch_requires_handoff_skill(app.pending_target);
+    let lark_target_needs_setup =
+        app.launch_review_lark_export && app.lark_cli_readiness.state != LarkCliState::Ready;
     lines.push(Line::raw(""));
-    if pending_needs_handoff_skill {
+    if !lark_target_needs_setup && pending_needs_handoff_skill {
         lines.extend([
             Line::from(Span::styled(
                 i18n::text(language, Text::HandoffSkillRequired),
@@ -7928,7 +7997,18 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
     let can_regenerate_handoff = validation_can_regenerate_handoff(&pending_validation);
     let selected_setup = app.selected_compiler_setup_install_plan();
     lines.extend([
-        if pending_needs_handoff_skill {
+        if lark_target_needs_setup {
+            Line::from(Span::styled(
+                localized(
+                    language,
+                    "Press Enter to install lark-cli before creating the document.",
+                    "按 Enter 先安装 lark-cli，再创建飞书文档。",
+                ),
+                Style::default()
+                    .fg(theme::gold())
+                    .add_modifier(Modifier::BOLD),
+            ))
+        } else if pending_needs_handoff_skill {
             Line::raw("")
         } else if pending_validation.state == LaunchValidationState::Blocked {
             Line::from(Span::styled(
@@ -7964,7 +8044,13 @@ fn render_launch(frame: &mut Frame, root: Rect, app: &App) {
         },
         Line::raw(""),
         Line::from(Span::styled(
-            if pending_needs_handoff_skill {
+            if lark_target_needs_setup {
+                if language == crate::core::config::UiLanguage::ZhHans {
+                    "j/k 选择目标   S Skill   R Runner   Enter 安装   y 不可用   Esc 取消"
+                } else {
+                    "j/k target   S skill   R runner   Enter install   y unavailable   Esc cancel"
+                }
+            } else if pending_needs_handoff_skill {
                 if language == crate::core::config::UiLanguage::ZhHans {
                     "j/k 选择目标   S Skill   R Runner   Enter 选择 Skill   y 不可用   Esc 取消"
                 } else {
@@ -8655,6 +8741,26 @@ fn target_picker_description(
         crate::core::config::UiLanguage::ZhHans => {
             format!("{target} 会读取生成的 handoff 文档。")
         }
+    }
+}
+
+fn lark_target_picker_description(
+    language: crate::core::config::UiLanguage,
+    readiness_state: LarkCliState,
+    readiness_reason: &str,
+) -> String {
+    if readiness_state == LarkCliState::Ready {
+        return localized(
+            language,
+            "Create a Feishu/Lark document from the reviewed handoff.",
+            "生成 handoff 后创建飞书文档。",
+        )
+        .into();
+    }
+    if language == crate::core::config::UiLanguage::ZhHans {
+        format!("需要 lark-cli：{readiness_reason}")
+    } else {
+        readiness_reason.to_string()
     }
 }
 
@@ -9808,19 +9914,17 @@ mod tests {
         assert_screen_contains(&screen, "Session actions");
         assert_screen_contains(&screen, "Resume");
         assert_screen_contains(&screen, "Handoff");
-        assert_screen_contains(&screen, "Lark Doc");
         assert_screen_contains(&screen, "New Session");
         assert_screen_contains(&screen, "Fork");
-        assert_screen_contains(&screen, "Yank");
-        assert_screen_contains(&screen, "Archive");
         assert_screen_contains(&screen, "↩ Resume");
         assert_screen_contains(&screen, "→ Handoff");
-        assert_screen_contains(&screen, "☁ Lark Doc");
         assert_screen_contains(&screen, "+ New Session");
-        assert_screen_contains(&screen, "⧉ Yank");
-        assert_screen_contains(&screen, "▣ Archive");
         assert_screen_contains(&screen, "unavailable");
         assert_screen_contains(&screen, "j/k choose");
+        assert!(!screen.contains("Lark Doc"), "{screen}");
+        assert!(!screen.contains("◎ Inspect"), "{screen}");
+        assert!(!screen.contains("⧉ Yank"), "{screen}");
+        assert!(!screen.contains("▣ Archive"), "{screen}");
         assert!(!screen.contains("Copy Session ID"), "{screen}");
     }
 
@@ -9839,22 +9943,16 @@ mod tests {
         assert_screen_contains(&screen, "会话动作");
         assert_screen_contains(&screen, "↩ 恢复  ✓ 可用");
         assert_screen_contains(&screen, "→ 交接  ✓ 可用");
-        assert_screen_contains(&screen, "☁ 飞书文档  ✓ 可用");
         assert_screen_contains(&screen, "+ 新会话  ✓ 可用");
         assert_screen_contains(&screen, "⤴ 分叉  ✓ 可用");
         assert_screen_contains(&screen, "↗ 跳转  · 不可用");
-        assert_screen_contains(&screen, "◎ 详情  ✓ 可用");
-        assert_screen_contains(&screen, "⧉ 复制  ✓ 可用");
-        assert_screen_contains(&screen, "▣ 归档  ✓ 可用");
         assert_screen_contains(&screen, "└ 可通过本地 provider CLI 恢复该会话。");
-        assert_screen_contains(&screen, "生成并创建当前会话的飞书交接文档。");
         assert_screen_contains(&screen, "可调用 Codex 原生 session fork。");
         assert_screen_contains(&screen, "Hooks 未启用，无法获得实时 tmux 状态。");
-        assert_screen_contains(&screen, "打开复制面板，不启动 provider 进程。");
-        assert_screen_contains(
-            &screen,
-            "归档状态会写入 Moonbox overlay，不会修改来源存储。",
-        );
+        assert!(!screen.contains("飞书文档"), "{screen}");
+        assert!(!screen.contains("◎ 详情"), "{screen}");
+        assert!(!screen.contains("⧉ 复制"), "{screen}");
+        assert!(!screen.contains("▣ 归档"), "{screen}");
         assert!(
             !screen.contains("Local provider resume is available."),
             "{screen}"
@@ -12553,6 +12651,7 @@ mod tests {
         assert_screen_contains(&screen, "C Codex");
         assert_screen_contains(&screen, "λ Claude");
         assert_screen_contains(&screen, "H Hermes");
+        assert_screen_contains(&screen, "☁ Lark Doc");
         assert_screen_contains(&screen, "Review will load the selected session context.");
         assert_screen_contains(&screen, "available");
         assert_screen_contains(&screen, "enter Review");
@@ -12620,6 +12719,7 @@ mod tests {
         let screen = render_text(&app, 140, 52);
 
         assert_screen_contains(&screen, "选择目标 CLI");
+        assert_screen_contains(&screen, "☁ 飞书文档");
         assert_screen_contains(&screen, "按 Enter 用当前 skill 重新生成 handoff");
         assert_screen_contains(&screen, "Enter 重新生成");
         assert_screen_contains(&screen, "当前 handoff 由其他 skill/compiler 生成");
