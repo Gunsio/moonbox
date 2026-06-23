@@ -43,6 +43,20 @@ pub fn load_workbench_from_session_snapshot(
     data::workbench_data_from_session_snapshot(source_session, sessions, source_adapters, target)
 }
 
+pub fn load_full_workbench_from_session_snapshot(
+    source_session: SessionSummary,
+    sessions: Vec<SessionSummary>,
+    source_adapters: Vec<super::model::SourceAdapterReport>,
+    target: CliTool,
+) -> Result<WorkbenchData, CoreError> {
+    data::workbench_data_from_full_session_snapshot(
+        source_session,
+        sessions,
+        source_adapters,
+        target,
+    )
+}
+
 pub fn load_workbench_for_data_space(
     space: &dataspace::DataSpaceEntry,
     source: super::model::CliTool,

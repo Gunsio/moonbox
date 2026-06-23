@@ -5044,7 +5044,7 @@ impl App {
             .get(selected_compiler)
             .cloned()
             .unwrap_or_else(compiler::default_compiler_id);
-        let rewind_event_id = self.rewind_event_id.clone();
+        let rewind_event_id = launch_rewind_event_id(&self.data, &self.rewind_event_id);
         if self.handoff_review_ready_for(&session_id, target, &compiler_id, &rewind_event_id) {
             self.pending_target = target;
             self.show_launch = true;
@@ -5068,13 +5068,13 @@ impl App {
             let _ = sender.send(LaunchReviewMessage::Progress(LaunchReviewProgress {
                 stage: LaunchReviewStage::PreparingContext,
                 detail: if space.is_local() {
-                    "reading local timeline snapshot".into()
+                    "reading full local timeline snapshot".into()
                 } else {
                     "reading SSH timeline snapshot in read-only mode".into()
                 },
             }));
             let result = if space.is_local() {
-                workbench::load_workbench_from_session_snapshot(
+                workbench::load_full_workbench_from_session_snapshot(
                     session,
                     sessions,
                     source_adapters,
@@ -5094,11 +5094,13 @@ impl App {
                     stage: LaunchReviewStage::RunningSkill,
                     detail: "generating handoff artifact".into(),
                 }));
+                let compile_rewind_event_id =
+                    launch_rewind_event_id(&data, &worker_rewind_event_id);
                 let Some(capsule) = workbench::compile_capsule_from_workbench_snapshot(
                     &data,
                     &worker_session_id,
                     target,
-                    &worker_rewind_event_id,
+                    &compile_rewind_event_id,
                     &worker_compiler_id,
                 )?
                 else {
@@ -5165,6 +5167,8 @@ impl App {
         self.data.capsule.source_session == session_id
             && self.data.capsule.target_cli == target
             && self.data.capsule.compiler == compiler_id
+            && !rewind_event_id.trim().is_empty()
+            && !timeline_has_preview_truncation(&self.data)
             && self
                 .data
                 .capsule
@@ -5197,12 +5201,9 @@ impl App {
             self.set_status("Review failed: no session selected");
             return false;
         };
-        match workbench::compile_capsule(
-            &session_id,
-            self.data.target,
-            &self.rewind_event_id,
-            &compiler,
-        ) {
+        let rewind_event_id = launch_rewind_event_id(&self.data, &self.rewind_event_id);
+        match workbench::compile_capsule(&session_id, self.data.target, &rewind_event_id, &compiler)
+        {
             Ok(Some(capsule)) => {
                 self.compile_status = "COMPILED";
                 self.data.capsule = capsule;
@@ -6262,7 +6263,18 @@ impl App {
             capsule.compiler = selected_compiler.clone();
         }
         capsule.target_cli = target;
-        capsule.handoff_label = format!("moonbox/{}-rewind-{}", target.id(), self.rewind_event_id);
+        let rewind_event_id = launch_rewind_event_id(&self.data, &self.rewind_event_id);
+        if !rewind_event_id.is_empty() {
+            let title = timeline_event_title_for_data(&self.data, &rewind_event_id)
+                .unwrap_or("selected rewind");
+            capsule.rewind_point = format!("{rewind_event_id} / {title}");
+        }
+        let rewind_label = if rewind_event_id.is_empty() {
+            "pending"
+        } else {
+            rewind_event_id.as_str()
+        };
+        capsule.handoff_label = format!("moonbox/{}-rewind-{rewind_label}", target.id());
         capsule
     }
 
@@ -6282,12 +6294,56 @@ impl App {
 }
 
 fn initial_rewind_event_id(data: &WorkbenchData) -> String {
-    data.capsule
+    launch_rewind_event_id(data, "")
+}
+
+fn launch_rewind_event_id(data: &WorkbenchData, preferred: &str) -> String {
+    let preferred = preferred.trim();
+    if timeline_contains_event(data, preferred) {
+        return preferred.to_string();
+    }
+    let capsule_rewind = capsule_rewind_event_id(&data.capsule);
+    if timeline_contains_event(data, capsule_rewind) {
+        return capsule_rewind.to_string();
+    }
+    data.timeline
+        .iter()
+        .rev()
+        .find(|event| timeline_event_is_rewind_anchor(event))
+        .or_else(|| {
+            data.timeline
+                .iter()
+                .rev()
+                .find(|event| !matches!(event.kind, TimelineKind::Tool))
+        })
+        .or_else(|| data.timeline.last())
+        .map(|event| event.id.clone())
+        .unwrap_or_default()
+}
+
+fn capsule_rewind_event_id(capsule: &WorkCapsule) -> &str {
+    capsule
         .rewind_point
         .split_whitespace()
         .next()
         .unwrap_or_default()
-        .to_string()
+}
+
+fn timeline_contains_event(data: &WorkbenchData, event_id: &str) -> bool {
+    !event_id.trim().is_empty() && data.timeline.iter().any(|event| event.id == event_id)
+}
+
+fn timeline_event_title_for_data<'a>(data: &'a WorkbenchData, event_id: &str) -> Option<&'a str> {
+    data.timeline
+        .iter()
+        .find(|event| event.id == event_id)
+        .map(|event| event.title.as_str())
+}
+
+fn timeline_has_preview_truncation(data: &WorkbenchData) -> bool {
+    data.timeline
+        .iter()
+        .any(|event| event.title == "Timeline preview truncated")
 }
 
 fn rewind_event_index(data: &WorkbenchData, rewind_event_id: &str) -> usize {
@@ -8014,6 +8070,46 @@ Host devbox
         assert!(!app.is_launch_review_pending());
         assert!(app.launch_review);
         assert_eq!(app.status_message, "Handoff review ready: Hermes");
+    }
+
+    #[test]
+    fn truncated_preview_handoff_artifact_is_not_reused_as_ready() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        let session_id = app.current_session().expect("session").id.clone();
+        let compiler_id = app.data.compilers[app.selected_compiler].clone();
+        let rewind_event_id = app.rewind_event_id.clone();
+        app.data.capsule.source_session = session_id.clone();
+        app.data.capsule.target_cli = CliTool::Hermes;
+        app.data.capsule.compiler = compiler_id.clone();
+        app.data.capsule.rewind_point = format!("{rewind_event_id} / reviewed");
+        app.data.capsule.handoff_artifact = Some("preview-only artifact".into());
+        app.data.timeline.push(TimelineEvent {
+            id: "evt-999".into(),
+            time: "--:--".into(),
+            kind: TimelineKind::Tool,
+            title: "Timeline preview truncated".into(),
+            detail: "showing first 300 events".into(),
+            metadata: Default::default(),
+        });
+
+        assert!(!app.handoff_review_ready_for(
+            &session_id,
+            CliTool::Hermes,
+            &compiler_id,
+            &rewind_event_id
+        ));
+    }
+
+    #[test]
+    fn launch_capsule_fills_missing_rewind_from_loaded_timeline() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.rewind_event_id.clear();
+        app.data.capsule.rewind_point.clear();
+
+        let capsule = app.launch_capsule_for_target(CliTool::Hermes);
+
+        assert!(capsule.rewind_point.starts_with("evt-091 /"));
+        assert!(capsule.handoff_label.contains("evt-091"));
     }
 
     #[test]

@@ -98,6 +98,23 @@ pub fn workbench_data_from_session_snapshot(
     )
 }
 
+pub fn workbench_data_from_full_session_snapshot(
+    source_session: SessionSummary,
+    sessions: Vec<SessionSummary>,
+    source_adapters: Vec<SourceAdapterReport>,
+    target: CliTool,
+) -> Result<WorkbenchData, CoreError> {
+    let source_session = ensure_session_anatomy(source_session);
+    let timeline = full_timeline_for_workbench(&source_session)?;
+    workbench_data_from_timeline_snapshot(
+        source_session,
+        sessions,
+        source_adapters,
+        target,
+        timeline,
+    )
+}
+
 pub fn workbench_data_from_timeline_snapshot(
     source_session: SessionSummary,
     sessions: Vec<SessionSummary>,
@@ -281,6 +298,15 @@ fn preview_timeline_for_workbench(
         return Ok(empty_timeline(source_session));
     }
     preview_timeline_for_session(source_session)
+}
+
+fn full_timeline_for_workbench(
+    source_session: &SessionSummary,
+) -> Result<CanonicalTimeline, CoreError> {
+    if should_skip_timeline_load(source_session) {
+        return Ok(empty_timeline(source_session));
+    }
+    canonical_timeline_for_session(source_session)
 }
 
 #[cfg(test)]
