@@ -1,5 +1,5 @@
 use std::{
-    env, fmt,
+    env, fmt, fs,
     sync::mpsc::{self, TryRecvError},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -4410,19 +4410,22 @@ impl App {
             self.confirm_launch_target();
             return;
         }
-        let Some(markdown) = self.data.capsule.handoff_artifact.clone() else {
-            self.set_status("Generate handoff before creating Lark Doc");
-            self.pending_g = false;
-            return;
-        };
         let session_id = self.data.capsule.source_session.clone();
         let target = self.data.capsule.target_cli;
         let rewind = self.rewind_event_id.clone();
         let compiler = self.data.capsule.compiler.clone();
         let title = lark::document_title(&self.data.capsule.handoff_label, &session_id);
+        let markdown = match handoff_markdown_for_lark_export(&self.data.capsule) {
+            Ok(markdown) => markdown,
+            Err(message) => {
+                self.set_status(message);
+                self.pending_g = false;
+                return;
+            }
+        };
         let markdown = lark::markdown_with_document_title(&title, &markdown);
         let command_display =
-            "lark-cli docs +create --api-version v2 --as user --doc-format markdown --content <titled reviewed handoff markdown>"
+            "lark-cli docs +create --api-version v2 --as user --doc-format markdown --content @<titled handoff markdown file>"
                 .to_string();
         self.pending_lark_export = Some(Box::new(LarkExportTuiPlan {
             session_id,
@@ -6940,6 +6943,26 @@ fn lark_export_command_display(
     )
 }
 
+fn handoff_markdown_for_lark_export(capsule: &WorkCapsule) -> Result<String, String> {
+    if let Some(path) = capsule
+        .handoff_artifact_path
+        .as_deref()
+        .filter(|path| !path.trim().is_empty())
+    {
+        let markdown = fs::read_to_string(path)
+            .map_err(|error| format!("Handoff file unreadable for Lark export: {error}"))?;
+        if markdown.trim().is_empty() {
+            return Err("Handoff file is empty for Lark export".into());
+        }
+        return Ok(markdown);
+    }
+    capsule
+        .handoff_artifact
+        .clone()
+        .filter(|markdown| !markdown.trim().is_empty())
+        .ok_or_else(|| "Generate handoff before creating Lark Doc".into())
+}
+
 fn shellish_quote(value: &str) -> String {
     if value.bytes().all(|byte| {
         byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'/' | b':' | b'=')
@@ -9151,6 +9174,44 @@ Host devbox
         assert!(plan.markdown.contains("Continue from preview."));
         assert!(!plan.markdown.contains("/tmp/"));
         assert_eq!(app.status_message, "Opening Lark Doc");
+    }
+
+    #[test]
+    fn launch_picker_lark_doc_target_reads_path_backed_handoff_file() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        seed_ready_handoff_artifact(&mut app, "# Generated Handoff\n\nPreview only.");
+        let millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_millis())
+            .unwrap_or_default();
+        let artifact_path = env::temp_dir().join(format!(
+            "moonbox-app-lark-handoff-{}-{millis}.md",
+            std::process::id()
+        ));
+        fs::write(
+            &artifact_path,
+            "# Generated Handoff\n\nFull file body.\n\nFULL_PATH_SENTINEL\n",
+        )
+        .expect("handoff artifact");
+        app.data.capsule.handoff_artifact_path = Some(artifact_path.to_string_lossy().into_owned());
+
+        app.open_launch_picker();
+        app.handle_key(key('j'));
+        app.lark_cli_readiness.state = lark::LarkCliState::Ready;
+        app.lark_cli_readiness.supports_docs_create_v2 = true;
+        app.launch_review = true;
+        app.launch_review_lark_export = true;
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        let Some(plan) = app.take_pending_lark_export() else {
+            panic!(
+                "expected pending Lark export; status={}",
+                app.status_message
+            );
+        };
+        assert!(plan.markdown.contains("FULL_PATH_SENTINEL"));
+        assert!(!plan.markdown.contains("Preview only."));
+        let _ = fs::remove_file(artifact_path);
     }
 
     #[test]

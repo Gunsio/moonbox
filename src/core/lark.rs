@@ -1,7 +1,8 @@
 use std::{
-    env,
-    path::PathBuf,
+    env, fs, io,
+    path::{Path, PathBuf},
     process::{Command, Output},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use serde::{Deserialize, Serialize};
@@ -112,8 +113,9 @@ pub fn readiness(setup_command: Option<String>) -> LarkCliReadiness {
             command,
             version,
             supports_docs_create_v2,
-            reason: "lark-cli does not expose docs +create --api-version v2 with content input"
-                .into(),
+            reason:
+                "lark-cli does not expose docs +create --api-version v2 with Markdown file input"
+                    .into(),
             setup_command,
         };
     }
@@ -177,14 +179,9 @@ pub fn execute_export(
         });
     }
 
-    let content = capsule
-        .handoff_artifact
-        .as_deref()
-        .ok_or_else(|| CoreError::LarkExport {
-            reason: "handoff runner did not produce a Markdown artifact for Lark export".into(),
-        })?;
+    let content = handoff_markdown_content(capsule)?;
     let command = create_command_preview(&title, options);
-    let output = run_lark_create(&markdown_with_document_title(&title, content), options)?;
+    let output = run_lark_create(&markdown_with_document_title(&title, &content), options)?;
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     if !output.status.success() {
@@ -262,7 +259,32 @@ pub fn execute_export(
     })
 }
 
-fn create_command_preview(title: &str, options: &LarkExportOptions) -> Vec<String> {
+fn handoff_markdown_content(capsule: &WorkCapsule) -> Result<String, CoreError> {
+    if let Some(path) = capsule
+        .handoff_artifact_path
+        .as_deref()
+        .filter(|path| !path.trim().is_empty())
+    {
+        let content = fs::read_to_string(path).map_err(|error| CoreError::LarkExport {
+            reason: format!("failed to read handoff artifact file {path}: {error}"),
+        })?;
+        if content.trim().is_empty() {
+            return Err(CoreError::LarkExport {
+                reason: format!("handoff artifact file is empty: {path}"),
+            });
+        }
+        return Ok(content);
+    }
+    capsule
+        .handoff_artifact
+        .clone()
+        .filter(|artifact| !artifact.trim().is_empty())
+        .ok_or_else(|| CoreError::LarkExport {
+            reason: "handoff runner did not produce a Markdown artifact for Lark export".into(),
+        })
+}
+
+fn create_command_preview(_title: &str, options: &LarkExportOptions) -> Vec<String> {
     let mut command = vec![
         lark_cli_bin_display(),
         "docs".into(),
@@ -274,7 +296,7 @@ fn create_command_preview(title: &str, options: &LarkExportOptions) -> Vec<Strin
         "--doc-format".into(),
         "markdown".into(),
         "--content".into(),
-        format!("# {}\n\n...", title),
+        "@<titled handoff markdown file>".into(),
     ];
     if let Some(parent_token) = &options.parent_token {
         command.push("--parent-token".into());
@@ -288,6 +310,10 @@ fn create_command_preview(title: &str, options: &LarkExportOptions) -> Vec<Strin
 }
 
 fn run_lark_create(content: &str, options: &LarkExportOptions) -> Result<Output, CoreError> {
+    let markdown_path = write_markdown_temp(content).map_err(|error| CoreError::LarkExport {
+        reason: format!("failed to prepare Markdown file for lark-cli: {error}"),
+    })?;
+    let markdown_arg = markdown_file_arg(&markdown_path);
     let mut command = Command::new(lark_cli_bin());
     command
         .arg("docs")
@@ -299,7 +325,7 @@ fn run_lark_create(content: &str, options: &LarkExportOptions) -> Result<Output,
         .arg("--doc-format")
         .arg("markdown")
         .arg("--content")
-        .arg(content);
+        .arg(&markdown_arg);
     if let Some(parent_token) = &options.parent_token {
         command.arg("--parent-token").arg(parent_token);
     }
@@ -308,9 +334,44 @@ fn run_lark_create(content: &str, options: &LarkExportOptions) -> Result<Output,
             .arg("--parent-position")
             .arg(parent_position.to_string());
     }
-    command.output().map_err(|error| CoreError::LarkExport {
+    let output = command.output();
+    let _ = fs::remove_file(&markdown_path);
+    output.map_err(|error| CoreError::LarkExport {
         reason: format!("failed to start lark-cli docs +create: {error}"),
     })
+}
+
+pub fn write_markdown_temp(content: &str) -> io::Result<PathBuf> {
+    for attempt in 0..16 {
+        let millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_millis())
+            .unwrap_or_default();
+        let path = PathBuf::from(format!(
+            ".moonbox-lark-handoff-{}-{millis}-{attempt}.md",
+            std::process::id()
+        ));
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .and_then(|mut file| {
+                use io::Write;
+                file.write_all(content.as_bytes())
+            }) {
+            Ok(()) => return Ok(path),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "could not allocate unique Moonbox Lark Markdown temp file",
+    ))
+}
+
+pub fn markdown_file_arg(path: &Path) -> String {
+    format!("@{}", path.display())
 }
 
 fn run_lark_title_patch(url: &str, title: &str) -> Result<Option<Output>, CoreError> {

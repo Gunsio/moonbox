@@ -24,7 +24,7 @@ use super::{
 
 const COMPILER_PREFIX: &str = "agent";
 const DEFAULT_TIMEOUT_MS: u64 = 300_000;
-const MAX_ARTIFACT_CHARS: usize = 40_000;
+const MAX_INLINE_ARTIFACT_CHARS: usize = 40_000;
 const MAX_CONTEXT_EVENTS: usize = 80;
 const MAX_CONTEXT_COMPACTS: usize = 5;
 const MAX_CONTEXT_EVIDENCE: usize = 40;
@@ -1918,7 +1918,7 @@ fn duration_millis(duration: Duration) -> u64 {
 }
 
 fn bounded_artifact(value: &str) -> String {
-    truncate(value.trim(), MAX_ARTIFACT_CHARS)
+    truncate(value.trim(), MAX_INLINE_ARTIFACT_CHARS)
 }
 
 fn single_line_excerpt(value: &str, limit: usize) -> String {
@@ -2268,6 +2268,40 @@ Write the handoff.
                 .as_deref()
                 .expect("artifact")
                 .contains("Continue the work")
+        );
+    }
+
+    #[test]
+    fn path_backed_agent_artifact_keeps_bounded_preview_and_file_path() {
+        let request =
+            data::compile_request(CliTool::Codex, CliTool::Claude, "evt-091").expect("request");
+        let skill = HandoffSkill {
+            id: "handoff".into(),
+            name: "handoff".into(),
+            description: "handoff".into(),
+            path: PathBuf::from("/skills/handoff/SKILL.md"),
+            source: HandoffSkillSource::Local,
+        };
+        let large_body = format!(
+            "# Handoff\n\n{}THE_END",
+            "large handoff body\n".repeat(MAX_INLINE_ARTIFACT_CHARS / 4)
+        );
+        let capsule = normalize_agent_artifact(
+            &request,
+            AgentRunner::Codex,
+            &skill,
+            &AgentArtifact {
+                body: large_body.clone(),
+                path: Some(PathBuf::from("/tmp/moonbox-large-handoff.md")),
+            },
+        );
+
+        let artifact = capsule.handoff_artifact.as_deref().expect("artifact");
+        assert!(artifact.len() <= MAX_INLINE_ARTIFACT_CHARS + 3);
+        assert!(!artifact.contains("THE_END"));
+        assert_eq!(
+            capsule.handoff_artifact_path.as_deref(),
+            Some("/tmp/moonbox-large-handoff.md")
         );
     }
 

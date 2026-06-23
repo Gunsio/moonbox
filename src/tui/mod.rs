@@ -272,6 +272,11 @@ fn run_lark_export(plan: &LarkExportTuiPlan) -> io::Result<ExitStatus> {
     println!("Creating the Feishu/Lark document from the reviewed handoff Markdown.");
     println!("Moonbox will return when the export exits.\n");
     io::stdout().flush()?;
+    let markdown_path = lark::write_markdown_temp(&lark::markdown_with_document_title(
+        &plan.title,
+        &plan.markdown,
+    ))?;
+    let markdown_arg = lark::markdown_file_arg(&markdown_path);
     let output = Command::new(lark_cli_bin())
         .arg("docs")
         .arg("+create")
@@ -282,11 +287,10 @@ fn run_lark_export(plan: &LarkExportTuiPlan) -> io::Result<ExitStatus> {
         .arg("--doc-format")
         .arg("markdown")
         .arg("--content")
-        .arg(lark::markdown_with_document_title(
-            &plan.title,
-            &plan.markdown,
-        ))
-        .output()?;
+        .arg(&markdown_arg)
+        .output();
+    let _ = std::fs::remove_file(&markdown_path);
+    let output = output?;
     io::stdout().write_all(&output.stdout)?;
     io::stderr().write_all(&output.stderr)?;
     if output.status.success()

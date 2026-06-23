@@ -2029,17 +2029,24 @@ fn lark_handoff_export_dry_run_reports_missing_cli_without_remote_write() {
 }
 
 #[test]
-fn lark_handoff_export_execute_calls_lark_cli_create_with_markdown_content() {
+fn lark_handoff_export_execute_calls_lark_cli_create_with_markdown_file() {
     let test_name = "lark-export-execute";
     let home = fixture_home(test_name);
     let args_path = home.join("fake-lark-args.txt");
     let content_path = home.join("fake-lark-content.xml");
     let title_args_path = home.join("fake-lark-title-args.txt");
+    let handoff_artifact_path = home.join("fake-generated-handoff.md");
     let fake_compiler = write_executable_script(
         &home,
         "bin/fake-handoff-compiler",
         r##"#!/bin/sh
-cat <<'JSON'
+artifact_path="$MOONBOX_FAKE_HANDOFF_ARTIFACT"
+{
+  printf '# Generated Handoff\n'
+  printf 'This came from the configured handoff runner.\n'
+  printf 'FULL_FILE_SENTINEL\n'
+} > "$artifact_path"
+cat <<JSON
 {
   "version": 1,
   "capsule": {
@@ -2056,7 +2063,8 @@ cat <<'JSON'
     "todo": [{"done": false, "text": "Continue from the generated handoff."}],
     "evidence": ["fake compiler output was consumed"],
     "risks": [],
-    "handoff_artifact": "# Generated Handoff\nThis came from the configured handoff runner.",
+    "handoff_artifact": "# Generated Handoff\nPreview only from capsule.",
+    "handoff_artifact_path": "$artifact_path",
     "handoff_runner": "Fake Runner",
     "handoff_skill": "handoff",
     "raw_source_map": null,
@@ -2106,7 +2114,10 @@ if [ "$1" = "docs" ] && [ "$2" = "+create" ]; then
   while [ "$#" -gt 0 ]; do
     if [ "$1" = "--content" ]; then
       shift
-      printf '%s' "$1" > "$MOONBOX_FAKE_LARK_CONTENT"
+      case "$1" in
+        @*) cat "${1#@}" > "$MOONBOX_FAKE_LARK_CONTENT" ;;
+        *) printf '%s' "$1" > "$MOONBOX_FAKE_LARK_CONTENT" ;;
+      esac
       break
     fi
     shift
@@ -2145,6 +2156,7 @@ exit 2
             .env("MOONBOX_FAKE_LARK_ARGS", &args_path)
             .env("MOONBOX_FAKE_LARK_CONTENT", &content_path)
             .env("MOONBOX_FAKE_LARK_TITLE_ARGS", &title_args_path)
+            .env("MOONBOX_FAKE_HANDOFF_ARTIFACT", &handoff_artifact_path)
             .env("MOONBOX_LARK_DISABLE_OPEN", "1")
             .env("MOONBOX_COMPILER", &fake_compiler)
             .env("MOONBOX_COMPILER_ID", "lark-handoff-test")
@@ -2162,11 +2174,14 @@ exit 2
     assert!(args.contains("--api-version\nv2\n"));
     assert!(args.contains("--as\nuser\n"));
     assert!(args.contains("--doc-format\nmarkdown\n"));
+    assert!(args.contains("--content\n@"));
 
     let content = fs::read_to_string(content_path).expect("fake lark content");
     assert!(content.starts_with("# Moonbox Handoff - "));
     assert!(content.contains("# Generated Handoff"));
     assert!(content.contains("This came from the configured handoff runner."));
+    assert!(content.contains("FULL_FILE_SENTINEL"));
+    assert!(!content.contains("Preview only from capsule."));
     assert!(!content.contains("Session Summary"));
     assert!(!content.contains("Handoff Result"));
     assert!(!content.contains("/tmp/"));

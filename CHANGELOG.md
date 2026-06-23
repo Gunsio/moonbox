@@ -7,6 +7,20 @@ and this project uses semantic versioning once tagged releases start.
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-06-23
+
+### Fixed
+
+- Fixed large agent-generated handoff artifacts by keeping full Markdown in the
+  generated handoff file and storing only a bounded preview in the capsule, so
+  verification no longer fails on oversized capsule JSON.
+- Fixed Feishu/Lark handoff export for large Markdown documents by passing
+  `docs +create --api-version v2 --doc-format markdown --content @file`
+  instead of sending the full handoff body as one command-line argument.
+- Made TUI `Lark Doc` export and `moonbox export --to lark --execute` prefer
+  `handoff_artifact_path` over the bounded preview, preventing truncated
+  Feishu/Lark documents.
+
 ### Added
 
 - Root agent operating rules covering one-milestone-per-PR governance, fixture-safe

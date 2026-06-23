@@ -1,6 +1,6 @@
 [package]
 name = "moonbox-theme"
-version = "0.1.5-beta.55"
+version = "0.1.6"
 edition = "2024"
 description = "Semantic TUI theme tokens for Moonbox and related Ratatui apps"
 license = "MIT"
