@@ -102,15 +102,17 @@ pub enum SettingsField {
     Theme,
     SmartEnter,
     CodexAppServer,
+    CodexK2Sessions,
     LarkCli,
 }
 
 impl SettingsField {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::Language,
         Self::Theme,
         Self::SmartEnter,
         Self::CodexAppServer,
+        Self::CodexK2Sessions,
         Self::LarkCli,
     ];
 
@@ -120,7 +122,8 @@ impl SettingsField {
             Self::Theme => 1,
             Self::SmartEnter => 2,
             Self::CodexAppServer => 3,
-            Self::LarkCli => 4,
+            Self::CodexK2Sessions => 4,
+            Self::LarkCli => 5,
         }
     }
 
@@ -1216,6 +1219,7 @@ pub struct App {
     pub settings_field: SettingsField,
     pub settings_smart_enter_tmux: bool,
     pub settings_codex_app_server_proxy: bool,
+    pub settings_codex_k2_sessions: bool,
     pub lark_cli_readiness: lark::LarkCliReadiness,
     pub pending_target: CliTool,
     pub pending_compiler: usize,
@@ -1297,6 +1301,7 @@ impl App {
         let hook_live = None;
         let settings_smart_enter_tmux = hooks_config.smart_enter_tmux;
         let settings_codex_app_server_proxy = codex_config.app_server_proxy;
+        let settings_codex_k2_sessions = codex_config.k2_sessions;
         let settings_language = ui_preferences.language;
         let settings_theme = ui_preferences.theme;
         let lark_cli_readiness = lark::readiness(Some(
@@ -1366,6 +1371,7 @@ impl App {
             settings_field: SettingsField::Language,
             settings_smart_enter_tmux,
             settings_codex_app_server_proxy,
+            settings_codex_k2_sessions,
             lark_cli_readiness,
             pending_target: target,
             pending_compiler: selected_compiler,
@@ -1740,6 +1746,7 @@ impl App {
     #[cfg(test)]
     pub(crate) fn set_codex_config_for_test(&mut self, codex_config: config::CodexConfig) {
         self.settings_codex_app_server_proxy = codex_config.app_server_proxy;
+        self.settings_codex_k2_sessions = codex_config.k2_sessions;
         self.codex_config = codex_config;
     }
 
@@ -1792,12 +1799,20 @@ impl App {
         self.codex_config.app_server_proxy
     }
 
+    pub fn codex_k2_sessions_enabled(&self) -> bool {
+        self.codex_config.k2_sessions
+    }
+
     pub fn settings_smart_enter_dirty(&self) -> bool {
         self.settings_smart_enter_tmux != self.hooks_config.smart_enter_tmux
     }
 
     pub fn settings_codex_app_server_dirty(&self) -> bool {
         self.settings_codex_app_server_proxy != self.codex_config.app_server_proxy
+    }
+
+    pub fn settings_codex_k2_sessions_dirty(&self) -> bool {
+        self.settings_codex_k2_sessions != self.codex_config.k2_sessions
     }
 
     pub fn ui_language(&self) -> config::UiLanguage {
@@ -1837,6 +1852,7 @@ impl App {
             || self.settings_theme_dirty()
             || self.settings_smart_enter_dirty()
             || self.settings_codex_app_server_dirty()
+            || self.settings_codex_k2_sessions_dirty()
     }
 
     pub fn settings_field_is_focused(&self, field: SettingsField) -> bool {
@@ -3034,6 +3050,7 @@ impl App {
             self.settings_theme = self.ui_preferences.theme;
             self.settings_smart_enter_tmux = self.hooks_config.smart_enter_tmux;
             self.settings_codex_app_server_proxy = self.codex_config.app_server_proxy;
+            self.settings_codex_k2_sessions = self.codex_config.k2_sessions;
             self.settings_field = SettingsField::Language;
             self.modal_scroll = 0;
             self.set_status("Settings closed");
@@ -3084,6 +3101,7 @@ impl App {
         self.settings_theme = self.ui_preferences.theme;
         self.settings_smart_enter_tmux = self.hooks_config.smart_enter_tmux;
         self.settings_codex_app_server_proxy = self.codex_config.app_server_proxy;
+        self.settings_codex_k2_sessions = self.codex_config.k2_sessions;
         self.refresh_lark_cli_readiness();
         self.settings_field = SettingsField::Language;
         self.show_settings = true;
@@ -3166,6 +3184,15 @@ impl App {
                 };
                 self.set_status(format!("Codex App Server draft: {state}"));
             }
+            SettingsField::CodexK2Sessions => {
+                self.settings_codex_k2_sessions = !self.settings_codex_k2_sessions;
+                let state = if self.settings_codex_k2_sessions {
+                    "On"
+                } else {
+                    "Off"
+                };
+                self.set_status(format!("Cdx.K2 sessions draft: {state}"));
+            }
             SettingsField::LarkCli => {
                 self.refresh_lark_cli_readiness();
                 self.set_status(format!("Lark CLI: {}", self.lark_cli_readiness.reason));
@@ -3179,6 +3206,7 @@ impl App {
         self.settings_theme = config::UiThemeName::default();
         self.settings_smart_enter_tmux = false;
         self.settings_codex_app_server_proxy = false;
+        self.settings_codex_k2_sessions = false;
         self.refresh_lark_cli_readiness();
         self.set_status("Settings draft reset to defaults");
         self.pending_g = false;
@@ -3208,12 +3236,14 @@ impl App {
 
     fn save_settings(&mut self) {
         let codex_proxy_changed = self.settings_codex_app_server_dirty();
+        let codex_k2_changed = self.settings_codex_k2_sessions_dirty();
         let ui = config::UiPreferencesConfig {
             language: self.settings_language,
             theme: self.settings_theme,
         };
         let codex = config::CodexConfig {
             app_server_proxy: self.settings_codex_app_server_proxy,
+            k2_sessions: self.settings_codex_k2_sessions,
         };
         match config::save_ui_preferences_smart_enter_and_codex(
             ui,
@@ -3228,6 +3258,7 @@ impl App {
                 self.settings_theme = self.ui_preferences.theme;
                 self.settings_smart_enter_tmux = self.hooks_config.smart_enter_tmux;
                 self.settings_codex_app_server_proxy = self.codex_config.app_server_proxy;
+                self.settings_codex_k2_sessions = self.codex_config.k2_sessions;
                 self.show_settings = false;
                 self.settings_field = SettingsField::Language;
                 self.modal_scroll = 0;
@@ -3236,7 +3267,12 @@ impl App {
                 } else {
                     "Off"
                 };
-                let refresh_status = if codex_proxy_changed {
+                let k2_status = if self.codex_config.k2_sessions {
+                    "On"
+                } else {
+                    "Off"
+                };
+                let refresh_status = if codex_proxy_changed || codex_k2_changed {
                     match self.refresh_local_source_inventory_after_settings_save() {
                         Ok(true) => "; source inventory refreshed".to_string(),
                         Ok(false) => "; remote data space not refreshed".to_string(),
@@ -3246,7 +3282,7 @@ impl App {
                     String::new()
                 };
                 self.set_status(format!(
-                    "Settings saved: language {}, theme {}, Smart Enter {}, Codex App Server {}{}",
+                    "Settings saved: language {}, theme {}, Smart Enter {}, Codex App Server {}, Cdx.K2 {}{}",
                     self.ui_preferences.language.label(),
                     self.ui_preferences.theme.label(),
                     if self.hooks_config.smart_enter_tmux {
@@ -3255,6 +3291,7 @@ impl App {
                         "Off"
                     },
                     codex_status,
+                    k2_status,
                     refresh_status
                 ));
             }

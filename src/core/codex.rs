@@ -8,6 +8,7 @@ use std::{
 use rusqlite::{Connection, MappedRows, OpenFlags, OptionalExtension, Row, named_params, params};
 use serde::Deserialize;
 use serde_json::Value;
+use time::OffsetDateTime;
 
 use super::{
     adapter::{AdapterError, SourceAdapter, SourceReportMeta, SourceScanStats},
@@ -33,10 +34,18 @@ use super::{
 
 const CODEX_TOOL: CliTool = CliTool::Codex;
 const CODEX_CONTEXT_TAIL_BYTES: u64 = 2 * 1024 * 1024;
+const K2_SOURCE_PREFIX: &str = "k2-session://";
+#[cfg(not(test))]
+const K2_CONFIG_DIR_ENV: &str = "K2_CONFIG_DIR";
+#[cfg(not(test))]
+const MOONBOX_K2_HOME_ENV: &str = "MOONBOX_K2_HOME";
+#[cfg(not(test))]
+const MOONBOX_K2_SESSIONS_ENV: &str = "MOONBOX_K2_SESSIONS";
 
 #[derive(Debug, Clone)]
 pub struct CodexSourceAdapter {
     root: PathBuf,
+    k2_root: Option<PathBuf>,
     list_limit: Option<usize>,
     scan_entry_limit: Option<usize>,
     summary_line_limit: Option<usize>,
@@ -95,6 +104,7 @@ impl CodexSourceAdapter {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self {
             root: root.into(),
+            k2_root: None,
             list_limit: configured_session_limit(),
             scan_entry_limit: configured_session_scan_entry_limit(),
             summary_line_limit: configured_session_summary_line_limit(),
@@ -125,6 +135,7 @@ impl CodexSourceAdapter {
     ) -> Self {
         Self {
             root: root.into(),
+            k2_root: None,
             list_limit,
             scan_entry_limit,
             summary_line_limit,
@@ -139,16 +150,33 @@ impl CodexSourceAdapter {
         adapter
     }
 
+    #[cfg(test)]
+    fn with_k2_root(mut self, k2_root: impl Into<PathBuf>) -> Self {
+        self.k2_root = Some(k2_root.into());
+        self
+    }
+
     #[cfg(not(test))]
     pub fn from_default_home() -> Option<Self> {
         if let Some(path) = env::var_os("MOONBOX_CODEX_HOME") {
-            return Some(Self::new(path).with_env_app_server());
+            return Some(
+                Self::new(path)
+                    .with_env_app_server()
+                    .with_default_k2_store(),
+            );
         }
         if let Some(path) = env::var_os("CODEX_HOME") {
-            return Some(Self::new(path).with_env_app_server());
+            return Some(
+                Self::new(path)
+                    .with_env_app_server()
+                    .with_default_k2_store(),
+            );
         }
-        env::var_os("HOME")
-            .map(|home| Self::new(PathBuf::from(home).join(".codex")).with_env_app_server())
+        env::var_os("HOME").map(|home| {
+            Self::new(PathBuf::from(home).join(".codex"))
+                .with_env_app_server()
+                .with_default_k2_store()
+        })
     }
 
     #[cfg(not(test))]
@@ -158,8 +186,16 @@ impl CodexSourceAdapter {
     }
 
     #[cfg(not(test))]
+    fn with_default_k2_store(mut self) -> Self {
+        if k2_sessions_enabled() {
+            self.k2_root = default_k2_root();
+        }
+        self
+    }
+
+    #[cfg(not(test))]
     pub fn has_session_store(&self) -> bool {
-        self.has_local_session_store() || self.app_server.is_some()
+        self.has_local_session_store() || self.app_server.is_some() || self.has_k2_session_store()
     }
 
     #[cfg(not(test))]
@@ -170,6 +206,8 @@ impl CodexSourceAdapter {
             && let Some(path) = app_server.store_path()
         {
             PathBuf::from(path)
+        } else if let Some(path) = self.k2_sessions_index_path().filter(|path| path.is_file()) {
+            path
         } else {
             self.sessions_dir()
         }
@@ -195,16 +233,38 @@ impl CodexSourceAdapter {
         self.state_db_path().is_file() || self.sessions_dir().is_dir()
     }
 
+    #[cfg_attr(test, allow(dead_code))]
+    fn has_k2_session_store(&self) -> bool {
+        self.k2_sessions_index_path()
+            .is_some_and(|path| path.is_file())
+    }
+
+    fn k2_sessions_dir(&self) -> Option<PathBuf> {
+        self.k2_root
+            .as_ref()
+            .map(|root| root.join("chat").join("sessions"))
+    }
+
+    fn k2_sessions_index_path(&self) -> Option<PathBuf> {
+        self.k2_sessions_dir().map(|dir| dir.join("index.json"))
+    }
+
     fn local_store_path(&self) -> Option<String> {
-        Some(
-            if self.has_state_index() {
-                self.state_db_path()
-            } else {
-                self.sessions_dir()
-            }
-            .display()
-            .to_string(),
-        )
+        if self.has_local_session_store() {
+            return Some(
+                if self.has_state_index() {
+                    self.state_db_path()
+                } else {
+                    self.sessions_dir()
+                }
+                .display()
+                .to_string(),
+            );
+        }
+        if let Some(path) = self.k2_sessions_index_path().filter(|path| path.is_file()) {
+            return Some(path.display().to_string());
+        }
+        Some(self.sessions_dir().display().to_string())
     }
 
     fn open_connection(&self) -> Result<Connection, AdapterError> {
@@ -519,22 +579,159 @@ impl CodexSourceAdapter {
     }
 
     fn list_fallback_sessions(&self) -> Result<Vec<SessionSummary>, AdapterError> {
-        if self.has_state_index() {
+        let mut sessions = if self.has_state_index() {
             let overrides = self.thread_name_overrides()?;
-            return Ok(self
-                .list_thread_rows(self.list_limit)?
+            self.list_thread_rows(self.list_limit)?
                 .into_iter()
                 .map(|mut row| {
                     apply_thread_name_override(&mut row, &overrides);
                     self.summary_for_thread(row)
                 })
-                .collect());
-        }
-        let mut sessions = Vec::new();
-        for path in self.listed_session_files()? {
-            sessions.push(self.parse_list_summary(&path)?);
-        }
+                .collect()
+        } else {
+            let mut sessions = Vec::new();
+            for path in self.listed_session_files()? {
+                sessions.push(self.parse_list_summary(&path)?);
+            }
+            sessions
+        };
+        self.append_k2_sessions(&mut sessions)?;
         Ok(sessions)
+    }
+
+    fn append_k2_sessions(&self, sessions: &mut Vec<SessionSummary>) -> Result<(), AdapterError> {
+        sessions.extend(self.list_k2_sessions()?);
+        sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+        if let Some(limit) = self.list_limit {
+            sessions.truncate(limit);
+        }
+        Ok(())
+    }
+
+    fn list_k2_sessions(&self) -> Result<Vec<SessionSummary>, AdapterError> {
+        let Some(index_path) = self.k2_sessions_index_path().filter(|path| path.is_file()) else {
+            return Ok(Vec::new());
+        };
+        let contents = fs::read_to_string(&index_path)
+            .map_err(|error| read_error(CODEX_TOOL, &index_path, error))?;
+        let index = serde_json::from_str::<K2SessionIndex>(&contents).map_err(|error| {
+            read_error(
+                CODEX_TOOL,
+                &index_path,
+                format!("invalid K2 sessions index: {error}"),
+            )
+        })?;
+        let mut sessions = index
+            .entries
+            .into_iter()
+            .filter(|entry| entry.agent.as_deref().unwrap_or("codex") == "codex")
+            .map(|entry| self.k2_summary_from_index_entry(entry))
+            .collect::<Vec<_>>();
+        sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+        Ok(sessions)
+    }
+
+    fn k2_summary_from_index_entry(&self, entry: K2SessionEntry) -> SessionSummary {
+        let id = entry.session_id;
+        let updated_at = entry
+            .updated_at
+            .and_then(timestamp_millis_to_rfc3339)
+            .unwrap_or_else(|| "1970-01-01T00:00:00.000Z".into());
+        let path = self.k2_session_path_for_id(&id);
+        let source_size_bytes = path.as_deref().and_then(source_size_bytes);
+        let source_path = path.as_deref().map(k2_source_path);
+        let status_text = entry.status.as_deref().unwrap_or("unknown");
+        let latest_run_status = entry.latest_run_status.as_deref().unwrap_or_default();
+        let status = if matches!(status_text, "failed" | "error")
+            || matches!(latest_run_status, "failed" | "error")
+        {
+            SessionStatus::Failed
+        } else {
+            SessionStatus::Healthy
+        };
+        let runtime_status = match status_text {
+            "running" | "active" => SessionRuntimeStatus::Active,
+            "idle" | "completed" => SessionRuntimeStatus::Inactive,
+            _ => SessionRuntimeStatus::Unknown,
+        };
+        let title = first_non_empty_str([
+            entry.title.as_deref(),
+            entry.last_message_preview.as_deref(),
+            Some(id.as_str()),
+        ])
+        .map(truncate_thread_title)
+        .unwrap_or_else(|| format!("K2 Codex session {}", short_id(&id)));
+
+        SessionSummary {
+            id: id.clone(),
+            cli: CODEX_TOOL,
+            title,
+            cwd: entry.cwd.unwrap_or_else(|| "~".into()),
+            updated: human_timestamp(&updated_at),
+            updated_at,
+            runtime_status,
+            runtime_reason: Some(format!("K2 Codex chat session status: {status_text}")),
+            status,
+            branch: None,
+            token_count: None,
+            health_reason: Some("K2 local chat session backed by Codex agent".into()),
+            event_count: 0,
+            resume_command: format!("k2 go codex resume {id}"),
+            source_provenance: SourceProvenance::Real,
+            source_path,
+            source_size_bytes,
+            parse_skip_count: 0,
+            provider_metadata: None,
+            context_health: None,
+            anatomy: None,
+        }
+    }
+
+    fn find_k2_session(&self, session_id: &str) -> Result<Option<SessionSummary>, AdapterError> {
+        Ok(self
+            .list_k2_sessions()?
+            .into_iter()
+            .find(|session| session.id == session_id))
+    }
+
+    fn k2_session_path_for_id(&self, session_id: &str) -> Option<PathBuf> {
+        let file_name = format!("{}.json", session_id.replace(':', "_"));
+        self.k2_sessions_dir().map(|dir| dir.join(file_name))
+    }
+
+    fn parse_k2_timeline(
+        &self,
+        session_id: &str,
+        path: &Path,
+        event_limit: Option<usize>,
+    ) -> Result<CanonicalTimeline, AdapterError> {
+        let contents =
+            fs::read_to_string(path).map_err(|error| read_error(CODEX_TOOL, path, error))?;
+        let session = serde_json::from_str::<K2SessionFile>(&contents).map_err(|error| {
+            read_error(
+                CODEX_TOOL,
+                path,
+                format!("invalid K2 session JSON: {error}"),
+            )
+        })?;
+        let mut events = Vec::new();
+        for (index, message) in session.messages.iter().enumerate() {
+            if let Some(event) = k2_timeline_event(message, events.len() + 1, session_id, path)
+                && push_timeline_event(&mut events, event, event_limit)
+            {
+                break;
+            }
+            if index + 1 == session.messages.len() {
+                break;
+            }
+        }
+
+        Ok(CanonicalTimeline {
+            version: 1,
+            source_cli: CODEX_TOOL,
+            source_session: session_id.into(),
+            events,
+        })
     }
 
     fn fallback_report(
@@ -572,6 +769,7 @@ impl CodexSourceAdapter {
         for path in discovery.files {
             sessions.push(self.parse_list_summary(&path)?);
         }
+        self.append_k2_sessions(&mut sessions)?;
         let report = super::adapter::report_from_sessions_with_scan(
             SourceReportMeta {
                 cli: self.tool(),
@@ -613,7 +811,11 @@ impl SourceAdapter for CodexSourceAdapter {
     fn list_sessions(&self) -> Result<Vec<SessionSummary>, AdapterError> {
         if let Some(app_server) = &self.app_server {
             match app_server.list_threads(self.list_limit) {
-                Ok(threads) => return Ok(threads.into_iter().map(app_thread_summary).collect()),
+                Ok(threads) => {
+                    let mut sessions = threads.into_iter().map(app_thread_summary).collect();
+                    self.append_k2_sessions(&mut sessions)?;
+                    return Ok(sessions);
+                }
                 Err(error) if self.has_local_session_store() => {
                     let _ = error;
                 }
@@ -631,6 +833,8 @@ impl SourceAdapter for CodexSourceAdapter {
         if let Some(app_server) = &self.app_server {
             match self.list_app_server_sessions() {
                 Ok(Some(sessions)) => {
+                    let mut sessions = sessions;
+                    self.append_k2_sessions(&mut sessions)?;
                     let report = super::adapter::report_from_sessions_with_scan(
                         SourceReportMeta {
                             cli: self.tool(),
@@ -683,12 +887,18 @@ impl SourceAdapter for CodexSourceAdapter {
             return Ok(Some(self.summary_for_thread(row)));
         }
         let Some(path) = self.find_session_path(session_id)? else {
-            return Ok(None);
+            return self.find_k2_session(session_id);
         };
         self.parse_summary(&path).map(Some)
     }
 
     fn load_timeline(&self, session_id: &str) -> Result<CanonicalTimeline, AdapterError> {
+        if let Some(path) = self
+            .k2_session_path_for_id(session_id)
+            .filter(|path| path.is_file())
+        {
+            return self.parse_k2_timeline(session_id, &path, None);
+        }
         if let Some(app_server) = &self.app_server {
             match app_server.load_timeline_limited(session_id, None) {
                 Ok(timeline) => return Ok(timeline),
@@ -712,6 +922,14 @@ impl SourceAdapter for CodexSourceAdapter {
         session: &SessionSummary,
         event_limit: Option<usize>,
     ) -> Result<CanonicalTimeline, AdapterError> {
+        if let Some(path) = session
+            .source_path
+            .as_deref()
+            .and_then(k2_source_path_to_path)
+            .filter(|path| path.is_file())
+        {
+            return self.parse_k2_timeline(&session.id, &path, event_limit);
+        }
         if let Some(app_server) = &self.app_server
             && session
                 .source_path
@@ -834,6 +1052,226 @@ fn cap(status: SourceCapabilityStatus, detail: impl Into<String>) -> SourceCapab
         status,
         detail: detail.into(),
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct K2SessionIndex {
+    #[serde(default)]
+    entries: Vec<K2SessionEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct K2SessionEntry {
+    #[serde(rename = "sessionId")]
+    session_id: String,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default, rename = "updatedAt")]
+    updated_at: Option<i64>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    cwd: Option<String>,
+    #[serde(default)]
+    agent: Option<String>,
+    #[serde(default, rename = "lastMessagePreview")]
+    last_message_preview: Option<String>,
+    #[serde(default, rename = "latestRunStatus")]
+    latest_run_status: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct K2SessionFile {
+    #[serde(default)]
+    messages: Vec<Value>,
+}
+
+#[cfg(not(test))]
+fn default_k2_root() -> Option<PathBuf> {
+    if let Some(path) = env::var_os(MOONBOX_K2_HOME_ENV).or_else(|| env::var_os(K2_CONFIG_DIR_ENV))
+    {
+        return Some(path.into());
+    }
+    env::var_os("HOME").map(|home| PathBuf::from(home).join(".k2"))
+}
+
+#[cfg(not(test))]
+fn k2_sessions_enabled() -> bool {
+    env_flag(MOONBOX_K2_SESSIONS_ENV)
+        .unwrap_or_else(|| super::config::load_codex_config().k2_sessions)
+}
+
+#[cfg(not(test))]
+fn env_flag(key: &str) -> Option<bool> {
+    let value = env::var(key).ok()?;
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+pub(crate) fn is_k2_source_path(source_path: &str) -> bool {
+    source_path.starts_with(K2_SOURCE_PREFIX)
+}
+
+fn k2_source_path(path: &Path) -> String {
+    format!("{K2_SOURCE_PREFIX}{}", path.display())
+}
+
+fn k2_source_path_to_path(source_path: &str) -> Option<PathBuf> {
+    source_path
+        .strip_prefix(K2_SOURCE_PREFIX)
+        .map(PathBuf::from)
+}
+
+fn k2_timeline_event(
+    message: &Value,
+    number: usize,
+    session_id: &str,
+    path: &Path,
+) -> Option<TimelineEvent> {
+    let role = string_field(message, "role").unwrap_or_default();
+    let message_type = string_field(message, "type");
+    let kind = match (message_type, role) {
+        (Some("status"), _) => TimelineKind::Tool,
+        (_, "user") => TimelineKind::User,
+        (_, "assistant") => TimelineKind::Assistant,
+        _ => TimelineKind::Tool,
+    };
+    let detail = string_field(message, "text")
+        .filter(|text| !text.trim().is_empty())
+        .map(str::to_owned)
+        .or_else(|| k2_process_detail(message))
+        .unwrap_or_default();
+    if detail.trim().is_empty() {
+        return None;
+    }
+    let title = string_field(message, "title")
+        .map(str::to_owned)
+        .unwrap_or_else(|| match kind {
+            TimelineKind::User => "User".into(),
+            TimelineKind::Assistant => "Assistant".into(),
+            TimelineKind::Tool => "K2 Process".into(),
+            _ => "K2 Event".into(),
+        });
+    let timestamp = message
+        .get("createdAt")
+        .and_then(Value::as_i64)
+        .and_then(timestamp_millis_to_rfc3339);
+    let message_id = string_field(message, "id").map(str::to_owned);
+    let metadata = TimelineEventMetadata {
+        raw_refs: vec![TimelineEventRawRef {
+            source_cli: Some(CODEX_TOOL),
+            source_session: Some(session_id.into()),
+            source_path: Some(path.display().to_string()),
+            row_id: message_id.clone(),
+            record_type: Some("k2_message".into()),
+            provider_kind: message_type.map(str::to_owned),
+            role: (!role.is_empty()).then(|| role.to_owned()),
+            digest: Some(stable_value_digest(message)),
+            ..TimelineEventRawRef::default()
+        }],
+        message_ids: message_id.iter().cloned().collect(),
+        provider_item_ids: message_id.into_iter().collect(),
+        runtime: k2_runtime_metadata(message),
+        ..TimelineEventMetadata::default()
+    };
+
+    Some(TimelineEvent {
+        id: event_id(number),
+        time: display_time(timestamp.as_deref()),
+        kind,
+        title,
+        detail: truncate_timeline_detail(&detail),
+        metadata,
+    })
+}
+
+fn k2_process_detail(message: &Value) -> Option<String> {
+    let process = message
+        .get("metadata")
+        .and_then(|metadata| metadata.get("process"))?;
+    let events = process.get("events").and_then(Value::as_array)?;
+    let mut lines = Vec::new();
+    if let Some(title) = string_field(message, "title") {
+        lines.push(title.to_owned());
+    }
+    if let Some(run_id) = string_field(message.get("metadata")?, "runId") {
+        lines.push(format!("run: {run_id}"));
+    }
+    lines.push(format!("events: {}", events.len()));
+    for event in events.iter().take(20) {
+        let label = string_field(event, "label")
+            .or_else(|| string_field(event, "kind"))
+            .unwrap_or("event");
+        let status = string_field(event, "status").unwrap_or("unknown");
+        lines.push(format!("- [{status}] {label}"));
+        if let Some(output) = event
+            .get("command")
+            .and_then(|command| string_field(command, "output"))
+            .filter(|output| !output.trim().is_empty())
+        {
+            lines.push(truncate(output.trim(), 800));
+        }
+    }
+    if events.len() > 20 {
+        lines.push(format!("... {} more K2 process events", events.len() - 20));
+    }
+    Some(lines.join("\n"))
+}
+
+fn k2_runtime_metadata(message: &Value) -> Option<TimelineRuntimeMetadata> {
+    let process = message
+        .get("metadata")
+        .and_then(|metadata| metadata.get("process"))?;
+    let started_at = process.get("startedAt").and_then(Value::as_i64);
+    let ended_at = process.get("endedAt").and_then(Value::as_i64);
+    let is_running = process
+        .get("isRunning")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let duration_ms = started_at
+        .zip(ended_at)
+        .and_then(|(start, end)| u64::try_from(end.saturating_sub(start)).ok());
+    Some(TimelineRuntimeMetadata {
+        status: if is_running {
+            SessionRuntimeStatus::Active
+        } else {
+            SessionRuntimeStatus::Inactive
+        },
+        reason: Some("K2 process message".into()),
+        duration_ms,
+        api_duration_ms: None,
+        turn_count: process
+            .get("events")
+            .and_then(Value::as_array)
+            .and_then(|events| u64::try_from(events.len()).ok()),
+    })
+}
+
+fn timestamp_millis_to_rfc3339(timestamp_ms: i64) -> Option<String> {
+    let seconds = timestamp_ms.div_euclid(1000);
+    let millis = timestamp_ms.rem_euclid(1000);
+    let time = OffsetDateTime::from_unix_timestamp(seconds).ok()?;
+    Some(format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+        time.year(),
+        u8::from(time.month()),
+        time.day(),
+        time.hour(),
+        time.minute(),
+        time.second(),
+        millis,
+    ))
+}
+
+fn first_non_empty_str<'a>(values: impl IntoIterator<Item = Option<&'a str>>) -> Option<&'a str> {
+    values
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|value| !value.is_empty() && *value != "-")
 }
 
 impl SummaryBuilder {
@@ -2041,6 +2479,88 @@ not-json-after-limit"#,
     }
 
     #[test]
+    fn lists_and_loads_k2_codex_sessions() {
+        let root = test_root("k2-codex-root");
+        let k2_root = test_root("k2-home");
+        let session_id = "codex:019eef43-5ee0-78a0-b9c7-7f85f951fa74";
+        let session_path = write_k2_session(
+            &k2_root,
+            session_id,
+            r#"{
+  "handle": {"agent": "codex", "conversationId": "codex:019eef43-5ee0-78a0-b9c7-7f85f951fa74"},
+  "title": "K2 Codex title",
+  "status": "idle",
+  "updatedAt": 1780736400000,
+  "cwd": "/repo/k2",
+  "model": "gpt-5.5-2026-04-24",
+  "messages": [
+    {"id": "msg-user", "role": "user", "text": "hello from k2", "createdAt": 1780736400000},
+    {"id": "msg-status", "role": "assistant", "text": "", "type": "status", "title": "处理过程", "createdAt": 1780736460000, "metadata": {"process": {"startedAt": 1780736460000, "endedAt": 1780736465000, "isRunning": false, "events": [{"kind": "command", "label": "cargo check", "status": "completed", "command": {"output": "ok"}}]}}},
+    {"id": "msg-assistant", "role": "assistant", "text": "done from k2", "createdAt": 1780736520000}
+  ]
+}"#,
+        );
+        write_k2_index(
+            &k2_root,
+            r#"{
+  "version": 1,
+  "entries": [
+    {
+      "sessionId": "codex:019eef43-5ee0-78a0-b9c7-7f85f951fa74",
+      "title": "K2 Codex title",
+      "updatedAt": 1780736400000,
+      "status": "idle",
+      "hostKind": "electron",
+      "cwd": "/repo/k2",
+      "agent": "codex",
+      "lastMessagePreview": "done from k2",
+      "latestRunStatus": "completed"
+    }
+  ]
+}"#,
+        );
+        let adapter = CodexSourceAdapter::new(&root).with_k2_root(&k2_root);
+
+        let sessions = adapter.list_sessions().expect("sessions");
+        let timeline = adapter
+            .load_timeline_limited(&sessions[0], None)
+            .expect("timeline");
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, session_id);
+        assert_eq!(sessions[0].title, "K2 Codex title");
+        assert_eq!(sessions[0].cwd, "/repo/k2");
+        let expected_source_path = k2_source_path(&session_path);
+        assert_eq!(
+            sessions[0].source_path.as_deref(),
+            Some(expected_source_path.as_str())
+        );
+        assert_eq!(
+            sessions[0].resume_command,
+            format!("k2 go codex resume {session_id}")
+        );
+        assert_eq!(timeline.source_session, session_id);
+        assert_eq!(
+            timeline
+                .events
+                .iter()
+                .map(|event| (event.kind, event.detail.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (TimelineKind::User, "hello from k2"),
+                (
+                    TimelineKind::Tool,
+                    "处理过程\n\
+events: 1\n\
+- [completed] cargo check\n\
+ok"
+                ),
+                (TimelineKind::Assistant, "done from k2")
+            ]
+        );
+    }
+
+    #[test]
     fn app_server_source_is_preferred_over_local_store() {
         let root = test_root("app-server-preferred");
         write_session(
@@ -2229,6 +2749,20 @@ not-json-after-limit"#,
 
     fn write_app_server_fixture(path: &Path, contents: &str) {
         fs::write(path, contents).expect("app server fixture");
+    }
+
+    fn write_k2_index(root: &Path, contents: &str) {
+        let sessions_dir = root.join("chat").join("sessions");
+        fs::create_dir_all(&sessions_dir).expect("k2 dirs");
+        fs::write(sessions_dir.join("index.json"), contents).expect("k2 index");
+    }
+
+    fn write_k2_session(root: &Path, session_id: &str, contents: &str) -> PathBuf {
+        let sessions_dir = root.join("chat").join("sessions");
+        fs::create_dir_all(&sessions_dir).expect("k2 dirs");
+        let path = sessions_dir.join(format!("{}.json", session_id.replace(':', "_")));
+        fs::write(&path, contents).expect("k2 session");
+        path
     }
 
     fn app_server_fixture_json() -> &'static str {

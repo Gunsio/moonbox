@@ -75,6 +75,8 @@ pub struct ContextModelConfig {
 pub struct CodexConfig {
     #[serde(default)]
     pub app_server_proxy: bool,
+    #[serde(default)]
+    pub k2_sessions: bool,
 }
 
 impl Default for HooksConfig {
@@ -511,7 +513,7 @@ mod tests {
 	    "event_allowlist": ["user", "assistant", "tool", "rewind_point"],
 	    "file_allowlist": ["README.md", "src/"]
 	  },
-	  "codex": {"app_server_proxy": true},
+	  "codex": {"app_server_proxy": true, "k2_sessions": true},
 	  "ui": {"language": "zh_hans", "theme": "tokyo-night"},
 	  "compiler_presets": [
     {"id": "handoff", "command": "/bin/moonbox-handoff", "args": ["--mode", "handoff"], "timeout_ms": 12000, "description": "Compresses source timelines for target CLIs.", "homepage": "https://github.com/example/handoff", "github_stars": 42}
@@ -546,6 +548,7 @@ mod tests {
         assert!(!config.hooks.smart_enter_tmux);
         assert_eq!(config.hooks.spool_max_bytes, default_hook_spool_max_bytes());
         assert!(config.codex.app_server_proxy);
+        assert!(config.codex.k2_sessions);
         assert_eq!(config.ui.language, UiLanguage::ZhHans);
         assert_eq!(config.ui.theme, UiThemeName::TokyoNight);
         assert_eq!(config.ui.theme.normalized_for_ui(), UiThemeName::Moonbox);
@@ -735,6 +738,7 @@ mod tests {
             true,
             CodexConfig {
                 app_server_proxy: true,
+                k2_sessions: true,
             },
         )
         .expect("save smart enter");
@@ -743,9 +747,11 @@ mod tests {
         assert!(hooks.enabled);
         assert!(hooks.smart_enter_tmux);
         assert!(codex.app_server_proxy);
+        assert!(codex.k2_sessions);
         assert!(saved.hooks.enabled);
         assert!(saved.hooks.smart_enter_tmux);
         assert!(saved.codex.app_server_proxy);
+        assert!(saved.codex.k2_sessions);
         assert_eq!(
             saved.hooks.spool_path.as_deref(),
             Some("/tmp/moonbox/events.jsonl")
@@ -832,6 +838,7 @@ mod tests {
             true,
             CodexConfig {
                 app_server_proxy: true,
+                k2_sessions: true,
             },
         )
         .expect("save ui preferences, smart enter, and codex");
@@ -842,9 +849,11 @@ mod tests {
         assert!(hooks.enabled);
         assert!(hooks.smart_enter_tmux);
         assert!(codex.app_server_proxy);
+        assert!(codex.k2_sessions);
         assert_eq!(saved.ui.language, UiLanguage::ZhHans);
         assert_eq!(saved.ui.theme, UiThemeName::LuoshenPine);
         assert!(saved.codex.app_server_proxy);
+        assert!(saved.codex.k2_sessions);
         assert_eq!(saved.compiler_presets[0].id, "handoff");
         assert_eq!(saved.ssh_hosts[0].name, "prod");
         assert_eq!(saved.starred_sessions, ["codex:abc"]);

@@ -5,7 +5,7 @@ use std::{
 };
 
 use super::{
-    compiler,
+    codex, compiler,
     error::CoreError,
     model::{
         ChecklistItem, CliTool, ContinuationProtocol, LaunchExecution, LaunchExecutionStatus,
@@ -14,6 +14,8 @@ use super::{
     },
     redaction, verifier,
 };
+
+const K2_BIN_ENV: &str = "MOONBOX_K2_BIN";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TargetInputPreview {
@@ -104,6 +106,9 @@ fn draft_compiler_execute_blocker(plan: &LaunchPlan, allow_draft: bool) -> Optio
 }
 
 pub fn original_command(session: &SessionSummary) -> TargetLaunchCommand {
+    if is_k2_session(session) {
+        return k2_original_command(session);
+    }
     let program = configured_target_binary(session.cli);
     let cwd = usable_cwd(&session.cwd);
     let args = original_args(session, cwd.as_deref());
@@ -117,7 +122,36 @@ pub fn original_command(session: &SessionSummary) -> TargetLaunchCommand {
     }
 }
 
+fn k2_original_command(session: &SessionSummary) -> TargetLaunchCommand {
+    let program = configured_k2_binary();
+    let cwd = usable_cwd(&session.cwd);
+    let args = vec![
+        "go".into(),
+        "codex".into(),
+        "resume".into(),
+        session.id.clone(),
+    ];
+    let display = shell_command(&program, &args);
+
+    TargetLaunchCommand {
+        program,
+        args,
+        cwd,
+        display,
+    }
+}
+
+fn is_k2_session(session: &SessionSummary) -> bool {
+    session
+        .source_path
+        .as_deref()
+        .is_some_and(codex::is_k2_source_path)
+}
+
 pub fn native_fork_command(session: &SessionSummary) -> Option<TargetLaunchCommand> {
+    if is_k2_session(session) {
+        return None;
+    }
     let program = configured_target_binary(session.cli);
     let cwd = usable_cwd(&session.cwd);
     let args = native_fork_args(session, cwd.as_deref())?;
@@ -755,6 +789,10 @@ pub(crate) fn configured_target_binary(target: CliTool) -> String {
     env::var(env_key).unwrap_or_else(|_| target.id().into())
 }
 
+fn configured_k2_binary() -> String {
+    env::var(K2_BIN_ENV).unwrap_or_else(|_| "k2".into())
+}
+
 fn usable_cwd(cwd: &str) -> Option<String> {
     let cwd = cwd.trim();
     if cwd.is_empty() || cwd == "~" {
@@ -1065,6 +1103,32 @@ mod tests {
         );
         assert!(command.display.contains(" -C "));
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn k2_original_resume_uses_k2_passthrough_entrypoint() {
+        let mut session = codex_session_with_cwd("/missing/k2/repo".into());
+        session.id = "codex:019eef43-5ee0-78a0-b9c7-7f85f951fa74".into();
+        session.source_path =
+            Some("k2-session:///Users/me/.k2/chat/sessions/codex_019eef43.json".into());
+
+        let command = original_command(&session);
+
+        assert_eq!(command.program, "k2");
+        assert_eq!(
+            command.args,
+            [
+                "go",
+                "codex",
+                "resume",
+                "codex:019eef43-5ee0-78a0-b9c7-7f85f951fa74"
+            ]
+        );
+        assert_eq!(command.cwd, None);
+        assert_eq!(
+            command.display,
+            "k2 go codex resume codex:019eef43-5ee0-78a0-b9c7-7f85f951fa74"
+        );
     }
 
     #[test]

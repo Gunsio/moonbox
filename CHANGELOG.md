@@ -384,6 +384,9 @@ and this project uses semantic versioning once tagged releases start.
   `MOONBOX_CODEX_APP_SERVER_FIXTURE` or `MOONBOX_CODEX_APP_SERVER_PROXY=1`,
   preferring `thread/list`, `thread/read`, and `thread/turns/list` data while
   keeping local SQLite/JSONL as fallback.
+- Opt-in Cdx.K2 session source support reads K2's local
+  `~/.k2/chat/sessions` index and session JSON, labels those rows as
+  `Cdx.K2`, and resumes them through `k2 go codex resume <session>`.
 - Non-executing `moonbox open-app` / `moon open-app` plans that preview
   `codex://threads/<id>` deep links for Codex sessions without launching the
   desktop app.

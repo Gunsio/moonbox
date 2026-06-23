@@ -125,7 +125,18 @@ pub fn open_app_plan(session_id: Option<&str>) -> Result<Option<AppOpenPlan>, Co
     let Some(source_session) = selected_session(session_id)? else {
         return Ok(None);
     };
-    let (supported, deep_link, reason) = if source_session.cli == CliTool::Codex {
+    let (supported, deep_link, reason) = if source_session
+        .source_path
+        .as_deref()
+        .is_some_and(super::codex::is_k2_source_path)
+    {
+        (
+            false,
+            None,
+            "Cdx.K2 sessions are local K2 chat files; no Codex desktop deep-link contract is available"
+                .into(),
+        )
+    } else if source_session.cli == CliTool::Codex {
         (
             true,
             Some(super::codex_app_server::CodexAppServerSource::deep_link(

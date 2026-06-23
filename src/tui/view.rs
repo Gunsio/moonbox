@@ -19,12 +19,14 @@ use crate::{
     core::image_preview::{ImagePreviewStatus, PreviewCell, PreviewRgb, TimelineImagePreview},
     core::model::{
         AnatomyMetric, CliTool, CompilerPresetInfo, CompilerPresetKind, CompilerPresetStatus,
-        ContextHealth, LaunchValidationState, SessionRuntimeStatus, SessionStatus,
+        ContextHealth, LaunchValidationState, SessionRuntimeStatus, SessionStatus, SessionSummary,
         SourceProvenance, TimelineAttachment, TimelineEvent, TimelineKind, TimelineToolResult,
         VerificationReport, VerificationStatus, WorkCapsule,
     },
     core::{
         actions::{SessionActionAvailability, SessionAvailableAction, SessionAvailableActionKind},
+        codex,
+        codex_app_server::CodexAppServerSource,
         compiler,
         config::UiLanguage,
         handoff, hooks,
@@ -640,7 +642,7 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &App) {
                     title_spans.push(Span::raw(" "));
                 }
                 title_spans.extend([
-                    Span::styled(source_pill(session.cli), source_tool_style(session.cli)),
+                    Span::styled(session_source_pill(session), source_tool_style(session.cli)),
                     Span::raw("  "),
                 ]);
                 if let Some(live) = app.hook_live_for_session(session) {
@@ -1287,6 +1289,20 @@ fn source_pill(tool: CliTool) -> &'static str {
         CliTool::Claude => "Clu",
         CliTool::Hermes => "Hms",
     }
+}
+
+fn session_source_pill(session: &SessionSummary) -> &'static str {
+    if session.cli == CliTool::Codex
+        && let Some(source_path) = session.source_path.as_deref()
+    {
+        if CodexAppServerSource::is_thread_source_path(source_path) {
+            return "Cdx.App";
+        }
+        if codex::is_k2_source_path(source_path) {
+            return "Cdx.K2";
+        }
+    }
+    source_pill(session.cli)
 }
 
 fn source_tool_style(tool: CliTool) -> Style {
@@ -4139,8 +4155,6 @@ fn render_settings(frame: &mut Frame, root: Rect, app: &App) {
     } else {
         (i18n::text(language, Text::Disabled), theme::muted())
     };
-    let effect = settings_effect(app, language);
-
     let mut lines = vec![
         Line::from(Span::styled(
             localized(language, "Preferences", "偏好"),
@@ -4208,16 +4222,23 @@ fn render_settings(frame: &mut Frame, root: Rect, app: &App) {
         saved: i18n::on_off(language, app.codex_app_server_proxy_enabled()),
         dirty: app.settings_codex_app_server_dirty(),
     }));
+    lines.extend(settings_row(SettingsRow {
+        app,
+        language,
+        layout: settings_row_layout,
+        field: SettingsField::CodexK2Sessions,
+        label: i18n::text(language, Text::CodexK2Sessions),
+        draft: i18n::on_off(language, app.settings_codex_k2_sessions),
+        saved: i18n::on_off(language, app.codex_k2_sessions_enabled()),
+        dirty: app.settings_codex_k2_sessions_dirty(),
+    }));
     lines.extend(settings_lark_cli_row(app, language, settings_row_layout));
-    lines.extend([
-        Line::raw(""),
-        Line::from(Span::styled(
-            i18n::text(language, Text::CurrentEnterRoute),
-            Style::default()
-                .fg(theme::blue())
-                .add_modifier(Modifier::BOLD),
-        )),
-    ]);
+    lines.push(Line::from(Span::styled(
+        i18n::text(language, Text::CurrentEnterRoute),
+        Style::default()
+            .fg(theme::blue())
+            .add_modifier(Modifier::BOLD),
+    )));
 
     if let Some(route) = route {
         lines.push(Line::from(vec![
@@ -4235,14 +4256,6 @@ fn render_settings(frame: &mut Frame, root: Rect, app: &App) {
     }
 
     lines.extend([
-        Line::raw(""),
-        Line::from(Span::styled(
-            i18n::text(language, Text::Effect),
-            Style::default()
-                .fg(theme::blue())
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(Span::styled(effect, Style::default().fg(theme::text()))),
         Line::raw(""),
         Line::from(Span::styled(
             i18n::text(language, Text::SettingsKeys),
@@ -4367,6 +4380,7 @@ fn settings_field_icon(field: SettingsField) -> (&'static str, Color) {
         SettingsField::Theme => ("◈", theme::purple()),
         SettingsField::SmartEnter => ("↵", theme::green()),
         SettingsField::CodexAppServer => ("C", theme::orange()),
+        SettingsField::CodexK2Sessions => ("K2", theme::purple()),
         SettingsField::LarkCli => ("☁", theme::cyan()),
     }
 }
@@ -4533,33 +4547,6 @@ fn pad_display_width(mut text: String, width: usize) -> String {
         text.push_str(&" ".repeat(width - current_width));
     }
     text
-}
-
-fn settings_effect(app: &App, language: crate::core::config::UiLanguage) -> &'static str {
-    match language {
-        crate::core::config::UiLanguage::English => {
-            if !app.hooks_enabled() {
-                "Smart Enter cannot jump until hooks are installed and new agent sessions are started."
-            } else if !app.settings_smart_enter_tmux {
-                "Enter keeps the existing resume or handoff behavior."
-            } else if app.current_data_space().is_local() {
-                "Enter validates hook tmux metadata, jumps to a live pane when available, and falls back to resume otherwise."
-            } else {
-                "SSH data spaces stay read-only; Enter opens guarded handoff instead of local resume or tmux jump."
-            }
-        }
-        crate::core::config::UiLanguage::ZhHans => {
-            if !app.hooks_enabled() {
-                "安装 hooks 并新开 agent session 后，Smart Enter 才能跳转。"
-            } else if !app.settings_smart_enter_tmux {
-                "Enter 保持既有 resume 或 handoff 行为。"
-            } else if app.current_data_space().is_local() {
-                "Enter 会校验 hook 捕获的 tmux metadata；pane 存活才跳转，否则降级 resume。"
-            } else {
-                "SSH data space 保持只读；Enter 打开受保护 handoff，不做本地 resume 或 tmux jump。"
-            }
-        }
-    }
 }
 
 fn render_data_spaces(frame: &mut Frame, root: Rect, app: &App) {
@@ -10055,6 +10042,28 @@ mod tests {
     }
 
     #[test]
+    fn session_source_pill_distinguishes_codex_subsources() {
+        let app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        let mut session = app
+            .data
+            .sessions
+            .iter()
+            .find(|session| session.cli == CliTool::Codex)
+            .expect("codex session")
+            .clone();
+
+        session.source_path = None;
+        assert_eq!(session_source_pill(&session), "Cdx");
+
+        session.source_path = Some("codex-app-server://threads/codex-app-thread".into());
+        assert_eq!(session_source_pill(&session), "Cdx.App");
+
+        session.source_path =
+            Some("k2-session:///Users/me/.k2/chat/sessions/codex_019eef43.json".into());
+        assert_eq!(session_source_pill(&session), "Cdx.K2");
+    }
+
+    #[test]
     fn compile_status_label_keeps_header_width_stable() {
         assert_eq!(compile_status_label("ACTIVE"), "ACTIVE  ");
         assert_eq!(compile_status_label("LOADING"), "LOADING ");
@@ -10269,6 +10278,7 @@ mod tests {
         let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
         app.set_codex_config_for_test(crate::core::config::CodexConfig {
             app_server_proxy: false,
+            k2_sessions: false,
         });
 
         app.handle_key(key(','));
@@ -10295,6 +10305,43 @@ mod tests {
             .unwrap_or_else(|| panic!("missing Codex App Server row:\n{on_screen}"));
         let on_detail = settings_row_detail_line(&on_screen, "Codex App Server");
         assert!(codex_row.contains("Unsaved"), "{codex_row}\n{on_screen}");
+        assert!(on_detail.contains("Preview On"), "{on_detail}\n{on_screen}");
+        assert!(on_detail.contains("Saved Off"), "{on_detail}\n{on_screen}");
+    }
+
+    #[test]
+    fn settings_overlay_previews_codex_k2_sessions_before_save() {
+        let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.set_codex_config_for_test(crate::core::config::CodexConfig {
+            app_server_proxy: false,
+            k2_sessions: false,
+        });
+
+        app.handle_key(key(','));
+        app.handle_key(key('j'));
+        app.handle_key(key('j'));
+        app.handle_key(key('j'));
+        app.handle_key(key('j'));
+        let off_screen = render_text(&app, 150, 36);
+        assert_screen_contains(&off_screen, "Cdx.K2 Sessions");
+        let off_detail = settings_row_detail_line(&off_screen, "Cdx.K2 Sessions");
+        assert!(
+            off_detail.contains("Preview Off"),
+            "{off_detail}\n{off_screen}"
+        );
+        assert!(
+            off_detail.contains("Saved Off"),
+            "{off_detail}\n{off_screen}"
+        );
+
+        app.handle_key(key(' '));
+        let on_screen = render_text(&app, 150, 36);
+        let k2_row = on_screen
+            .lines()
+            .find(|line| line.contains("Cdx.K2 Sessions"))
+            .unwrap_or_else(|| panic!("missing Cdx.K2 row:\n{on_screen}"));
+        let on_detail = settings_row_detail_line(&on_screen, "Cdx.K2 Sessions");
+        assert!(k2_row.contains("Unsaved"), "{k2_row}\n{on_screen}");
         assert!(on_detail.contains("Preview On"), "{on_detail}\n{on_screen}");
         assert!(on_detail.contains("Saved Off"), "{on_detail}\n{on_screen}");
     }
@@ -10411,14 +10458,19 @@ mod tests {
         let codex_app_server_screen = render_text(&app, 150, 36);
         let codex_app_server_columns = assert_settings_columns_aligned(&codex_app_server_screen);
 
+        app.handle_key(key('j'));
+        let codex_k2_screen = render_text(&app, 150, 36);
+        let codex_k2_columns = assert_settings_columns_aligned(&codex_k2_screen);
+
         app.handle_key(key('k'));
-        let smart_enter_again_screen = render_text(&app, 150, 36);
-        let smart_enter_again_columns = assert_settings_columns_aligned(&smart_enter_again_screen);
+        let codex_app_again_screen = render_text(&app, 150, 36);
+        let codex_app_again_columns = assert_settings_columns_aligned(&codex_app_again_screen);
 
         assert_eq!(language_columns, theme_columns);
         assert_eq!(language_columns, smart_enter_columns);
         assert_eq!(language_columns, codex_app_server_columns);
-        assert_eq!(language_columns, smart_enter_again_columns);
+        assert_eq!(language_columns, codex_k2_columns);
+        assert_eq!(language_columns, codex_app_again_columns);
     }
 
     #[test]
