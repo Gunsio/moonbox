@@ -413,6 +413,15 @@ and this project uses semantic versioning once tagged releases start.
 
 ### Fixed
 
+- Codex session inventory now marks Codex Desktop rollout rows as `Cdx.App`,
+  marks K2-launched Codex rollout rows as `Cdx.K2`, and makes the Cdx.K2
+  settings toggle hide those K2-origin rows when disabled.
+- Codex fork chains are collapsed in the default inventory so a single resumed
+  task does not appear as several near-identical rows; the retained summary
+  keeps the provider parent session id for inspection.
+- TUI session filtering now hides fallback-title Codex SDK worker sessions from
+  the default list unless the search explicitly asks for Moonbox handoff
+  workers.
 - Lark handoff export execution now compiles the selected session with the
   configured handoff runner and writes the generated Markdown artifact directly
   into the Feishu/Lark document, instead of exporting a fallback capsule summary

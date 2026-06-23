@@ -6883,12 +6883,25 @@ fn is_moonbox_handoff_worker_session(session: &SessionSummary) -> bool {
     let title = session.title.to_ascii_lowercase();
     crate::core::local_jsonl::is_provider_context_text(&session.title)
         || crate::core::local_jsonl::is_moonbox_handoff_control_text(&session.title)
+        || is_codex_sdk_fallback_worker_session(session)
         || title.starts_with("$handoff ")
         || title.contains("you are running a moonbox continuation handoff job")
         || title.contains("moonbox continuation handoff job")
         || title.contains("the following is the codex agent history whose request action")
         || title.contains("<selected_skill")
         || title.contains("transcript start")
+}
+
+fn is_codex_sdk_fallback_worker_session(session: &SessionSummary) -> bool {
+    session.cli == CliTool::Codex
+        && session.title.starts_with("Codex session ")
+        && session
+            .provider_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.origin.as_ref())
+            .and_then(|origin| origin.get("originator"))
+            .and_then(|originator| originator.as_str())
+            == Some("codex_python_sdk")
 }
 
 fn query_explicitly_requests_moonbox_handoff_workers(query: &str) -> bool {
@@ -7559,6 +7572,14 @@ Host devbox
             "<turn_aborted>The user interrupted the previous turn on purpose.</turn_aborted>"
                 .into();
         app.data.sessions.insert(0, aborted_worker);
+        let mut sdk_worker = app.data.sessions[0].clone();
+        sdk_worker.id = "moonbox-worker-sdk-session".into();
+        sdk_worker.title = "Codex session 019ef438".into();
+        sdk_worker.provider_metadata = Some(crate::core::model::ProviderSessionMetadata {
+            origin: Some(serde_json::json!({ "originator": "codex_python_sdk" })),
+            ..crate::core::model::ProviderSessionMetadata::default()
+        });
+        app.data.sessions.insert(0, sdk_worker);
 
         app.refresh_visible_sessions();
 
@@ -7581,6 +7602,11 @@ Host devbox
             !app.visible_session_indices()
                 .iter()
                 .any(|index| app.data.sessions[*index].id == "moonbox-worker-aborted-session")
+        );
+        assert!(
+            !app.visible_session_indices()
+                .iter()
+                .any(|index| app.data.sessions[*index].id == "moonbox-worker-sdk-session")
         );
 
         app.search_query = "moonbox continuation handoff".into();

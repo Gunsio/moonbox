@@ -125,11 +125,7 @@ pub fn open_app_plan(session_id: Option<&str>) -> Result<Option<AppOpenPlan>, Co
     let Some(source_session) = selected_session(session_id)? else {
         return Ok(None);
     };
-    let (supported, deep_link, reason) = if source_session
-        .source_path
-        .as_deref()
-        .is_some_and(super::codex::is_k2_source_path)
-    {
+    let (supported, deep_link, reason) = if super::codex::is_k2_session_summary(&source_session) {
         (
             false,
             None,

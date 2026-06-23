@@ -25,9 +25,7 @@ use crate::{
     },
     core::{
         actions::{SessionActionAvailability, SessionAvailableAction, SessionAvailableActionKind},
-        codex,
-        codex_app_server::CodexAppServerSource,
-        compiler,
+        codex, compiler,
         config::UiLanguage,
         handoff, hooks,
         lark::LarkCliState,
@@ -1292,14 +1290,12 @@ fn source_pill(tool: CliTool) -> &'static str {
 }
 
 fn session_source_pill(session: &SessionSummary) -> &'static str {
-    if session.cli == CliTool::Codex
-        && let Some(source_path) = session.source_path.as_deref()
-    {
-        if CodexAppServerSource::is_thread_source_path(source_path) {
-            return "Cdx.App";
-        }
-        if codex::is_k2_source_path(source_path) {
+    if session.cli == CliTool::Codex {
+        if codex::is_k2_session_summary(session) {
             return "Cdx.K2";
+        }
+        if codex::is_codex_app_session_summary(session) {
+            return "Cdx.App";
         }
     }
     source_pill(session.cli)
@@ -10061,6 +10057,20 @@ mod tests {
         session.source_path =
             Some("k2-session:///Users/me/.k2/chat/sessions/codex_019eef43.json".into());
         assert_eq!(session_source_pill(&session), "Cdx.K2");
+
+        session.source_path = Some("/Users/me/.codex/sessions/rollout.jsonl".into());
+        session.provider_metadata = Some(crate::core::model::ProviderSessionMetadata {
+            source: Some(codex::K2_PROVIDER_SOURCE.into()),
+            session_key: Some("codex:019eef43".into()),
+            ..crate::core::model::ProviderSessionMetadata::default()
+        });
+        assert_eq!(session_source_pill(&session), "Cdx.K2");
+
+        session.provider_metadata = Some(crate::core::model::ProviderSessionMetadata {
+            source: Some(codex::CODEX_APP_PROVIDER_SOURCE.into()),
+            ..crate::core::model::ProviderSessionMetadata::default()
+        });
+        assert_eq!(session_source_pill(&session), "Cdx.App");
     }
 
     #[test]

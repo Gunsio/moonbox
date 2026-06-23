@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     env, fs,
     io::{BufRead, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
@@ -23,8 +23,8 @@ use super::{
         text_from_value, title_case, truncate, truncate_timeline_detail,
     },
     model::{
-        CanonicalTimeline, CliTool, ContextHealth, EvidenceConfidence, SessionRuntimeStatus,
-        SessionStatus, SessionSummary, SourceCapabilities, SourceCapability,
+        CanonicalTimeline, CliTool, ContextHealth, EvidenceConfidence, ProviderSessionMetadata,
+        SessionRuntimeStatus, SessionStatus, SessionSummary, SourceCapabilities, SourceCapability,
         SourceCapabilityStatus, SourceFidelity, SourceFidelityStatus, SourceProvenance,
         TimelineApproval, TimelineEvent, TimelineEventMetadata, TimelineEventRawRef,
         TimelineFileChange, TimelineKind, TimelineRuntimeMetadata, TimelineToolCall,
@@ -35,6 +35,8 @@ use super::{
 const CODEX_TOOL: CliTool = CliTool::Codex;
 const CODEX_CONTEXT_TAIL_BYTES: u64 = 2 * 1024 * 1024;
 const K2_SOURCE_PREFIX: &str = "k2-session://";
+pub(crate) const CODEX_APP_PROVIDER_SOURCE: &str = "codex_app";
+pub(crate) const K2_PROVIDER_SOURCE: &str = "k2";
 #[cfg(not(test))]
 const K2_CONFIG_DIR_ENV: &str = "K2_CONFIG_DIR";
 #[cfg(not(test))]
@@ -46,6 +48,7 @@ const MOONBOX_K2_SESSIONS_ENV: &str = "MOONBOX_K2_SESSIONS";
 pub struct CodexSourceAdapter {
     root: PathBuf,
     k2_root: Option<PathBuf>,
+    k2_sessions_enabled: bool,
     list_limit: Option<usize>,
     scan_entry_limit: Option<usize>,
     summary_line_limit: Option<usize>,
@@ -73,6 +76,8 @@ struct SummaryBuilder {
     id: Option<String>,
     title: Option<String>,
     cwd: Option<String>,
+    originator: Option<String>,
+    parent_session_id: Option<String>,
     updated_at: Option<String>,
     branch: Option<String>,
     token_count: Option<usize>,
@@ -100,11 +105,19 @@ struct CodexThreadRow {
     archived: bool,
 }
 
+#[derive(Debug, Default)]
+struct CodexRolloutMetadata {
+    provider_source: Option<&'static str>,
+    originator: Option<String>,
+    parent_session_id: Option<String>,
+}
+
 impl CodexSourceAdapter {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self {
             root: root.into(),
             k2_root: None,
+            k2_sessions_enabled: false,
             list_limit: configured_session_limit(),
             scan_entry_limit: configured_session_scan_entry_limit(),
             summary_line_limit: configured_session_summary_line_limit(),
@@ -136,6 +149,7 @@ impl CodexSourceAdapter {
         Self {
             root: root.into(),
             k2_root: None,
+            k2_sessions_enabled: false,
             list_limit,
             scan_entry_limit,
             summary_line_limit,
@@ -153,6 +167,14 @@ impl CodexSourceAdapter {
     #[cfg(test)]
     fn with_k2_root(mut self, k2_root: impl Into<PathBuf>) -> Self {
         self.k2_root = Some(k2_root.into());
+        self.k2_sessions_enabled = true;
+        self
+    }
+
+    #[cfg(test)]
+    fn with_k2_root_disabled(mut self, k2_root: impl Into<PathBuf>) -> Self {
+        self.k2_root = Some(k2_root.into());
+        self.k2_sessions_enabled = false;
         self
     }
 
@@ -187,15 +209,16 @@ impl CodexSourceAdapter {
 
     #[cfg(not(test))]
     fn with_default_k2_store(mut self) -> Self {
-        if k2_sessions_enabled() {
-            self.k2_root = default_k2_root();
-        }
+        self.k2_sessions_enabled = k2_sessions_enabled();
+        self.k2_root = default_k2_root();
         self
     }
 
     #[cfg(not(test))]
     pub fn has_session_store(&self) -> bool {
-        self.has_local_session_store() || self.app_server.is_some() || self.has_k2_session_store()
+        self.has_local_session_store()
+            || self.app_server.is_some()
+            || (self.k2_sessions_enabled && self.has_k2_session_store())
     }
 
     #[cfg(not(test))]
@@ -206,7 +229,9 @@ impl CodexSourceAdapter {
             && let Some(path) = app_server.store_path()
         {
             PathBuf::from(path)
-        } else if let Some(path) = self.k2_sessions_index_path().filter(|path| path.is_file()) {
+        } else if self.k2_sessions_enabled
+            && let Some(path) = self.k2_sessions_index_path().filter(|path| path.is_file())
+        {
             path
         } else {
             self.sessions_dir()
@@ -261,7 +286,9 @@ impl CodexSourceAdapter {
                 .to_string(),
             );
         }
-        if let Some(path) = self.k2_sessions_index_path().filter(|path| path.is_file()) {
+        if self.k2_sessions_enabled
+            && let Some(path) = self.k2_sessions_index_path().filter(|path| path.is_file())
+        {
             return Some(path.display().to_string());
         }
         Some(self.sessions_dir().display().to_string())
@@ -347,6 +374,15 @@ impl CodexSourceAdapter {
     }
 
     fn summary_for_thread(&self, row: CodexThreadRow) -> SessionSummary {
+        let k2_ids = self.k2_session_id_set().unwrap_or_default();
+        self.summary_for_thread_with_k2_ids(row, &k2_ids)
+    }
+
+    fn summary_for_thread_with_k2_ids(
+        &self,
+        row: CodexThreadRow,
+        k2_ids: &HashSet<String>,
+    ) -> SessionSummary {
         let source_path = row.rollout_path.trim();
         let rollout_exists = !source_path.is_empty() && Path::new(source_path).is_file();
         let title = first_non_empty([&row.title, &row.preview, &row.first_user_message])
@@ -389,7 +425,7 @@ impl CodexSourceAdapter {
             )
         };
 
-        SessionSummary {
+        let mut summary = SessionSummary {
             id: row.id.clone(),
             cli: CODEX_TOOL,
             title,
@@ -417,7 +453,9 @@ impl CodexSourceAdapter {
             provider_metadata: None,
             context_health,
             anatomy: None,
-        }
+        };
+        annotate_codex_subsource(&mut summary, k2_ids);
+        summary
     }
 
     fn session_files(&self, limit: Option<usize>) -> Result<Vec<PathBuf>, AdapterError> {
@@ -457,14 +495,20 @@ impl CodexSourceAdapter {
         self.parse_summary_limited(path, None)
     }
 
-    fn parse_list_summary(&self, path: &Path) -> Result<SessionSummary, AdapterError> {
-        self.parse_summary_limited(path, self.summary_line_limit)
-    }
-
     fn parse_summary_limited(
         &self,
         path: &Path,
         line_limit: Option<usize>,
+    ) -> Result<SessionSummary, AdapterError> {
+        let k2_ids = self.k2_session_id_set()?;
+        self.parse_summary_limited_with_k2_ids(path, line_limit, &k2_ids)
+    }
+
+    fn parse_summary_limited_with_k2_ids(
+        &self,
+        path: &Path,
+        line_limit: Option<usize>,
+        k2_ids: &HashSet<String>,
     ) -> Result<SessionSummary, AdapterError> {
         let mut builder = SummaryBuilder::new(path);
         let reader = open_reader(CODEX_TOOL, path)?;
@@ -486,7 +530,9 @@ impl CodexSourceAdapter {
             }
         }
 
-        Ok(builder.finish())
+        let mut summary = builder.finish();
+        annotate_codex_subsource(&mut summary, k2_ids);
+        Ok(summary)
     }
 
     fn find_session_path(&self, session_id: &str) -> Result<Option<PathBuf>, AdapterError> {
@@ -579,19 +625,28 @@ impl CodexSourceAdapter {
     }
 
     fn list_fallback_sessions(&self) -> Result<Vec<SessionSummary>, AdapterError> {
+        let k2_ids = self.k2_session_id_set()?;
         let mut sessions = if self.has_state_index() {
             let overrides = self.thread_name_overrides()?;
             self.list_thread_rows(self.list_limit)?
                 .into_iter()
                 .map(|mut row| {
                     apply_thread_name_override(&mut row, &overrides);
-                    self.summary_for_thread(row)
+                    self.summary_for_thread_with_k2_ids(row, &k2_ids)
                 })
+                .filter(|session| self.include_codex_summary(session))
                 .collect()
         } else {
             let mut sessions = Vec::new();
             for path in self.listed_session_files()? {
-                sessions.push(self.parse_list_summary(&path)?);
+                let session = self.parse_summary_limited_with_k2_ids(
+                    &path,
+                    self.summary_line_limit,
+                    &k2_ids,
+                )?;
+                if self.include_codex_summary(&session) {
+                    sessions.push(session);
+                }
             }
             sessions
         };
@@ -600,7 +655,23 @@ impl CodexSourceAdapter {
     }
 
     fn append_k2_sessions(&self, sessions: &mut Vec<SessionSummary>) -> Result<(), AdapterError> {
-        sessions.extend(self.list_k2_sessions()?);
+        let mut existing = HashSet::new();
+        for session in sessions.iter() {
+            existing.extend(session_id_aliases(&session.id));
+            if let Some(session_key) = session
+                .provider_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.session_key.as_deref())
+            {
+                existing.extend(session_id_aliases(session_key));
+            }
+        }
+        sessions.extend(
+            self.list_k2_sessions()?.into_iter().filter(|session| {
+                session_id_aliases(&session.id).all(|id| !existing.contains(&id))
+            }),
+        );
+        collapse_codex_fork_chains(sessions);
         sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
         if let Some(limit) = self.list_limit {
             sessions.truncate(limit);
@@ -609,18 +680,12 @@ impl CodexSourceAdapter {
     }
 
     fn list_k2_sessions(&self) -> Result<Vec<SessionSummary>, AdapterError> {
-        let Some(index_path) = self.k2_sessions_index_path().filter(|path| path.is_file()) else {
+        if !self.k2_sessions_enabled {
             return Ok(Vec::new());
         };
-        let contents = fs::read_to_string(&index_path)
-            .map_err(|error| read_error(CODEX_TOOL, &index_path, error))?;
-        let index = serde_json::from_str::<K2SessionIndex>(&contents).map_err(|error| {
-            read_error(
-                CODEX_TOOL,
-                &index_path,
-                format!("invalid K2 sessions index: {error}"),
-            )
-        })?;
+        let Some(index) = self.read_k2_index()? else {
+            return Ok(Vec::new());
+        };
         let mut sessions = index
             .entries
             .into_iter()
@@ -681,10 +746,47 @@ impl CodexSourceAdapter {
             source_path,
             source_size_bytes,
             parse_skip_count: 0,
-            provider_metadata: None,
+            provider_metadata: Some(ProviderSessionMetadata {
+                source: Some(K2_PROVIDER_SOURCE.into()),
+                session_key: Some(id.clone()),
+                ..ProviderSessionMetadata::default()
+            }),
             context_health: None,
             anatomy: None,
         }
+    }
+
+    fn read_k2_index(&self) -> Result<Option<K2SessionIndex>, AdapterError> {
+        let Some(index_path) = self.k2_sessions_index_path().filter(|path| path.is_file()) else {
+            return Ok(None);
+        };
+        let contents = fs::read_to_string(&index_path)
+            .map_err(|error| read_error(CODEX_TOOL, &index_path, error))?;
+        serde_json::from_str::<K2SessionIndex>(&contents)
+            .map(Some)
+            .map_err(|error| {
+                read_error(
+                    CODEX_TOOL,
+                    &index_path,
+                    format!("invalid K2 sessions index: {error}"),
+                )
+            })
+    }
+
+    fn k2_session_id_set(&self) -> Result<HashSet<String>, AdapterError> {
+        let Some(index) = self.read_k2_index()? else {
+            return Ok(HashSet::new());
+        };
+        Ok(index
+            .entries
+            .into_iter()
+            .filter(|entry| entry.agent.as_deref().unwrap_or("codex") == "codex")
+            .flat_map(|entry| session_id_aliases(&entry.session_id).collect::<Vec<_>>())
+            .collect())
+    }
+
+    fn include_codex_summary(&self, session: &SessionSummary) -> bool {
+        self.k2_sessions_enabled || !is_k2_session_summary(session)
     }
 
     fn find_k2_session(&self, session_id: &str) -> Result<Option<SessionSummary>, AdapterError> {
@@ -765,9 +867,14 @@ impl CodexSourceAdapter {
         }
 
         let discovery = self.listed_session_discovery()?;
+        let k2_ids = self.k2_session_id_set()?;
         let mut sessions = Vec::new();
         for path in discovery.files {
-            sessions.push(self.parse_list_summary(&path)?);
+            let session =
+                self.parse_summary_limited_with_k2_ids(&path, self.summary_line_limit, &k2_ids)?;
+            if self.include_codex_summary(&session) {
+                sessions.push(session);
+            }
         }
         self.append_k2_sessions(&mut sessions)?;
         let report = super::adapter::report_from_sessions_with_scan(
@@ -884,12 +991,14 @@ impl SourceAdapter for CodexSourceAdapter {
         if let Some(mut row) = self.find_thread_row(session_id)? {
             let overrides = self.thread_name_overrides()?;
             apply_thread_name_override(&mut row, &overrides);
-            return Ok(Some(self.summary_for_thread(row)));
+            let session = self.summary_for_thread(row);
+            return Ok(self.include_codex_summary(&session).then_some(session));
         }
         let Some(path) = self.find_session_path(session_id)? else {
             return self.find_k2_session(session_id);
         };
-        self.parse_summary(&path).map(Some)
+        let session = self.parse_summary(&path)?;
+        Ok(self.include_codex_summary(&session).then_some(session))
     }
 
     fn load_timeline(&self, session_id: &str) -> Result<CanonicalTimeline, AdapterError> {
@@ -1115,6 +1224,40 @@ pub(crate) fn is_k2_source_path(source_path: &str) -> bool {
     source_path.starts_with(K2_SOURCE_PREFIX)
 }
 
+pub(crate) fn is_k2_session_summary(session: &SessionSummary) -> bool {
+    session
+        .source_path
+        .as_deref()
+        .is_some_and(is_k2_source_path)
+        || session_provider_source_is(session, K2_PROVIDER_SOURCE)
+}
+
+pub(crate) fn is_codex_app_session_summary(session: &SessionSummary) -> bool {
+    session
+        .source_path
+        .as_deref()
+        .is_some_and(CodexAppServerSource::is_thread_source_path)
+        || session_provider_source_is(session, CODEX_APP_PROVIDER_SOURCE)
+}
+
+pub(crate) fn k2_resume_session_id(session: &SessionSummary) -> String {
+    session
+        .provider_metadata
+        .as_ref()
+        .and_then(|metadata| metadata.session_key.as_deref())
+        .filter(|session_key| !session_key.trim().is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| canonical_k2_session_id(&session.id))
+}
+
+fn session_provider_source_is(session: &SessionSummary, source: &str) -> bool {
+    session
+        .provider_metadata
+        .as_ref()
+        .and_then(|metadata| metadata.source.as_deref())
+        == Some(source)
+}
+
 fn k2_source_path(path: &Path) -> String {
     format!("{K2_SOURCE_PREFIX}{}", path.display())
 }
@@ -1123,6 +1266,191 @@ fn k2_source_path_to_path(source_path: &str) -> Option<PathBuf> {
     source_path
         .strip_prefix(K2_SOURCE_PREFIX)
         .map(PathBuf::from)
+}
+
+fn annotate_codex_subsource(summary: &mut SessionSummary, k2_ids: &HashSet<String>) {
+    let rollout_metadata = rollout_metadata(summary.source_path.as_deref());
+    if let Some(parent_session_id) = rollout_metadata
+        .parent_session_id
+        .filter(|parent_session_id| !parent_session_id.trim().is_empty())
+    {
+        let metadata = summary
+            .provider_metadata
+            .get_or_insert_with(ProviderSessionMetadata::default);
+        metadata.parent_session_id = Some(parent_session_id);
+    }
+    if let Some(originator) = rollout_metadata
+        .originator
+        .filter(|originator| !originator.trim().is_empty())
+    {
+        let metadata = summary
+            .provider_metadata
+            .get_or_insert_with(ProviderSessionMetadata::default);
+        metadata.origin = Some(serde_json::json!({ "originator": originator }));
+    }
+
+    if let Some(k2_session_id) = matching_k2_session_id(&summary.id, k2_ids).or_else(|| {
+        matches!(rollout_metadata.provider_source, Some(K2_PROVIDER_SOURCE))
+            .then(|| canonical_k2_session_id(&summary.id))
+    }) {
+        let metadata = summary
+            .provider_metadata
+            .get_or_insert_with(ProviderSessionMetadata::default);
+        metadata.source = Some(K2_PROVIDER_SOURCE.into());
+        metadata.session_key = Some(k2_session_id.clone());
+        summary.resume_command = format!("k2 go codex resume {k2_session_id}");
+        return;
+    }
+
+    if matches!(
+        rollout_metadata.provider_source,
+        Some(CODEX_APP_PROVIDER_SOURCE)
+    ) {
+        let metadata = summary
+            .provider_metadata
+            .get_or_insert_with(ProviderSessionMetadata::default);
+        metadata.source = Some(CODEX_APP_PROVIDER_SOURCE.into());
+    }
+}
+
+fn matching_k2_session_id(session_id: &str, k2_ids: &HashSet<String>) -> Option<String> {
+    session_id_aliases(session_id)
+        .find(|alias| k2_ids.contains(alias))
+        .map(|alias| {
+            if alias.starts_with("codex:") {
+                alias
+            } else {
+                canonical_k2_session_id(&alias)
+            }
+        })
+}
+
+fn session_id_aliases(session_id: &str) -> impl Iterator<Item = String> + '_ {
+    let trimmed = session_id.trim();
+    let without_prefix = trimmed.strip_prefix("codex:").unwrap_or(trimmed);
+    [
+        without_prefix.to_owned(),
+        canonical_k2_session_id(without_prefix),
+    ]
+    .into_iter()
+}
+
+fn canonical_k2_session_id(session_id: &str) -> String {
+    let trimmed = session_id.trim();
+    if trimmed.starts_with("codex:") {
+        trimmed.into()
+    } else {
+        format!("codex:{trimmed}")
+    }
+}
+
+fn rollout_metadata(source_path: Option<&str>) -> CodexRolloutMetadata {
+    let Some(source_path) = source_path else {
+        return CodexRolloutMetadata::default();
+    };
+    if is_k2_source_path(source_path) {
+        return CodexRolloutMetadata {
+            provider_source: Some(K2_PROVIDER_SOURCE),
+            originator: None,
+            parent_session_id: None,
+        };
+    }
+    if CodexAppServerSource::is_thread_source_path(source_path) {
+        return CodexRolloutMetadata {
+            provider_source: Some(CODEX_APP_PROVIDER_SOURCE),
+            originator: None,
+            parent_session_id: None,
+        };
+    }
+    let path = Path::new(source_path);
+    if !path.is_file() {
+        return CodexRolloutMetadata::default();
+    }
+    let Ok(mut file) = fs::File::open(path) else {
+        return CodexRolloutMetadata::default();
+    };
+    let mut buffer = vec![0; 256 * 1024];
+    let Ok(bytes) = file.read(&mut buffer) else {
+        return CodexRolloutMetadata::default();
+    };
+    let Ok(prefix) = std::str::from_utf8(&buffer[..bytes]) else {
+        return CodexRolloutMetadata::default();
+    };
+    let provider_source = if prefix.contains(r#""model_provider":"k2_airouter""#)
+        || prefix.contains(r#""originator":"cli-server-bridge""#)
+    {
+        Some(K2_PROVIDER_SOURCE)
+    } else if prefix.contains(r#""originator":"Codex Desktop""#) {
+        Some(CODEX_APP_PROVIDER_SOURCE)
+    } else {
+        None
+    };
+    CodexRolloutMetadata {
+        provider_source,
+        originator: json_string_field_in_text(prefix, "originator"),
+        parent_session_id: json_string_field_in_text(prefix, "forked_from_id"),
+    }
+}
+
+fn json_string_field_in_text(text: &str, key: &str) -> Option<String> {
+    let pattern = format!(r#""{key}""#);
+    let after_key = text.get(text.find(&pattern)? + pattern.len()..)?;
+    let after_colon = after_key.get(after_key.find(':')? + 1..)?.trim_start();
+    if !after_colon.starts_with('"') {
+        return None;
+    }
+    let mut deserializer = serde_json::Deserializer::from_str(after_colon);
+    String::deserialize(&mut deserializer).ok()
+}
+
+fn collapse_codex_fork_chains(sessions: &mut Vec<SessionSummary>) {
+    let parents: HashMap<String, String> = sessions
+        .iter()
+        .filter_map(|session| {
+            let parent = session
+                .provider_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.parent_session_id.as_deref())?
+                .trim();
+            (!parent.is_empty()).then(|| (session.id.clone(), parent.to_owned()))
+        })
+        .collect();
+    if parents.is_empty() {
+        return;
+    }
+
+    sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+    let mut seen_roots = HashSet::new();
+    sessions.retain(|session| seen_roots.insert(codex_fork_root(&session.id, &parents)));
+}
+
+fn codex_fork_root(session_id: &str, parents: &HashMap<String, String>) -> String {
+    let mut current = session_id.to_owned();
+    let mut seen = HashSet::new();
+    while seen.insert(current.clone()) {
+        let Some(parent) = parents
+            .get(&current)
+            .filter(|parent| !parent.trim().is_empty())
+        else {
+            return current;
+        };
+        current = parent.clone();
+    }
+    current
+}
+
+fn codex_provider_metadata(
+    originator: Option<String>,
+    parent_session_id: Option<String>,
+) -> Option<ProviderSessionMetadata> {
+    if originator.is_none() && parent_session_id.is_none() {
+        return None;
+    }
+    Some(ProviderSessionMetadata {
+        parent_session_id,
+        origin: originator.map(|originator| serde_json::json!({ "originator": originator })),
+        ..ProviderSessionMetadata::default()
+    })
 }
 
 fn k2_timeline_event(
@@ -1281,6 +1609,8 @@ impl SummaryBuilder {
             id: None,
             title: None,
             cwd: None,
+            originator: None,
+            parent_session_id: None,
             updated_at: timestamp_from_filename(path),
             branch: None,
             token_count: None,
@@ -1326,6 +1656,12 @@ impl SummaryBuilder {
         }
         if self.cwd.is_none() {
             self.cwd = string_field(payload, "cwd").map(str::to_owned);
+        }
+        if self.originator.is_none() {
+            self.originator = string_field(payload, "originator").map(str::to_owned);
+        }
+        if self.parent_session_id.is_none() {
+            self.parent_session_id = string_field(payload, "forked_from_id").map(str::to_owned);
         }
         if self.branch.is_none() {
             self.branch = payload
@@ -1433,7 +1769,7 @@ impl SummaryBuilder {
             source_path: Some(self.path.display().to_string()),
             source_size_bytes: source_size_bytes(&self.path),
             parse_skip_count: self.malformed_lines,
-            provider_metadata: None,
+            provider_metadata: codex_provider_metadata(self.originator, self.parent_session_id),
             context_health: context_health_from_token_count(
                 self.context_used_tokens.or(self.token_count),
                 self.context_window_tokens,
@@ -2561,6 +2897,181 @@ ok"
     }
 
     #[test]
+    fn k2_toggle_filters_and_labels_codex_rollout_rows() {
+        let root = test_root("k2-codex-rollout-root");
+        let k2_root = test_root("k2-codex-rollout-home");
+        let codex_id = "019eef4e-0d3f-7e60-9c0c-01a4fe4e5613";
+        let k2_id = format!("codex:{codex_id}");
+        let rollout_path = write_session(
+            &root,
+            "2026/06/22/rollout-2026-06-22T20-28-50-019eef4e-0d3f-7e60-9c0c-01a4fe4e5613.jsonl",
+            &format!(
+                r#"{{"timestamp":"2026-06-22T12:28:52.753Z","type":"session_meta","payload":{{"id":"{codex_id}","cwd":"/repo/k2","originator":"cli-server-bridge","source":"vscode","model_provider":"k2_airouter","git":{{"branch":"k2-branch"}}}}}}
+{{"timestamp":"2026-06-22T12:29:00.000Z","type":"event_msg","payload":{{"type":"user_message","message":"基于 K2 Preset / Stage"}}}}
+"#
+            ),
+        );
+        write_state_db(&root, &rollout_path, codex_id, "基于 K2 Preset / Stage");
+        write_k2_index(
+            &k2_root,
+            &format!(
+                r#"{{
+  "version": 1,
+  "entries": [
+    {{
+      "sessionId": "{k2_id}",
+      "title": "K2 indexed duplicate",
+      "updatedAt": 1780736400000,
+      "status": "idle",
+      "cwd": "/repo/k2",
+      "agent": "codex"
+    }}
+  ]
+}}"#
+            ),
+        );
+        write_k2_session(
+            &k2_root,
+            &k2_id,
+            r#"{"messages":[{"id":"msg-user","role":"user","text":"k2 sidecar","createdAt":1780736400000}]}"#,
+        );
+
+        let disabled = CodexSourceAdapter::new(&root).with_k2_root_disabled(&k2_root);
+        let enabled = CodexSourceAdapter::new(&root).with_k2_root(&k2_root);
+
+        let disabled_sessions = disabled.list_sessions().expect("disabled sessions");
+        let enabled_sessions = enabled.list_sessions().expect("enabled sessions");
+
+        assert!(disabled_sessions.is_empty(), "{disabled_sessions:#?}");
+        assert_eq!(enabled_sessions.len(), 1, "{enabled_sessions:#?}");
+        assert_eq!(enabled_sessions[0].id, codex_id);
+        assert_eq!(
+            enabled_sessions[0]
+                .provider_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.source.as_deref()),
+            Some(K2_PROVIDER_SOURCE)
+        );
+        assert_eq!(
+            enabled_sessions[0]
+                .provider_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.session_key.as_deref()),
+            Some(k2_id.as_str())
+        );
+        assert_eq!(
+            enabled_sessions[0].resume_command,
+            format!("k2 go codex resume {k2_id}")
+        );
+        assert_eq!(
+            enabled
+                .find_session(codex_id)
+                .expect("find enabled")
+                .expect("enabled session")
+                .provider_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.source.as_deref()),
+            Some(K2_PROVIDER_SOURCE)
+        );
+        assert!(
+            disabled
+                .find_session(codex_id)
+                .expect("find disabled")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn codex_desktop_rollout_rows_are_marked_as_codex_app() {
+        let root = test_root("codex-desktop-origin");
+        let codex_id = "019ef3e6-ac49-76c3-af48-feff92042b1d";
+        let rollout_path = write_session(
+            &root,
+            "2026/06/23/rollout-2026-06-23T17-54-01-019ef3e6-ac49-76c3-af48-feff92042b1d.jsonl",
+            &format!(
+                r#"{{"timestamp":"2026-06-23T09:54:03.817Z","type":"session_meta","payload":{{"id":"{codex_id}","cwd":"/repo/app","originator":"Codex Desktop","source":"vscode","model_provider":"openai"}}}}
+{{"timestamp":"2026-06-23T09:54:04.000Z","type":"event_msg","payload":{{"type":"user_message","message":"Introduce codex"}}}}
+"#
+            ),
+        );
+        write_state_db(&root, &rollout_path, codex_id, "Introduce codex");
+
+        let sessions = CodexSourceAdapter::new(&root)
+            .list_sessions()
+            .expect("sessions");
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(
+            sessions[0]
+                .provider_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.source.as_deref()),
+            Some(CODEX_APP_PROVIDER_SOURCE)
+        );
+    }
+
+    #[test]
+    fn codex_fork_chain_collapses_to_latest_list_entry() {
+        let root = test_root("codex-fork-chain-collapse");
+        let parent_id = "codex-parent";
+        let child_old_id = "codex-child-old";
+        let child_new_id = "codex-child-new";
+        let parent_path = write_session(
+            &root,
+            "2026/06/06/rollout-2026-06-06T10-00-00-codex-parent.jsonl",
+            r#"{"timestamp":"2026-06-06T10:00:00.000Z","type":"session_meta","payload":{"id":"codex-parent","cwd":"/repo"}}
+{"timestamp":"2026-06-06T10:00:01.000Z","type":"event_msg","payload":{"type":"user_message","message":"pipeline2"}}
+"#,
+        );
+        let child_old_path = write_session(
+            &root,
+            "2026/06/06/rollout-2026-06-06T10-01-00-codex-child-old.jsonl",
+            r#"{"timestamp":"2026-06-06T10:01:00.000Z","type":"session_meta","payload":{"id":"codex-child-old","forked_from_id":"codex-parent","cwd":"/repo"}}
+{"timestamp":"2026-06-06T10:01:01.000Z","type":"event_msg","payload":{"type":"user_message","message":"pipeline2"}}
+"#,
+        );
+        let child_new_path = write_session(
+            &root,
+            "2026/06/06/rollout-2026-06-06T10-02-00-codex-child-new.jsonl",
+            r#"{"timestamp":"2026-06-06T10:02:00.000Z","type":"session_meta","payload":{"id":"codex-child-new","forked_from_id":"codex-parent","cwd":"/repo"}}
+{"timestamp":"2026-06-06T10:02:01.000Z","type":"event_msg","payload":{"type":"user_message","message":"pipeline2"}}
+"#,
+        );
+        write_state_db_rows(
+            &root,
+            &[
+                (&parent_path, parent_id, "pipeline2", 1_780_736_400_000),
+                (
+                    &child_old_path,
+                    child_old_id,
+                    "pipeline2",
+                    1_780_736_460_000,
+                ),
+                (
+                    &child_new_path,
+                    child_new_id,
+                    "pipeline2",
+                    1_780_736_520_000,
+                ),
+            ],
+        );
+
+        let sessions = CodexSourceAdapter::new(&root)
+            .list_sessions()
+            .expect("sessions");
+
+        assert_eq!(sessions.len(), 1, "{sessions:#?}");
+        assert_eq!(sessions[0].id, child_new_id);
+        assert_eq!(
+            sessions[0]
+                .provider_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.parent_session_id.as_deref()),
+            Some(parent_id)
+        );
+    }
+
+    #[test]
     fn app_server_source_is_preferred_over_local_store() {
         let root = test_root("app-server-preferred");
         write_session(
@@ -2693,6 +3204,10 @@ ok"
     }
 
     fn write_state_db(root: &Path, rollout_path: &Path, id: &str, title: &str) {
+        write_state_db_rows(root, &[(rollout_path, id, title, 1_780_736_400_000)]);
+    }
+
+    fn write_state_db_rows(root: &Path, rows: &[(&Path, &str, &str, i64)]) {
         let db = Connection::open(root.join("state_5.sqlite")).expect("db");
         db.execute_batch(
             r#"
@@ -2714,33 +3229,36 @@ ok"
             "#,
         )
         .expect("schema");
-        db.execute(
-            r#"
-            insert into threads (
-                id,
-                rollout_path,
-                created_at,
-                updated_at,
-                created_at_ms,
-                updated_at_ms,
-                cwd,
-                title,
-                preview,
-                first_user_message,
-                git_branch,
-                tokens_used,
-                archived
-            ) values (?1, ?2, 0, 0, 1780736400000, 1780736400000, ?3, ?4, '', '', ?5, 42, 0)
-            "#,
-            params![
-                id,
-                rollout_path.display().to_string(),
-                "/sqlite",
-                title,
-                "sqlite-branch"
-            ],
-        )
-        .expect("insert thread");
+        for (rollout_path, id, title, updated_at_ms) in rows {
+            db.execute(
+                r#"
+                insert into threads (
+                    id,
+                    rollout_path,
+                    created_at,
+                    updated_at,
+                    created_at_ms,
+                    updated_at_ms,
+                    cwd,
+                    title,
+                    preview,
+                    first_user_message,
+                    git_branch,
+                    tokens_used,
+                    archived
+                ) values (?1, ?2, 0, 0, ?3, ?3, ?4, ?5, '', '', ?6, 42, 0)
+                "#,
+                params![
+                    id,
+                    rollout_path.display().to_string(),
+                    updated_at_ms,
+                    "/sqlite",
+                    title,
+                    "sqlite-branch"
+                ],
+            )
+            .expect("insert thread");
+        }
     }
 
     fn write_session_index(root: &Path, contents: &str) {

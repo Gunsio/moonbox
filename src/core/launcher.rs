@@ -125,12 +125,8 @@ pub fn original_command(session: &SessionSummary) -> TargetLaunchCommand {
 fn k2_original_command(session: &SessionSummary) -> TargetLaunchCommand {
     let program = configured_k2_binary();
     let cwd = usable_cwd(&session.cwd);
-    let args = vec![
-        "go".into(),
-        "codex".into(),
-        "resume".into(),
-        session.id.clone(),
-    ];
+    let resume_id = codex::k2_resume_session_id(session);
+    let args = vec!["go".into(), "codex".into(), "resume".into(), resume_id];
     let display = shell_command(&program, &args);
 
     TargetLaunchCommand {
@@ -142,10 +138,7 @@ fn k2_original_command(session: &SessionSummary) -> TargetLaunchCommand {
 }
 
 fn is_k2_session(session: &SessionSummary) -> bool {
-    session
-        .source_path
-        .as_deref()
-        .is_some_and(codex::is_k2_source_path)
+    codex::is_k2_session_summary(session)
 }
 
 pub fn native_fork_command(session: &SessionSummary) -> Option<TargetLaunchCommand> {
