@@ -416,6 +416,9 @@ and this project uses semantic versioning once tagged releases start.
 - Codex session inventory now marks Codex Desktop rollout rows as `Cdx.App`,
   marks K2-launched Codex rollout rows as `Cdx.K2`, and makes the Cdx.K2
   settings toggle hide those K2-origin rows when disabled.
+- The Codex App Server setting now also gates locally discovered `Cdx.App`
+  rollout rows, so saving that setting Off removes Codex App sessions from the
+  default inventory instead of only disabling the app-server RPC source.
 - Codex fork chains are collapsed in the default inventory so a single resumed
   task does not appear as several near-identical rows; the retained summary
   keeps the provider parent session id for inspection.

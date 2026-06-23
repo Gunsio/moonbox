@@ -48,6 +48,7 @@ const MOONBOX_K2_SESSIONS_ENV: &str = "MOONBOX_K2_SESSIONS";
 pub struct CodexSourceAdapter {
     root: PathBuf,
     k2_root: Option<PathBuf>,
+    codex_app_sessions_enabled: bool,
     k2_sessions_enabled: bool,
     list_limit: Option<usize>,
     scan_entry_limit: Option<usize>,
@@ -117,6 +118,7 @@ impl CodexSourceAdapter {
         Self {
             root: root.into(),
             k2_root: None,
+            codex_app_sessions_enabled: false,
             k2_sessions_enabled: false,
             list_limit: configured_session_limit(),
             scan_entry_limit: configured_session_scan_entry_limit(),
@@ -149,6 +151,7 @@ impl CodexSourceAdapter {
         Self {
             root: root.into(),
             k2_root: None,
+            codex_app_sessions_enabled: false,
             k2_sessions_enabled: false,
             list_limit,
             scan_entry_limit,
@@ -161,7 +164,14 @@ impl CodexSourceAdapter {
     fn with_app_server_fixture(root: impl Into<PathBuf>, fixture_path: impl Into<PathBuf>) -> Self {
         let mut adapter = Self::with_all_limits(root, Some(200), None, None);
         adapter.app_server = Some(CodexAppServerSource::fixture(fixture_path));
+        adapter.codex_app_sessions_enabled = true;
         adapter
+    }
+
+    #[cfg(test)]
+    fn with_codex_app_sessions_enabled(mut self) -> Self {
+        self.codex_app_sessions_enabled = true;
+        self
     }
 
     #[cfg(test)]
@@ -204,6 +214,7 @@ impl CodexSourceAdapter {
     #[cfg(not(test))]
     fn with_env_app_server(mut self) -> Self {
         self.app_server = CodexAppServerSource::from_env();
+        self.codex_app_sessions_enabled = self.app_server.is_some();
         self
     }
 
@@ -786,7 +797,8 @@ impl CodexSourceAdapter {
     }
 
     fn include_codex_summary(&self, session: &SessionSummary) -> bool {
-        self.k2_sessions_enabled || !is_k2_session_summary(session)
+        (self.k2_sessions_enabled || !is_k2_session_summary(session))
+            && (self.codex_app_sessions_enabled || !is_codex_app_session_summary(session))
     }
 
     fn find_k2_session(&self, session_id: &str) -> Result<Option<SessionSummary>, AdapterError> {
@@ -2982,7 +2994,7 @@ ok"
     }
 
     #[test]
-    fn codex_desktop_rollout_rows_are_marked_as_codex_app() {
+    fn codex_desktop_rollout_rows_follow_app_server_toggle() {
         let root = test_root("codex-desktop-origin");
         let codex_id = "019ef3e6-ac49-76c3-af48-feff92042b1d";
         let rollout_path = write_session(
@@ -2996,13 +3008,32 @@ ok"
         );
         write_state_db(&root, &rollout_path, codex_id, "Introduce codex");
 
-        let sessions = CodexSourceAdapter::new(&root)
-            .list_sessions()
-            .expect("sessions");
+        let disabled = CodexSourceAdapter::new(&root);
+        let enabled = CodexSourceAdapter::new(&root).with_codex_app_sessions_enabled();
 
-        assert_eq!(sessions.len(), 1);
+        let disabled_sessions = disabled.list_sessions().expect("disabled sessions");
+        let enabled_sessions = enabled.list_sessions().expect("enabled sessions");
+
+        assert!(disabled_sessions.is_empty(), "{disabled_sessions:#?}");
+        assert_eq!(enabled_sessions.len(), 1);
         assert_eq!(
-            sessions[0]
+            enabled_sessions[0]
+                .provider_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.source.as_deref()),
+            Some(CODEX_APP_PROVIDER_SOURCE)
+        );
+        assert!(
+            disabled
+                .find_session(codex_id)
+                .expect("find disabled")
+                .is_none()
+        );
+        assert_eq!(
+            enabled
+                .find_session(codex_id)
+                .expect("find enabled")
+                .expect("enabled session")
                 .provider_metadata
                 .as_ref()
                 .and_then(|metadata| metadata.source.as_deref()),
