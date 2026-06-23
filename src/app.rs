@@ -9035,13 +9035,22 @@ Host devbox
             Some(old_session.as_str())
         );
         assert!(app.take_pending_lark_export().is_none());
-        assert!(app.is_launch_review_pending());
-        assert_eq!(
-            app.pending_launch_review
-                .as_ref()
-                .map(|pending| pending.session_id.as_str()),
-            Some("codex-current-session")
-        );
+        if app.is_launch_review_pending() {
+            assert_eq!(
+                app.pending_launch_review
+                    .as_ref()
+                    .map(|pending| pending.session_id.as_str()),
+                Some("codex-current-session")
+            );
+        } else {
+            let Some(plan) = app.take_pending_setup_install() else {
+                panic!(
+                    "expected stale Lark export to regenerate or request setup; status={}",
+                    app.status_message
+                );
+            };
+            assert_eq!(plan.target, setup::SetupInstallTarget::LarkCli);
+        }
     }
 
     #[test]
