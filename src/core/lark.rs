@@ -205,25 +205,25 @@ pub fn execute_export(
     }
 
     let url = extract_first_url(&stdout).or_else(|| extract_first_url(&stderr));
-    if let Some(url) = url.as_deref() {
-        if let Some(output) = run_lark_title_patch(url, &title)? {
-            let patch_stderr = String::from_utf8_lossy(&output.stderr);
-            if !output.status.success() {
-                return Err(CoreError::LarkExport {
-                    reason: if patch_stderr.trim().is_empty() {
-                        format!(
-                            "lark-cli drive files patch exited with {}",
-                            status_label(&output)
-                        )
-                    } else {
-                        format!(
-                            "lark-cli drive files patch exited with {}: {}",
-                            status_label(&output),
-                            patch_stderr.trim()
-                        )
-                    },
-                });
-            }
+    if let Some(url) = url.as_deref()
+        && let Some(output) = run_lark_title_patch(url, &title)?
+    {
+        let patch_stderr = String::from_utf8_lossy(&output.stderr);
+        if !output.status.success() {
+            return Err(CoreError::LarkExport {
+                reason: if patch_stderr.trim().is_empty() {
+                    format!(
+                        "lark-cli drive files patch exited with {}",
+                        status_label(&output)
+                    )
+                } else {
+                    format!(
+                        "lark-cli drive files patch exited with {}: {}",
+                        status_label(&output),
+                        patch_stderr.trim()
+                    )
+                },
+            });
         }
     }
     let (browser_opened, browser_error) = match url.as_deref() {

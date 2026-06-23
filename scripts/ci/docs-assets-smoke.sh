@@ -64,6 +64,6 @@ grep -Fq 'Portable JSON' docs/assets/moonbox-yank.svg
 grep -Fq 'Handoff Review' docs/assets/moonbox-handoff-review.svg
 grep -Fq 'Handoff Body' docs/assets/moonbox-handoff-review.svg
 grep -Fq 'Timeline' docs/assets/moonbox-timeline-details.svg
-grep -Fq 'Action Path' docs/assets/moonbox-timeline-details.svg
+grep -Fq 'Timeline Inspector' docs/assets/moonbox-timeline-details.svg
 
 echo "moonbox docs asset smoke passed"

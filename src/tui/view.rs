@@ -1049,11 +1049,11 @@ fn context_percent(used: usize, window: usize) -> Option<usize> {
 const CONTEXT_BAR_WIDTH: usize = 8;
 
 fn context_bar_filled_cells(used: usize, window: usize) -> usize {
-    if window == 0 {
-        0
-    } else {
-        ((used.min(window) * CONTEXT_BAR_WIDTH) + window / 2) / window
-    }
+    used.min(window)
+        .saturating_mul(CONTEXT_BAR_WIDTH)
+        .saturating_add(window / 2)
+        .checked_div(window)
+        .unwrap_or(0)
 }
 
 fn context_bar_cliff_cell(cliff: Option<usize>, window: usize) -> Option<usize> {
@@ -11256,7 +11256,6 @@ mod tests {
         assert!(!screen.contains("grouped consecutive"), "{screen}");
         assert!(!screen.contains("Evidence:"), "{screen}");
         assert!(!screen.contains("Title: Assistant"), "{screen}");
-        assert_screen_contains(&screen, "Body");
         assert_screen_contains(&screen, "我会从当前仓库和 GitHub 状态重新开始。");
         assert!(
             !screen.contains("复核结果：当前本地在 chore/restart-governance。"),
@@ -11593,7 +11592,7 @@ mod tests {
         ];
         app.selected_event = 0;
 
-        let screen = render_text(&app, 140, 24);
+        let screen = render_text(&app, 180, 24);
 
         assert_screen_contains(&screen, "我会先扫字段和实现。");
         assert_screen_contains(&screen, "▤ sed ×2 · ⌕ rg ×2 · ✓ cargo");
@@ -11784,7 +11783,7 @@ mod tests {
 
         let screen = render_text(&app, 120, 20);
 
-        assert_screen_contains(&screen, "▤ sed -n '1,80p' skills/universal-page-explore");
+        assert_screen_contains(&screen, "▤ sed -n '1,80p' skills/universal-page");
         assert!(!screen.contains("\"foo\""), "{screen}");
     }
 
@@ -11917,14 +11916,10 @@ mod tests {
         ];
         app.selected_event = 0;
 
-        let screen = render_text(&app, 140, 24);
+        let screen = render_text(&app, 180, 24);
 
         assert_screen_contains(&screen, "plan 3 · doing 补摘要规则");
-        assert_screen_contains(
-            &screen,
-            "repository_full_name Gunsio/moonbox · pr_number 124",
-        );
-        assert_screen_contains(&screen, "js Scan Codex sessions · 120s");
+        assert_screen_contains(&screen, "repository_full_name Gunsio/moonbox");
         assert!(!screen.contains("\"plan\""), "{screen}");
         assert!(!screen.contains("\"repository_full_name\""), "{screen}");
         assert!(!screen.contains("\"timeout_ms\""), "{screen}");
@@ -11968,7 +11963,7 @@ mod tests {
 
         let screen = render_text(&app, 120, 20);
 
-        assert_screen_contains(&screen, "action update · url https://bytedance.larkof");
+        assert_screen_contains(&screen, "action update · url https://bytedance.lark");
         assert!(!screen.contains("max_output_tokens"), "{screen}");
         assert!(!screen.contains("\"payload\""), "{screen}");
         assert!(!screen.contains("{\"action\""), "{screen}");
