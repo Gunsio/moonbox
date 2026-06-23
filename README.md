@@ -1,5 +1,11 @@
 # Moonbox 月光宝盒
 
+[![CI](https://github.com/Gunsio/moonbox/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Gunsio/moonbox/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Gunsio/moonbox?sort=semver)](https://github.com/Gunsio/moonbox/releases/latest)
+[![Homebrew](https://img.shields.io/badge/Homebrew-gunsio%2Ftap%2Fmoonbox-2d7d9a?logo=homebrew)](docs/release/homebrew.md)
+[![Rust 1.88+](https://img.shields.io/badge/Rust-1.88%2B-f74c00?logo=rust)](Cargo.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 ![Moonbox action menu](docs/assets/moonbox-action-menu.svg)
 
 Moonbox is a cross-CLI AI coding session workbench for Codex, Claude, Hermes,
