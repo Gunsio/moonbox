@@ -1,5 +1,7 @@
 # Moonbox 月光宝盒
 
+![Moonbox action menu](docs/assets/moonbox-action-menu.svg)
+
 Moonbox is a cross-CLI AI coding session workbench for Codex, Claude, Hermes,
 and local agent workflows. It helps you jump back to a useful moment, inspect
 the surrounding timeline, shrink the work into a reviewed handoff, and continue
@@ -61,12 +63,6 @@ moon export --session <session-id> --to lark --mode handoff --execute
   first-party Luoshen theme pack.
 
 ## Screenshots
-
-### Action Menu
-
-`o` opens the selected session's action surface without launching anything.
-
-![Moonbox action menu](docs/assets/moonbox-action-menu.svg)
 
 ### Yank Panel
 
