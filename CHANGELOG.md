@@ -7,6 +7,11 @@ and this project uses semantic versioning once tagged releases start.
 
 ## [Unreleased]
 
+### Changed
+
+- Improved README discoverability by moving the bottled Homebrew install,
+  session search, handoff, and Feishu/Lark export path into the first screen.
+
 ## [0.1.6] - 2026-06-23
 
 ### Fixed

@@ -1,9 +1,9 @@
 # Moonbox 月光宝盒
 
-Moonbox is a cross-CLI session workbench for moving through AI coding sessions
-like a Moonlight Box: jump back to a useful moment, inspect the surrounding
-timeline, package the context, and continue in the agent you actually want to
-use next.
+Moonbox is a cross-CLI AI coding session workbench for Codex, Claude, Hermes,
+and local agent workflows. It helps you jump back to a useful moment, inspect
+the surrounding timeline, shrink the work into a reviewed handoff, and continue
+in the agent you actually want to use next.
 
 It is built for people who switch between Codex, Claude, Hermes, and local
 tooling but do not want their working memory trapped inside one provider's
@@ -12,6 +12,33 @@ resume picker.
 Moonbox reads source session stores in read-only mode. It does not mutate
 provider histories, send keystrokes, or resume source sessions unless you
 explicitly ask it to run a guarded action.
+
+## Quick Start
+
+Install the bottled Homebrew release:
+
+```bash
+brew tap Gunsio/tap
+brew trust --formula gunsio/tap/moonbox
+brew install moonbox
+```
+
+Open the TUI and find the session you want to shrink into a handoff:
+
+```bash
+moon
+```
+
+Use `/` to search sessions, `o` to open the action menu, `x` or `H` to start a
+handoff, and `o Enter` to create a Feishu/Lark handoff document when `lark-cli`
+is ready.
+
+For automation, export a handoff or create the Lark document from the CLI:
+
+```bash
+moon export --session <session-id> --to lark --mode handoff
+moon export --session <session-id> --to lark --mode handoff --execute
+```
 
 ## What It Does
 
@@ -91,7 +118,25 @@ Themes are selected in Settings with `,`. Theme changes affect only Moonbox UI;
 session content, paths, prompts, tool output, and handoff artifacts remain
 unchanged.
 
-## Install
+## Install Details
+
+The package installs both `moonbox` and the short `moon` alias.
+
+### Homebrew
+
+Moonbox releases are distributed through the dedicated Homebrew tap. Apple
+Silicon macOS uses a published bottle by default:
+
+```bash
+brew tap Gunsio/tap
+brew trust --formula gunsio/tap/moonbox
+brew install moonbox
+moonbox --version
+moon --version
+```
+
+See [docs/release/homebrew.md](docs/release/homebrew.md) for release and tap
+maintenance details.
 
 ### Cargo
 
@@ -103,8 +148,7 @@ moonbox --version
 moon --version
 ```
 
-The package installs both `moonbox` and the short `moon` alias. From a local
-checkout:
+From a local checkout:
 
 ```bash
 cargo install --path . --locked
@@ -128,19 +172,6 @@ The same flow is available from CLI for automation:
 moon export --session <session-id> --to lark --mode handoff
 moon export --session <session-id> --to lark --mode handoff --execute
 ```
-
-### Homebrew
-
-Moonbox prereleases are distributed through the dedicated Homebrew tap:
-
-```bash
-brew tap Gunsio/tap
-brew trust --formula gunsio/tap/moonbox
-brew install moonbox
-```
-
-See [docs/release/homebrew.md](docs/release/homebrew.md) for release and tap
-maintenance details.
 
 ## Development
 
