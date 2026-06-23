@@ -15,6 +15,7 @@ use time::OffsetDateTime;
 
 use super::{
     adapter::AdapterError,
+    config,
     local_jsonl::{
         display_time, event_id, human_timestamp, is_moonbox_handoff_control_text,
         is_provider_context_text, push_timeline_event, stable_text_digest, stable_value_digest,
@@ -139,7 +140,9 @@ impl CodexAppServerSource {
         if let Some(path) = env::var_os(CODEX_APP_SERVER_FIXTURE_ENV) {
             return Some(Self::fixture(path));
         }
-        if !env_enabled(CODEX_APP_SERVER_PROXY_ENV) {
+        let proxy_enabled = env_flag(CODEX_APP_SERVER_PROXY_ENV)
+            .unwrap_or_else(|| config::load_codex_config().app_server_proxy);
+        if !proxy_enabled {
             return None;
         }
 
@@ -872,14 +875,15 @@ fn short_id(id: &str) -> String {
     id.chars().take(8).collect()
 }
 
-fn env_enabled(key: &str) -> bool {
-    env::var(key)
-        .ok()
-        .map(|value| {
-            let normalized = value.trim().to_ascii_lowercase();
-            matches!(normalized.as_str(), "1" | "true" | "yes" | "proxy")
-        })
-        .unwrap_or(false)
+fn env_flag(key: &str) -> Option<bool> {
+    env::var(key).ok().and_then(|value| {
+        let normalized = value.trim().to_ascii_lowercase();
+        match normalized.as_str() {
+            "1" | "true" | "yes" | "proxy" | "on" => Some(true),
+            "0" | "false" | "no" | "off" => Some(false),
+            _ => None,
+        }
+    })
 }
 
 fn configured_timeout() -> Duration {

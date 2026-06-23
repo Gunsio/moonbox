@@ -95,6 +95,7 @@ pub enum Text {
     HooksEventChannel,
     HooksManagedByCli,
     SmartEnterTmux,
+    CodexAppServer,
     CurrentEnterRoute,
     Effect,
     SettingsKeys,
@@ -279,6 +280,7 @@ fn english(key: Text) -> &'static str {
         Text::HooksEventChannel => "Hooks event channel",
         Text::HooksManagedByCli => "managed by `moonbox hooks`",
         Text::SmartEnterTmux => "Smart Enter / tmux",
+        Text::CodexAppServer => "Codex App Server",
         Text::CurrentEnterRoute => "Current Enter Route",
         Text::Effect => "Effect",
         Text::SettingsKeys => {
@@ -442,6 +444,7 @@ fn zh_hans(key: Text) -> &'static str {
         Text::HooksEventChannel => "Hooks 事件通道",
         Text::HooksManagedByCli => "由 `moonbox hooks` 管理",
         Text::SmartEnterTmux => "Smart Enter / tmux",
+        Text::CodexAppServer => "Codex App Server",
         Text::CurrentEnterRoute => "当前 Enter 路径",
         Text::Effect => "影响",
         Text::SettingsKeys => "j/k 选择   h/l 切换   space 开关   r 重置   Enter 保存   Esc 取消",

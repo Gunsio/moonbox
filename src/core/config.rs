@@ -71,6 +71,12 @@ pub struct ContextModelConfig {
     pub quality_cliff_tokens: Option<usize>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodexConfig {
+    #[serde(default)]
+    pub app_server_proxy: bool,
+}
+
 impl Default for HooksConfig {
     fn default() -> Self {
         Self {
@@ -222,6 +228,8 @@ struct UserConfig {
     #[serde(default)]
     ui: UiPreferencesConfig,
     #[serde(default)]
+    codex: CodexConfig,
+    #[serde(default)]
     compiler_presets: Vec<CompilerPresetConfig>,
     #[serde(default)]
     context_models: Vec<ContextModelConfig>,
@@ -290,6 +298,12 @@ pub fn load_context_model_configs() -> Vec<ContextModelConfig> {
                 && (entry.window_tokens.is_some() || entry.quality_cliff_tokens.is_some())
         })
         .collect()
+}
+
+pub fn load_codex_config() -> CodexConfig {
+    load_user_config()
+        .map(|config| config.codex)
+        .unwrap_or_default()
 }
 
 pub fn add_ssh_host_config(host: SshHostConfig) -> Result<(), Box<dyn std::error::Error>> {
@@ -385,24 +399,27 @@ fn save_ui_preferences_config_to_path(
     Ok(user_config.ui)
 }
 
-pub fn save_ui_preferences_and_smart_enter(
+pub fn save_ui_preferences_smart_enter_and_codex(
     ui: UiPreferencesConfig,
     smart_enter_tmux: bool,
-) -> Result<(UiPreferencesConfig, HooksConfig), Box<dyn std::error::Error>> {
+    codex: CodexConfig,
+) -> Result<(UiPreferencesConfig, HooksConfig, CodexConfig), Box<dyn std::error::Error>> {
     let path = config_path().ok_or("missing home directory")?;
-    save_ui_preferences_and_smart_enter_to_path(&path, ui, smart_enter_tmux)
+    save_ui_preferences_smart_enter_and_codex_to_path(&path, ui, smart_enter_tmux, codex)
 }
 
-fn save_ui_preferences_and_smart_enter_to_path(
+fn save_ui_preferences_smart_enter_and_codex_to_path(
     path: &Path,
     ui: UiPreferencesConfig,
     smart_enter_tmux: bool,
-) -> Result<(UiPreferencesConfig, HooksConfig), Box<dyn std::error::Error>> {
+    codex: CodexConfig,
+) -> Result<(UiPreferencesConfig, HooksConfig, CodexConfig), Box<dyn std::error::Error>> {
     let mut user_config = load_user_config_from_path(path).unwrap_or_default();
     user_config.ui = ui.normalized_for_ui();
     user_config.hooks.smart_enter_tmux = smart_enter_tmux;
+    user_config.codex = codex;
     save_user_config_to_path(path, &user_config)?;
-    Ok((user_config.ui, user_config.hooks))
+    Ok((user_config.ui, user_config.hooks, user_config.codex))
 }
 
 pub fn save_starred_sessions(sessions: &[String]) -> Result<(), Box<dyn std::error::Error>> {
@@ -494,6 +511,7 @@ mod tests {
 	    "event_allowlist": ["user", "assistant", "tool", "rewind_point"],
 	    "file_allowlist": ["README.md", "src/"]
 	  },
+	  "codex": {"app_server_proxy": true},
 	  "ui": {"language": "zh_hans", "theme": "tokyo-night"},
 	  "compiler_presets": [
     {"id": "handoff", "command": "/bin/moonbox-handoff", "args": ["--mode", "handoff"], "timeout_ms": 12000, "description": "Compresses source timelines for target CLIs.", "homepage": "https://github.com/example/handoff", "github_stars": 42}
@@ -527,6 +545,7 @@ mod tests {
         assert!(!config.hooks.enabled);
         assert!(!config.hooks.smart_enter_tmux);
         assert_eq!(config.hooks.spool_max_bytes, default_hook_spool_max_bytes());
+        assert!(config.codex.app_server_proxy);
         assert_eq!(config.ui.language, UiLanguage::ZhHans);
         assert_eq!(config.ui.theme, UiThemeName::TokyoNight);
         assert_eq!(config.ui.theme.normalized_for_ui(), UiThemeName::Moonbox);
@@ -707,21 +726,26 @@ mod tests {
         )
         .expect("write config");
 
-        let (_, hooks) = save_ui_preferences_and_smart_enter_to_path(
+        let (_, hooks, codex) = save_ui_preferences_smart_enter_and_codex_to_path(
             &path,
             UiPreferencesConfig {
                 language: UiLanguage::ZhHans,
                 theme: UiThemeName::LuoshenSwan,
             },
             true,
+            CodexConfig {
+                app_server_proxy: true,
+            },
         )
         .expect("save smart enter");
         let saved = load_user_config_from_path(&path).expect("saved");
 
         assert!(hooks.enabled);
         assert!(hooks.smart_enter_tmux);
+        assert!(codex.app_server_proxy);
         assert!(saved.hooks.enabled);
         assert!(saved.hooks.smart_enter_tmux);
+        assert!(saved.codex.app_server_proxy);
         assert_eq!(
             saved.hooks.spool_path.as_deref(),
             Some("/tmp/moonbox/events.jsonl")
@@ -778,7 +802,7 @@ mod tests {
     }
 
     #[test]
-    fn save_ui_preferences_and_smart_enter_preserves_other_config() {
+    fn save_ui_preferences_smart_enter_and_codex_preserves_other_config() {
         let path = env::temp_dir().join(format!(
             "moonbox-config-ui-smart-{}.json",
             std::process::id()
@@ -799,23 +823,28 @@ mod tests {
         )
         .expect("write config");
 
-        let (ui, hooks) = save_ui_preferences_and_smart_enter_to_path(
+        let (ui, hooks, codex) = save_ui_preferences_smart_enter_and_codex_to_path(
             &path,
             UiPreferencesConfig {
                 language: UiLanguage::ZhHans,
                 theme: UiThemeName::LuoshenPine,
             },
             true,
+            CodexConfig {
+                app_server_proxy: true,
+            },
         )
-        .expect("save ui preferences and smart enter");
+        .expect("save ui preferences, smart enter, and codex");
         let saved = load_user_config_from_path(&path).expect("saved");
 
         assert_eq!(ui.language, UiLanguage::ZhHans);
         assert_eq!(ui.theme, UiThemeName::LuoshenPine);
         assert!(hooks.enabled);
         assert!(hooks.smart_enter_tmux);
+        assert!(codex.app_server_proxy);
         assert_eq!(saved.ui.language, UiLanguage::ZhHans);
         assert_eq!(saved.ui.theme, UiThemeName::LuoshenPine);
+        assert!(saved.codex.app_server_proxy);
         assert_eq!(saved.compiler_presets[0].id, "handoff");
         assert_eq!(saved.ssh_hosts[0].name, "prod");
         assert_eq!(saved.starred_sessions, ["codex:abc"]);

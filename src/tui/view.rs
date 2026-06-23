@@ -4198,6 +4198,16 @@ fn render_settings(frame: &mut Frame, root: Rect, app: &App) {
         saved: i18n::on_off(language, app.smart_enter_tmux_enabled()),
         dirty: app.settings_smart_enter_dirty(),
     }));
+    lines.extend(settings_row(SettingsRow {
+        app,
+        language,
+        layout: settings_row_layout,
+        field: SettingsField::CodexAppServer,
+        label: i18n::text(language, Text::CodexAppServer),
+        draft: i18n::on_off(language, app.settings_codex_app_server_proxy),
+        saved: i18n::on_off(language, app.codex_app_server_proxy_enabled()),
+        dirty: app.settings_codex_app_server_dirty(),
+    }));
     lines.extend(settings_lark_cli_row(app, language, settings_row_layout));
     lines.extend([
         Line::raw(""),
@@ -4356,6 +4366,7 @@ fn settings_field_icon(field: SettingsField) -> (&'static str, Color) {
         SettingsField::Language => ("文", theme::blue()),
         SettingsField::Theme => ("◈", theme::purple()),
         SettingsField::SmartEnter => ("↵", theme::green()),
+        SettingsField::CodexAppServer => ("C", theme::orange()),
         SettingsField::LarkCli => ("☁", theme::cyan()),
     }
 }
@@ -9831,14 +9842,7 @@ mod tests {
     }
 
     fn settings_row_columns(screen: &str, row_label: &str) -> (usize, usize) {
-        let lines = screen.lines().collect::<Vec<_>>();
-        let row_index = lines
-            .iter()
-            .position(|line| line.contains(row_label))
-            .unwrap_or_else(|| panic!("missing settings row {row_label:?} in screen:\n{screen}"));
-        let detail_line = lines.get(row_index + 1).unwrap_or_else(|| {
-            panic!("missing settings detail row after {row_label:?}:\n{screen}")
-        });
+        let detail_line = settings_row_detail_line(screen, row_label);
         let draft_index = detail_line.find("预览").expect("draft column");
         let saved_index = detail_line.find("已保存").expect("saved column");
         (
@@ -9847,8 +9851,19 @@ mod tests {
         )
     }
 
+    fn settings_row_detail_line<'a>(screen: &'a str, row_label: &str) -> &'a str {
+        let lines = screen.lines().collect::<Vec<_>>();
+        let row_index = lines
+            .iter()
+            .position(|line| line.contains(row_label))
+            .unwrap_or_else(|| panic!("missing settings row {row_label:?} in screen:\n{screen}"));
+        lines
+            .get(row_index + 1)
+            .unwrap_or_else(|| panic!("missing settings detail row after {row_label:?}:\n{screen}"))
+    }
+
     fn assert_settings_columns_aligned(screen: &str) -> Vec<(usize, usize)> {
-        let columns = ["语言", "主题", "Smart Enter / tmux"]
+        let columns = ["语言", "主题", "Smart Enter / tmux", "Codex App Server"]
             .into_iter()
             .map(|label| settings_row_columns(screen, label))
             .collect::<Vec<_>>();
@@ -10250,6 +10265,41 @@ mod tests {
     }
 
     #[test]
+    fn settings_overlay_previews_codex_app_server_proxy_before_save() {
+        let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.set_codex_config_for_test(crate::core::config::CodexConfig {
+            app_server_proxy: false,
+        });
+
+        app.handle_key(key(','));
+        app.handle_key(key('j'));
+        app.handle_key(key('j'));
+        app.handle_key(key('j'));
+        let off_screen = render_text(&app, 150, 36);
+        assert_screen_contains(&off_screen, "Codex App Server");
+        let off_detail = settings_row_detail_line(&off_screen, "Codex App Server");
+        assert!(
+            off_detail.contains("Preview Off"),
+            "{off_detail}\n{off_screen}"
+        );
+        assert!(
+            off_detail.contains("Saved Off"),
+            "{off_detail}\n{off_screen}"
+        );
+
+        app.handle_key(key(' '));
+        let on_screen = render_text(&app, 150, 36);
+        let codex_row = on_screen
+            .lines()
+            .find(|line| line.contains("Codex App Server"))
+            .unwrap_or_else(|| panic!("missing Codex App Server row:\n{on_screen}"));
+        let on_detail = settings_row_detail_line(&on_screen, "Codex App Server");
+        assert!(codex_row.contains("Unsaved"), "{codex_row}\n{on_screen}");
+        assert!(on_detail.contains("Preview On"), "{on_detail}\n{on_screen}");
+        assert!(on_detail.contains("Saved Off"), "{on_detail}\n{on_screen}");
+    }
+
+    #[test]
     fn settings_overlay_shows_lark_cli_readiness_as_action_status() {
         let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
         app.show_settings = true;
@@ -10357,13 +10407,18 @@ mod tests {
         let smart_enter_screen = render_text(&app, 150, 36);
         let smart_enter_columns = assert_settings_columns_aligned(&smart_enter_screen);
 
+        app.handle_key(key('j'));
+        let codex_app_server_screen = render_text(&app, 150, 36);
+        let codex_app_server_columns = assert_settings_columns_aligned(&codex_app_server_screen);
+
         app.handle_key(key('k'));
-        let theme_again_screen = render_text(&app, 150, 36);
-        let theme_again_columns = assert_settings_columns_aligned(&theme_again_screen);
+        let smart_enter_again_screen = render_text(&app, 150, 36);
+        let smart_enter_again_columns = assert_settings_columns_aligned(&smart_enter_again_screen);
 
         assert_eq!(language_columns, theme_columns);
         assert_eq!(language_columns, smart_enter_columns);
-        assert_eq!(language_columns, theme_again_columns);
+        assert_eq!(language_columns, codex_app_server_columns);
+        assert_eq!(language_columns, smart_enter_again_columns);
     }
 
     #[test]

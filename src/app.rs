@@ -26,7 +26,7 @@ use crate::core::{
         SourceProvenance, TimelineAttachment, TimelineEvent, TimelineKind, VerificationReport,
         WorkCapsule, WorkbenchData,
     },
-    setup, tmux, verifier, workbench,
+    setup, sources, tmux, verifier, workbench,
 };
 
 type SessionLoadResult = Result<WorkbenchData, CoreError>;
@@ -101,18 +101,26 @@ pub enum SettingsField {
     Language,
     Theme,
     SmartEnter,
+    CodexAppServer,
     LarkCli,
 }
 
 impl SettingsField {
-    const ALL: [Self; 4] = [Self::Language, Self::Theme, Self::SmartEnter, Self::LarkCli];
+    const ALL: [Self; 5] = [
+        Self::Language,
+        Self::Theme,
+        Self::SmartEnter,
+        Self::CodexAppServer,
+        Self::LarkCli,
+    ];
 
     fn index(self) -> usize {
         match self {
             Self::Language => 0,
             Self::Theme => 1,
             Self::SmartEnter => 2,
-            Self::LarkCli => 3,
+            Self::CodexAppServer => 3,
+            Self::LarkCli => 4,
         }
     }
 
@@ -1202,10 +1210,12 @@ pub struct App {
     pub data_space_config_field: usize,
     pub data_space_delete_confirmation: Option<String>,
     ui_preferences: config::UiPreferencesConfig,
+    codex_config: config::CodexConfig,
     pub settings_language: config::UiLanguage,
     pub settings_theme: config::UiThemeName,
     pub settings_field: SettingsField,
     pub settings_smart_enter_tmux: bool,
+    pub settings_codex_app_server_proxy: bool,
     pub lark_cli_readiness: lark::LarkCliReadiness,
     pub pending_target: CliTool,
     pub pending_compiler: usize,
@@ -1278,10 +1288,15 @@ impl App {
         #[cfg(test)]
         let ui_preferences = config::UiPreferencesConfig::default();
         #[cfg(not(test))]
+        let codex_config = config::load_codex_config();
+        #[cfg(test)]
+        let codex_config = config::CodexConfig::default();
+        #[cfg(not(test))]
         let hook_live = hooks::live_state_from_config(&hooks_config);
         #[cfg(test)]
         let hook_live = None;
         let settings_smart_enter_tmux = hooks_config.smart_enter_tmux;
+        let settings_codex_app_server_proxy = codex_config.app_server_proxy;
         let settings_language = ui_preferences.language;
         let settings_theme = ui_preferences.theme;
         let lark_cli_readiness = lark::readiness(Some(
@@ -1345,10 +1360,12 @@ impl App {
             data_space_config_field: 0,
             data_space_delete_confirmation: None,
             ui_preferences,
+            codex_config,
             settings_language,
             settings_theme,
             settings_field: SettingsField::Language,
             settings_smart_enter_tmux,
+            settings_codex_app_server_proxy,
             lark_cli_readiness,
             pending_target: target,
             pending_compiler: selected_compiler,
@@ -1720,6 +1737,12 @@ impl App {
         self.hooks_config = hooks_config;
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_codex_config_for_test(&mut self, codex_config: config::CodexConfig) {
+        self.settings_codex_app_server_proxy = codex_config.app_server_proxy;
+        self.codex_config = codex_config;
+    }
+
     pub(crate) fn set_ui_preferences_for_render(&mut self, ui: config::UiPreferencesConfig) {
         let ui = config::UiPreferencesConfig {
             language: ui.language,
@@ -1765,8 +1788,16 @@ impl App {
         self.hooks_config.smart_enter_tmux
     }
 
+    pub fn codex_app_server_proxy_enabled(&self) -> bool {
+        self.codex_config.app_server_proxy
+    }
+
     pub fn settings_smart_enter_dirty(&self) -> bool {
         self.settings_smart_enter_tmux != self.hooks_config.smart_enter_tmux
+    }
+
+    pub fn settings_codex_app_server_dirty(&self) -> bool {
+        self.settings_codex_app_server_proxy != self.codex_config.app_server_proxy
     }
 
     pub fn ui_language(&self) -> config::UiLanguage {
@@ -1805,6 +1836,7 @@ impl App {
         self.settings_language_dirty()
             || self.settings_theme_dirty()
             || self.settings_smart_enter_dirty()
+            || self.settings_codex_app_server_dirty()
     }
 
     pub fn settings_field_is_focused(&self, field: SettingsField) -> bool {
@@ -3001,6 +3033,7 @@ impl App {
             self.settings_language = self.ui_preferences.language;
             self.settings_theme = self.ui_preferences.theme;
             self.settings_smart_enter_tmux = self.hooks_config.smart_enter_tmux;
+            self.settings_codex_app_server_proxy = self.codex_config.app_server_proxy;
             self.settings_field = SettingsField::Language;
             self.modal_scroll = 0;
             self.set_status("Settings closed");
@@ -3050,6 +3083,7 @@ impl App {
         self.settings_language = self.ui_preferences.language;
         self.settings_theme = self.ui_preferences.theme;
         self.settings_smart_enter_tmux = self.hooks_config.smart_enter_tmux;
+        self.settings_codex_app_server_proxy = self.codex_config.app_server_proxy;
         self.refresh_lark_cli_readiness();
         self.settings_field = SettingsField::Language;
         self.show_settings = true;
@@ -3123,6 +3157,15 @@ impl App {
                 };
                 self.set_status(format!("Smart Enter draft: {state}"));
             }
+            SettingsField::CodexAppServer => {
+                self.settings_codex_app_server_proxy = !self.settings_codex_app_server_proxy;
+                let state = if self.settings_codex_app_server_proxy {
+                    "On"
+                } else {
+                    "Off"
+                };
+                self.set_status(format!("Codex App Server draft: {state}"));
+            }
             SettingsField::LarkCli => {
                 self.refresh_lark_cli_readiness();
                 self.set_status(format!("Lark CLI: {}", self.lark_cli_readiness.reason));
@@ -3135,6 +3178,7 @@ impl App {
         self.settings_language = config::UiLanguage::default();
         self.settings_theme = config::UiThemeName::default();
         self.settings_smart_enter_tmux = false;
+        self.settings_codex_app_server_proxy = false;
         self.refresh_lark_cli_readiness();
         self.set_status("Settings draft reset to defaults");
         self.pending_g = false;
@@ -3163,29 +3207,55 @@ impl App {
     }
 
     fn save_settings(&mut self) {
+        let codex_proxy_changed = self.settings_codex_app_server_dirty();
         let ui = config::UiPreferencesConfig {
             language: self.settings_language,
             theme: self.settings_theme,
         };
-        match config::save_ui_preferences_and_smart_enter(ui, self.settings_smart_enter_tmux) {
-            Ok((ui_preferences, hooks_config)) => {
+        let codex = config::CodexConfig {
+            app_server_proxy: self.settings_codex_app_server_proxy,
+        };
+        match config::save_ui_preferences_smart_enter_and_codex(
+            ui,
+            self.settings_smart_enter_tmux,
+            codex,
+        ) {
+            Ok((ui_preferences, hooks_config, codex_config)) => {
                 self.ui_preferences = ui_preferences;
                 self.hooks_config = hooks_config;
+                self.codex_config = codex_config;
                 self.settings_language = self.ui_preferences.language;
                 self.settings_theme = self.ui_preferences.theme;
                 self.settings_smart_enter_tmux = self.hooks_config.smart_enter_tmux;
+                self.settings_codex_app_server_proxy = self.codex_config.app_server_proxy;
                 self.show_settings = false;
                 self.settings_field = SettingsField::Language;
                 self.modal_scroll = 0;
+                let codex_status = if self.codex_config.app_server_proxy {
+                    "On"
+                } else {
+                    "Off"
+                };
+                let refresh_status = if codex_proxy_changed {
+                    match self.refresh_local_source_inventory_after_settings_save() {
+                        Ok(true) => "; source inventory refreshed".to_string(),
+                        Ok(false) => "; remote data space not refreshed".to_string(),
+                        Err(error) => format!("; source refresh failed: {error}"),
+                    }
+                } else {
+                    String::new()
+                };
                 self.set_status(format!(
-                    "Settings saved: language {}, theme {}, Smart Enter {}",
+                    "Settings saved: language {}, theme {}, Smart Enter {}, Codex App Server {}{}",
                     self.ui_preferences.language.label(),
                     self.ui_preferences.theme.label(),
                     if self.hooks_config.smart_enter_tmux {
                         "On"
                     } else {
                         "Off"
-                    }
+                    },
+                    codex_status,
+                    refresh_status
                 ));
             }
             Err(error) => {
@@ -3193,6 +3263,39 @@ impl App {
             }
         }
         self.pending_g = false;
+    }
+
+    fn refresh_local_source_inventory_after_settings_save(&mut self) -> Result<bool, CoreError> {
+        if !self.current_data_space().is_local() {
+            return Ok(false);
+        }
+        let old_selected = self
+            .current_session()
+            .map(|session| (session.cli, session.id.clone()));
+        let inventory = sources::source_inventory()?;
+        self.data.sessions = inventory.sessions;
+        self.data.source_adapters = inventory.adapter_reports;
+        self.doctor_report =
+            doctor::diagnose_with_inventory(&self.data.sessions, &self.data.source_adapters);
+        self.refresh_visible_sessions();
+        if let Some((cli, id)) = old_selected.as_ref()
+            && let Some(index) = self.visible_session_indices.iter().copied().find(|index| {
+                self.data
+                    .sessions
+                    .get(*index)
+                    .is_some_and(|session| session.cli == *cli && session.id == *id)
+            })
+        {
+            self.selected_session = index;
+        }
+        self.clamp_selected_session();
+        let new_selected = self
+            .current_session()
+            .map(|session| (session.cli, session.id.clone()));
+        if new_selected != old_selected {
+            self.defer_selected_session_context();
+        }
+        Ok(true)
     }
 
     fn prev_focus(&mut self) {
