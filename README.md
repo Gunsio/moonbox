@@ -8,18 +8,12 @@
 
 ![Moonbox action menu](docs/assets/moonbox-action-menu.svg)
 
-Moonbox is a cross-CLI AI coding session workbench for Codex, Claude, Hermes,
-and local agent workflows. It helps you jump back to a useful moment, inspect
-the surrounding timeline, shrink the work into a reviewed handoff, and continue
-in the agent you actually want to use next.
+Moonbox is a cross-CLI workbench for Codex, Claude, Hermes, and local agents:
+find an old AI coding session, rewind to the useful moment, and turn it into a
+reviewed handoff for the next agent.
 
-It is built for people who switch between Codex, Claude, Hermes, and local
-tooling but do not want their working memory trapped inside one provider's
-resume picker.
-
-Moonbox reads source session stores in read-only mode. It does not mutate
-provider histories, send keystrokes, or resume source sessions unless you
-explicitly ask it to run a guarded action.
+It reads source session stores in read-only mode and only resumes, forks, or
+exports when you explicitly choose a guarded action.
 
 ## Quick Start
 
