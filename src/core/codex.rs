@@ -682,7 +682,6 @@ impl CodexSourceAdapter {
                 session_id_aliases(&session.id).all(|id| !existing.contains(&id))
             }),
         );
-        collapse_codex_fork_chains(sessions);
         sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
         if let Some(limit) = self.list_limit {
             sessions.truncate(limit);
@@ -1413,42 +1412,6 @@ fn json_string_field_in_text(text: &str, key: &str) -> Option<String> {
     }
     let mut deserializer = serde_json::Deserializer::from_str(after_colon);
     String::deserialize(&mut deserializer).ok()
-}
-
-fn collapse_codex_fork_chains(sessions: &mut Vec<SessionSummary>) {
-    let parents: HashMap<String, String> = sessions
-        .iter()
-        .filter_map(|session| {
-            let parent = session
-                .provider_metadata
-                .as_ref()
-                .and_then(|metadata| metadata.parent_session_id.as_deref())?
-                .trim();
-            (!parent.is_empty()).then(|| (session.id.clone(), parent.to_owned()))
-        })
-        .collect();
-    if parents.is_empty() {
-        return;
-    }
-
-    sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
-    let mut seen_roots = HashSet::new();
-    sessions.retain(|session| seen_roots.insert(codex_fork_root(&session.id, &parents)));
-}
-
-fn codex_fork_root(session_id: &str, parents: &HashMap<String, String>) -> String {
-    let mut current = session_id.to_owned();
-    let mut seen = HashSet::new();
-    while seen.insert(current.clone()) {
-        let Some(parent) = parents
-            .get(&current)
-            .filter(|parent| !parent.trim().is_empty())
-        else {
-            return current;
-        };
-        current = parent.clone();
-    }
-    current
 }
 
 fn codex_provider_metadata(
@@ -3042,8 +3005,8 @@ ok"
     }
 
     #[test]
-    fn codex_fork_chain_collapses_to_latest_list_entry() {
-        let root = test_root("codex-fork-chain-collapse");
+    fn codex_fork_children_remain_independently_listed() {
+        let root = test_root("codex-fork-children-visible");
         let parent_id = "codex-parent";
         let child_old_id = "codex-child-old";
         let child_new_id = "codex-child-new";
@@ -3091,14 +3054,32 @@ ok"
             .list_sessions()
             .expect("sessions");
 
-        assert_eq!(sessions.len(), 1, "{sessions:#?}");
-        assert_eq!(sessions[0].id, child_new_id);
+        assert_eq!(
+            sessions
+                .iter()
+                .map(|session| session.id.as_str())
+                .collect::<Vec<_>>(),
+            [child_new_id, child_old_id, parent_id],
+            "{sessions:#?}"
+        );
         assert_eq!(
             sessions[0]
                 .provider_metadata
                 .as_ref()
                 .and_then(|metadata| metadata.parent_session_id.as_deref()),
             Some(parent_id)
+        );
+
+        let capped = CodexSourceAdapter::with_session_limit(&root, Some(2))
+            .list_sessions()
+            .expect("capped sessions");
+        assert_eq!(
+            capped
+                .iter()
+                .map(|session| session.id.as_str())
+                .collect::<Vec<_>>(),
+            [child_new_id, child_old_id],
+            "{capped:#?}"
         );
     }
 

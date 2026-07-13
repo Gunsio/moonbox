@@ -42,14 +42,19 @@ moon export --session <session-id> --to lark --mode handoff --execute
 ## What It Does
 
 - **Session inventory**: browse local Codex, Claude, and Hermes sessions in one
-  time-sorted TUI.
+  time-sorted TUI. Each independently resumable Codex child or fork session is
+  retained rather than silently collapsed into its parent.
 - **Timeline rewind**: inspect turns, tool evidence, images, and compact
   boundaries before choosing where to continue.
 - **Context health**: see provider-backed context usage, agent/model-resolved
   windows, quality-cliff estimates, and compact markers; unknown usage stays
   explicit instead of being turned into a fake percentage.
 - **Action menu**: use `o` to pick Resume, Handoff, Lark Doc, New Session,
-  Fork, Jump, Inspect, Yank, or Archive from one availability-aware menu.
+  Fork, Jump, Inspect, Yank, or Archive from one availability-aware menu. Local
+  native Codex sessions also offer a separately reviewed **Resume (Full
+  Access)** action: it displays the exact command, requires `Shift+R`, and
+  warns that it bypasses approvals and sandboxing and must be used only in an
+  externally sandboxed environment.
 - **Yank panel**: use `y` for copy-only workflows such as first user input,
   last AI output, session id, handoff text, and portable JSON.
 - **Handoff review**: generate or review a continuation artifact before a target
@@ -133,18 +138,22 @@ maintenance details.
 
 ### Cargo
 
-Install from Git:
+Homebrew and a Cargo global installation are alternative channels. On macOS,
+use Homebrew for the single global `moonbox` / `moon` entry point; do not also
+install a checkout into another directory on `PATH`.
+
+For a local checkout, run the current source directly:
+
+```bash
+cargo run --locked -- tui
+```
+
+For environments without Homebrew, install from Git as the one global channel:
 
 ```bash
 cargo install --git https://github.com/Gunsio/moonbox
 moonbox --version
 moon --version
-```
-
-From a local checkout:
-
-```bash
-cargo install --path . --locked
 ```
 
 Fixture-safe verification commands:
@@ -186,13 +195,14 @@ scripts/ci/full-gate.sh
 ```
 
 The generated screenshots in this README come from the real Ratatui render
-buffer. Refresh them with:
+buffer. Refresh them with the same deterministic fixture environment used by
+the CI smoke:
 
 ```bash
-cargo run --locked -- docs-snapshot --scene action-menu --output docs/assets/moonbox-action-menu.svg
-cargo run --locked -- docs-snapshot --scene yank --output docs/assets/moonbox-yank.svg
-cargo run --locked -- docs-snapshot --scene handoff --output docs/assets/moonbox-handoff-review.svg
-cargo run --locked -- docs-snapshot --scene timeline-details --output docs/assets/moonbox-timeline-details.svg
+MOONBOX_SESSION_MODE=fixture MOONBOX_TUI_NOW_UNIX=1780650000 COLORTERM=truecolor TERM=xterm-256color cargo run --locked -- docs-snapshot --scene action-menu --output docs/assets/moonbox-action-menu.svg
+MOONBOX_SESSION_MODE=fixture MOONBOX_TUI_NOW_UNIX=1780650000 COLORTERM=truecolor TERM=xterm-256color cargo run --locked -- docs-snapshot --scene yank --output docs/assets/moonbox-yank.svg
+MOONBOX_SESSION_MODE=fixture MOONBOX_TUI_NOW_UNIX=1780650000 COLORTERM=truecolor TERM=xterm-256color cargo run --locked -- docs-snapshot --scene handoff --output docs/assets/moonbox-handoff-review.svg
+MOONBOX_SESSION_MODE=fixture MOONBOX_TUI_NOW_UNIX=1780650000 COLORTERM=truecolor TERM=xterm-256color cargo run --locked -- docs-snapshot --scene timeline-details --output docs/assets/moonbox-timeline-details.svg
 ```
 
 ## Project Docs

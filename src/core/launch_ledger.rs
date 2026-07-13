@@ -658,6 +658,7 @@ fn record_from_row(row: &Row<'_>) -> rusqlite::Result<LaunchRecord> {
 fn action_to_db(action: SessionAction) -> &'static str {
     match action {
         SessionAction::OriginalResume => "original_resume",
+        SessionAction::FullAccessResume => "full_access_resume",
         SessionAction::NativeFork => "native_fork",
         SessionAction::NewSession => "new_session",
         SessionAction::TargetHandoff => "target_handoff",
@@ -668,6 +669,7 @@ fn action_to_db(action: SessionAction) -> &'static str {
 fn action_from_db(value: String) -> rusqlite::Result<SessionAction> {
     match value.as_str() {
         "original_resume" => Ok(SessionAction::OriginalResume),
+        "full_access_resume" => Ok(SessionAction::FullAccessResume),
         "native_fork" => Ok(SessionAction::NativeFork),
         "new_session" => Ok(SessionAction::NewSession),
         "target_handoff" => Ok(SessionAction::TargetHandoff),
@@ -915,5 +917,17 @@ mod tests {
             Some("provider does not support fork")
         );
         let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn full_access_resume_uses_a_distinct_ledger_action() {
+        assert_eq!(
+            action_to_db(SessionAction::FullAccessResume),
+            "full_access_resume"
+        );
+        assert!(matches!(
+            action_from_db("full_access_resume".into()),
+            Ok(SessionAction::FullAccessResume)
+        ));
     }
 }

@@ -207,9 +207,10 @@ fn action_is_runnable(status: SessionActionAvailability) -> bool {
     )
 }
 
-fn action_menu_order() -> [SessionAvailableActionKind; 5] {
+fn action_menu_order() -> [SessionAvailableActionKind; 6] {
     [
         SessionAvailableActionKind::Resume,
+        SessionAvailableActionKind::FullAccessResume,
         SessionAvailableActionKind::Handoff,
         SessionAvailableActionKind::NewSession,
         SessionAvailableActionKind::Fork,
@@ -803,6 +804,7 @@ struct PendingArchiveFeedback {
 #[derive(Debug, Clone)]
 pub enum TuiExitAction {
     OriginalResume(Box<OriginalSessionPlan>),
+    FullAccessResume(Box<OriginalSessionPlan>),
     NativeFork(Box<OriginalSessionPlan>),
     NewSession(Box<OriginalSessionPlan>),
 }
@@ -1247,6 +1249,7 @@ pub struct App {
     hooks_config: config::HooksConfig,
     hook_live: Option<hooks::HookLiveState>,
     clipboard_text: Option<String>,
+    full_access_resume_confirmation: Option<Box<OriginalSessionPlan>>,
     pending_resume: Option<Box<OriginalSessionPlan>>,
     pending_native_fork: Option<Box<OriginalSessionPlan>>,
     pending_seed_prompt: Option<Box<OriginalSessionPlan>>,
@@ -1407,6 +1410,7 @@ impl App {
             hooks_config,
             hook_live,
             clipboard_text: None,
+            full_access_resume_confirmation: None,
             pending_resume: None,
             pending_native_fork: None,
             pending_seed_prompt: None,
@@ -1444,6 +1448,10 @@ impl App {
 
     pub fn take_clipboard_text(&mut self) -> Option<String> {
         self.clipboard_text.take()
+    }
+
+    pub fn full_access_resume_confirmation(&self) -> Option<&OriginalSessionPlan> {
+        self.full_access_resume_confirmation.as_deref()
     }
 
     pub fn take_pending_resume(&mut self) -> Option<Box<OriginalSessionPlan>> {
@@ -2953,6 +2961,10 @@ impl App {
     }
 
     fn handle_overlay_key(&mut self, key: KeyEvent) {
+        if self.full_access_resume_confirmation.is_some() {
+            self.handle_full_access_resume_confirmation_key(key);
+            return;
+        }
         if self.show_share_panel {
             self.handle_share_panel_key(key);
             return;
@@ -3005,7 +3017,9 @@ impl App {
     }
 
     fn back_or_quit(&mut self) {
-        if self.show_skill_picker {
+        if self.full_access_resume_confirmation.is_some() {
+            self.cancel_full_access_resume_confirmation();
+        } else if self.show_skill_picker {
             self.show_skill_picker = false;
             self.modal_scroll = 0;
             self.pending_compiler = self.selected_compiler;
@@ -4215,6 +4229,41 @@ impl App {
         }
     }
 
+    fn handle_full_access_resume_confirmation_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => self.cancel_full_access_resume_confirmation(),
+            KeyCode::Char('R') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                self.queue_confirmed_full_access_resume()
+            }
+            KeyCode::Char('y') => {
+                let command = self
+                    .full_access_resume_confirmation
+                    .as_ref()
+                    .map(|plan| plan.command.display.clone());
+                if let Some(command) = command {
+                    self.copy_text("full-access resume", command);
+                } else {
+                    self.set_status("No full-access Resume command to copy");
+                }
+            }
+            KeyCode::Enter => {
+                self.set_status("Review the command, then press Shift+R to resume with full access")
+            }
+            KeyCode::Char('j') | KeyCode::Down => self.scroll_modal(true, 1),
+            KeyCode::Char('k') | KeyCode::Up => self.scroll_modal(false, 1),
+            KeyCode::PageDown => self.scroll_modal(true, 6),
+            KeyCode::PageUp => self.scroll_modal(false, 6),
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.scroll_modal(true, 6)
+            }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.scroll_modal(false, 6)
+            }
+            _ => {}
+        }
+        self.pending_g = false;
+    }
+
     fn move_action_menu_selection(&mut self, forward: bool) {
         let count = self.action_menu_entries().len();
         if count == 0 {
@@ -4278,6 +4327,9 @@ impl App {
             SessionAvailableActionKind::Resume => {
                 self.show_action_menu = false;
                 self.queue_original_resume();
+            }
+            SessionAvailableActionKind::FullAccessResume => {
+                self.open_full_access_resume_confirmation();
             }
             SessionAvailableActionKind::Handoff => {
                 self.show_action_menu = false;
@@ -4620,6 +4672,84 @@ impl App {
             self.set_status(format!("Original ready: {} {}", session.cli, session.id));
         } else {
             self.set_status("No session selected");
+        }
+        self.pending_g = false;
+    }
+
+    fn open_full_access_resume_confirmation(&mut self) {
+        if !self.current_data_space().is_local() {
+            self.set_status("Full-access Resume requires a local Codex session");
+            self.pending_g = false;
+            return;
+        }
+        if !self.ensure_session_details_ready("Full-access Resume") {
+            return;
+        }
+        let Some(session) = self.current_session().cloned() else {
+            self.set_status("No session selected");
+            self.pending_g = false;
+            return;
+        };
+        let Some(command) = launcher::full_access_resume_command(&session) else {
+            self.set_status("Full-access Resume is only available for native local Codex sessions");
+            self.pending_g = false;
+            return;
+        };
+        self.full_access_resume_confirmation = Some(Box::new(OriginalSessionPlan {
+            version: 1,
+            action: SessionAction::FullAccessResume,
+            dry_run: true,
+            source_session: session,
+            command,
+        }));
+        self.show_action_menu = false;
+        self.modal_scroll = 0;
+        self.pending_g = false;
+        self.set_status("Review full-access Resume command");
+    }
+
+    fn cancel_full_access_resume_confirmation(&mut self) {
+        self.full_access_resume_confirmation = None;
+        self.show_action_menu = true;
+        self.action_menu_selection = self
+            .action_menu_entries()
+            .iter()
+            .position(|entry| entry.action.kind == SessionAvailableActionKind::FullAccessResume)
+            .unwrap_or(0);
+        self.modal_scroll = 0;
+        self.pending_g = false;
+        self.set_status("Full-access Resume cancelled");
+    }
+
+    fn queue_confirmed_full_access_resume(&mut self) {
+        self.queue_confirmed_full_access_resume_with_mode(original_resume_mode_from_env());
+    }
+
+    fn queue_confirmed_full_access_resume_with_mode(&mut self, mode: OriginalResumeMode) {
+        let Some(plan) = self.full_access_resume_confirmation.take() else {
+            self.set_status("No full-access Resume command to run");
+            self.pending_g = false;
+            return;
+        };
+        let session = plan.source_session.clone();
+        self.show_action_menu = false;
+        self.modal_scroll = 0;
+        match mode {
+            OriginalResumeMode::Suspend => {
+                self.pending_resume = Some(plan);
+                self.set_status(format!(
+                    "Suspending to full-access original: {} {}",
+                    session.cli, session.id
+                ));
+            }
+            OriginalResumeMode::Exec => {
+                self.exit_action = Some(TuiExitAction::FullAccessResume(plan));
+                self.should_quit = true;
+                self.set_status(format!(
+                    "Opening full-access original: {} {}",
+                    session.cli, session.id
+                ));
+            }
         }
         self.pending_g = false;
     }
@@ -4997,6 +5127,7 @@ impl App {
 
     fn has_overlay(&self) -> bool {
         self.show_help
+            || self.full_access_resume_confirmation.is_some()
             || self.show_share_panel
             || self.show_action_menu
             || self.show_open_original
@@ -8993,6 +9124,11 @@ Host devbox
         assert_eq!(app.status_message, "Choose session action: Handoff");
         assert_eq!(entries[0].action.kind, SessionAvailableActionKind::Resume);
         assert_eq!(entries[0].action.status, SessionActionAvailability::Blocked);
+        assert!(
+            entries
+                .iter()
+                .all(|entry| entry.action.kind != SessionAvailableActionKind::FullAccessResume)
+        );
         assert_eq!(entries[1].action.kind, SessionAvailableActionKind::Handoff);
         assert_eq!(
             entries[1].action.status,
@@ -9109,24 +9245,29 @@ Host devbox
 
         assert!(app.show_action_menu);
         let entries = app.action_menu_entries();
-        assert_eq!(entries.len(), 5);
+        assert_eq!(entries.len(), 6);
         assert_eq!(entries[0].action.kind, SessionAvailableActionKind::Resume);
-        assert_eq!(entries[1].action.kind, SessionAvailableActionKind::Handoff);
         assert_eq!(
-            entries[2].action.kind,
+            entries[1].action.kind,
+            SessionAvailableActionKind::FullAccessResume
+        );
+        assert_eq!(entries[1].action.status, SessionActionAvailability::Warning);
+        assert_eq!(entries[2].action.kind, SessionAvailableActionKind::Handoff);
+        assert_eq!(
+            entries[3].action.kind,
             SessionAvailableActionKind::NewSession
         );
-        assert_eq!(
-            entries[2].action.status,
-            SessionActionAvailability::Available
-        );
-        assert_eq!(entries[3].action.kind, SessionAvailableActionKind::Fork);
         assert_eq!(
             entries[3].action.status,
             SessionActionAvailability::Available
         );
-        assert_eq!(entries[4].action.kind, SessionAvailableActionKind::Jump);
-        assert_eq!(app.action_menu_selection, 1);
+        assert_eq!(entries[4].action.kind, SessionAvailableActionKind::Fork);
+        assert_eq!(
+            entries[4].action.status,
+            SessionActionAvailability::Available
+        );
+        assert_eq!(entries[5].action.kind, SessionAvailableActionKind::Jump);
+        assert_eq!(app.action_menu_selection, 2);
         assert_eq!(app.status_message, "Choose session action: Handoff");
 
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
@@ -9308,6 +9449,7 @@ Host devbox
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         app.handle_key(key('o'));
         app.handle_key(key('k'));
+        app.handle_key(key('k'));
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
         assert!(app.show_action_menu);
@@ -9330,6 +9472,108 @@ Host devbox
         assert_eq!(plan.source_session.id, "codex-cxcp-design");
         assert_eq!(plan.command.display, "codex resume codex-cxcp-design");
         assert!(plan.dry_run);
+    }
+
+    #[test]
+    fn full_access_resume_requires_review_and_shift_r_confirmation() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.handle_key(key('o'));
+        app.action_menu_selection = app
+            .action_menu_entries()
+            .iter()
+            .position(|entry| entry.action.kind == SessionAvailableActionKind::FullAccessResume)
+            .expect("full-access Resume entry");
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert!(!app.show_action_menu);
+        let confirmation = app
+            .full_access_resume_confirmation()
+            .expect("full-access Resume review");
+        assert_eq!(confirmation.action, SessionAction::FullAccessResume);
+        assert_eq!(
+            confirmation.command.display,
+            "codex resume --dangerously-bypass-approvals-and-sandbox codex-cxcp-design"
+        );
+        assert!(app.take_pending_resume().is_none());
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        assert!(app.full_access_resume_confirmation().is_some());
+        assert!(app.take_pending_resume().is_none());
+        assert_eq!(
+            app.status_message,
+            "Review the command, then press Shift+R to resume with full access"
+        );
+
+        app.handle_key(key('y'));
+        assert_eq!(
+            app.take_clipboard_text().as_deref(),
+            Some("codex resume --dangerously-bypass-approvals-and-sandbox codex-cxcp-design")
+        );
+        assert!(app.full_access_resume_confirmation().is_some());
+        assert!(app.take_pending_resume().is_none());
+
+        app.handle_key(KeyEvent::from(KeyCode::Esc));
+        assert!(app.full_access_resume_confirmation().is_none());
+        assert!(app.show_action_menu);
+        assert!(app.take_pending_resume().is_none());
+        assert_eq!(app.status_message, "Full-access Resume cancelled");
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        app.handle_key(key('r'));
+        assert!(app.full_access_resume_confirmation().is_some());
+        assert!(app.take_pending_resume().is_none());
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT));
+
+        assert!(app.full_access_resume_confirmation().is_none());
+        assert!(!app.show_action_menu);
+        let Some(plan) = app.take_pending_resume() else {
+            panic!("expected pending full-access Resume");
+        };
+        assert_eq!(plan.action, SessionAction::FullAccessResume);
+        assert_eq!(
+            plan.command.args,
+            [
+                "resume",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "codex-cxcp-design",
+            ]
+        );
+        assert!(plan.dry_run);
+    }
+
+    #[test]
+    fn full_access_resume_exec_mode_exits_with_a_distinct_action() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.handle_key(key('o'));
+        app.action_menu_selection = app
+            .action_menu_entries()
+            .iter()
+            .position(|entry| entry.action.kind == SessionAvailableActionKind::FullAccessResume)
+            .expect("full-access Resume entry");
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        app.queue_confirmed_full_access_resume_with_mode(OriginalResumeMode::Exec);
+
+        assert!(app.should_quit());
+        assert!(app.take_pending_resume().is_none());
+        let Some(TuiExitAction::FullAccessResume(plan)) = app.take_exit_action() else {
+            panic!("expected full-access Resume exit action");
+        };
+        assert_eq!(plan.action, SessionAction::FullAccessResume);
+        assert_eq!(
+            plan.command.args,
+            [
+                "resume",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "codex-cxcp-design",
+            ]
+        );
+        assert_eq!(
+            app.status_message,
+            "Opening full-access original: Codex codex-cxcp-design"
+        );
     }
 
     #[test]

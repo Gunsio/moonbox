@@ -7,11 +7,32 @@ and this project uses semantic versioning once tagged releases start.
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-07-16
+
+### Fixed
+
+- Keep every independently resumable Codex child or fork session in the default
+  inventory. Moonbox no longer collapses recent `forked_from_id` rows into a
+  single root session, which hid Codex 0.144 multi-agent work.
+- Replaced the stale Yank screenshot and made generated documentation assets
+  deterministic across terminal color capabilities and clocks.
+
+### Added
+
+- Added a Codex-only `Resume (Full Access)` action to the TUI Action Menu. It
+  appears only for local native (non-K2) Codex sessions, shows the complete
+  command, requires a separate `Shift+R` confirmation, and launches with
+  `--dangerously-bypass-approvals-and-sandbox`; ordinary `Resume` remains
+  unchanged and continues to require `r` from the Action Menu.
+
 ### Changed
 
 - Improved README discoverability by moving status badges, the primary
   screenshot, bottled Homebrew install, session search, handoff, and
   Feishu/Lark export path into the first screen.
+- Made the installation guidance explicit: on macOS, Homebrew is the supported
+  global installation channel, while a local checkout is run with Cargo rather
+  than installed beside a Homebrew-managed binary.
 
 ## [0.1.6] - 2026-06-23
 

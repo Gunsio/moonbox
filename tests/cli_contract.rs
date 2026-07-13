@@ -1631,6 +1631,18 @@ fn actions_cli_reports_fixture_safe_action_model() {
     };
     assert_eq!(action("inspect")["status"], "available");
     assert_eq!(action("resume")["status"], "available");
+    assert_eq!(action("full_access_resume")["status"], "warning");
+    assert_eq!(
+        action("full_access_resume")["reason"],
+        "Skips all Codex confirmation prompts and runs without sandboxing; use only in an externally sandboxed environment."
+    );
+    assert!(
+        action("full_access_resume")["safety"]
+            .as_array()
+            .expect("full-access resume safety")
+            .iter()
+            .any(|safety| safety == "bypasses_approvals_and_sandbox")
+    );
     assert_eq!(action("jump")["status"], "unavailable");
     assert_eq!(action("fork")["status"], "available");
     assert_eq!(
