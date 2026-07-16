@@ -1155,6 +1155,7 @@ fn provider_metadata(
 ) -> ProviderSessionMetadata {
     ProviderSessionMetadata {
         source: non_empty_string(&row.source),
+        thread_source: None,
         platform: supplement
             .and_then(|entry| entry.platform.as_deref())
             .and_then(non_empty_string)

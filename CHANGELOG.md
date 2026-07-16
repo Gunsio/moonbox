@@ -7,6 +7,14 @@ and this project uses semantic versioning once tagged releases start.
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-07-17
+
+### Fixed
+
+- Hide Codex sessions explicitly marked `thread_source: "subagent"` from the
+  inventory before they consume list capacity. Ordinary resumable forks remain
+  visible, and the provider store stays read-only.
+
 ## [0.1.7] - 2026-07-16
 
 ### Fixed

@@ -78,6 +78,7 @@ struct SummaryBuilder {
     title: Option<String>,
     cwd: Option<String>,
     originator: Option<String>,
+    thread_source: Option<String>,
     parent_session_id: Option<String>,
     updated_at: Option<String>,
     branch: Option<String>,
@@ -104,12 +105,14 @@ struct CodexThreadRow {
     branch: Option<String>,
     token_count: usize,
     archived: bool,
+    thread_source: Option<String>,
 }
 
 #[derive(Debug, Default)]
 struct CodexRolloutMetadata {
     provider_source: Option<&'static str>,
     originator: Option<String>,
+    thread_source: Option<String>,
     parent_session_id: Option<String>,
 }
 
@@ -315,13 +318,21 @@ impl CodexSourceAdapter {
 
     fn list_thread_rows(&self, limit: Option<usize>) -> Result<Vec<CodexThreadRow>, AdapterError> {
         let db = self.open_connection()?;
+        let has_thread_source = has_thread_source_column(&db)
+            .map_err(|error| read_error(CODEX_TOOL, &self.state_db_path(), error))?;
+        let thread_select = thread_select(has_thread_source);
+        let visible_thread_clause = if has_thread_source {
+            " and coalesce(lower(trim(thread_source)), '') != 'subagent'"
+        } else {
+            ""
+        };
         let query = format!(
-            "{} {}",
-            THREAD_SELECT,
+            "{} where archived = 0{} order by updated_at_ms_sort desc, id desc{}",
+            thread_select,
+            visible_thread_clause,
             match limit {
-                Some(_) =>
-                    "where archived = 0 order by updated_at_ms_sort desc, id desc limit :limit",
-                None => "where archived = 0 order by updated_at_ms_sort desc, id desc",
+                Some(_) => " limit :limit",
+                None => "",
             }
         );
         let mut statement = db
@@ -345,8 +356,12 @@ impl CodexSourceAdapter {
             return Ok(None);
         }
         let db = self.open_connection()?;
+        let thread_select = thread_select(
+            has_thread_source_column(&db)
+                .map_err(|error| read_error(CODEX_TOOL, &self.state_db_path(), error))?,
+        );
         let mut statement = db
-            .prepare(&format!("{THREAD_SELECT} where id = ?1"))
+            .prepare(&format!("{thread_select} where id = ?1"))
             .map_err(|error| read_error(CODEX_TOOL, &self.state_db_path(), error))?;
         statement
             .query_row(params![session_id], thread_row)
@@ -396,6 +411,7 @@ impl CodexSourceAdapter {
     ) -> SessionSummary {
         let source_path = row.rollout_path.trim();
         let rollout_exists = !source_path.is_empty() && Path::new(source_path).is_file();
+        let thread_source = row.thread_source.clone();
         let title = first_non_empty([&row.title, &row.preview, &row.first_user_message])
             .filter(|title| {
                 !is_provider_context_text(title) && !is_moonbox_handoff_control_text(title)
@@ -461,7 +477,7 @@ impl CodexSourceAdapter {
                 .then(|| source_size_bytes(Path::new(source_path)))
                 .flatten(),
             parse_skip_count: 0,
-            provider_metadata: None,
+            provider_metadata: codex_provider_metadata(None, thread_source, None),
             context_health,
             anatomy: None,
         };
@@ -489,13 +505,25 @@ impl CodexSourceAdapter {
     }
 
     fn listed_session_discovery(&self) -> Result<super::local_jsonl::JsonlDiscovery, AdapterError> {
-        discover_jsonl_files(
+        let mut discovery = discover_jsonl_files(
             CODEX_TOOL,
             &self.sessions_dir(),
-            self.list_limit,
+            None,
             self.scan_entry_limit,
             DiscoveryOrder::PathDesc,
-        )
+        )?;
+        let mut files = Vec::new();
+        for path in discovery.files {
+            if !is_codex_subagent_rollout(&path)? {
+                files.push(path);
+                if self.list_limit.is_some_and(|limit| files.len() >= limit) {
+                    break;
+                }
+            }
+        }
+        discovery.files = files;
+        discovery.scan_stats.list_limit = self.list_limit;
+        Ok(discovery)
     }
 
     fn all_session_files(&self) -> Result<Vec<PathBuf>, AdapterError> {
@@ -626,26 +654,31 @@ impl CodexSourceAdapter {
         let Some(app_server) = &self.app_server else {
             return Ok(None);
         };
-        Ok(Some(
-            app_server
-                .list_threads(self.list_limit)?
-                .into_iter()
-                .map(app_thread_summary)
-                .collect(),
-        ))
+        let mut sessions = app_server
+            .list_threads(self.scan_entry_limit)?
+            .into_iter()
+            .map(app_thread_summary)
+            .filter(|session| self.include_codex_summary(session))
+            .collect::<Vec<_>>();
+        if let Some(limit) = self.list_limit {
+            sessions.truncate(limit);
+        }
+        Ok(Some(sessions))
     }
 
     fn list_fallback_sessions(&self) -> Result<Vec<SessionSummary>, AdapterError> {
         let k2_ids = self.k2_session_id_set()?;
         let mut sessions = if self.has_state_index() {
             let overrides = self.thread_name_overrides()?;
-            self.list_thread_rows(self.list_limit)?
+            self.list_thread_rows(self.scan_entry_limit)?
                 .into_iter()
+                .filter(|row| !is_subagent_thread_source(row.thread_source.as_deref()))
                 .map(|mut row| {
                     apply_thread_name_override(&mut row, &overrides);
                     self.summary_for_thread_with_k2_ids(row, &k2_ids)
                 })
                 .filter(|session| self.include_codex_summary(session))
+                .take(self.list_limit.unwrap_or(usize::MAX))
                 .collect()
         } else {
             let mut sessions = Vec::new();
@@ -796,7 +829,8 @@ impl CodexSourceAdapter {
     }
 
     fn include_codex_summary(&self, session: &SessionSummary) -> bool {
-        (self.k2_sessions_enabled || !is_k2_session_summary(session))
+        !is_codex_subagent_session_summary(session)
+            && (self.k2_sessions_enabled || !is_k2_session_summary(session))
             && (self.codex_app_sessions_enabled || !is_codex_app_session_summary(session))
     }
 
@@ -927,13 +961,13 @@ impl SourceAdapter for CodexSourceAdapter {
     }
 
     fn list_sessions(&self) -> Result<Vec<SessionSummary>, AdapterError> {
-        if let Some(app_server) = &self.app_server {
-            match app_server.list_threads(self.list_limit) {
-                Ok(threads) => {
-                    let mut sessions = threads.into_iter().map(app_thread_summary).collect();
+        if self.app_server.is_some() {
+            match self.list_app_server_sessions() {
+                Ok(Some(mut sessions)) => {
                     self.append_k2_sessions(&mut sessions)?;
                     return Ok(sessions);
                 }
+                Ok(None) => {}
                 Err(error) if self.has_local_session_store() => {
                     let _ = error;
                 }
@@ -992,7 +1026,10 @@ impl SourceAdapter for CodexSourceAdapter {
     fn find_session(&self, session_id: &str) -> Result<Option<SessionSummary>, AdapterError> {
         if let Some(app_server) = &self.app_server {
             match app_server.read_thread(session_id) {
-                Ok(thread) => return Ok(Some(app_thread_summary(thread))),
+                Ok(thread) => {
+                    let session = app_thread_summary(thread);
+                    return Ok(self.include_codex_summary(&session).then_some(session));
+                }
                 Err(error) if self.has_local_session_store() => {
                     let _ = error;
                 }
@@ -1299,6 +1336,15 @@ fn annotate_codex_subsource(summary: &mut SessionSummary, k2_ids: &HashSet<Strin
             .get_or_insert_with(ProviderSessionMetadata::default);
         metadata.origin = Some(serde_json::json!({ "originator": originator }));
     }
+    if let Some(thread_source) = rollout_metadata
+        .thread_source
+        .filter(|thread_source| !thread_source.trim().is_empty())
+    {
+        let metadata = summary
+            .provider_metadata
+            .get_or_insert_with(ProviderSessionMetadata::default);
+        metadata.thread_source = Some(thread_source);
+    }
 
     if let Some(k2_session_id) = matching_k2_session_id(&summary.id, k2_ids).or_else(|| {
         matches!(rollout_metadata.provider_source, Some(K2_PROVIDER_SOURCE))
@@ -1363,6 +1409,7 @@ fn rollout_metadata(source_path: Option<&str>) -> CodexRolloutMetadata {
         return CodexRolloutMetadata {
             provider_source: Some(K2_PROVIDER_SOURCE),
             originator: None,
+            thread_source: None,
             parent_session_id: None,
         };
     }
@@ -1370,6 +1417,7 @@ fn rollout_metadata(source_path: Option<&str>) -> CodexRolloutMetadata {
         return CodexRolloutMetadata {
             provider_source: Some(CODEX_APP_PROVIDER_SOURCE),
             originator: None,
+            thread_source: None,
             parent_session_id: None,
         };
     }
@@ -1399,6 +1447,7 @@ fn rollout_metadata(source_path: Option<&str>) -> CodexRolloutMetadata {
     CodexRolloutMetadata {
         provider_source,
         originator: json_string_field_in_text(prefix, "originator"),
+        thread_source: json_string_field_in_text(prefix, "thread_source"),
         parent_session_id: json_string_field_in_text(prefix, "forked_from_id"),
     }
 }
@@ -1416,16 +1465,52 @@ fn json_string_field_in_text(text: &str, key: &str) -> Option<String> {
 
 fn codex_provider_metadata(
     originator: Option<String>,
+    thread_source: Option<String>,
     parent_session_id: Option<String>,
 ) -> Option<ProviderSessionMetadata> {
-    if originator.is_none() && parent_session_id.is_none() {
+    if originator.is_none() && thread_source.is_none() && parent_session_id.is_none() {
         return None;
     }
     Some(ProviderSessionMetadata {
+        thread_source,
         parent_session_id,
         origin: originator.map(|originator| serde_json::json!({ "originator": originator })),
         ..ProviderSessionMetadata::default()
     })
+}
+
+fn is_subagent_thread_source(thread_source: Option<&str>) -> bool {
+    thread_source.is_some_and(|thread_source| thread_source.trim().eq_ignore_ascii_case("subagent"))
+}
+
+fn is_codex_subagent_session_summary(session: &SessionSummary) -> bool {
+    session.cli == CODEX_TOOL
+        && is_subagent_thread_source(
+            session
+                .provider_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.thread_source.as_deref()),
+        )
+}
+
+fn is_codex_subagent_rollout(path: &Path) -> Result<bool, AdapterError> {
+    let reader = open_reader(CODEX_TOOL, path)?;
+    for line in reader.lines().take(8) {
+        let line = line.map_err(|error| read_error(CODEX_TOOL, path, error))?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let Ok(record) = serde_json::from_str::<CodexRecord>(&line) else {
+            continue;
+        };
+        if record.record_type.as_deref() == Some("session_meta") {
+            return Ok(is_subagent_thread_source(string_field(
+                &record.payload,
+                "thread_source",
+            )));
+        }
+    }
+    Ok(false)
 }
 
 fn k2_timeline_event(
@@ -1585,6 +1670,7 @@ impl SummaryBuilder {
             title: None,
             cwd: None,
             originator: None,
+            thread_source: None,
             parent_session_id: None,
             updated_at: timestamp_from_filename(path),
             branch: None,
@@ -1634,6 +1720,9 @@ impl SummaryBuilder {
         }
         if self.originator.is_none() {
             self.originator = string_field(payload, "originator").map(str::to_owned);
+        }
+        if self.thread_source.is_none() {
+            self.thread_source = string_field(payload, "thread_source").map(str::to_owned);
         }
         if self.parent_session_id.is_none() {
             self.parent_session_id = string_field(payload, "forked_from_id").map(str::to_owned);
@@ -1744,7 +1833,11 @@ impl SummaryBuilder {
             source_path: Some(self.path.display().to_string()),
             source_size_bytes: source_size_bytes(&self.path),
             parse_skip_count: self.malformed_lines,
-            provider_metadata: codex_provider_metadata(self.originator, self.parent_session_id),
+            provider_metadata: codex_provider_metadata(
+                self.originator,
+                self.thread_source,
+                self.parent_session_id,
+            ),
             context_health: context_health_from_token_count(
                 self.context_used_tokens.or(self.token_count),
                 self.context_window_tokens,
@@ -2181,7 +2274,7 @@ fn config_snapshot(payload: &Value) -> Option<Value> {
     )
 }
 
-const THREAD_SELECT: &str = r#"
+const THREAD_SELECT_PREFIX: &str = r#"
     select
         id,
         rollout_path,
@@ -2197,9 +2290,28 @@ const THREAD_SELECT: &str = r#"
         git_branch,
         coalesce(tokens_used, 0) as tokens_used,
         archived != 0 as archived,
-        coalesce(updated_at_ms, updated_at * 1000, created_at_ms, created_at * 1000) as updated_at_ms_sort
-    from threads
+        coalesce(updated_at_ms, updated_at * 1000, created_at_ms, created_at * 1000) as updated_at_ms_sort,
 "#;
+
+fn thread_select(has_thread_source: bool) -> String {
+    let thread_source = if has_thread_source {
+        "thread_source"
+    } else {
+        "null"
+    };
+    format!("{THREAD_SELECT_PREFIX}        {thread_source} as thread_source\n    from threads")
+}
+
+fn has_thread_source_column(db: &Connection) -> rusqlite::Result<bool> {
+    let mut statement = db.prepare("pragma table_info(threads)")?;
+    let mut rows = statement.query([])?;
+    while let Some(row) = rows.next()? {
+        if row.get::<_, String>(1)? == "thread_source" {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
 
 fn thread_row(row: &Row<'_>) -> rusqlite::Result<CodexThreadRow> {
     Ok(CodexThreadRow {
@@ -2213,6 +2325,7 @@ fn thread_row(row: &Row<'_>) -> rusqlite::Result<CodexThreadRow> {
         branch: row.get(7)?,
         token_count: row.get::<_, i64>(8).unwrap_or_default().max(0) as usize,
         archived: row.get(9)?,
+        thread_source: row.get(11)?,
     })
 }
 
@@ -2346,6 +2459,41 @@ mod tests {
             Some(fs::metadata(rollout_path).expect("rollout metadata").len())
         );
         assert_eq!(timeline.source_session, "codex-indexed");
+    }
+
+    #[test]
+    fn legacy_state_index_without_thread_source_remains_readable() {
+        let root = test_root("legacy-state-index");
+        let rollout_path = write_session(
+            &root,
+            "2026/06/06/rollout-2026-06-06T08-00-00-legacy.jsonl",
+            r#"{"timestamp":"2026-06-06T08:00:00.000Z","type":"session_meta","payload":{"id":"codex-legacy","cwd":"/repo"}}
+{"timestamp":"2026-06-06T08:01:00.000Z","type":"event_msg","payload":{"type":"user_message","message":"Legacy session"}}
+"#,
+        );
+        write_state_db(&root, &rollout_path, "codex-legacy", "Legacy SQLite title");
+        Connection::open(root.join("state_5.sqlite"))
+            .expect("state db")
+            .execute_batch("alter table threads drop column thread_source")
+            .expect("legacy schema");
+
+        let adapter = CodexSourceAdapter::new(&root);
+        let sessions = adapter.list_sessions().expect("legacy sessions");
+        let found = adapter
+            .find_session("codex-legacy")
+            .expect("find legacy")
+            .expect("legacy session");
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].title, "Legacy SQLite title");
+        assert_eq!(found.id, "codex-legacy");
+        assert!(
+            found
+                .provider_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.thread_source.as_deref())
+                .is_none()
+        );
     }
 
     #[test]
@@ -3084,6 +3232,144 @@ ok"
     }
 
     #[test]
+    fn codex_subagent_thread_source_is_preserved_from_jsonl_and_state_index() {
+        let root = test_root("codex-subagent-thread-source");
+        let session_id = "codex-subagent";
+        let rollout_path = write_session(
+            &root,
+            "2026/06/06/rollout-2026-06-06T10-00-00-codex-subagent.jsonl",
+            r#"{"timestamp":"2026-06-06T10:00:00.000Z","type":"session_meta","payload":{"id":"codex-subagent","thread_source":"subagent","cwd":"/repo"}}
+{"timestamp":"2026-06-06T10:00:01.000Z","type":"event_msg","payload":{"type":"user_message","message":"Inherited user task title"}}
+"#,
+        );
+        write_state_db(&root, &rollout_path, session_id, "Indexed worker title");
+        let db = Connection::open(root.join("state_5.sqlite")).expect("state db");
+        db.execute(
+            "update threads set thread_source = 'subagent' where id = ?1",
+            params![session_id],
+        )
+        .expect("thread source");
+
+        let adapter = CodexSourceAdapter::new(&root);
+        let parsed = adapter
+            .parse_summary(&rollout_path)
+            .expect("parsed summary");
+        let indexed = adapter.summary_for_thread(
+            adapter
+                .find_thread_row(session_id)
+                .expect("thread row")
+                .expect("indexed worker"),
+        );
+
+        assert_eq!(
+            parsed
+                .provider_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.thread_source.as_deref()),
+            Some("subagent")
+        );
+        assert_eq!(
+            indexed
+                .provider_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.thread_source.as_deref()),
+            Some("subagent")
+        );
+        assert!(
+            adapter
+                .list_sessions()
+                .expect("visible sessions")
+                .is_empty()
+        );
+        assert!(
+            adapter
+                .find_session(session_id)
+                .expect("find worker")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn codex_subagent_workers_are_excluded_before_list_limit() {
+        let state_root = test_root("codex-subagent-state-limit");
+        let state_user_path = write_session(
+            &state_root,
+            "2026/06/06/rollout-2026-06-06T10-00-00-codex-user.jsonl",
+            r#"{"timestamp":"2026-06-06T10:00:00.000Z","type":"session_meta","payload":{"id":"codex-user","cwd":"/repo"}}
+{"timestamp":"2026-06-06T10:00:01.000Z","type":"event_msg","payload":{"type":"user_message","message":"User session"}}
+"#,
+        );
+        let state_worker_path = write_session(
+            &state_root,
+            "2026/06/06/rollout-2026-06-06T10-01-00-codex-worker.jsonl",
+            r#"{"timestamp":"2026-06-06T10:01:00.000Z","type":"session_meta","payload":{"id":"codex-worker","thread_source":"subagent","cwd":"/repo"}}
+{"timestamp":"2026-06-06T10:01:01.000Z","type":"event_msg","payload":{"type":"user_message","message":"Inherited user task"}}
+"#,
+        );
+        write_state_db_rows(
+            &state_root,
+            &[
+                (
+                    &state_user_path,
+                    "codex-user",
+                    "User session",
+                    1_780_736_400_000,
+                ),
+                (
+                    &state_worker_path,
+                    "codex-worker",
+                    "Inherited user task",
+                    1_780_736_460_000,
+                ),
+            ],
+        );
+        let db = Connection::open(state_root.join("state_5.sqlite")).expect("state db");
+        db.execute(
+            "update threads set thread_source = 'subagent' where id = 'codex-worker'",
+            [],
+        )
+        .expect("worker source");
+
+        let state_sessions = CodexSourceAdapter::with_session_limit(&state_root, Some(1))
+            .list_sessions()
+            .expect("state sessions");
+        assert_eq!(
+            state_sessions
+                .iter()
+                .map(|session| session.id.as_str())
+                .collect::<Vec<_>>(),
+            ["codex-user"]
+        );
+
+        let jsonl_root = test_root("codex-subagent-jsonl-limit");
+        write_session(
+            &jsonl_root,
+            "2026/06/06/rollout-2026-06-06T10-00-00-codex-user.jsonl",
+            r#"{"timestamp":"2026-06-06T10:00:00.000Z","type":"session_meta","payload":{"id":"codex-user","cwd":"/repo"}}
+{"timestamp":"2026-06-06T10:00:01.000Z","type":"event_msg","payload":{"type":"user_message","message":"User session"}}
+"#,
+        );
+        write_session(
+            &jsonl_root,
+            "2026/06/06/rollout-2026-06-06T10-01-00-codex-worker.jsonl",
+            r#"{"timestamp":"2026-06-06T10:01:00.000Z","type":"session_meta","payload":{"id":"codex-worker","thread_source":"subagent","cwd":"/repo"}}
+{"timestamp":"2026-06-06T10:01:01.000Z","type":"event_msg","payload":{"type":"user_message","message":"Inherited user task"}}
+"#,
+        );
+
+        let jsonl_sessions = CodexSourceAdapter::with_session_limit(&jsonl_root, Some(1))
+            .list_sessions()
+            .expect("jsonl sessions");
+        assert_eq!(
+            jsonl_sessions
+                .iter()
+                .map(|session| session.id.as_str())
+                .collect::<Vec<_>>(),
+            ["codex-user"]
+        );
+    }
+
+    #[test]
     fn app_server_source_is_preferred_over_local_store() {
         let root = test_root("app-server-preferred");
         write_session(
@@ -3148,6 +3434,51 @@ ok"
                 (TimelineKind::Assistant, "App-server answer"),
                 (TimelineKind::Tool, "cargo test [completed] exit=0\nok")
             ]
+        );
+    }
+
+    #[test]
+    fn app_server_subagents_are_excluded_before_the_session_limit() {
+        let root = test_root("app-server-subagent-limit");
+        let fixture_path = root.join("app-server.json");
+        write_app_server_fixture(
+            &fixture_path,
+            r#"{
+              "responses": [
+                {"method":"thread/list","result":{"data":[
+                  {
+                    "id":"codex-app-worker",
+                    "cwd":"/repo",
+                    "name":"Inherited user request",
+                    "preview":"worker",
+                    "status":{"type":"idle"},
+                    "threadSource":"subagent",
+                    "updatedAt":1780736401
+                  },
+                  {
+                    "id":"codex-app-user",
+                    "cwd":"/repo",
+                    "name":"User session",
+                    "preview":"normal work",
+                    "status":{"type":"idle"},
+                    "updatedAt":1780736400
+                  }
+                ]}}
+              ]
+            }"#,
+        );
+        let mut adapter = CodexSourceAdapter::with_limits(&root, Some(1), None);
+        adapter.app_server = Some(CodexAppServerSource::fixture(&fixture_path));
+        adapter.codex_app_sessions_enabled = true;
+
+        let sessions = adapter.list_sessions().expect("app-server sessions");
+
+        assert_eq!(
+            sessions
+                .iter()
+                .map(|session| session.id.as_str())
+                .collect::<Vec<_>>(),
+            ["codex-app-user"]
         );
     }
 
@@ -3236,7 +3567,8 @@ ok"
                 first_user_message text not null default '',
                 git_branch text,
                 tokens_used integer not null default 0,
-                archived integer not null default 0
+                archived integer not null default 0,
+                thread_source text
             );
             "#,
         )
