@@ -227,6 +227,8 @@ pub struct ProviderSessionMetadata {
     #[serde(default)]
     pub source: Option<String>,
     #[serde(default)]
+    pub thread_source: Option<String>,
+    #[serde(default)]
     pub platform: Option<String>,
     #[serde(default)]
     pub user_id: Option<String>,

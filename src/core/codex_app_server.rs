@@ -22,8 +22,8 @@ use super::{
         text_from_value, title_case, truncate, truncate_timeline_detail,
     },
     model::{
-        CanonicalTimeline, CliTool, SessionRuntimeStatus, SessionStatus, SessionSummary,
-        SourceProvenance, TimelineAttachment, TimelineEvent, TimelineEventMetadata,
+        CanonicalTimeline, CliTool, ProviderSessionMetadata, SessionRuntimeStatus, SessionStatus,
+        SessionSummary, SourceProvenance, TimelineAttachment, TimelineEvent, TimelineEventMetadata,
         TimelineEventRawRef, TimelineFileChange, TimelineKind, TimelineRuntimeMetadata,
         TimelineToolCall, TimelineToolResult,
     },
@@ -104,6 +104,8 @@ pub(crate) struct CodexAppThread {
     git_info: Option<CodexAppGitInfo>,
     #[serde(default)]
     status: Value,
+    #[serde(default, rename = "threadSource", alias = "thread_source")]
+    thread_source: Option<String>,
     #[serde(default)]
     turns: Vec<CodexAppTurn>,
 }
@@ -287,6 +289,7 @@ impl CodexAppServerSource {
 }
 
 pub(crate) fn app_thread_summary(thread: CodexAppThread) -> SessionSummary {
+    let thread_source = thread.thread_source.clone();
     let updated_at = thread
         .updated_at
         .or(thread.created_at)
@@ -333,7 +336,10 @@ pub(crate) fn app_thread_summary(thread: CodexAppThread) -> SessionSummary {
         source_path: Some(CodexAppServerSource::thread_source_path(&thread.id)),
         source_size_bytes: None,
         parse_skip_count: 0,
-        provider_metadata: None,
+        provider_metadata: thread_source.map(|thread_source| ProviderSessionMetadata {
+            thread_source: Some(thread_source),
+            ..ProviderSessionMetadata::default()
+        }),
         context_health: None,
         anatomy: None,
     }

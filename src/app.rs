@@ -4860,8 +4860,8 @@ impl App {
             })
             .filter(|(_, session)| session_matches_query(session, &query))
             .filter(|(_, session)| {
-                !is_moonbox_handoff_worker_session(session)
-                    || query_explicitly_requests_moonbox_handoff_workers(&query)
+                !is_background_worker_session(session)
+                    || query_explicitly_requests_background_workers(&query)
             })
             .map(|(index, _)| index)
             .collect();
@@ -7011,13 +7011,19 @@ fn session_matches_query(session: &SessionSummary, query: &str) -> bool {
             .health_reason
             .as_ref()
             .is_some_and(|reason| reason.to_ascii_lowercase().contains(query))
+        || session
+            .provider_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.thread_source.as_deref())
+            .is_some_and(|thread_source| thread_source.to_ascii_lowercase().contains(query))
 }
 
-fn is_moonbox_handoff_worker_session(session: &SessionSummary) -> bool {
+fn is_background_worker_session(session: &SessionSummary) -> bool {
     let title = session.title.to_ascii_lowercase();
     crate::core::local_jsonl::is_provider_context_text(&session.title)
         || crate::core::local_jsonl::is_moonbox_handoff_control_text(&session.title)
         || is_codex_sdk_fallback_worker_session(session)
+        || is_codex_subagent_worker_session(session)
         || title.starts_with("$handoff ")
         || title.contains("you are running a moonbox continuation handoff job")
         || title.contains("moonbox continuation handoff job")
@@ -7038,11 +7044,23 @@ fn is_codex_sdk_fallback_worker_session(session: &SessionSummary) -> bool {
             == Some("codex_python_sdk")
 }
 
-fn query_explicitly_requests_moonbox_handoff_workers(query: &str) -> bool {
+fn is_codex_subagent_worker_session(session: &SessionSummary) -> bool {
+    session.cli == CliTool::Codex
+        && session
+            .provider_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.thread_source.as_deref())
+            .is_some_and(|thread_source| thread_source.eq_ignore_ascii_case("subagent"))
+}
+
+fn query_explicitly_requests_background_workers(query: &str) -> bool {
     !query.is_empty()
         && (query.contains("$handoff")
             || query.contains("moonbox continuation handoff")
-            || query.contains("moonbox handoff worker"))
+            || query.contains("moonbox handoff worker")
+            || query == "subagent"
+            || query.contains("codex subagent")
+            || query.contains("codex worker"))
 }
 
 fn original_resume_mode_from_env() -> OriginalResumeMode {
@@ -7700,7 +7718,7 @@ Host devbox
     }
 
     #[test]
-    fn moonbox_handoff_worker_sessions_are_hidden_unless_explicitly_searched() {
+    fn background_worker_sessions_are_hidden_unless_explicitly_searched() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         let mut worker = app.data.sessions[0].clone();
         worker.id = "moonbox-worker-session".into();
@@ -7734,6 +7752,14 @@ Host devbox
             ..crate::core::model::ProviderSessionMetadata::default()
         });
         app.data.sessions.insert(0, sdk_worker);
+        let mut subagent_worker = app.data.sessions[0].clone();
+        subagent_worker.id = "codex-subagent-worker-session".into();
+        subagent_worker.title = "Inherited user task title".into();
+        subagent_worker.provider_metadata = Some(crate::core::model::ProviderSessionMetadata {
+            thread_source: Some("subagent".into()),
+            ..crate::core::model::ProviderSessionMetadata::default()
+        });
+        app.data.sessions.insert(0, subagent_worker);
 
         app.refresh_visible_sessions();
 
@@ -7762,6 +7788,11 @@ Host devbox
                 .iter()
                 .any(|index| app.data.sessions[*index].id == "moonbox-worker-sdk-session")
         );
+        assert!(
+            !app.visible_session_indices()
+                .iter()
+                .any(|index| app.data.sessions[*index].id == "codex-subagent-worker-session")
+        );
 
         app.search_query = "moonbox continuation handoff".into();
         app.refresh_visible_sessions();
@@ -7770,6 +7801,19 @@ Host devbox
             app.visible_session_indices()
                 .iter()
                 .any(|index| app.data.sessions[*index].id == "moonbox-worker-session")
+        );
+
+        app.search_query.clear();
+        app.refresh_visible_sessions();
+        app.handle_key(key('/'));
+        for ch in "subagent".chars() {
+            app.handle_key(key(ch));
+        }
+
+        assert!(
+            app.visible_session_indices()
+                .iter()
+                .any(|index| app.data.sessions[*index].id == "codex-subagent-worker-session")
         );
     }
 

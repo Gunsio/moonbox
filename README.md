@@ -43,7 +43,9 @@ moon export --session <session-id> --to lark --mode handoff --execute
 
 - **Session inventory**: browse local Codex, Claude, and Hermes sessions in one
   time-sorted TUI. Each independently resumable Codex child or fork session is
-  retained rather than silently collapsed into its parent.
+  retained rather than silently collapsed into its parent. Codex collaboration
+  workers marked `thread_source: "subagent"` are excluded from Moonbox's
+  inventory without modifying the provider store.
 - **Timeline rewind**: inspect turns, tool evidence, images, and compact
   boundaries before choosing where to continue.
 - **Context health**: see provider-backed context usage, agent/model-resolved
