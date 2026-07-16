@@ -552,7 +552,8 @@ impl SourceAdapter for HermesSourceAdapter {
     }
 
     fn load_timeline(&self, session_id: &str) -> Result<CanonicalTimeline, AdapterError> {
-        self.load_timeline_limited_for_id(session_id, None)
+        let mut no_progress = |_| {};
+        self.load_timeline_limited_for_id(session_id, None, &mut no_progress)
     }
 
     fn load_timeline_limited(
@@ -560,7 +561,17 @@ impl SourceAdapter for HermesSourceAdapter {
         session: &SessionSummary,
         event_limit: Option<usize>,
     ) -> Result<CanonicalTimeline, AdapterError> {
-        self.load_timeline_limited_for_id(&session.id, event_limit)
+        let mut no_progress = |_| {};
+        self.load_timeline_limited_with_progress(session, event_limit, &mut no_progress)
+    }
+
+    fn load_timeline_limited_with_progress(
+        &self,
+        session: &SessionSummary,
+        event_limit: Option<usize>,
+        on_progress: &mut dyn FnMut(usize),
+    ) -> Result<CanonicalTimeline, AdapterError> {
+        self.load_timeline_limited_for_id(&session.id, event_limit, on_progress)
     }
 }
 
@@ -569,6 +580,7 @@ impl HermesSourceAdapter {
         &self,
         session_id: &str,
         event_limit: Option<usize>,
+        on_progress: &mut dyn FnMut(usize),
     ) -> Result<CanonicalTimeline, AdapterError> {
         if self.find_session_row(session_id)?.is_none() {
             return Err(AdapterError::SessionNotFound {
@@ -580,7 +592,11 @@ impl HermesSourceAdapter {
         let mut events = Vec::new();
         for row in messages {
             if let Some(event) = timeline_event(row, events.len() + 1, session_id) {
+                let before = events.len();
                 push_timeline_event(&mut events, event, None);
+                if events.len() != before {
+                    on_progress(events.len().min(event_limit.unwrap_or(usize::MAX)));
+                }
             }
         }
         if let Some(limit) = event_limit
@@ -588,6 +604,7 @@ impl HermesSourceAdapter {
         {
             events.truncate(limit);
             events.push(timeline_preview_truncated_event(events.len() + 1, limit));
+            on_progress(limit);
         }
 
         Ok(CanonicalTimeline {

@@ -1497,6 +1497,11 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
             app,
             localized(language, "Loading more timeline", "正在加载更多 timeline"),
         ));
+        if let Some(progress) = app.timeline_expansion_progress() {
+            lines.push(timeline_expansion_progress_line(
+                language, progress, area.width,
+            ));
+        }
         lines.push(Line::from(Span::styled(
             localized(
                 language,
@@ -1529,6 +1534,63 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
             .scroll((timeline_scroll(app, area), 0)),
         area,
     );
+}
+
+const TIMELINE_EXPANSION_PROGRESS_BAR_WIDTH: usize = 12;
+
+fn timeline_expansion_progress_line(
+    language: UiLanguage,
+    progress: crate::app::TimelineExpansionProgress,
+    width: u16,
+) -> Line<'static> {
+    let percent = progress.percent();
+    let compact = width < 56;
+    let show_bar = width >= 72;
+    let filled = progress
+        .loaded_events
+        .saturating_mul(TIMELINE_EXPANSION_PROGRESS_BAR_WIDTH)
+        .saturating_div(progress.total_events.max(1))
+        .min(TIMELINE_EXPANSION_PROGRESS_BAR_WIDTH);
+    let progress_style = Style::default()
+        .fg(theme::gold())
+        .add_modifier(Modifier::BOLD);
+    let mut spans = vec![
+        Span::styled(
+            format!("  {}: ", localized(language, "Progress", "进度")),
+            Style::default().fg(theme::muted()),
+        ),
+        Span::styled(
+            if compact {
+                format!(
+                    "{percent}% · {}/{}",
+                    progress.loaded_events, progress.total_events
+                )
+            } else {
+                format!(
+                    "{percent}% · {} / {} {} ",
+                    progress.loaded_events,
+                    progress.total_events,
+                    localized(language, "new events", "个新事件"),
+                )
+            },
+            progress_style,
+        ),
+    ];
+    if show_bar {
+        spans.push(Span::styled("▐", Style::default().fg(theme::border())));
+        for index in 0..TIMELINE_EXPANSION_PROGRESS_BAR_WIDTH {
+            spans.push(Span::styled(
+                if index < filled { "█" } else { "░" },
+                if index < filled {
+                    progress_style
+                } else {
+                    Style::default().fg(theme::muted())
+                },
+            ));
+        }
+        spans.push(Span::styled("▌", Style::default().fg(theme::border())));
+    }
+    Line::from(spans)
 }
 
 fn session_preview_loading_timeline_lines(
@@ -10223,8 +10285,10 @@ mod tests {
         let narrow = render_text(&app, 80, 24);
         assert_screen_contains(&wide, "showing first 7 events; press G to load more");
         assert_screen_contains(&wide, "Loading more timeline");
+        assert_screen_contains(&wide, "Progress: 0% · 0 / 300 new events");
         assert_screen_contains(&wide, "current preview stays available");
         assert_screen_contains(&narrow, "Loading more timeline");
+        assert_screen_contains(&narrow, "Progress: 0% · 0/300");
     }
 
     #[test]

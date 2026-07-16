@@ -151,14 +151,15 @@ pub fn load_timeline_preview(session: &SessionSummary) -> Result<CanonicalTimeli
     load_timeline_with_limit(session, preview_timeline_event_limit(session))
 }
 
-pub fn load_timeline_up_to(
+pub fn load_timeline_up_to_with_progress(
     session: &SessionSummary,
     event_limit: usize,
+    on_progress: &mut dyn FnMut(usize),
 ) -> Result<CanonicalTimeline, CoreError> {
     if event_limit == 0 {
-        return load_timeline(session);
+        return load_timeline_with_limit_and_progress(session, None, on_progress);
     }
-    load_timeline_with_limit(session, Some(event_limit))
+    load_timeline_with_limit_and_progress(session, Some(event_limit), on_progress)
 }
 
 pub fn configured_timeline_event_limit() -> Option<usize> {
@@ -186,17 +187,26 @@ fn load_timeline_with_limit(
     session: &SessionSummary,
     event_limit: Option<usize>,
 ) -> Result<CanonicalTimeline, CoreError> {
+    let mut no_progress = |_| {};
+    load_timeline_with_limit_and_progress(session, event_limit, &mut no_progress)
+}
+
+fn load_timeline_with_limit_and_progress(
+    session: &SessionSummary,
+    event_limit: Option<usize>,
+    on_progress: &mut dyn FnMut(usize),
+) -> Result<CanonicalTimeline, CoreError> {
     for adapter in runtime_adapters() {
         if adapter.tool() != session.cli {
             continue;
         }
         return adapter
-            .load_timeline_limited(session, event_limit)
+            .load_timeline_limited_with_progress(session, event_limit, on_progress)
             .map_err(CoreError::from);
     }
 
     FixtureSourceAdapter::new(session.cli)
-        .load_timeline(&session.id)
+        .load_timeline_limited_with_progress(session, event_limit, on_progress)
         .map_err(CoreError::from)
 }
 
@@ -423,8 +433,11 @@ mod tests {
             .find(|session| session.id == "codex-cxcp-design")
             .expect("codex session");
 
-        let first_page = load_timeline_up_to(&session, 2).expect("first page");
-        let second_page = load_timeline_up_to(&session, 4).expect("second page");
+        let mut no_progress = |_| {};
+        let first_page =
+            load_timeline_up_to_with_progress(&session, 2, &mut no_progress).expect("first page");
+        let second_page =
+            load_timeline_up_to_with_progress(&session, 4, &mut no_progress).expect("second page");
 
         assert_eq!(first_page.events.len(), 3);
         assert_eq!(second_page.events.len(), 5);
@@ -439,6 +452,32 @@ mod tests {
         assert_eq!(second_page.events[0].id, first_page.events[0].id);
         assert_eq!(second_page.events[1].id, first_page.events[1].id);
         assert_ne!(second_page.events[2].title, "Timeline preview truncated");
+    }
+
+    #[test]
+    fn timeline_up_to_reports_actual_bounded_event_progress() {
+        let session = list_sessions()
+            .expect("sessions")
+            .into_iter()
+            .find(|session| session.id == "codex-cxcp-design")
+            .expect("codex session");
+        let mut reported = Vec::new();
+
+        let timeline =
+            load_timeline_up_to_with_progress(&session, 2, &mut |count| reported.push(count))
+                .expect("timeline");
+
+        assert_eq!(
+            timeline
+                .events
+                .iter()
+                .filter(|event| event.title != "Timeline preview truncated")
+                .count(),
+            2,
+            "the preview marker is not part of progress"
+        );
+        assert_eq!(reported.last(), Some(&2));
+        assert!(reported.iter().all(|count| *count <= 2));
     }
 
     #[test]

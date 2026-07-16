@@ -9,6 +9,9 @@
 - [x] **Large Timeline continuation** — `G` now keeps a truncated Timeline
   responsive by loading the next bounded page in the background and landing at
   its new end; repeat `G` while the marker remains.
+- [x] **Timeline page progress** — while `G` loads a bounded page, keep the
+  current preview visible and show actual parsed-event percentage plus
+  loaded/target counts; never infer the value from elapsed time.
 
 ## P0 — Experience regressions to verify and fix
 

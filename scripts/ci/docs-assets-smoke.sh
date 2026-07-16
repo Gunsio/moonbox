@@ -36,7 +36,7 @@ for entry in "${scenes[@]}"; do
   cargo run --locked -- docs-snapshot --scene "$scene" --output "$generated"
   if ! cmp -s "$generated" "$svg"; then
     diff -u "$generated" "$svg"
-    echo "README screenshot asset is stale; regenerate with: MOONBOX_SESSION_MODE=fixture MOONBOX_TUI_NOW_UNIX=1780650000 COLORTERM=truecolor TERM=xterm-256color cargo run --locked -- docs-snapshot --scene $scene --output $svg" >&2
+    echo "README screenshot asset is stale; regenerate with: env -u NO_COLOR MOONBOX_SESSION_MODE=fixture MOONBOX_TUI_NOW_UNIX=1780650000 COLORTERM=truecolor TERM=xterm-256color cargo run --locked -- docs-snapshot --scene $scene --output $svg" >&2
     exit 1
   fi
   xmllint --noout "$svg"

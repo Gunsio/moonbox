@@ -418,6 +418,7 @@ impl ClaudeSourceAdapter {
         session_id: &str,
         path: &Path,
         event_limit: Option<usize>,
+        on_progress: &mut dyn FnMut(usize),
     ) -> Result<CanonicalTimeline, AdapterError> {
         let reader = open_reader(CLAUDE_TOOL, path)?;
         let mut events = Vec::new();
@@ -450,7 +451,9 @@ impl ClaudeSourceAdapter {
                             ..TimelineEventMetadata::default()
                         },
                     };
-                    if push_timeline_event(&mut events, event, event_limit) {
+                    let reached_limit = push_timeline_event(&mut events, event, event_limit);
+                    on_progress(events.len().min(event_limit.unwrap_or(usize::MAX)));
+                    if reached_limit {
                         break;
                     }
                     continue;
@@ -459,9 +462,12 @@ impl ClaudeSourceAdapter {
 
             if let Some(event) =
                 timeline_event(record, events.len() + 1, session_id, path, line_index + 1)
-                && push_timeline_event(&mut events, event, event_limit)
             {
-                break;
+                let reached_limit = push_timeline_event(&mut events, event, event_limit);
+                on_progress(events.len().min(event_limit.unwrap_or(usize::MAX)));
+                if reached_limit {
+                    break;
+                }
             }
         }
 
@@ -573,13 +579,14 @@ impl SourceAdapter for ClaudeSourceAdapter {
     }
 
     fn load_timeline(&self, session_id: &str) -> Result<CanonicalTimeline, AdapterError> {
+        let mut no_progress = |_| {};
         let Some(path) = self.find_session_path(session_id)? else {
             return Err(AdapterError::SessionNotFound {
                 tool: CLAUDE_TOOL,
                 session_id: session_id.into(),
             });
         };
-        self.parse_timeline(session_id, &path, None)
+        self.parse_timeline(session_id, &path, None, &mut no_progress)
     }
 
     fn load_timeline_limited(
@@ -587,13 +594,23 @@ impl SourceAdapter for ClaudeSourceAdapter {
         session: &SessionSummary,
         event_limit: Option<usize>,
     ) -> Result<CanonicalTimeline, AdapterError> {
+        let mut no_progress = |_| {};
+        self.load_timeline_limited_with_progress(session, event_limit, &mut no_progress)
+    }
+
+    fn load_timeline_limited_with_progress(
+        &self,
+        session: &SessionSummary,
+        event_limit: Option<usize>,
+        on_progress: &mut dyn FnMut(usize),
+    ) -> Result<CanonicalTimeline, AdapterError> {
         if let Some(path) = session
             .source_path
             .as_deref()
             .map(PathBuf::from)
             .filter(|path| path.is_file())
         {
-            return self.parse_timeline(&session.id, &path, event_limit);
+            return self.parse_timeline(&session.id, &path, event_limit, on_progress);
         }
         let Some(path) = self.find_session_path(&session.id)? else {
             return Err(AdapterError::SessionNotFound {
@@ -601,7 +618,7 @@ impl SourceAdapter for ClaudeSourceAdapter {
                 session_id: session.id.clone(),
             });
         };
-        self.parse_timeline(&session.id, &path, event_limit)
+        self.parse_timeline(&session.id, &path, event_limit, on_progress)
     }
 }
 
