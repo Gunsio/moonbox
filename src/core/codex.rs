@@ -595,6 +595,7 @@ impl CodexSourceAdapter {
         session_id: &str,
         path: &Path,
         event_limit: Option<usize>,
+        on_progress: &mut dyn FnMut(usize),
     ) -> Result<CanonicalTimeline, AdapterError> {
         let reader = open_reader(CODEX_TOOL, path)?;
         let mut events = Vec::new();
@@ -627,7 +628,9 @@ impl CodexSourceAdapter {
                             ..TimelineEventMetadata::default()
                         },
                     };
-                    if push_timeline_event(&mut events, event, event_limit) {
+                    let reached_limit = push_timeline_event(&mut events, event, event_limit);
+                    on_progress(events.len().min(event_limit.unwrap_or(usize::MAX)));
+                    if reached_limit {
                         break;
                     }
                     continue;
@@ -636,9 +639,12 @@ impl CodexSourceAdapter {
 
             if let Some(event) =
                 timeline_event(record, events.len() + 1, session_id, path, line_index + 1)
-                && push_timeline_event(&mut events, event, event_limit)
             {
-                break;
+                let reached_limit = push_timeline_event(&mut events, event, event_limit);
+                on_progress(events.len().min(event_limit.unwrap_or(usize::MAX)));
+                if reached_limit {
+                    break;
+                }
             }
         }
 
@@ -851,6 +857,7 @@ impl CodexSourceAdapter {
         session_id: &str,
         path: &Path,
         event_limit: Option<usize>,
+        on_progress: &mut dyn FnMut(usize),
     ) -> Result<CanonicalTimeline, AdapterError> {
         let contents =
             fs::read_to_string(path).map_err(|error| read_error(CODEX_TOOL, path, error))?;
@@ -863,10 +870,12 @@ impl CodexSourceAdapter {
         })?;
         let mut events = Vec::new();
         for (index, message) in session.messages.iter().enumerate() {
-            if let Some(event) = k2_timeline_event(message, events.len() + 1, session_id, path)
-                && push_timeline_event(&mut events, event, event_limit)
-            {
-                break;
+            if let Some(event) = k2_timeline_event(message, events.len() + 1, session_id, path) {
+                let reached_limit = push_timeline_event(&mut events, event, event_limit);
+                on_progress(events.len().min(event_limit.unwrap_or(usize::MAX)));
+                if reached_limit {
+                    break;
+                }
             }
             if index + 1 == session.messages.len() {
                 break;
@@ -1050,11 +1059,12 @@ impl SourceAdapter for CodexSourceAdapter {
     }
 
     fn load_timeline(&self, session_id: &str) -> Result<CanonicalTimeline, AdapterError> {
+        let mut no_progress = |_| {};
         if let Some(path) = self
             .k2_session_path_for_id(session_id)
             .filter(|path| path.is_file())
         {
-            return self.parse_k2_timeline(session_id, &path, None);
+            return self.parse_k2_timeline(session_id, &path, None, &mut no_progress);
         }
         if let Some(app_server) = &self.app_server {
             match app_server.load_timeline_limited(session_id, None) {
@@ -1071,7 +1081,7 @@ impl SourceAdapter for CodexSourceAdapter {
                 session_id: session_id.into(),
             });
         };
-        self.parse_timeline(session_id, &path, None)
+        self.parse_timeline(session_id, &path, None, &mut no_progress)
     }
 
     fn load_timeline_limited(
@@ -1079,13 +1089,23 @@ impl SourceAdapter for CodexSourceAdapter {
         session: &SessionSummary,
         event_limit: Option<usize>,
     ) -> Result<CanonicalTimeline, AdapterError> {
+        let mut no_progress = |_| {};
+        self.load_timeline_limited_with_progress(session, event_limit, &mut no_progress)
+    }
+
+    fn load_timeline_limited_with_progress(
+        &self,
+        session: &SessionSummary,
+        event_limit: Option<usize>,
+        on_progress: &mut dyn FnMut(usize),
+    ) -> Result<CanonicalTimeline, AdapterError> {
         if let Some(path) = session
             .source_path
             .as_deref()
             .and_then(k2_source_path_to_path)
             .filter(|path| path.is_file())
         {
-            return self.parse_k2_timeline(&session.id, &path, event_limit);
+            return self.parse_k2_timeline(&session.id, &path, event_limit, on_progress);
         }
         if let Some(app_server) = &self.app_server
             && session
@@ -1093,7 +1113,11 @@ impl SourceAdapter for CodexSourceAdapter {
                 .as_deref()
                 .is_some_and(CodexAppServerSource::is_thread_source_path)
         {
-            match app_server.load_timeline_limited(&session.id, event_limit) {
+            match app_server.load_timeline_limited_with_progress(
+                &session.id,
+                event_limit,
+                on_progress,
+            ) {
                 Ok(timeline) => return Ok(timeline),
                 Err(error) if self.has_local_session_store() => {
                     let _ = error;
@@ -1107,7 +1131,7 @@ impl SourceAdapter for CodexSourceAdapter {
             .map(PathBuf::from)
             .filter(|path| path.is_file())
         {
-            return self.parse_timeline(&session.id, &path, event_limit);
+            return self.parse_timeline(&session.id, &path, event_limit, on_progress);
         }
         let Some(path) = self.find_session_path(&session.id)? else {
             return Err(AdapterError::SessionNotFound {
@@ -1115,7 +1139,7 @@ impl SourceAdapter for CodexSourceAdapter {
                 session_id: session.id.clone(),
             });
         };
-        self.parse_timeline(&session.id, &path, event_limit)
+        self.parse_timeline(&session.id, &path, event_limit, on_progress)
     }
 }
 
@@ -2909,6 +2933,35 @@ mod tests {
         assert_eq!(timeline.events[0].title, "Session");
         assert_eq!(timeline.events[1].detail, "first");
         assert_eq!(timeline.events[2].title, "Timeline preview truncated");
+    }
+
+    #[test]
+    fn timeline_preview_reports_incremental_progress_for_local_jsonl() {
+        let root = test_root("timeline-preview-progress");
+        write_session(
+            &root,
+            "2026/06/06/rollout-2026-06-06T10-00-00-progress.jsonl",
+            r#"{"timestamp":"2026-06-06T10:00:00.000Z","type":"session_meta","payload":{"id":"codex-progress","cwd":"/repo"}}
+{"timestamp":"2026-06-06T10:01:00.000Z","type":"event_msg","payload":{"type":"user_message","message":"first"}}
+{"timestamp":"2026-06-06T10:02:00.000Z","type":"event_msg","payload":{"type":"agent_message","message":"second"}}
+{"timestamp":"2026-06-06T10:03:00.000Z","type":"event_msg","payload":{"type":"agent_message","message":"third should not parse"}}"#,
+        );
+        let adapter = CodexSourceAdapter::new(&root);
+        let session = adapter
+            .find_session("codex-progress")
+            .expect("find")
+            .expect("session");
+        let mut reported = Vec::new();
+
+        let timeline = adapter
+            .load_timeline_limited_with_progress(&session, Some(3), &mut |count| {
+                reported.push(count)
+            })
+            .expect("timeline");
+
+        assert_eq!(reported, vec![1, 2, 3]);
+        assert_eq!(timeline.events.len(), 4);
+        assert_eq!(timeline.events[3].title, "Timeline preview truncated");
     }
 
     #[test]

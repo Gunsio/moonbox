@@ -47,7 +47,9 @@ moon export --session <session-id> --to lark --mode handoff --execute
   workers marked `thread_source: "subagent"` are excluded from Moonbox's
   inventory without modifying the provider store.
 - **Timeline rewind**: inspect turns, tool evidence, images, and compact
-  boundaries before choosing where to continue.
+  boundaries before choosing where to continue. When a preview is truncated,
+  `G` loads its next bounded page in the background and shows actual parsed
+  event progress without hiding the current preview.
 - **Context health**: see provider-backed context usage, agent/model-resolved
   windows, quality-cliff estimates, and compact markers; unknown usage stays
   explicit instead of being turned into a fake percentage.
@@ -94,7 +96,7 @@ core map stays predictable:
 | Key | Action |
 | --- | --- |
 | `j` / `k` | Move through the active list |
-| `gg` / `G` | Jump to top or bottom; `G` loads the next Timeline page when the preview is truncated |
+| `gg` / `G` | Jump to top or bottom; `G` loads the next Timeline page when the preview is truncated, with parsed-event progress |
 | `/` | Search sessions |
 | `[` / `]` | Change source filter |
 | `{` / `}` | Change data space |
@@ -201,10 +203,10 @@ buffer. Refresh them with the same deterministic fixture environment used by
 the CI smoke:
 
 ```bash
-MOONBOX_SESSION_MODE=fixture MOONBOX_TUI_NOW_UNIX=1780650000 COLORTERM=truecolor TERM=xterm-256color cargo run --locked -- docs-snapshot --scene action-menu --output docs/assets/moonbox-action-menu.svg
-MOONBOX_SESSION_MODE=fixture MOONBOX_TUI_NOW_UNIX=1780650000 COLORTERM=truecolor TERM=xterm-256color cargo run --locked -- docs-snapshot --scene yank --output docs/assets/moonbox-yank.svg
-MOONBOX_SESSION_MODE=fixture MOONBOX_TUI_NOW_UNIX=1780650000 COLORTERM=truecolor TERM=xterm-256color cargo run --locked -- docs-snapshot --scene handoff --output docs/assets/moonbox-handoff-review.svg
-MOONBOX_SESSION_MODE=fixture MOONBOX_TUI_NOW_UNIX=1780650000 COLORTERM=truecolor TERM=xterm-256color cargo run --locked -- docs-snapshot --scene timeline-details --output docs/assets/moonbox-timeline-details.svg
+env -u NO_COLOR MOONBOX_SESSION_MODE=fixture MOONBOX_TUI_NOW_UNIX=1780650000 COLORTERM=truecolor TERM=xterm-256color cargo run --locked -- docs-snapshot --scene action-menu --output docs/assets/moonbox-action-menu.svg
+env -u NO_COLOR MOONBOX_SESSION_MODE=fixture MOONBOX_TUI_NOW_UNIX=1780650000 COLORTERM=truecolor TERM=xterm-256color cargo run --locked -- docs-snapshot --scene yank --output docs/assets/moonbox-yank.svg
+env -u NO_COLOR MOONBOX_SESSION_MODE=fixture MOONBOX_TUI_NOW_UNIX=1780650000 COLORTERM=truecolor TERM=xterm-256color cargo run --locked -- docs-snapshot --scene handoff --output docs/assets/moonbox-handoff-review.svg
+env -u NO_COLOR MOONBOX_SESSION_MODE=fixture MOONBOX_TUI_NOW_UNIX=1780650000 COLORTERM=truecolor TERM=xterm-256color cargo run --locked -- docs-snapshot --scene timeline-details --output docs/assets/moonbox-timeline-details.svg
 ```
 
 ## Project Docs

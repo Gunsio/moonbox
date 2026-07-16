@@ -102,6 +102,24 @@ pub trait SourceAdapter {
         let _ = event_limit;
         self.load_timeline(&session.id)
     }
+    fn load_timeline_limited_with_progress(
+        &self,
+        session: &SessionSummary,
+        event_limit: Option<usize>,
+        on_progress: &mut dyn FnMut(usize),
+    ) -> Result<CanonicalTimeline, AdapterError> {
+        let timeline = self.load_timeline_limited(session, event_limit)?;
+        on_progress(timeline_progress_event_count(&timeline));
+        Ok(timeline)
+    }
+}
+
+pub fn timeline_progress_event_count(timeline: &CanonicalTimeline) -> usize {
+    timeline
+        .events
+        .iter()
+        .filter(|event| event.title != "Timeline preview truncated")
+        .count()
 }
 
 pub fn report_from_sessions(

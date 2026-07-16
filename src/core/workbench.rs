@@ -57,19 +57,21 @@ pub fn load_full_workbench_from_session_snapshot(
     )
 }
 
-pub fn load_workbench_from_session_snapshot_with_timeline_limit(
+pub fn load_workbench_from_session_snapshot_with_timeline_limit_and_progress(
     source_session: SessionSummary,
     sessions: Vec<SessionSummary>,
     source_adapters: Vec<super::model::SourceAdapterReport>,
     target: CliTool,
     event_limit: usize,
+    on_progress: &mut dyn FnMut(usize),
 ) -> Result<WorkbenchData, CoreError> {
-    data::workbench_data_from_session_snapshot_with_timeline_limit(
+    data::workbench_data_from_session_snapshot_with_timeline_limit_and_progress(
         source_session,
         sessions,
         source_adapters,
         target,
         event_limit,
+        on_progress,
     )
 }
 

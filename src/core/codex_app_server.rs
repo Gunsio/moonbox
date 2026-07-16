@@ -233,17 +233,44 @@ impl CodexAppServerSource {
         thread_id: &str,
         event_limit: Option<usize>,
     ) -> Result<CanonicalTimeline, AdapterError> {
-        let mut turns = Vec::new();
+        let mut no_progress = |_| {};
+        self.load_timeline_limited_with_progress(thread_id, event_limit, &mut no_progress)
+    }
+
+    pub(crate) fn load_timeline_limited_with_progress(
+        &self,
+        thread_id: &str,
+        event_limit: Option<usize>,
+        on_progress: &mut dyn FnMut(usize),
+    ) -> Result<CanonicalTimeline, AdapterError> {
+        let mut events = Vec::new();
         let mut cursor = None;
+        let mut loaded_turn_count = 0usize;
         loop {
             let response = self.list_turns_page(thread_id, cursor.as_deref(), event_limit)?;
-            turns.extend(response.data);
-            cursor = response.next_cursor;
-            if cursor.is_none() || event_limit.is_some_and(|limit| turns.len() >= limit) {
+            loaded_turn_count = loaded_turn_count.saturating_add(response.data.len());
+            let reached_event_limit = append_timeline_events_from_turns(
+                thread_id,
+                &response.data,
+                &mut events,
+                event_limit,
+                on_progress,
+            );
+            let next_cursor = response.next_cursor;
+            if reached_event_limit
+                || next_cursor.is_none()
+                || event_limit.is_some_and(|limit| loaded_turn_count >= limit)
+            {
                 break;
             }
+            cursor = next_cursor;
         }
-        Ok(timeline_from_turns(thread_id, &turns, event_limit))
+        Ok(CanonicalTimeline {
+            version: 1,
+            source_cli: CODEX_TOOL,
+            source_session: thread_id.into(),
+            events,
+        })
     }
 
     fn list_turns_page(
@@ -462,32 +489,46 @@ fn parse_rpc_result(method: &str, stdout: &str) -> Result<Value, String> {
     Err(format!("{method} returned no JSON-RPC result"))
 }
 
-fn timeline_from_turns(
+fn append_timeline_events_from_turns(
     thread_id: &str,
     turns: &[CodexAppTurn],
+    events: &mut Vec<TimelineEvent>,
     event_limit: Option<usize>,
-) -> CanonicalTimeline {
-    let mut events = Vec::new();
-    'turns: for turn in turns {
-        if let Some(event) = turn_error_event(thread_id, turn, events.len() + 1)
-            && push_timeline_event(&mut events, event, event_limit)
-        {
-            break 'turns;
+    on_progress: &mut dyn FnMut(usize),
+) -> bool {
+    for turn in turns {
+        if let Some(event) = turn_error_event(thread_id, turn, events.len() + 1) {
+            let before = events.len();
+            let reached_limit = push_timeline_event(events, event, event_limit);
+            if events.len() != before {
+                on_progress(if reached_limit {
+                    events.len().saturating_sub(1)
+                } else {
+                    events.len()
+                });
+            }
+            if reached_limit {
+                return true;
+            }
         }
         for item in &turn.items {
-            if let Some(event) = app_thread_item_event(thread_id, turn, item, events.len() + 1)
-                && push_timeline_event(&mut events, event, event_limit)
-            {
-                break 'turns;
+            if let Some(event) = app_thread_item_event(thread_id, turn, item, events.len() + 1) {
+                let before = events.len();
+                let reached_limit = push_timeline_event(events, event, event_limit);
+                if events.len() != before {
+                    on_progress(if reached_limit {
+                        events.len().saturating_sub(1)
+                    } else {
+                        events.len()
+                    });
+                }
+                if reached_limit {
+                    return true;
+                }
             }
         }
     }
-    CanonicalTimeline {
-        version: 1,
-        source_cli: CODEX_TOOL,
-        source_session: thread_id.into(),
-        events,
-    }
+    false
 }
 
 fn app_thread_item_event(
@@ -979,6 +1020,41 @@ mod tests {
                 .status,
             SessionRuntimeStatus::Inactive
         );
+    }
+
+    #[test]
+    fn fixture_transport_reports_incremental_progress_for_bounded_timeline() {
+        let root = env::temp_dir().join(format!(
+            "moonbox-codex-app-progress-fixture-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("root");
+        let fixture_path = root.join("app-server.json");
+        fs::write(
+            &fixture_path,
+            format!(
+                r#"{{
+                  "responses": [
+                    {{"method":"thread/turns/list","thread_id":"codex-app-1","result":{{"data":[{}]}}}}
+                  ]
+                }}"#,
+                turn_json(),
+            ),
+        )
+        .expect("fixture");
+        let source = CodexAppServerSource::fixture(fixture_path);
+        let mut reported = Vec::new();
+
+        let timeline = source
+            .load_timeline_limited_with_progress("codex-app-1", Some(2), &mut |count| {
+                reported.push(count)
+            })
+            .expect("timeline");
+
+        assert_eq!(reported, vec![1, 2]);
+        assert_eq!(timeline.events.len(), 3);
+        assert_eq!(timeline.events[2].title, "Timeline preview truncated");
     }
 
     fn thread_json() -> &'static str {

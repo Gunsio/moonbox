@@ -7,6 +7,16 @@ and this project uses semantic versioning once tagged releases start.
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-07-17
+
+### Added
+
+- Show real, page-relative progress while `G` loads the next bounded Timeline
+  page: the active preview remains readable alongside percentage, loaded/target
+  event counts, and a compact progress bar. Progress comes from parsed
+  canonical events rather than elapsed time, and updates are bounded so a large
+  history cannot flood the TUI message queue.
+
 ## [0.1.9] - 2026-07-17
 
 ### Fixed
