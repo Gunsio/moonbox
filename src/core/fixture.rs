@@ -2,6 +2,7 @@ use serde::Deserialize;
 
 use super::{
     adapter::{AdapterError, SourceAdapter},
+    local_jsonl::timeline_preview_truncated_event,
     model::{
         CanonicalTimeline, CliTool, SessionRuntimeStatus, SessionSummary, SourceProvenance,
         unknown_runtime_reason,
@@ -102,6 +103,25 @@ impl SourceAdapter for FixtureSourceAdapter {
             session_id: session_id.into(),
         })
     }
+
+    fn load_timeline_limited(
+        &self,
+        session: &SessionSummary,
+        event_limit: Option<usize>,
+    ) -> Result<CanonicalTimeline, AdapterError> {
+        let mut timeline = self.load_timeline(&session.id)?;
+        let Some(limit) = event_limit else {
+            return Ok(timeline);
+        };
+        if limit > 0 && timeline.events.len() >= limit {
+            timeline.events.truncate(limit);
+            timeline.events.push(timeline_preview_truncated_event(
+                timeline.events.len() + 1,
+                limit,
+            ));
+        }
+        Ok(timeline)
+    }
 }
 
 const CODEX_TIMELINES: [TimelineFixture; 1] = [TimelineFixture {
@@ -176,6 +196,20 @@ mod tests {
                     .any(|event| event.id.starts_with("evt-"))
             );
         }
+    }
+
+    #[test]
+    fn fixture_timeline_limit_matches_real_source_preview_contract() {
+        let adapter = FixtureSourceAdapter::new(CliTool::Codex);
+        let session = adapter.list_sessions().expect("sessions").remove(0);
+
+        let timeline = adapter
+            .load_timeline_limited(&session, Some(2))
+            .expect("limited timeline");
+
+        assert_eq!(timeline.events.len(), 3);
+        assert_eq!(timeline.events[2].title, "Timeline preview truncated");
+        assert!(timeline.events[2].detail.contains("press G"));
     }
 
     #[test]

@@ -6,6 +6,9 @@
 
 - [x] **Codex full-access Resume in Action Menu** — completed as a separate, explicitly dangerous local native-Codex action. It preserves ordinary Resume; excludes Claude, Hermes, SSH, and K2-wrapped Codex; shows the full command; and requires `Shift+R` after review.
 - [x] **Codex child-session visibility** — stopped collapsing independently resumable `forked_from_id` sessions, which hid most recent Codex multi-agent work after the provider update.
+- [x] **Large Timeline continuation** — `G` now keeps a truncated Timeline
+  responsive by loading the next bounded page in the background and landing at
+  its new end; repeat `G` while the marker remains.
 
 ## P0 — Experience regressions to verify and fix
 

@@ -7,6 +7,15 @@ and this project uses semantic versioning once tagged releases start.
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-07-17
+
+### Fixed
+
+- Make `G` in a truncated Timeline load the next bounded event page in the
+  background, retain the current preview and rewind point, then land on that
+  page's end. Press `G` again while the marker remains to keep paging without
+  turning a large session into a blocking full-transcript load.
+
 ## [0.1.8] - 2026-07-17
 
 ### Fixed
