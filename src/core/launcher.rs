@@ -122,6 +122,31 @@ pub fn original_command(session: &SessionSummary) -> TargetLaunchCommand {
     }
 }
 
+pub fn full_access_resume_command(session: &SessionSummary) -> Option<TargetLaunchCommand> {
+    if session.cli != CliTool::Codex || is_k2_session(session) {
+        return None;
+    }
+
+    let program = configured_target_binary(session.cli);
+    let cwd = usable_cwd(&session.cwd);
+    let mut args = Vec::new();
+    if let Some(cwd) = cwd.as_deref() {
+        args.push("-C".into());
+        args.push(cwd.into());
+    }
+    args.push("resume".into());
+    args.push("--dangerously-bypass-approvals-and-sandbox".into());
+    args.push(session.id.clone());
+    let display = shell_command(&program, &args);
+
+    Some(TargetLaunchCommand {
+        program,
+        args,
+        cwd,
+        display,
+    })
+}
+
 fn k2_original_command(session: &SessionSummary) -> TargetLaunchCommand {
     let program = configured_k2_binary();
     let cwd = usable_cwd(&session.cwd);
@@ -210,6 +235,7 @@ pub(crate) fn run_original_interactive(
 pub(crate) fn original_handoff_notice(plan: &OriginalSessionPlan) -> String {
     let cwd = plan.command.cwd.as_deref().unwrap_or("terminal default");
     let action = match plan.action {
+        super::model::SessionAction::FullAccessResume => "Opening full-access original session",
         super::model::SessionAction::NativeFork => "Forking native session",
         super::model::SessionAction::NewSession => "Starting new session",
         _ => "Opening original session",
@@ -1095,6 +1121,60 @@ mod tests {
             Some(root.to_string_lossy().as_ref())
         );
         assert!(command.display.contains(" -C "));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn full_access_resume_is_a_codex_only_command_with_explicit_bypass_flag() {
+        let root = std::env::temp_dir().join(format!(
+            "moonbox-full-access-resume-command-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).expect("temp root");
+        let session = codex_session_with_cwd(root.display().to_string());
+
+        let command = full_access_resume_command(&session).expect("full-access command");
+
+        assert_eq!(
+            command.args,
+            [
+                "-C",
+                root.to_string_lossy().as_ref(),
+                "resume",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "codex-cxcp-design",
+            ]
+        );
+        assert_eq!(
+            original_command(&session).args,
+            [
+                "-C",
+                root.to_string_lossy().as_ref(),
+                "resume",
+                "codex-cxcp-design",
+            ]
+        );
+
+        let data = data::workbench_data(CliTool::Codex, CliTool::Hermes).expect("data");
+        let claude = data
+            .sessions
+            .iter()
+            .find(|candidate| candidate.cli == CliTool::Claude)
+            .expect("claude");
+        assert!(full_access_resume_command(claude).is_none());
+        let hermes = data
+            .sessions
+            .iter()
+            .find(|candidate| candidate.cli == CliTool::Hermes)
+            .expect("hermes");
+        assert!(full_access_resume_command(hermes).is_none());
+
+        let mut k2 = session.clone();
+        k2.id = "codex:019eef43-5ee0-78a0-b9c7-7f85f951fa74".into();
+        k2.source_path =
+            Some("k2-session:///Users/me/.k2/chat/sessions/codex_019eef43.json".into());
+        assert!(full_access_resume_command(&k2).is_none());
+
         let _ = std::fs::remove_dir_all(root);
     }
 

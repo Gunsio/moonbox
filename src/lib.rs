@@ -89,6 +89,11 @@ fn execute_tui_exit_action(action: Option<app::TuiExitAction>) -> Result<()> {
             io::stdout().flush()?;
             core::launcher::handoff_original_plan(*plan)?;
         }
+        Some(app::TuiExitAction::FullAccessResume(plan)) => {
+            print!("{}", core::launcher::original_handoff_notice(&plan));
+            io::stdout().flush()?;
+            core::launcher::handoff_original_plan(*plan)?;
+        }
         Some(app::TuiExitAction::NativeFork(plan)) => {
             print!("{}", core::launcher::original_handoff_notice(&plan));
             io::stdout().flush()?;
@@ -1355,6 +1360,7 @@ fn launch_status(status: core::model::LaunchExecutionStatus) -> &'static str {
 fn launch_action_label(action: core::model::SessionAction) -> &'static str {
     match action {
         core::model::SessionAction::OriginalResume => "original",
+        core::model::SessionAction::FullAccessResume => "full-access-resume",
         core::model::SessionAction::NativeFork => "native-fork",
         core::model::SessionAction::NewSession => "new-session",
         core::model::SessionAction::TargetHandoff => "handoff",

@@ -26,6 +26,11 @@ current Homebrew guidance for stable source archives, checksums,
 Homebrew Core can come later, after the project has stable releases, external
 usage, and a lower-risk dependency/release profile.
 
+On macOS, Homebrew is the supported single global installation channel. Run a
+local checkout with `cargo run --locked -- …`; do not also use `cargo install`
+for the checkout while the Homebrew formula is installed, because two binaries
+on `PATH` can report different capabilities under the same version string.
+
 ## Release Checklist
 
 1. Merge the accepted release milestone PR.
@@ -39,9 +44,9 @@ scripts/release/stage-artifacts.sh --version 0.1.5-beta.55 --tag v0.1.5-beta.55
 4. Create a GitHub prerelease and upload the staged source archive, Cargo crate
    archive, host binary archive,
    `SHA256SUMS`, and `release-manifest.json` to the GitHub release.
-5. Build and upload Apple Silicon Homebrew bottles for the supported macOS
-   bottle tags, then add the bottle checksums to `Gunsio/homebrew-tap`'s
-   `Formula/moonbox.rb`.
+5. Build and upload Apple Silicon Homebrew bottles, then add checksums from
+   `brew bottle --json` to `Gunsio/homebrew-tap`'s `Formula/moonbox.rb`. List
+   only the macOS bottle tags actually produced for that release.
 6. Copy the `homebrew.sha256` value from `release-manifest.json` into the source
    fallback in `Gunsio/homebrew-tap`'s `Formula/moonbox.rb`.
 7. Run formula verification:
@@ -94,8 +99,8 @@ The source repository keeps a formula template at
 [homebrew/moonbox.rb](homebrew/moonbox.rb). The published formula lives in
 `Gunsio/homebrew-tap` as `Formula/moonbox.rb` and must pin tagged release
 artifacts. Apple Silicon macOS should use published bottle checksums first;
-source fallbacks should use `release-manifest.json`'s `homebrew.sha256` field
-for the source archive.
+those values come from `brew bottle --json`. Source fallbacks should use
+`release-manifest.json`'s `homebrew.sha256` field for the source archive.
 
 ```ruby
 class Moonbox < Formula

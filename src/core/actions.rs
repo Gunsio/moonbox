@@ -1,12 +1,16 @@
 use serde::{Deserialize, Serialize};
 
-use super::model::{CliTool, SessionSummary};
+use super::{
+    codex,
+    model::{CliTool, SessionSummary},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionAvailableActionKind {
     Inspect,
     Resume,
+    FullAccessResume,
     Jump,
     Fork,
     Handoff,
@@ -21,6 +25,7 @@ impl SessionAvailableActionKind {
         match self {
             Self::Inspect => "inspect",
             Self::Resume => "resume",
+            Self::FullAccessResume => "full_access_resume",
             Self::Jump => "jump",
             Self::Fork => "fork",
             Self::Handoff => "handoff",
@@ -35,6 +40,7 @@ impl SessionAvailableActionKind {
         match self {
             Self::Inspect => "Inspect",
             Self::Resume => "Resume",
+            Self::FullAccessResume => "Resume (Full Access)",
             Self::Jump => "Jump",
             Self::Fork => "Fork",
             Self::Handoff => "Handoff",
@@ -72,6 +78,7 @@ pub enum SessionActionSafety {
     SourceStoreReadOnly,
     MoonboxOverlayWrite,
     LaunchesProviderProcess,
+    BypassesApprovalsAndSandbox,
     SelectsTmuxPane,
     GeneratesHandoffArtifact,
     WritesExternalDocument,
@@ -140,9 +147,11 @@ pub fn session_action_set(
     session: &SessionSummary,
     context: &SessionActionContext,
 ) -> SessionActionSet {
-    let actions = vec![
-        inspect_action(),
-        resume_action(context),
+    let mut actions = vec![inspect_action(), resume_action(context)];
+    if let Some(action) = full_access_resume_action(session, context) {
+        actions.push(action);
+    }
+    actions.extend([
         jump_action(context),
         fork_action(session, context),
         handoff_action(context),
@@ -150,7 +159,7 @@ pub fn session_action_set(
         new_session_action(context),
         share_action(),
         archive_action(),
-    ];
+    ]);
     SessionActionSet {
         version: 1,
         source_cli: session.cli,
@@ -201,6 +210,30 @@ fn resume_action(context: &SessionActionContext) -> SessionAvailableAction {
         ],
         vec!["enter"],
     )
+}
+
+fn full_access_resume_action(
+    session: &SessionSummary,
+    context: &SessionActionContext,
+) -> Option<SessionAvailableAction> {
+    if !context.local_data_space
+        || session.cli != CliTool::Codex
+        || codex::is_k2_session_summary(session)
+    {
+        return None;
+    }
+
+    Some(action(
+        SessionAvailableActionKind::FullAccessResume,
+        SessionActionAvailability::Warning,
+        "Skips all Codex confirmation prompts and runs without sandboxing; use only in an externally sandboxed environment.",
+        vec![
+            SessionActionSafety::SourceStoreReadOnly,
+            SessionActionSafety::LaunchesProviderProcess,
+            SessionActionSafety::BypassesApprovalsAndSandbox,
+        ],
+        Vec::new(),
+    ))
 }
 
 fn jump_action(context: &SessionActionContext) -> SessionAvailableAction {
@@ -490,6 +523,65 @@ mod tests {
                 .expect("archive")
                 .safety,
             vec![SessionActionSafety::MoonboxOverlayWrite]
+        );
+    }
+
+    #[test]
+    fn full_access_resume_is_limited_to_local_native_codex_sessions() {
+        let codex = session();
+        let actions = session_action_set(&codex, &SessionActionContext::local_without_live());
+        let action = actions
+            .action(SessionAvailableActionKind::FullAccessResume)
+            .expect("full-access Codex resume");
+
+        assert_eq!(action.status, SessionActionAvailability::Warning);
+        assert_eq!(
+            action.reason,
+            "Skips all Codex confirmation prompts and runs without sandboxing; use only in an externally sandboxed environment."
+        );
+        assert_eq!(
+            action.safety,
+            vec![
+                SessionActionSafety::SourceStoreReadOnly,
+                SessionActionSafety::LaunchesProviderProcess,
+                SessionActionSafety::BypassesApprovalsAndSandbox,
+            ]
+        );
+
+        let remote_context = SessionActionContext {
+            local_data_space: false,
+            ..SessionActionContext::local_without_live()
+        };
+        assert!(
+            session_action_set(&codex, &remote_context)
+                .action(SessionAvailableActionKind::FullAccessResume)
+                .is_none()
+        );
+
+        let mut claude = session();
+        claude.cli = CliTool::Claude;
+        assert!(
+            session_action_set(&claude, &SessionActionContext::local_without_live())
+                .action(SessionAvailableActionKind::FullAccessResume)
+                .is_none()
+        );
+
+        let mut hermes = session();
+        hermes.cli = CliTool::Hermes;
+        assert!(
+            session_action_set(&hermes, &SessionActionContext::local_without_live())
+                .action(SessionAvailableActionKind::FullAccessResume)
+                .is_none()
+        );
+
+        let mut k2 = session();
+        k2.id = "codex:019eef43-5ee0-78a0-b9c7-7f85f951fa74".into();
+        k2.source_path =
+            Some("k2-session:///Users/me/.k2/chat/sessions/codex_019eef43.json".into());
+        assert!(
+            session_action_set(&k2, &SessionActionContext::local_without_live())
+                .action(SessionAvailableActionKind::FullAccessResume)
+                .is_none()
         );
     }
 

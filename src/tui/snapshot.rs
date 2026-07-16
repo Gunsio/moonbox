@@ -273,6 +273,7 @@ mod tests {
         assert!(action.contains("Action Menu"));
         assert!(action.contains("Session actions"));
         assert!(action.contains("Resume"));
+        assert!(action.contains("Resume (Full Access)"));
         assert!(action.contains("New Session"));
         assert!(action.contains("Fork"));
         assert!(!action.contains("Archive"));

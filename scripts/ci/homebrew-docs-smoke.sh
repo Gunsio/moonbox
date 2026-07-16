@@ -33,7 +33,7 @@ grep -Fq 'sha256 cellar: :any_skip_relocation, arm64_tahoe: "<release-bottle-sha
 grep -Fq 'sha256 cellar: :any_skip_relocation, arm64_sequoia: "<release-bottle-sha256>"' "$formula"
 grep -Fq 'sha256 "<release-binary-sha256>"' "$formula"
 grep -Fq 'sha256 "<release-source-sha256>"' "$formula"
-grep -Fq 'release-manifest.json source, binary artifact, and bottle checksums' "$formula"
+grep -Fq 'release-manifest.json. Generate bottle checksums with `brew bottle --json`' "$formula"
 grep -Fq 'bin.install binary_root/"bin/moonbox", binary_root/"bin/moon"' "$formula"
 grep -Fq 'system "cargo", "install", *std_cargo_args' "$formula"
 grep -Fq 'generate_completions_from_executable(bin/"moonbox", "completions", shells: [:bash, :zsh, :fish, :pwsh])' "$formula"

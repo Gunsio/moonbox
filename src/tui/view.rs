@@ -89,6 +89,9 @@ pub fn render(frame: &mut Frame, app: &App) {
     if app.show_action_menu {
         render_action_menu(frame, root, app);
     }
+    if app.full_access_resume_confirmation().is_some() {
+        render_full_access_resume_confirmation(frame, root, app);
+    }
     if app.show_share_panel {
         render_share_panel(frame, root, app);
     }
@@ -996,10 +999,9 @@ fn context_health_metric_for_width(health: &ContextHealth, _width: usize) -> Opt
         format!("{pct}%")
     } else if let Some(used) = health.used_tokens {
         format!("{}/?", format_token_count(Some(used)))
-    } else if let Some(window) = health.window_tokens {
-        format!("?/{}", format_token_count(Some(window)))
     } else {
-        return None;
+        let window = health.window_tokens?;
+        format!("?/{}", format_token_count(Some(window)))
     };
 
     Some(text)
@@ -3789,6 +3791,17 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("y", i18n::text(language, Text::Unavailable)),
             ("PgUp/Dn", i18n::text(language, Text::Scroll)),
             ("Esc", i18n::text(language, Text::Cancel)),
+        ];
+    }
+    if app.full_access_resume_confirmation().is_some() {
+        return vec![
+            (
+                "Shift+R",
+                localized(language, "full-access resume", "满权限恢复"),
+            ),
+            ("y", i18n::text(language, Text::Copy)),
+            ("j/k", i18n::text(language, Text::Scroll)),
+            ("Esc/q", i18n::text(language, Text::Cancel)),
         ];
     }
     if app.show_action_menu {
@@ -9027,6 +9040,104 @@ fn verification_color(status: VerificationStatus) -> Color {
     }
 }
 
+fn render_full_access_resume_confirmation(frame: &mut Frame, root: Rect, app: &App) {
+    let language = app.effective_language();
+    let area = modal_area(root, 76, 56);
+    frame.render_widget(Clear, area);
+    let lines = if let Some(plan) = app.full_access_resume_confirmation() {
+        vec![
+            Line::from(Span::styled(
+                localized(language, "EXTREMELY DANGEROUS", "极度危险"),
+                Style::default()
+                    .fg(theme::red())
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::raw(""),
+            Line::from(vec![
+                Span::styled(
+                    format!("{}: ", i18n::text(language, Text::Session)),
+                    Style::default().fg(theme::blue()),
+                ),
+                Span::raw(format!(
+                    "{} / {}",
+                    plan.source_session.cli, plan.source_session.id
+                )),
+            ]),
+            Line::from(vec![
+                Span::styled("cwd: ", Style::default().fg(theme::blue())),
+                Span::raw(
+                    plan.command
+                        .cwd
+                        .as_deref()
+                        .unwrap_or("terminal default")
+                        .to_string(),
+                ),
+            ]),
+            Line::raw(""),
+            Line::from(Span::styled(
+                localized(
+                    language,
+                    "This starts Codex with every approval prompt and sandbox disabled.",
+                    "这会启动 Codex，并禁用全部审批提示和沙箱。",
+                ),
+                Style::default()
+                    .fg(theme::red())
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(
+                localized(
+                    language,
+                    "Use it only in an environment that is already externally sandboxed.",
+                    "仅应在已由外部环境隔离的情况下使用。",
+                ),
+                Style::default().fg(theme::gold()),
+            )),
+            Line::raw(""),
+            Line::from(Span::styled(
+                localized(language, "Command", "命令"),
+                Style::default()
+                    .fg(theme::blue())
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(
+                plan.command.display.clone(),
+                Style::default().fg(theme::red()),
+            )),
+            Line::raw(""),
+            Line::from(Span::styled(
+                localized(
+                    language,
+                    "Press Shift+R to resume with full access. y copies the command. Esc/q cancels.",
+                    "按 Shift+R 以满权限恢复；y 复制命令；Esc/q 取消。",
+                ),
+                Style::default().fg(theme::muted()),
+            )),
+        ]
+    } else {
+        vec![Line::from(Span::styled(
+            localized(
+                language,
+                "No full-access Resume command is ready.",
+                "没有可用的满权限恢复命令。",
+            ),
+            Style::default()
+                .fg(theme::red())
+                .add_modifier(Modifier::BOLD),
+        ))]
+    };
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(panel_block(
+                localized(language, " Full-access Resume ", " 满权限恢复 "),
+                true,
+            ))
+            .scroll((app.modal_scroll, 0))
+            .wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
 fn render_action_menu(frame: &mut Frame, root: Rect, app: &App) {
     let language = app.effective_language();
     let area = modal_area(root, 70, 86);
@@ -9055,8 +9166,8 @@ fn render_action_menu(frame: &mut Frame, root: Rect, app: &App) {
         lines.push(Line::from(Span::styled(
             localized(
                 language,
-                "j/k choose   enter run action   r resume   Esc/q close",
-                "j/k 选择   enter 执行动作   r 恢复   Esc/q 关闭",
+                "j/k choose   enter choose/review action   r resume   Esc/q close",
+                "j/k 选择   enter 执行或审阅动作   r 恢复   Esc/q 关闭",
             ),
             Style::default().fg(theme::muted()),
         )));
@@ -9426,6 +9537,11 @@ fn action_menu_entry_lines(
                 entry.selected,
                 if matches!(entry.action.status, SessionActionAvailability::Unavailable) {
                     theme::muted()
+                } else if matches!(
+                    entry.action.kind,
+                    SessionAvailableActionKind::FullAccessResume
+                ) {
+                    theme::red()
                 } else {
                     theme::cyan()
                 },
@@ -9453,6 +9569,7 @@ fn action_menu_action_icon(action: &SessionAvailableAction) -> (&'static str, Co
     } else {
         match action.kind {
             SessionAvailableActionKind::Resume => theme::cyan(),
+            SessionAvailableActionKind::FullAccessResume => theme::red(),
             SessionAvailableActionKind::Handoff => theme::cyan(),
             SessionAvailableActionKind::LarkExport => theme::cyan(),
             SessionAvailableActionKind::NewSession => theme::gold(),
@@ -9465,6 +9582,7 @@ fn action_menu_action_icon(action: &SessionAvailableAction) -> (&'static str, Co
     };
     let icon = match action.kind {
         SessionAvailableActionKind::Resume => "↩",
+        SessionAvailableActionKind::FullAccessResume => "!",
         SessionAvailableActionKind::Handoff => "→",
         SessionAvailableActionKind::LarkExport => "☁",
         SessionAvailableActionKind::NewSession => "+",
@@ -9498,6 +9616,9 @@ fn action_menu_action_label(
 ) -> &'static str {
     match action.kind {
         SessionAvailableActionKind::Resume => i18n::text(language, Text::Resume),
+        SessionAvailableActionKind::FullAccessResume => {
+            localized(language, "Resume (Full Access)", "满权限恢复")
+        }
         SessionAvailableActionKind::Handoff => localized(language, "Handoff", "交接"),
         SessionAvailableActionKind::LarkExport => localized(language, "Lark Doc", "飞书文档"),
         SessionAvailableActionKind::NewSession => localized(language, "New Session", "新会话"),
@@ -9524,6 +9645,9 @@ fn action_menu_reason_label(
     }
     match action.kind {
         SessionAvailableActionKind::Inspect => "可查看会话详情，不会修改来源存储。".into(),
+        SessionAvailableActionKind::FullAccessResume => {
+            "跳过 Codex 的全部审批并禁用沙箱；仅应在外部已隔离的环境中使用。".into()
+        }
         SessionAvailableActionKind::Resume => match action.status {
             SessionActionAvailability::Blocked => {
                 "SSH 数据空间只读；恢复需要本地 provider CLI。".into()
@@ -9899,7 +10023,7 @@ mod tests {
     }
 
     #[test]
-    fn action_menu_renders_resume_handoff_and_native_fork() {
+    fn action_menu_renders_resume_full_access_handoff_and_native_fork() {
         let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
         app.handle_key(key('o'));
 
@@ -9908,6 +10032,11 @@ mod tests {
         assert_screen_contains(&screen, "Action Menu");
         assert_screen_contains(&screen, "Session actions");
         assert_screen_contains(&screen, "Resume");
+        assert_screen_contains(&screen, "Resume (Full Access)");
+        assert_screen_contains(
+            &screen,
+            "Skips all Codex confirmation prompts and runs without sandboxing",
+        );
         assert_screen_contains(&screen, "Handoff");
         assert_screen_contains(&screen, "New Session");
         assert_screen_contains(&screen, "Fork");
@@ -9938,11 +10067,16 @@ mod tests {
         assert_screen_contains(&screen, "动作菜单");
         assert_screen_contains(&screen, "会话动作");
         assert_screen_contains(&screen, "↩ 恢复");
+        assert_screen_contains(&screen, "!  满权限恢复");
         assert_screen_contains(&screen, "→ 交接");
         assert_screen_contains(&screen, "+  新会话");
         assert_screen_contains(&screen, "⤴ 分叉");
         assert_screen_contains(&screen, "↗ 跳转  ·");
         assert_screen_contains(&screen, "可通过本地 provider CLI 恢复该会话。");
+        assert_screen_contains(
+            &screen,
+            "跳过 Codex 的全部审批并禁用沙箱；仅应在外部已隔离的环境中使用。",
+        );
         assert_screen_contains(&screen, "可调用 Codex 原生 session fork。");
         assert_screen_contains(&screen, "Hooks 未启用，无法获得实时 tmux 状态。");
         assert!(!screen.contains("可用"), "{screen}");
@@ -9959,6 +10093,51 @@ mod tests {
             !screen.contains("Whole-session fork is planned"),
             "{screen}"
         );
+    }
+
+    #[test]
+    fn full_access_resume_confirmation_renders_danger_and_command_at_narrow_width() {
+        let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.handle_key(key('o'));
+        app.action_menu_selection = app
+            .action_menu_entries()
+            .iter()
+            .position(|entry| entry.action.kind == SessionAvailableActionKind::FullAccessResume)
+            .expect("full-access Resume entry");
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        let wide = render_text(&app, 120, 52);
+        let narrow = render_text(&app, 80, 24);
+
+        assert_screen_contains(&wide, "Full-access Resume");
+        assert_screen_contains(&wide, "EXTREMELY DANGEROUS");
+        assert_screen_contains(&wide, "--dangerously-bypass-approvals-and-sandbox");
+        assert_screen_contains(&wide, "Shift+R");
+        assert_screen_contains(&narrow, "EXTREMELY DANGEROUS");
+        assert_screen_contains(&narrow, "Shift+R");
+    }
+
+    #[test]
+    fn full_access_resume_confirmation_localizes_zh_hans() {
+        let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.set_ui_preferences_for_test(crate::core::config::UiPreferencesConfig {
+            language: crate::core::config::UiLanguage::ZhHans,
+            theme: crate::core::config::UiThemeName::Moonbox,
+        });
+        app.handle_key(key('o'));
+        app.action_menu_selection = app
+            .action_menu_entries()
+            .iter()
+            .position(|entry| entry.action.kind == SessionAvailableActionKind::FullAccessResume)
+            .expect("full-access Resume entry");
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        let screen = render_text(&app, 120, 52);
+
+        assert_screen_contains(&screen, "满权限恢复");
+        assert_screen_contains(&screen, "极度危险");
+        assert_screen_contains(&screen, "禁用全部审批提示和沙箱");
+        assert_screen_contains(&screen, "按 Shift+R 以满权限恢复");
     }
 
     #[test]
@@ -10924,6 +11103,53 @@ mod tests {
         assert!(!screen.contains("Timeline Items:"), "{screen}");
         assert!(!screen.contains("Portrait:"), "{screen}");
         assert!(!screen.contains("shape U"), "{screen}");
+    }
+
+    #[test]
+    fn fork_children_remain_visible_and_actionable_across_session_list_viewports() {
+        let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        let mut parent = test_session("2026-06-07T13:30:00Z", None);
+        parent.id = "codex-parent".into();
+        parent.title = "Parent session".into();
+
+        let mut child_old = test_session("2026-06-07T13:31:00Z", None);
+        child_old.id = "codex-child-old".into();
+        child_old.title = "Child old".into();
+        child_old.provider_metadata = Some(crate::core::model::ProviderSessionMetadata {
+            parent_session_id: Some(parent.id.clone()),
+            ..crate::core::model::ProviderSessionMetadata::default()
+        });
+
+        let mut child_new = test_session("2026-06-07T13:32:00Z", None);
+        child_new.id = "codex-child-new".into();
+        child_new.title = "Child new".into();
+        child_new.provider_metadata = Some(crate::core::model::ProviderSessionMetadata {
+            parent_session_id: Some(parent.id.clone()),
+            ..crate::core::model::ProviderSessionMetadata::default()
+        });
+
+        app.data.sessions = vec![child_new, child_old, parent];
+        app.selected_session = 0;
+        app.archived_sessions.clear();
+        app.apply_session_filter(SessionFilter::All);
+
+        for (width, height) in [(80, 24), (120, 40)] {
+            let screen = render_text(&app, width, height);
+            assert_screen_contains(&screen, "Child new");
+            assert_screen_contains(&screen, "Child old");
+        }
+
+        app.handle_key(key('j'));
+        assert_eq!(
+            app.current_session().expect("child session").id,
+            "codex-child-old"
+        );
+        app.handle_key(key('o'));
+
+        let action_menu = render_text(&app, 120, 40);
+        assert_screen_contains(&action_menu, "Action Menu");
+        assert_screen_contains(&action_menu, "Session: Codex / codex-child-old");
+        assert_screen_contains(&action_menu, "Resume");
     }
 
     #[test]

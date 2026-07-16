@@ -14,10 +14,12 @@ export MOONBOX_HERMES_HOME="$smoke_home/hermes"
 export MOONBOX_CONFIG="$smoke_home/config.json"
 export MOONBOX_SESSION_MODE=fixture
 export MOONBOX_SESSION_LIMIT=50
+# Snapshot SVGs are versioned release assets, so render them under a fixed
+# terminal capability and clock instead of inheriting the caller's terminal.
 export MOONBOX_TUI_NOW_UNIX=1780650000
-unset NO_COLOR
 export COLORTERM=truecolor
 export TERM=xterm-256color
+unset NO_COLOR
 
 scenes=(
   "action-menu:moonbox-action-menu.svg"
@@ -45,14 +47,15 @@ grep -Fq '![Moonbox yank panel](docs/assets/moonbox-yank.svg)' README.md
 grep -Fq '![Moonbox handoff review](docs/assets/moonbox-handoff-review.svg)' README.md
 grep -Fq '![Moonbox timeline details](docs/assets/moonbox-timeline-details.svg)' README.md
 grep -Fq 'cargo install --git https://github.com/Gunsio/moonbox' README.md
-grep -Fq 'cargo install --path . --locked' README.md
+grep -Fq 'cargo run --locked -- tui' README.md
+grep -Fq 'Homebrew and a Cargo global installation are alternative channels.' README.md
 grep -Fq 'MOONBOX_SESSION_MODE=fixture moon sessions --json --filter codex' README.md
 grep -Fq 'MOONBOX_SESSION_MODE=fixture moon doctor --json' README.md
 grep -Fq 'moon completions zsh > /tmp/_moon' README.md
 grep -Fq 'brew tap Gunsio/tap' README.md
 grep -Fq 'brew trust --formula gunsio/tap/moonbox' README.md
-grep -Fq 'cross-CLI session workbench' README.md
-grep -Fq 'like a Moonlight Box' README.md
+grep -Fq 'local and SSH-backed session management entry point' README.md
+grep -Fq 'inspired by the Moonlight Box' README.md
 grep -Fq 'Luoshen theme pack' README.md
 grep -Fq 'Acknowledgements' README.md
 
