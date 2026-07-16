@@ -151,6 +151,16 @@ pub fn load_timeline_preview(session: &SessionSummary) -> Result<CanonicalTimeli
     load_timeline_with_limit(session, preview_timeline_event_limit(session))
 }
 
+pub fn load_timeline_up_to(
+    session: &SessionSummary,
+    event_limit: usize,
+) -> Result<CanonicalTimeline, CoreError> {
+    if event_limit == 0 {
+        return load_timeline(session);
+    }
+    load_timeline_with_limit(session, Some(event_limit))
+}
+
 pub fn configured_timeline_event_limit() -> Option<usize> {
     match std::env::var(TIMELINE_EVENT_LIMIT_ENV) {
         Ok(value) if value.trim() == "0" => None,
@@ -403,6 +413,32 @@ mod tests {
 
         assert_eq!(timeline.source_session, session.id);
         assert!(!timeline.events.is_empty());
+    }
+
+    #[test]
+    fn timeline_up_to_expands_fixture_preview_by_requested_page_bound() {
+        let session = list_sessions()
+            .expect("sessions")
+            .into_iter()
+            .find(|session| session.id == "codex-cxcp-design")
+            .expect("codex session");
+
+        let first_page = load_timeline_up_to(&session, 2).expect("first page");
+        let second_page = load_timeline_up_to(&session, 4).expect("second page");
+
+        assert_eq!(first_page.events.len(), 3);
+        assert_eq!(second_page.events.len(), 5);
+        assert_eq!(
+            first_page.events.last().map(|event| event.title.as_str()),
+            Some("Timeline preview truncated")
+        );
+        assert_eq!(
+            second_page.events.last().map(|event| event.title.as_str()),
+            Some("Timeline preview truncated")
+        );
+        assert_eq!(second_page.events[0].id, first_page.events[0].id);
+        assert_eq!(second_page.events[1].id, first_page.events[1].id);
+        assert_ne!(second_page.events[2].title, "Timeline preview truncated");
     }
 
     #[test]

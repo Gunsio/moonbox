@@ -231,8 +231,35 @@ struct PendingSessionLoad {
     request_id: u64,
     session_id: String,
     target: CliTool,
+    purpose: SessionLoadPurpose,
     started_at: Instant,
     receiver: mpsc::Receiver<SessionLoadResult>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SessionLoadPurpose {
+    Details,
+    TimelineExpansion { event_limit: usize },
+}
+
+impl SessionLoadPurpose {
+    fn is_timeline_expansion(self) -> bool {
+        matches!(self, Self::TimelineExpansion { .. })
+    }
+
+    fn failure_label(self) -> &'static str {
+        match self {
+            Self::Details => "Session load",
+            Self::TimelineExpansion { .. } => "Timeline expansion",
+        }
+    }
+
+    fn event_limit(self) -> Option<usize> {
+        match self {
+            Self::Details => None,
+            Self::TimelineExpansion { event_limit } => Some(event_limit),
+        }
+    }
 }
 
 struct PendingSessionPreview {
@@ -1697,6 +1724,12 @@ impl App {
         self.pending_session_load.is_some()
     }
 
+    pub fn is_timeline_expansion_pending(&self) -> bool {
+        self.pending_session_load
+            .as_ref()
+            .is_some_and(|pending| pending.purpose.is_timeline_expansion())
+    }
+
     pub fn is_session_preview_pending(&self) -> bool {
         self.pending_session_preview.is_some() || self.deferred_session_preview.is_some()
     }
@@ -2245,7 +2278,11 @@ impl App {
                 Err(TryRecvError::Disconnected) => {
                     self.pending_share_handoff_copy = false;
                     self.compile_status = "FAILED";
-                    self.set_status(format!("Session load failed: {}", pending.session_id));
+                    self.set_status(format!(
+                        "{} failed: {}",
+                        pending.purpose.failure_label(),
+                        pending.session_id
+                    ));
                     changed = true;
                 }
             }
@@ -3434,7 +3471,11 @@ impl App {
                 }
             }
             Focus::Timeline => {
-                self.selected_event = last_visible_timeline_event(&self.data, &self.rewind_event_id)
+                self.selected_event =
+                    last_visible_timeline_event(&self.data, &self.rewind_event_id);
+                if timeline_has_preview_truncation(&self.data) {
+                    self.request_selected_session_timeline_expansion();
+                }
             }
             Focus::Capsule => self.scroll_capsule(true, 999),
             Focus::Branches => {}
@@ -5585,6 +5626,75 @@ impl App {
         true
     }
 
+    fn request_selected_session_timeline_expansion(&mut self) {
+        if !self.selected_session_timeline_loaded() {
+            self.set_status("Timeline expansion waits for the selected session preview");
+            return;
+        }
+        if !timeline_has_preview_truncation(&self.data) {
+            return;
+        }
+        if self.is_timeline_expansion_pending() {
+            self.set_status("Loading more timeline events in the background");
+            return;
+        }
+        if self.is_session_load_pending() {
+            self.set_status("Timeline expansion waits for the selected session load");
+            return;
+        }
+        if !self.current_data_space().is_local() {
+            self.set_status(
+                "Timeline expansion is unavailable while a remote session preview is truncated",
+            );
+            return;
+        }
+
+        let Some(event_limit) = next_timeline_event_limit(&self.data) else {
+            return;
+        };
+
+        let Some(session) = self.data.sessions.get(self.selected_session).cloned() else {
+            self.set_status("No session selected");
+            return;
+        };
+        let target = self.data.target;
+        self.session_load_request_id = self.session_load_request_id.wrapping_add(1);
+        self.session_preview_request_id = self.session_preview_request_id.wrapping_add(1);
+        self.pending_session_preview = None;
+        self.deferred_session_preview = None;
+        let request_id = self.session_load_request_id;
+        let sessions = self.data.sessions.clone();
+        let source_adapters = self.data.source_adapters.clone();
+        let worker_session = session.clone();
+        let worker_session_id = session.id.clone();
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let result = workbench::load_workbench_from_session_snapshot_with_timeline_limit(
+                worker_session,
+                sessions,
+                source_adapters,
+                target,
+                event_limit,
+            );
+            let _ = sender.send(result);
+        });
+
+        self.pending_session_load = Some(PendingSessionLoad {
+            request_id,
+            session_id: worker_session_id,
+            target,
+            purpose: SessionLoadPurpose::TimelineExpansion { event_limit },
+            started_at: Instant::now(),
+            receiver,
+        });
+        self.compile_status = "LOADING";
+        self.verify_passed = false;
+        self.set_status(format!(
+            "Loading more timeline events (up to {event_limit}): {} {}",
+            session.cli, session.title,
+        ));
+    }
+
     fn request_selected_session_details(&mut self) {
         let Some(session) = self.data.sessions.get(self.selected_session).cloned() else {
             self.pending_session_load = None;
@@ -5625,6 +5735,7 @@ impl App {
             request_id,
             session_id: worker_session_id,
             target,
+            purpose: SessionLoadPurpose::Details,
             started_at: Instant::now(),
             receiver,
         });
@@ -5670,6 +5781,7 @@ impl App {
             request_id,
             session_id: worker_session_id,
             target,
+            purpose: SessionLoadPurpose::Details,
             started_at: Instant::now(),
             receiver,
         });
@@ -5762,6 +5874,8 @@ impl App {
         }
 
         let elapsed = pending.started_at.elapsed();
+        let purpose = pending.purpose;
+        let previous_rewind_event_id = self.rewind_event_id.clone();
         let selected_compiler = self.selected_compiler;
         let selected_compiler_id = self
             .data
@@ -5776,8 +5890,16 @@ impl App {
                     && self.target_launch_result.is_none()
                     && self.launch_review_error.is_none()
                     && self.pending_launch_review.is_none();
-                let rewind_event_id = initial_rewind_event_id(&data);
-                let selected_event = rewind_event_index(&data, &rewind_event_id);
+                let rewind_event_id = if purpose.is_timeline_expansion() {
+                    launch_rewind_event_id(&data, &previous_rewind_event_id)
+                } else {
+                    initial_rewind_event_id(&data)
+                };
+                let selected_event = if purpose.is_timeline_expansion() {
+                    last_visible_timeline_event(&data, &rewind_event_id)
+                } else {
+                    rewind_event_index(&data, &rewind_event_id)
+                };
                 self.data = data;
                 self.refresh_visible_sessions();
                 self.selected_session = self
@@ -5791,28 +5913,46 @@ impl App {
                 self.selected_compiler =
                     compiler_index_for_id(&self.data, &selected_compiler_id, selected_compiler);
                 self.data.capsule.compiler = self.data.compilers[self.selected_compiler].clone();
-                self.rewind_event_id = rewind_event_id;
+                self.rewind_event_id = rewind_event_id.clone();
+                if purpose.is_timeline_expansion()
+                    && let Some(title) = self.timeline_event_title(&rewind_event_id)
+                {
+                    self.apply_rewind_event(rewind_event_id, title);
+                }
                 self.capsule_scroll = 0;
                 self.compile_status = "PREVIEW";
                 self.verify_passed = false;
                 if launch_was_waiting {
                     self.set_status("Choose target CLI");
                 } else if let Some(session) = self.current_session() {
+                    let label = match (
+                        purpose.event_limit(),
+                        timeline_has_preview_truncation(&self.data),
+                    ) {
+                        (Some(_), true) => "Timeline expanded",
+                        (Some(_), false) => "Timeline complete",
+                        (None, _) => "Timeline",
+                    };
                     self.set_status(format!(
-                        "Timeline: {} {} ({} events, {} ms)",
+                        "{label}: {} {} ({} events, {} ms)",
                         session.cli,
                         session.title,
                         self.data.timeline.len(),
                         elapsed.as_millis()
                     ));
                 } else {
-                    self.set_status(format!("Session loaded ({} ms)", elapsed.as_millis()));
+                    self.set_status(format!(
+                        "{} complete ({} ms)",
+                        purpose.failure_label(),
+                        elapsed.as_millis()
+                    ));
                 }
             }
             Err(error) => {
                 self.compile_status = "FAILED";
                 self.set_status(format!(
-                    "Session reload failed: {error} ({} ms)",
+                    "{} failed: {error} ({} ms)",
+                    purpose.failure_label(),
                     elapsed.as_millis()
                 ));
             }
@@ -6689,7 +6829,26 @@ fn timeline_event_title_for_data<'a>(data: &'a WorkbenchData, event_id: &str) ->
 fn timeline_has_preview_truncation(data: &WorkbenchData) -> bool {
     data.timeline
         .iter()
-        .any(|event| event.title == "Timeline preview truncated")
+        .any(timeline_event_is_preview_truncation)
+}
+
+fn next_timeline_event_limit(data: &WorkbenchData) -> Option<usize> {
+    if !timeline_has_preview_truncation(data) {
+        return None;
+    }
+    let loaded_event_count = data
+        .timeline
+        .iter()
+        .filter(|event| !timeline_event_is_preview_truncation(event))
+        .count();
+    let page_size = sources::configured_timeline_event_limit()
+        .unwrap_or(sources::DEFAULT_TIMELINE_EVENT_LIMIT)
+        .max(1);
+    Some(loaded_event_count.saturating_add(page_size))
+}
+
+fn timeline_event_is_preview_truncation(event: &TimelineEvent) -> bool {
+    event.title == "Timeline preview truncated"
 }
 
 fn rewind_event_index(data: &WorkbenchData, rewind_event_id: &str) -> usize {
@@ -7401,6 +7560,63 @@ mod tests {
 
         app.handle_key(key('k'));
         assert_eq!(app.selected_event, 1);
+    }
+
+    #[test]
+    fn timeline_g_loads_next_preview_page_in_background_and_lands_at_its_end() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.focus = Focus::Timeline;
+        let preserved_rewind_event_id = app.rewind_event_id.clone();
+        app.data
+            .timeline
+            .push(crate::core::local_jsonl::timeline_preview_truncated_event(
+                app.data.timeline.len() + 1,
+                app.data.timeline.len(),
+            ));
+        let preview_last = last_visible_timeline_event(&app.data, &app.rewind_event_id);
+
+        app.handle_key(key('G'));
+
+        assert_eq!(app.selected_event, preview_last);
+        assert!(app.is_timeline_expansion_pending());
+        assert!(
+            app.status_message
+                .starts_with("Loading more timeline events (up to 307):")
+        );
+        assert!(matches!(
+            app.pending_session_load
+                .as_ref()
+                .map(|pending| pending.purpose),
+            Some(SessionLoadPurpose::TimelineExpansion { event_limit: 307 })
+        ));
+        let request_id = app.session_load_request_id;
+
+        app.handle_key(key('G'));
+        assert_eq!(app.session_load_request_id, request_id);
+        assert!(app.is_timeline_expansion_pending());
+
+        settle_session_load(&mut app);
+
+        assert!(!app.is_timeline_expansion_pending());
+        assert!(!timeline_has_preview_truncation(&app.data));
+        assert_eq!(app.rewind_event_id, preserved_rewind_event_id);
+        assert_eq!(
+            app.selected_event,
+            last_visible_timeline_event(&app.data, &app.rewind_event_id)
+        );
+        assert!(app.status_message.starts_with("Timeline complete: "));
+    }
+
+    #[test]
+    fn timeline_g_keeps_normal_bottom_jump_when_preview_is_complete() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.focus = Focus::Timeline;
+        let expected = last_visible_timeline_event(&app.data, &app.rewind_event_id);
+
+        app.handle_key(key('G'));
+
+        assert_eq!(app.selected_event, expected);
+        assert!(!app.is_session_load_pending());
     }
 
     #[test]

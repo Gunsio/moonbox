@@ -1492,6 +1492,21 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &App) {
         lines.push(Line::raw(""));
     }
 
+    if !lines.is_empty() && app.is_timeline_expansion_pending() {
+        lines.push(loading_heading(
+            app,
+            localized(language, "Loading more timeline", "正在加载更多 timeline"),
+        ));
+        lines.push(Line::from(Span::styled(
+            localized(
+                language,
+                "The current preview stays available; Moonbox will jump to the next loaded end when ready.",
+                "当前预览会保留；完成后 Moonbox 会跳到新加载内容的末尾。",
+            ),
+            Style::default().fg(theme::muted()),
+        )));
+    }
+
     if lines.is_empty() && app.is_session_load_pending() {
         lines.extend(session_loading_timeline_lines(language, app));
     } else if lines.is_empty() && app.is_session_preview_pending() {
@@ -10189,6 +10204,27 @@ mod tests {
         assert_screen_contains(&first, "| Loading timeline preview");
         assert_screen_contains(&second, "/ Loading timeline preview");
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn timeline_g_expansion_keeps_preview_visible_with_loading_feedback() {
+        let mut app = App::new(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.data
+            .timeline
+            .push(crate::core::local_jsonl::timeline_preview_truncated_event(
+                app.data.timeline.len() + 1,
+                app.data.timeline.len(),
+            ));
+
+        app.handle_key(key('G'));
+
+        let wide = render_text(&app, 140, 40);
+        let narrow = render_text(&app, 80, 24);
+        assert_screen_contains(&wide, "showing first 7 events; press G to load more");
+        assert_screen_contains(&wide, "Loading more timeline");
+        assert_screen_contains(&wide, "current preview stays available");
+        assert_screen_contains(&narrow, "Loading more timeline");
     }
 
     #[test]

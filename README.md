@@ -94,7 +94,7 @@ core map stays predictable:
 | Key | Action |
 | --- | --- |
 | `j` / `k` | Move through the active list |
-| `gg` / `G` | Jump to top or bottom |
+| `gg` / `G` | Jump to top or bottom; `G` loads the next Timeline page when the preview is truncated |
 | `/` | Search sessions |
 | `[` / `]` | Change source filter |
 | `{` / `}` | Change data space |

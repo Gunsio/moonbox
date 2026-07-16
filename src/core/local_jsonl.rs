@@ -451,9 +451,7 @@ pub fn timeline_preview_truncated_event(number: usize, limit: usize) -> Timeline
         time: "--:--".into(),
         kind: TimelineKind::Tool,
         title: "Timeline preview truncated".into(),
-        detail: format!(
-            "showing first {limit} events; set MOONBOX_TIMELINE_EVENT_LIMIT=0 for full TUI preview"
-        ),
+        detail: format!("showing first {limit} events; press G to load more"),
         metadata: Default::default(),
     }
 }
@@ -777,5 +775,6 @@ mod tests {
         assert_eq!(events[0].detail, "first");
         assert_eq!(events[1].detail, "second");
         assert_eq!(events[2].title, "Timeline preview truncated");
+        assert!(events[2].detail.contains("press G"));
     }
 }
