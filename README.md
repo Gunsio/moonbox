@@ -98,7 +98,7 @@ core map stays predictable:
 | Key | Action |
 | --- | --- |
 | `j` / `k` | Move through the active list |
-| `gg` / `G` | Jump to top or bottom; `G` loads the next Timeline page when history is truncated. Its fixed third-column status names the page-relative percentage while loading, retains `This page 100%` after that page finishes, and never presents it as whole-session progress. |
+| `gg` / `G` | Jump to top or bottom; `G` loads the next Timeline page when history is truncated. Its fixed third-column status shows the real page-relative percentage only while `G` is actively loading; while idle it names the loaded count and next `G` action, never a fabricated whole-session percentage. |
 | `/` | Search sessions |
 | `[` / `]` | Change source filter |
 | `{` / `}` | Change data space |
