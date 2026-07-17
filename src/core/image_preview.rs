@@ -328,6 +328,7 @@ mod tests {
                 },
             }],
             source_adapters: Vec::new(),
+            timeline_source_coverage: None,
             capsule: WorkCapsule {
                 version: 1,
                 source_cli: CliTool::Codex,

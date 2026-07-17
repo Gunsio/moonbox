@@ -2,7 +2,10 @@ use super::{
     adapter::{SourceAdapter, collect_sessions},
     error::CoreError,
     fixture::FixtureSourceAdapter,
-    model::{CanonicalTimeline, CliTool, SessionSummary, SourceAdapterReport, SourceProvenance},
+    model::{
+        CanonicalTimeline, CliTool, SessionSummary, SourceAdapterReport, SourceProvenance,
+        TimelineParseProgress,
+    },
 };
 
 #[cfg(not(test))]
@@ -154,7 +157,7 @@ pub fn load_timeline_preview(session: &SessionSummary) -> Result<CanonicalTimeli
 pub fn load_timeline_up_to_with_progress(
     session: &SessionSummary,
     event_limit: usize,
-    on_progress: &mut dyn FnMut(usize),
+    on_progress: &mut dyn FnMut(TimelineParseProgress),
 ) -> Result<CanonicalTimeline, CoreError> {
     if event_limit == 0 {
         return load_timeline_with_limit_and_progress(session, None, on_progress);
@@ -194,7 +197,7 @@ fn load_timeline_with_limit(
 fn load_timeline_with_limit_and_progress(
     session: &SessionSummary,
     event_limit: Option<usize>,
-    on_progress: &mut dyn FnMut(usize),
+    on_progress: &mut dyn FnMut(TimelineParseProgress),
 ) -> Result<CanonicalTimeline, CoreError> {
     for adapter in runtime_adapters() {
         if adapter.tool() != session.cli {
@@ -463,9 +466,10 @@ mod tests {
             .expect("codex session");
         let mut reported = Vec::new();
 
-        let timeline =
-            load_timeline_up_to_with_progress(&session, 2, &mut |count| reported.push(count))
-                .expect("timeline");
+        let timeline = load_timeline_up_to_with_progress(&session, 2, &mut |progress| {
+            reported.push(progress.parsed_event_count)
+        })
+        .expect("timeline");
 
         assert_eq!(
             timeline

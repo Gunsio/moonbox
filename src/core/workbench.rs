@@ -63,7 +63,7 @@ pub fn load_workbench_from_session_snapshot_with_timeline_limit_and_progress(
     source_adapters: Vec<super::model::SourceAdapterReport>,
     target: CliTool,
     event_limit: usize,
-    on_progress: &mut dyn FnMut(usize),
+    on_progress: &mut dyn FnMut(super::model::TimelineParseProgress),
 ) -> Result<WorkbenchData, CoreError> {
     data::workbench_data_from_session_snapshot_with_timeline_limit_and_progress(
         source_session,
@@ -270,6 +270,7 @@ pub fn compile_capsule_from_workbench_snapshot(
             source_cli: workbench.source,
             source_session: session_id.into(),
             events: workbench.timeline.clone(),
+            source_coverage: workbench.timeline_source_coverage,
         },
         rewind_event_id,
         compiler,

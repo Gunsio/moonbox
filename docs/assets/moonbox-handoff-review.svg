@@ -13,7 +13,7 @@
   <text x="46" y="60" class="mono" font-size="14" font-weight="500" fill="#5c708a">╭ Moonbox CLI ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮</text>
   <text x="46" y="78" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
   <text x="73" y="78" class="mono" font-size="14" font-weight="800" fill="#e8eff4">MOONBOX</text>
-  <text x="145" y="78" class="mono" font-size="14" font-weight="500" fill="#94a2b2">v0.1.13</text>
+  <text x="145" y="78" class="mono" font-size="14" font-weight="500" fill="#94a2b2">v0.1.14</text>
   <text x="235" y="78" class="mono" font-size="14" font-weight="500" fill="#e8eff4">Filter</text>
   <text x="298" y="78" class="mono" font-size="14" font-weight="500" fill="#94a2b2">[ ]</text>
   <text x="325" y="78" class="mono" font-size="14" font-weight="500" fill="#e8eff4">:</text>
@@ -37,7 +37,7 @@
   <text x="397" y="132" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
   <text x="460" y="132" class="mono" font-size="14" font-weight="500" fill="#e8eff4">Conclusion: raw session copy is the wrong abstraction.</text>
   <text x="1018" y="132" class="mono" font-size="14" font-weight="500" fill="#5c708a">││</text>
-  <text x="1045" y="132" class="mono" font-size="14" font-weight="800" fill="#82be9d">All events 100%</text>
+  <text x="1045" y="132" class="mono" font-size="14" font-weight="800" fill="#82be9d">All events loaded</text>
   <text x="1441" y="132" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
   <text x="46" y="150" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="100" y="150" class="mono" font-size="14" font-weight="800" fill="#e8eff4">42K tokens ·</text>
