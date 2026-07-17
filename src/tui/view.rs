@@ -2473,12 +2473,17 @@ fn timeline_load_status_lines(
 
     match state {
         TimelineLoadState::LoadingPage(progress) if compact => vec![Line::from(Span::styled(
-            format!(
-                "TL {}% {}/{}",
-                progress.percent(),
-                progress.loaded_events,
-                progress.total_events
-            ),
+            if width >= 20 {
+                format!(
+                    "{} {}% · +{}/{}",
+                    localized(language, "Page", "本页"),
+                    progress.percent(),
+                    progress.loaded_events,
+                    progress.total_events
+                )
+            } else {
+                format!("TL {}%", progress.percent())
+            },
             Style::default()
                 .fg(theme::gold())
                 .add_modifier(Modifier::BOLD),
@@ -2492,63 +2497,76 @@ fn timeline_load_status_lines(
             } else {
                 String::new()
             };
+            let mut headline = Vec::new();
+            if width >= 30 {
+                headline.push(Span::styled(
+                    spinner_frame(animation_tick),
+                    Style::default()
+                        .fg(theme::gold())
+                        .add_modifier(Modifier::BOLD),
+                ));
+                headline.push(Span::raw(" "));
+            }
+            headline.extend([
+                Span::styled(localized(language, "This page", "本页"), heading_style),
+                Span::raw(" "),
+                Span::styled(
+                    format!("{}%", progress.percent()),
+                    Style::default()
+                        .fg(theme::gold())
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" · "),
+                Span::styled(
+                    format!("+{}/{}", progress.loaded_events, progress.total_events),
+                    detail_style,
+                ),
+            ]);
             vec![
+                Line::from(headline),
                 Line::from(vec![
                     Span::styled(
-                        spinner_frame(animation_tick),
-                        Style::default()
-                            .fg(theme::gold())
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw(" "),
-                    Span::styled(
-                        localized(language, "Timeline Load · Page", "Timeline 加载 · 分页"),
-                        heading_style,
-                    ),
-                ]),
-                Line::from(vec![
-                    Span::styled(
-                        match language {
-                            UiLanguage::English => format!(
-                                "  {}% · {}/{} new",
-                                progress.percent(),
-                                progress.loaded_events,
-                                progress.total_events
-                            ),
-                            UiLanguage::ZhHans => format!(
-                                "  {}% · {}/{} 新事件",
-                                progress.percent(),
-                                progress.loaded_events,
-                                progress.total_events
-                            ),
-                        },
+                        localized(language, "  Loading this page", "  正在加载本页"),
                         detail_style,
                     ),
                     Span::styled(bar, Style::default().fg(theme::gold())),
                 ]),
             ]
         }
-        TimelineLoadState::FinalizingPage { .. } if compact => vec![Line::from(Span::styled(
-            localized(language, "TL finalizing", "TL 正在完成"),
+        TimelineLoadState::FinalizingPage {
+            loaded_events,
+            total_events,
+        } if compact => vec![Line::from(Span::styled(
+            if width >= 20 {
+                format!(
+                    "{} 100% · {loaded_events}/{total_events}",
+                    localized(language, "Page", "本页")
+                )
+            } else {
+                "TL 100%".into()
+            },
             Style::default()
                 .fg(theme::gold())
                 .add_modifier(Modifier::BOLD),
         ))],
-        TimelineLoadState::FinalizingPage { .. } => vec![
-            Line::from(Span::styled(
-                localized(
-                    language,
-                    "Timeline Load · Finalizing",
-                    "Timeline 加载 · 正在完成",
+        TimelineLoadState::FinalizingPage {
+            loaded_events,
+            total_events,
+        } => vec![
+            Line::from(vec![
+                Span::styled(localized(language, "This page", "本页"), heading_style),
+                Span::raw(" "),
+                Span::styled(
+                    "100%",
+                    Style::default()
+                        .fg(theme::gold())
+                        .add_modifier(Modifier::BOLD),
                 ),
-                heading_style,
-            )),
+                Span::raw(" · "),
+                Span::styled(format!("{loaded_events}/{total_events}"), detail_style),
+            ]),
             Line::from(Span::styled(
-                localized(
-                    language,
-                    "  Page parsed · updating view",
-                    "  分页已解析 · 正在更新视图",
-                ),
+                localized(language, "  Updating timeline", "  正在更新 timeline"),
                 detail_style,
             )),
         ],
@@ -2578,74 +2596,127 @@ fn timeline_load_status_lines(
         ],
         TimelineLoadState::Preview {
             loaded_events,
-            next_page_size: _,
+            next_page_size,
             can_expand,
         } if compact => vec![Line::from(Span::styled(
             if can_expand {
-                match language {
-                    UiLanguage::English => format!("TL {loaded_events} shown · G"),
-                    UiLanguage::ZhHans => format!("TL {loaded_events} 条 · G"),
+                if width >= 24 {
+                    format!(
+                        "{} 100% · {} G+{next_page_size}",
+                        localized(language, "Page", "本页"),
+                        timeline_load_compact_count(loaded_events)
+                    )
+                } else if width >= 20 {
+                    format!(
+                        "{} 100% · G+{next_page_size}",
+                        localized(language, "Page", "本页")
+                    )
+                } else {
+                    "TL 100% · G".into()
                 }
             } else {
-                match language {
-                    UiLanguage::English => format!("TL {loaded_events} shown"),
-                    UiLanguage::ZhHans => format!("TL {loaded_events} 条"),
+                if width >= 20 {
+                    format!(
+                        "{} 100% · {}",
+                        localized(language, "Page", "本页"),
+                        timeline_load_compact_count(loaded_events)
+                    )
+                } else {
+                    "TL 100%".into()
                 }
             },
-            Style::default().fg(theme::muted()),
+            Style::default()
+                .fg(theme::green())
+                .add_modifier(Modifier::BOLD),
         ))],
         TimelineLoadState::Preview {
             loaded_events,
             next_page_size,
             can_expand,
-        } => vec![
-            Line::from(Span::styled(
-                localized(language, "Timeline Load · Preview", "Timeline 加载 · 预览"),
-                heading_style,
-            )),
-            Line::from(Span::styled(
-                if can_expand {
-                    match language {
-                        UiLanguage::English => {
-                            format!("  {loaded_events} shown · G +{next_page_size}")
+        } => {
+            let loaded_count = timeline_load_status_count(loaded_events);
+            vec![
+                // A truncation marker proves this bounded page was parsed in full.
+                // Keep that page-relative completion explicit instead of presenting
+                // the internal "Preview" state or implying whole-session progress.
+                Line::from(vec![
+                    Span::styled(localized(language, "This page", "本页"), heading_style),
+                    Span::raw(" "),
+                    Span::styled(
+                        "100%",
+                        Style::default()
+                            .fg(theme::green())
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+                Line::from(Span::styled(
+                    if can_expand {
+                        match language {
+                            UiLanguage::English if width >= 30 => {
+                                format!("  {loaded_count} loaded · G loads +{next_page_size}")
+                            }
+                            UiLanguage::English => {
+                                format!("  {loaded_count} loaded · G +{next_page_size}")
+                            }
+                            UiLanguage::ZhHans if width >= 36 => {
+                                format!("  已加载 {loaded_count} 条 · G 再加载 {next_page_size} 条")
+                            }
+                            UiLanguage::ZhHans => {
+                                format!("  已加载 {loaded_count} 条 · G +{next_page_size}")
+                            }
                         }
-                        UiLanguage::ZhHans => {
-                            format!("  已显示 {loaded_events} 条 · G +{next_page_size}")
+                    } else {
+                        match language {
+                            UiLanguage::English => format!("  {loaded_count} loaded · read-only"),
+                            UiLanguage::ZhHans => format!("  已加载 {loaded_count} 条 · 只读"),
                         }
-                    }
-                } else {
-                    localized(
-                        language,
-                        "  Preview is read-only in this data space",
-                        "  当前数据空间中的预览为只读",
-                    )
-                    .into()
-                },
-                detail_style,
-            )),
-        ],
+                    },
+                    detail_style,
+                )),
+            ]
+        }
         TimelineLoadState::Complete { loaded_events } if compact => vec![Line::from(Span::styled(
-            match language {
-                UiLanguage::English => format!("TL done · {loaded_events}"),
-                UiLanguage::ZhHans => format!("TL 完成 · {loaded_events}"),
+            if width >= 20 {
+                let suffix = match language {
+                    UiLanguage::English if width >= 22 => " done",
+                    UiLanguage::ZhHans if width >= 24 => " 已完成",
+                    _ => "",
+                };
+                format!(
+                    "{} 100% · {}{suffix}",
+                    localized(language, "All", "全部"),
+                    timeline_load_compact_count(loaded_events)
+                )
+            } else {
+                "TL 100%".into()
             },
-            Style::default().fg(theme::green()),
+            Style::default()
+                .fg(theme::green())
+                .add_modifier(Modifier::BOLD),
         ))],
         TimelineLoadState::Complete { loaded_events } => vec![
             Line::from(Span::styled(
-                localized(
-                    language,
-                    "Timeline Load · Complete",
-                    "Timeline 加载 · 已完成",
-                ),
+                localized(language, "All events 100%", "全部事件 100%"),
                 Style::default()
                     .fg(theme::green())
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(Span::styled(
                 match language {
-                    UiLanguage::English => format!("  {loaded_events} events loaded"),
-                    UiLanguage::ZhHans => format!("  已加载 {loaded_events} 条事件"),
+                    UiLanguage::English if width >= 34 => {
+                        format!(
+                            "  {} loaded · end reached",
+                            timeline_load_status_count(loaded_events)
+                        )
+                    }
+                    UiLanguage::English => format!(
+                        "  {} loaded · done",
+                        timeline_load_status_count(loaded_events)
+                    ),
+                    UiLanguage::ZhHans => format!(
+                        "  已加载 {} 条 · 已到底",
+                        timeline_load_status_count(loaded_events)
+                    ),
                 },
                 detail_style,
             )),
@@ -2672,6 +2743,34 @@ fn timeline_load_status_lines(
                 detail_style,
             )),
         ],
+    }
+}
+
+fn timeline_load_compact_count(count: usize) -> String {
+    match count {
+        1_000_000.. => compact_timeline_load_count(count, 1_000_000, "m"),
+        10_000.. => format!("{}k", count / 1_000),
+        1_000.. => compact_timeline_load_count(count, 1_000, "k"),
+        _ => count.to_string(),
+    }
+}
+
+fn timeline_load_status_count(count: usize) -> String {
+    let full = count.to_string();
+    if display_width(&full) <= 5 {
+        full
+    } else {
+        timeline_load_compact_count(count)
+    }
+}
+
+fn compact_timeline_load_count(count: usize, unit: usize, suffix: &str) -> String {
+    let whole = count / unit;
+    let tenth = count % unit / (unit / 10);
+    if tenth == 0 {
+        format!("{whole}{suffix}")
+    } else {
+        format!("{whole}.{tenth}{suffix}")
     }
 }
 
@@ -10464,27 +10563,26 @@ mod tests {
         let wide = render_text(&app, 140, 40);
         let narrow = render_text(&app, 80, 24);
         assert_screen_contains(&wide, "showing first 7 events; press G to load more");
-        assert_screen_contains(&wide, "Timeline Load · Page");
-        assert_screen_contains(&wide, "0% · 0/300 new");
+        assert_screen_contains(&wide, "This page 0% · +0/300");
         assert!(
-            screen_column(&wide, "Timeline Load · Page") >= 84,
+            screen_column(&wide, "This page 0% · +0/300") >= 84,
             "timeline load status must be in the third Session Details column:\n{wide}"
         );
         assert!(!wide.contains("Loading more timeline"), "{wide}");
         assert!(!wide.contains("current preview stays available"), "{wide}");
-        assert_screen_contains(&narrow, "TL 0% 0/300");
+        assert_screen_contains(&narrow, "TL 0%");
 
         app.capsule_scroll = u16::MAX;
         let scrolled = render_text(&app, 140, 40);
-        assert_screen_contains(&scrolled, "Timeline Load · Page");
+        assert_screen_contains(&scrolled, "This page 0% · +0/300");
         assert!(
-            screen_column(&scrolled, "Timeline Load · Page") >= 84,
+            screen_column(&scrolled, "This page 0% · +0/300") >= 84,
             "timeline load status must remain fixed while session details scroll:\n{scrolled}"
         );
     }
 
     #[test]
-    fn timeline_load_status_never_leaves_a_completed_hundred_percent_label() {
+    fn timeline_load_status_keeps_page_percent_after_a_page_finishes() {
         let loading = timeline_load_status_lines(
             UiLanguage::English,
             0,
@@ -10494,7 +10592,7 @@ mod tests {
             }),
             20,
         );
-        assert_eq!(line_text(&loading[0]), "TL 42% 126/300");
+        assert_eq!(line_text(&loading[0]), "Page 42% · +126/300");
 
         let finalizing = timeline_load_status_lines(
             UiLanguage::English,
@@ -10506,8 +10604,25 @@ mod tests {
             44,
         );
         let finalizing_text = finalizing.iter().map(line_text).collect::<String>();
-        assert_screen_contains(&finalizing_text, "Finalizing");
-        assert!(!finalizing_text.contains("100%"), "{finalizing_text}");
+        assert_screen_contains(&finalizing_text, "This page 100% · 300/300");
+        assert_screen_contains(&finalizing_text, "Updating timeline");
+        assert!(!finalizing_text.contains("Finalizing"), "{finalizing_text}");
+
+        let preview = timeline_load_status_lines(
+            UiLanguage::English,
+            0,
+            TimelineLoadState::Preview {
+                loaded_events: 1800,
+                next_page_size: 300,
+                can_expand: true,
+            },
+            42,
+        );
+        let preview_text = preview.iter().map(line_text).collect::<String>();
+        assert_screen_contains(&preview_text, "This page 100%");
+        assert_screen_contains(&preview_text, "1800 loaded · G loads +300");
+        assert!(!preview_text.contains("300/300"), "{preview_text}");
+        assert!(!preview_text.contains("Preview"), "{preview_text}");
 
         let complete = timeline_load_status_lines(
             UiLanguage::English,
@@ -10516,9 +10631,116 @@ mod tests {
             44,
         );
         let complete_text = complete.iter().map(line_text).collect::<String>();
-        assert_screen_contains(&complete_text, "Complete");
-        assert_screen_contains(&complete_text, "607 events loaded");
-        assert!(!complete_text.contains('%'), "{complete_text}");
+        assert_screen_contains(&complete_text, "All events 100%");
+        assert_screen_contains(&complete_text, "607 loaded · end reached");
+    }
+
+    #[test]
+    fn timeline_load_status_fits_its_resident_column_at_narrow_widths() {
+        let states = [
+            TimelineLoadState::LoadingPage(crate::app::TimelineExpansionProgress {
+                loaded_events: 126,
+                total_events: 300,
+            }),
+            TimelineLoadState::FinalizingPage {
+                loaded_events: 300,
+                total_events: 300,
+            },
+            TimelineLoadState::Preview {
+                loaded_events: 1800,
+                next_page_size: 300,
+                can_expand: true,
+            },
+            TimelineLoadState::Preview {
+                loaded_events: 1_800_000,
+                next_page_size: 300,
+                can_expand: true,
+            },
+            TimelineLoadState::Complete {
+                loaded_events: 1800,
+            },
+        ];
+
+        for language in [UiLanguage::English, UiLanguage::ZhHans] {
+            for width in [20, 25, 26, 29, 30, 33, 34, 35, 36, 42] {
+                for state in states {
+                    for line in timeline_load_status_lines(language, 0, state, width) {
+                        let text = line_text(&line);
+                        assert!(
+                            display_width(&text) <= usize::from(width),
+                            "{language:?} status overflows {width} columns: {text:?}"
+                        );
+                    }
+                }
+            }
+        }
+
+        let zh_preview = timeline_load_status_lines(
+            UiLanguage::ZhHans,
+            0,
+            TimelineLoadState::Preview {
+                loaded_events: 1800,
+                next_page_size: 300,
+                can_expand: true,
+            },
+            25,
+        );
+        assert_screen_contains(&line_text(&zh_preview[0]), "本页");
+
+        let zh_complete = timeline_load_status_lines(
+            UiLanguage::ZhHans,
+            0,
+            TimelineLoadState::Complete {
+                loaded_events: 1800,
+            },
+            25,
+        );
+        assert_screen_contains(&line_text(&zh_complete[0]), "全部");
+    }
+
+    #[test]
+    fn settled_truncated_preview_keeps_a_truthful_page_percent_in_the_third_column() {
+        let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        let seed = app.data.timeline.first().cloned().expect("fixture event");
+        app.data.timeline = (1..=150)
+            .map(|index| {
+                let mut event = seed.clone();
+                event.id = format!("preview-{index:03}");
+                event
+            })
+            .collect();
+        app.data
+            .timeline
+            .push(crate::core::local_jsonl::timeline_preview_truncated_event(
+                151, 150,
+            ));
+
+        assert!(matches!(
+            app.timeline_load_state(),
+            TimelineLoadState::Preview {
+                loaded_events: 150,
+                next_page_size: 300,
+                can_expand: true,
+            }
+        ));
+
+        let wide = render_text(&app, 140, 40);
+        assert_screen_contains(&wide, "This page 100%");
+        assert_screen_contains(&wide, "150 loaded · G loads +300");
+        assert!(!wide.contains("300/300"), "{wide}");
+        assert!(!wide.contains("Preview"), "{wide}");
+        assert!(
+            screen_column(&wide, "This page 100%") >= 84,
+            "settled page status must stay in the third Session Details column:\n{wide}"
+        );
+
+        app.capsule_scroll = u16::MAX;
+        let scrolled = render_text(&app, 140, 40);
+        assert_screen_contains(&scrolled, "This page 100%");
+        assert!(
+            screen_column(&scrolled, "This page 100%") >= 84,
+            "settled page status must remain fixed while session details scroll:\n{scrolled}"
+        );
     }
 
     #[test]

@@ -7837,6 +7837,54 @@ mod tests {
     }
 
     #[test]
+    fn finished_timeline_page_with_a_remaining_marker_returns_to_preview() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        let session_id = app.current_session().expect("session").id.clone();
+        let mut expanded = app.data.clone();
+        let seed = expanded.timeline.last().cloned().expect("fixture event");
+        while loaded_timeline_event_count(&expanded) < 10 {
+            let mut event = seed.clone();
+            event.id = format!("expanded-{}", expanded.timeline.len() + 1);
+            expanded.timeline.push(event);
+        }
+        expanded
+            .timeline
+            .push(crate::core::local_jsonl::timeline_preview_truncated_event(
+                11, 10,
+            ));
+
+        app.session_load_request_id = 1;
+        app.pending_session_preview = None;
+        app.deferred_session_preview = None;
+        let (sender, receiver) = mpsc::channel();
+        app.pending_session_load = Some(PendingSessionLoad {
+            request_id: 1,
+            session_id,
+            target: app.data.target,
+            purpose: SessionLoadPurpose::TimelineExpansion {
+                event_limit: 10,
+                loaded_event_count: 7,
+            },
+            timeline_progress_events: 10,
+            started_at: Instant::now(),
+            receiver,
+        });
+        sender
+            .send(SessionLoadMessage::Finished(Box::new(Ok(expanded))))
+            .expect("finished page send");
+
+        assert!(app.poll_background());
+        assert!(matches!(
+            app.timeline_load_state(),
+            TimelineLoadState::Preview {
+                loaded_events: 10,
+                next_page_size: 300,
+                can_expand: true,
+            }
+        ));
+    }
+
+    #[test]
     fn timeline_expansion_progress_uses_the_requested_page_not_elapsed_time() {
         let progress = TimelineExpansionProgress {
             loaded_events: 126,
@@ -7981,7 +8029,7 @@ mod tests {
     }
 
     #[test]
-    fn timeline_load_state_uses_finalizing_not_a_resident_hundred_percent() {
+    fn timeline_load_state_marks_a_full_page_as_finalizing_before_applying_it() {
         let mut app = new_app(CliTool::Codex, CliTool::Hermes);
         let session_id = app.current_session().expect("session").id.clone();
         let (_sender, receiver) = mpsc::channel();

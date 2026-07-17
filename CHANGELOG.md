@@ -7,6 +7,21 @@ and this project uses semantic versioning once tagged releases start.
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-07-17
+
+### Fixed
+
+- Make the fixed Timeline status understandable after a `G` page finishes:
+  it now retains an explicit page-relative `This page 100%`, reports the
+  loaded event count and next `G` page, and removes the internal `Preview` /
+  `shown` wording. The exact `+loaded/target` count remains visible while the
+  parser is loading or finalizing; it is never inferred from the next page
+  size. Only a source that has actually reached its end is labeled
+  `All events 100%`.
+- Keep the resident Timeline status within its narrow third-column width at
+  80×24 and larger terminal sizes, with compact truthful page and action
+  labels when space is constrained.
+
 ## [0.1.11] - 2026-07-17
 
 ### Fixed

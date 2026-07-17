@@ -1,6 +1,6 @@
 [package]
 name = "moonbox"
-version = "0.1.11"
+version = "0.1.12"
 edition = "2024"
 default-run = "moonbox"
 description = "Cross-CLI session rewind workbench"
