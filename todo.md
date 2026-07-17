@@ -15,7 +15,9 @@
 - [x] **Timeline progress accuracy and placement** — prevent buffered parser
   updates from collapsing to a visible `100%`; keep a resident Timeline load
   status in the third Session Details column, with real page progress while
-  loading and the final loaded state after completion.
+  loading and an explicit, page-relative `本页 100%` after completion. Do not
+  expose implementation labels such as `Preview` or imply whole-session
+  progress before the source has reached its end.
 
 ## P0 — Experience regressions to verify and fix
 

@@ -13,7 +13,7 @@
   <text x="46" y="60" class="mono" font-size="14" font-weight="500" fill="#5c708a">╭ Moonbox CLI ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮</text>
   <text x="46" y="78" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
   <text x="73" y="78" class="mono" font-size="14" font-weight="800" fill="#e8eff4">MOONBOX</text>
-  <text x="145" y="78" class="mono" font-size="14" font-weight="500" fill="#94a2b2">v0.1.11</text>
+  <text x="145" y="78" class="mono" font-size="14" font-weight="500" fill="#94a2b2">v0.1.12</text>
   <text x="235" y="78" class="mono" font-size="14" font-weight="500" fill="#e8eff4">Filter</text>
   <text x="298" y="78" class="mono" font-size="14" font-weight="500" fill="#94a2b2">[ ]</text>
   <text x="325" y="78" class="mono" font-size="14" font-weight="500" fill="#e8eff4">:</text>
@@ -36,7 +36,6 @@
   <text x="253" y="132" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="271" y="132" class="mono" font-size="14" font-weight="800" fill="#debb7a">Session actions</text>
   <text x="1234" y="132" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
-  <text x="1243" y="132" class="mono" font-size="14" font-weight="800" fill="#82be9d">te</text>
   <text x="1441" y="132" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
   <text x="46" y="150" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="100" y="150" class="mono" font-size="14" font-weight="800" fill="#e8eff4">42K tokens · 10m</text>
