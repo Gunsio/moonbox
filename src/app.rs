@@ -271,6 +271,25 @@ impl TimelineExpansionProgress {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimelineLoadState {
+    LoadingPage(TimelineExpansionProgress),
+    FinalizingPage {
+        loaded_events: usize,
+        total_events: usize,
+    },
+    LoadingSession,
+    Preview {
+        loaded_events: usize,
+        next_page_size: usize,
+        can_expand: bool,
+    },
+    Complete {
+        loaded_events: usize,
+    },
+    NotLoaded,
+}
+
 impl SessionLoadPurpose {
     fn is_timeline_expansion(self) -> bool {
         matches!(self, Self::TimelineExpansion { .. })
@@ -1787,6 +1806,39 @@ impl App {
             .and_then(PendingSessionLoad::timeline_expansion_progress)
     }
 
+    pub fn timeline_load_state(&self) -> TimelineLoadState {
+        if let Some(progress) = self.timeline_expansion_progress() {
+            return if progress.percent() == 100 {
+                TimelineLoadState::FinalizingPage {
+                    loaded_events: progress.loaded_events,
+                    total_events: progress.total_events,
+                }
+            } else {
+                TimelineLoadState::LoadingPage(progress)
+            };
+        }
+        if self.is_session_load_pending() {
+            return TimelineLoadState::LoadingSession;
+        }
+        if !self.selected_session_timeline_loaded() {
+            return TimelineLoadState::NotLoaded;
+        }
+
+        let loaded_events = loaded_timeline_event_count(&self.data);
+        if timeline_has_preview_truncation(&self.data) {
+            let next_page_size = sources::configured_timeline_event_limit()
+                .unwrap_or(sources::DEFAULT_TIMELINE_EVENT_LIMIT)
+                .max(1);
+            return TimelineLoadState::Preview {
+                loaded_events,
+                next_page_size,
+                can_expand: self.current_data_space().is_local(),
+            };
+        }
+
+        TimelineLoadState::Complete { loaded_events }
+    }
+
     pub fn is_session_preview_pending(&self) -> bool {
         self.pending_session_preview.is_some() || self.deferred_session_preview.is_some()
     }
@@ -2324,45 +2376,73 @@ impl App {
         }
 
         if let Some(mut pending) = self.pending_session_load.take() {
-            let mut finished = None;
-            let mut disconnected = false;
-            loop {
+            if pending.purpose.is_timeline_expansion() {
+                // A page load uses a rendezvous channel and consumes exactly one
+                // parser checkpoint per frame. This lets the TUI render a real
+                // intermediate count instead of draining a fast parser straight
+                // through its final 100% message.
                 match pending.receiver.try_recv() {
                     Ok(SessionLoadMessage::TimelineProgress { parsed_event_count }) => {
                         let previous = pending.timeline_expansion_progress();
                         pending.timeline_progress_events =
                             pending.timeline_progress_events.max(parsed_event_count);
-                        let current = pending.timeline_expansion_progress();
-                        if current != previous {
-                            self.set_status(timeline_expansion_loading_status(current));
-                            changed = true;
-                        }
+                        changed |= pending.timeline_expansion_progress() != previous;
+                        self.pending_session_load = Some(pending);
                     }
                     Ok(SessionLoadMessage::Finished(result)) => {
-                        finished = Some(result);
-                        break;
+                        self.apply_session_load_result(pending, *result);
+                        changed = true;
                     }
-                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Empty) => {
+                        self.pending_session_load = Some(pending);
+                    }
                     Err(TryRecvError::Disconnected) => {
-                        disconnected = true;
-                        break;
+                        self.pending_share_handoff_copy = false;
+                        self.compile_status = "FAILED";
+                        self.set_status(format!(
+                            "{} failed: {}",
+                            pending.purpose.failure_label(),
+                            pending.session_id
+                        ));
+                        changed = true;
                     }
                 }
-            }
-            if let Some(result) = finished {
-                self.apply_session_load_result(pending, *result);
-                changed = true;
-            } else if disconnected {
-                self.pending_share_handoff_copy = false;
-                self.compile_status = "FAILED";
-                self.set_status(format!(
-                    "{} failed: {}",
-                    pending.purpose.failure_label(),
-                    pending.session_id
-                ));
-                changed = true;
             } else {
-                self.pending_session_load = Some(pending);
+                let mut finished = None;
+                let mut disconnected = false;
+                loop {
+                    match pending.receiver.try_recv() {
+                        Ok(SessionLoadMessage::TimelineProgress { parsed_event_count }) => {
+                            pending.timeline_progress_events =
+                                pending.timeline_progress_events.max(parsed_event_count);
+                            changed = true;
+                        }
+                        Ok(SessionLoadMessage::Finished(result)) => {
+                            finished = Some(result);
+                            break;
+                        }
+                        Err(TryRecvError::Empty) => break,
+                        Err(TryRecvError::Disconnected) => {
+                            disconnected = true;
+                            break;
+                        }
+                    }
+                }
+                if let Some(result) = finished {
+                    self.apply_session_load_result(pending, *result);
+                    changed = true;
+                } else if disconnected {
+                    self.pending_share_handoff_copy = false;
+                    self.compile_status = "FAILED";
+                    self.set_status(format!(
+                        "{} failed: {}",
+                        pending.purpose.failure_label(),
+                        pending.session_id
+                    ));
+                    changed = true;
+                } else {
+                    self.pending_session_load = Some(pending);
+                }
             }
         }
 
@@ -5713,9 +5793,7 @@ impl App {
             return;
         }
         if self.is_timeline_expansion_pending() {
-            self.set_status(timeline_expansion_loading_status(
-                self.timeline_expansion_progress(),
-            ));
+            self.set_status("Timeline page load already running");
             return;
         }
         if self.is_session_load_pending() {
@@ -5748,7 +5826,7 @@ impl App {
         let source_adapters = self.data.source_adapters.clone();
         let worker_session = session.clone();
         let worker_session_id = session.id.clone();
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = mpsc::sync_channel(0);
         thread::spawn(move || {
             let progress_step = timeline_progress_report_step(loaded_event_count, event_limit);
             let (result, last_reported_event_count) = {
@@ -5804,10 +5882,8 @@ impl App {
         self.compile_status = "LOADING";
         self.verify_passed = false;
         self.set_status(format!(
-            "{}: {} {}",
-            timeline_expansion_loading_status(self.timeline_expansion_progress()),
-            session.cli,
-            session.title,
+            "Loading next timeline page: {} {}",
+            session.cli, session.title,
         ));
     }
 
@@ -6968,20 +7044,8 @@ fn loaded_timeline_event_count(data: &WorkbenchData) -> usize {
         .count()
 }
 
-fn timeline_expansion_loading_status(progress: Option<TimelineExpansionProgress>) -> String {
-    match progress {
-        Some(progress) => format!(
-            "Loading more timeline events: {}% ({} / {} new events)",
-            progress.percent(),
-            progress.loaded_events,
-            progress.total_events,
-        ),
-        None => "Loading more timeline events in the background".into(),
-    }
-}
-
 fn timeline_progress_report_step(loaded_event_count: usize, event_limit: usize) -> usize {
-    const MAX_PROGRESS_UPDATES_PER_PAGE: usize = 100;
+    const MAX_PROGRESS_UPDATES_PER_PAGE: usize = 8;
     let page_event_count = event_limit.saturating_sub(loaded_event_count).max(1);
     page_event_count
         .saturating_add(MAX_PROGRESS_UPDATES_PER_PAGE - 1)
@@ -7736,7 +7800,7 @@ mod tests {
         assert!(app.is_timeline_expansion_pending());
         assert!(
             app.status_message
-                .starts_with("Loading more timeline events: 0% (0 / 300 new events):")
+                .starts_with("Loading next timeline page:")
         );
         assert_eq!(
             app.timeline_expansion_progress(),
@@ -7794,16 +7858,16 @@ mod tests {
     fn timeline_progress_messages_are_capped_to_page_relative_updates() {
         let report_step = timeline_progress_report_step(30_000, 30_300);
 
-        assert_eq!(report_step, 3);
+        assert_eq!(report_step, 38);
         assert!(!should_report_timeline_progress(
-            30_001,
+            30_037,
             30_000,
             30_000,
             30_300,
             report_step,
         ));
         assert!(should_report_timeline_progress(
-            30_003,
+            30_038,
             30_000,
             30_000,
             30_300,
@@ -7811,7 +7875,7 @@ mod tests {
         ));
         assert!(should_report_timeline_progress(
             30_300,
-            30_297,
+            30_262,
             30_000,
             30_300,
             report_step,
@@ -7852,8 +7916,96 @@ mod tests {
             })
         );
         assert_eq!(
-            app.status_message,
-            "Loading more timeline events: 42% (126 / 300 new events)"
+            app.timeline_load_state(),
+            TimelineLoadState::LoadingPage(TimelineExpansionProgress {
+                loaded_events: 126,
+                total_events: 300,
+            })
+        );
+        assert!(!app.status_message.contains('%'));
+    }
+
+    #[test]
+    fn timeline_expansion_consumes_one_parser_checkpoint_per_poll() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        let session_id = app.current_session().expect("session").id.clone();
+        let (sender, receiver) = mpsc::channel();
+        app.pending_session_preview = None;
+        app.deferred_session_preview = None;
+        app.pending_session_load = Some(PendingSessionLoad {
+            request_id: 1,
+            session_id,
+            target: app.data.target,
+            purpose: SessionLoadPurpose::TimelineExpansion {
+                event_limit: 607,
+                loaded_event_count: 307,
+            },
+            timeline_progress_events: 307,
+            started_at: Instant::now(),
+            receiver,
+        });
+        sender
+            .send(SessionLoadMessage::TimelineProgress {
+                parsed_event_count: 345,
+            })
+            .expect("first parser checkpoint");
+        sender
+            .send(SessionLoadMessage::TimelineProgress {
+                parsed_event_count: 433,
+            })
+            .expect("second parser checkpoint");
+
+        assert!(app.poll_background());
+        assert_eq!(
+            app.timeline_expansion_progress(),
+            Some(TimelineExpansionProgress {
+                loaded_events: 38,
+                total_events: 300,
+            })
+        );
+        assert!(app.is_timeline_expansion_pending());
+
+        assert!(app.poll_background());
+        assert_eq!(
+            app.timeline_expansion_progress(),
+            Some(TimelineExpansionProgress {
+                loaded_events: 126,
+                total_events: 300,
+            })
+        );
+        assert!(app.is_timeline_expansion_pending());
+
+        drop(sender);
+        assert!(app.poll_background());
+        assert!(!app.is_timeline_expansion_pending());
+    }
+
+    #[test]
+    fn timeline_load_state_uses_finalizing_not_a_resident_hundred_percent() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        let session_id = app.current_session().expect("session").id.clone();
+        let (_sender, receiver) = mpsc::channel();
+        app.pending_session_preview = None;
+        app.deferred_session_preview = None;
+        app.pending_session_load = Some(PendingSessionLoad {
+            request_id: 1,
+            session_id,
+            target: app.data.target,
+            purpose: SessionLoadPurpose::TimelineExpansion {
+                event_limit: 607,
+                loaded_event_count: 307,
+            },
+            timeline_progress_events: 607,
+            started_at: Instant::now(),
+            receiver,
+        });
+
+        assert_eq!(
+            app.timeline_load_state(),
+            TimelineLoadState::FinalizingPage {
+                loaded_events: 300,
+                total_events: 300,
+            }
         );
     }
 

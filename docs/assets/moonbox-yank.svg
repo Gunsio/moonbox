@@ -13,7 +13,7 @@
   <text x="46" y="60" class="mono" font-size="14" font-weight="500" fill="#5c708a">╭ Moonbox CLI ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮</text>
   <text x="46" y="78" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
   <text x="73" y="78" class="mono" font-size="14" font-weight="800" fill="#e8eff4">MOONBOX</text>
-  <text x="145" y="78" class="mono" font-size="14" font-weight="500" fill="#94a2b2">v0.1.10</text>
+  <text x="145" y="78" class="mono" font-size="14" font-weight="500" fill="#94a2b2">v0.1.11</text>
   <text x="235" y="78" class="mono" font-size="14" font-weight="500" fill="#e8eff4">Filter</text>
   <text x="298" y="78" class="mono" font-size="14" font-weight="500" fill="#94a2b2">[ ]</text>
   <text x="325" y="78" class="mono" font-size="14" font-weight="500" fill="#e8eff4">:</text>
@@ -37,12 +37,12 @@
   <text x="271" y="132" class="mono" font-size="14" font-weight="500" fill="#74a5d6">Session:</text>
   <text x="352" y="132" class="mono" font-size="14" font-weight="500" fill="#e8eff4">Codex / codex-cxcp-design</text>
   <text x="1234" y="132" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1243" y="132" class="mono" font-size="14" font-weight="800" fill="#82be9d">te</text>
   <text x="1441" y="132" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
   <text x="46" y="150" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="100" y="150" class="mono" font-size="14" font-weight="800" fill="#e8eff4">42K tokens · 10m</text>
   <text x="253" y="150" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="1234" y="150" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
-  <text x="1252" y="150" class="mono" font-size="14" font-weight="500" fill="#e8eff4">rewind design</text>
   <text x="1441" y="150" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
   <text x="46" y="168" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="82" y="168" class="mono" font-size="14" font-weight="500" fill="#debb7a">▲</text>
@@ -62,7 +62,7 @@
   <text x="271" y="186" class="mono" font-size="14" font-weight="500" fill="#5c708a">   └</text>
   <text x="334" y="186" class="mono" font-size="14" font-weight="500" fill="#5c708a">Copy the first user message from the loaded timeline.</text>
   <text x="1234" y="186" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
-  <text x="1243" y="186" class="mono" font-size="14" font-weight="500" fill="#e8eff4">n ago</text>
+  <text x="1252" y="186" class="mono" font-size="14" font-weight="500" fill="#e8eff4">rewind design</text>
   <text x="1441" y="186" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
   <text x="46" y="204" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="82" y="204" class="mono" font-size="14" font-weight="800" fill="#e07c92">!</text>
@@ -82,6 +82,7 @@
   <text x="271" y="222" class="mono" font-size="14" font-weight="500" fill="#5c708a">   └</text>
   <text x="334" y="222" class="mono" font-size="14" font-weight="500" fill="#5c708a">Copy the latest assistant message from the loaded timeline.</text>
   <text x="1234" y="222" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1243" y="222" class="mono" font-size="14" font-weight="500" fill="#e8eff4">n ago</text>
   <text x="1441" y="222" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
   <text x="46" y="240" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="253" y="240" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
@@ -102,14 +103,12 @@
   <text x="298" y="276" class="mono" font-size="14" font-weight="800" fill="#b094cb">→</text>
   <text x="316" y="276" class="mono" font-size="14" font-weight="500" fill="#76cbd3">Handoff content</text>
   <text x="1234" y="276" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
-  <text x="1243" y="276" class="mono" font-size="14" font-weight="800" fill="#e8eff4">tin_compiler</text>
   <text x="1441" y="276" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
   <text x="46" y="294" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="253" y="294" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="271" y="294" class="mono" font-size="14" font-weight="500" fill="#5c708a">   └</text>
   <text x="334" y="294" class="mono" font-size="14" font-weight="500" fill="#5c708a">Generate a handoff artifact, then copy it without launching the target.</text>
   <text x="1234" y="294" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
-  <text x="1243" y="294" class="mono" font-size="14" font-weight="500" fill="#e8eff4">re raw resume.</text>
   <text x="1441" y="294" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
   <text x="46" y="312" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="253" y="312" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
@@ -117,39 +116,40 @@
   <text x="298" y="312" class="mono" font-size="14" font-weight="800" fill="#debb7a">{}</text>
   <text x="325" y="312" class="mono" font-size="14" font-weight="500" fill="#76cbd3">Portable JSON</text>
   <text x="1234" y="312" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
-  <text x="1243" y="312" class="mono" font-size="14" font-weight="500" fill="#e8eff4">le for Hermes.</text>
+  <text x="1243" y="312" class="mono" font-size="14" font-weight="800" fill="#e8eff4">tin_compiler</text>
   <text x="1441" y="312" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
   <text x="46" y="330" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="253" y="330" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="271" y="330" class="mono" font-size="14" font-weight="500" fill="#5c708a">   └</text>
   <text x="334" y="330" class="mono" font-size="14" font-weight="500" fill="#5c708a">Copy a compact Moonbox JSON envelope for this selected session.</text>
   <text x="1234" y="330" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
-  <text x="1252" y="330" class="mono" font-size="14" font-weight="500" fill="#e8eff4">session rewind</text>
+  <text x="1243" y="330" class="mono" font-size="14" font-weight="500" fill="#e8eff4">re raw resume.</text>
   <text x="1441" y="330" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
   <text x="46" y="348" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="253" y="348" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="1234" y="348" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
-  <text x="1243" y="348" class="mono" font-size="14" font-weight="500" fill="#e8eff4">ewind point.</text>
+  <text x="1243" y="348" class="mono" font-size="14" font-weight="500" fill="#e8eff4">le for Hermes.</text>
   <text x="1441" y="348" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
   <text x="46" y="366" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="253" y="366" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="271" y="366" class="mono" font-size="14" font-weight="500" fill="#94a2b2">j/k choose   enter copy   Esc/q close</text>
   <text x="1234" y="366" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
-  <text x="1243" y="366" class="mono" font-size="14" font-weight="500" fill="#e07c92">ompiler may omit tool</text>
+  <text x="1252" y="366" class="mono" font-size="14" font-weight="500" fill="#e8eff4">session rewind</text>
   <text x="1441" y="366" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
   <text x="46" y="384" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="253" y="384" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="1234" y="384" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
-  <text x="1243" y="384" class="mono" font-size="14" font-weight="500" fill="#e07c92">and hidden provider</text>
+  <text x="1243" y="384" class="mono" font-size="14" font-weight="500" fill="#e8eff4">ewind point.</text>
   <text x="1441" y="384" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
   <text x="46" y="402" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="253" y="402" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="1234" y="402" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1243" y="402" class="mono" font-size="14" font-weight="500" fill="#e07c92">ompiler may omit tool</text>
   <text x="1441" y="402" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
   <text x="46" y="420" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="253" y="420" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="1234" y="420" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
-  <text x="1252" y="420" class="mono" font-size="14" font-weight="500" fill="#94a2b2">review the full</text>
+  <text x="1243" y="420" class="mono" font-size="14" font-weight="500" fill="#e07c92">and hidden provider</text>
   <text x="1441" y="420" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
   <text x="46" y="438" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="253" y="438" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
@@ -158,6 +158,7 @@
   <text x="46" y="456" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="253" y="456" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="1234" y="456" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
+  <text x="1252" y="456" class="mono" font-size="14" font-weight="500" fill="#94a2b2">review the full</text>
   <text x="1441" y="456" class="mono" font-size="14" font-weight="500" fill="#5c708a">│</text>
   <text x="46" y="474" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>
   <text x="253" y="474" class="mono" font-size="14" font-weight="500" fill="#debb7a">│</text>

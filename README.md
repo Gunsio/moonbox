@@ -48,8 +48,10 @@ moon export --session <session-id> --to lark --mode handoff --execute
   inventory without modifying the provider store.
 - **Timeline rewind**: inspect turns, tool evidence, images, and compact
   boundaries before choosing where to continue. When a preview is truncated,
-  `G` loads its next bounded page in the background and shows actual parsed
-  event progress without hiding the current preview.
+  `G` loads its next bounded page in the background. The third **Session
+  Details** column keeps a fixed Timeline status: real parsed-event progress
+  while loading, then the loaded or preview state without hiding the current
+  preview or leaving a misleading `100%` behind.
 - **Context health**: see provider-backed context usage, agent/model-resolved
   windows, quality-cliff estimates, and compact markers; unknown usage stays
   explicit instead of being turned into a fake percentage.
@@ -96,7 +98,7 @@ core map stays predictable:
 | Key | Action |
 | --- | --- |
 | `j` / `k` | Move through the active list |
-| `gg` / `G` | Jump to top or bottom; `G` loads the next Timeline page when the preview is truncated, with parsed-event progress |
+| `gg` / `G` | Jump to top or bottom; `G` loads the next Timeline page when the preview is truncated; its fixed third-column status shows parsed-event progress |
 | `/` | Search sessions |
 | `[` / `]` | Change source filter |
 | `{` / `}` | Change data space |

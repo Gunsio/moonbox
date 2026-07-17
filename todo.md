@@ -12,6 +12,10 @@
 - [x] **Timeline page progress** — while `G` loads a bounded page, keep the
   current preview visible and show actual parsed-event percentage plus
   loaded/target counts; never infer the value from elapsed time.
+- [x] **Timeline progress accuracy and placement** — prevent buffered parser
+  updates from collapsing to a visible `100%`; keep a resident Timeline load
+  status in the third Session Details column, with real page progress while
+  loading and the final loaded state after completion.
 
 ## P0 — Experience regressions to verify and fix
 

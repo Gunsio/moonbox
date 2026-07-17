@@ -7,6 +7,19 @@ and this project uses semantic versioning once tagged releases start.
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-07-17
+
+### Fixed
+
+- Keep Timeline page-load state resident at the top of the third Session
+  Details column. It now remains visible while details scroll, reports only
+  real parsed-page checkpoints while `G` loads more history, uses a brief
+  finalizing state instead of leaving `100%` on screen, and then reports the
+  loaded or preview state.
+- Prevent a fast parser from draining every Timeline progress message before a
+  frame can render. Bounded page loading now uses a rendezvous handoff and one
+  checkpoint per frame, while the normal TUI cadence remains unchanged.
+
 ## [0.1.10] - 2026-07-17
 
 ### Added
