@@ -14,10 +14,11 @@
   loaded/target counts; never infer the value from elapsed time.
 - [x] **Timeline progress accuracy and placement** — prevent buffered parser
   updates from collapsing to a visible `100%`; keep a resident Timeline load
-  status in the third Session Details column, with real page progress while
-  loading and an explicit, page-relative `本页 100%` after completion. Do not
-  expose implementation labels such as `Preview` or imply whole-session
-  progress before the source has reached its end.
+  status in the third Session Details column, with real page progress only
+  while loading. After a page completes but more history remains, show the
+  loaded count and next `G` action instead of stale `100%`; do not expose
+  implementation labels such as `Preview` or imply whole-session progress
+  before the source has reached its end.
 
 ## P0 — Experience regressions to verify and fix
 

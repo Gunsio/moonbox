@@ -7,6 +7,16 @@ and this project uses semantic versioning once tagged releases start.
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-07-17
+
+### Fixed
+
+- Stop leaving `This page 100%` in the fixed third-column Timeline status
+  after a bounded `G` page has already settled. Percentage now appears only
+  during an active page load; when more history remains, the status names the
+  loaded event count and the next `G` action instead. Moonbox still shows
+  `All events 100%` only after the source has actually reached its end.
+
 ## [0.1.12] - 2026-07-17
 
 ### Fixed
