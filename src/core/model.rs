@@ -671,9 +671,55 @@ pub struct WorkbenchData {
     pub source_adapters: Vec<SourceAdapterReport>,
     pub sessions: Vec<SessionSummary>,
     pub timeline: Vec<TimelineEvent>,
+    /// Verified coverage of a byte-addressable local Timeline source.
+    ///
+    /// This deliberately describes source bytes rather than canonical event count:
+    /// adapters may filter, split, or synthesize timeline events while parsing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeline_source_coverage: Option<TimelineSourceCoverage>,
     pub capsule: WorkCapsule,
     pub branches: Vec<BranchNode>,
     pub compilers: Vec<String>,
+}
+
+/// A bounded source-coverage measurement for a local timeline file.
+///
+/// `total_bytes` is a metadata snapshot made before reading. `scanned_bytes`
+/// is the byte frontier represented by canonical events that have been loaded
+/// into the timeline, not any parser lookahead used to decide whether another
+/// page exists. It is clamped to the snapshot so a concurrently appended file
+/// cannot yield a misleading value above 100%.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TimelineSourceCoverage {
+    pub scanned_bytes: u64,
+    pub total_bytes: u64,
+}
+
+impl TimelineSourceCoverage {
+    pub fn from_scanned_bytes(scanned_bytes: u64, total_bytes: u64) -> Option<Self> {
+        (total_bytes > 0).then_some(Self {
+            scanned_bytes: scanned_bytes.min(total_bytes),
+            total_bytes,
+        })
+    }
+
+    /// Returns a clamped source-coverage percentage without overflowing for large files.
+    pub fn percent(self) -> usize {
+        if self.total_bytes == 0 {
+            return 0;
+        }
+        ((u128::from(self.scanned_bytes.min(self.total_bytes)) * 100)
+            / u128::from(self.total_bytes)) as usize
+    }
+}
+
+/// A parser checkpoint. `coverage` is available only when the adapter has a
+/// byte-addressable source with a trustworthy size snapshot. It follows the
+/// loaded timeline frontier rather than parser lookahead.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TimelineParseProgress {
+    pub parsed_event_count: usize,
+    pub coverage: Option<TimelineSourceCoverage>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -682,6 +728,8 @@ pub struct CanonicalTimeline {
     pub source_cli: CliTool,
     pub source_session: String,
     pub events: Vec<TimelineEvent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_coverage: Option<TimelineSourceCoverage>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1200,6 +1248,26 @@ pub struct CompilerPresetInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn timeline_source_coverage_percent_is_clamped_and_overflow_safe() {
+        let partial = TimelineSourceCoverage::from_scanned_bytes(3, 10).expect("coverage");
+        assert_eq!(partial.percent(), 30);
+
+        let complete = TimelineSourceCoverage::from_scanned_bytes(u64::MAX, 1).expect("coverage");
+        assert_eq!(complete.scanned_bytes, 1);
+        assert_eq!(complete.percent(), 100);
+
+        assert!(TimelineSourceCoverage::from_scanned_bytes(0, 0).is_none());
+        assert_eq!(
+            TimelineSourceCoverage {
+                scanned_bytes: u64::MAX,
+                total_bytes: u64::MAX,
+            }
+            .percent(),
+            100
+        );
+    }
 
     #[test]
     fn timeline_event_accepts_legacy_five_field_json() {

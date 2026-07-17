@@ -49,9 +49,11 @@ moon export --session <session-id> --to lark --mode handoff --execute
 - **Timeline rewind**: inspect turns, tool evidence, images, and compact
   boundaries before choosing where to continue. When a preview is truncated,
   `G` loads its next bounded page in the background. The third **Session
-  Details** column keeps a fixed Timeline status: real parsed-event progress
-  while loading, then the loaded or preview state without hiding the current
-  preview or leaving a misleading `100%` behind.
+  Details** column keeps a fixed Timeline status: local JSONL sessions show
+  persistent source coverage (loaded-source bytes / the read-start file-size
+  snapshot), while `G` also shows the current page's parsed-event progress.
+  Providers without a trustworthy source total remain explicitly count-based;
+  Moonbox never turns their event counts into a fabricated percentage.
 - **Context health**: see provider-backed context usage, agent/model-resolved
   windows, quality-cliff estimates, and compact markers; unknown usage stays
   explicit instead of being turned into a fake percentage.
@@ -98,7 +100,7 @@ core map stays predictable:
 | Key | Action |
 | --- | --- |
 | `j` / `k` | Move through the active list |
-| `gg` / `G` | Jump to top or bottom; `G` loads the next Timeline page when history is truncated. Its fixed third-column status shows the real page-relative percentage only while `G` is actively loading; while idle it names the loaded count and next `G` action, never a fabricated whole-session percentage. |
+| `gg` / `G` | Jump to top or bottom; `G` loads the next Timeline page when history is truncated. Its fixed third-column status permanently shows verified local source coverage when available, plus the real current-page percentage while loading. It otherwise names the loaded count and next `G` action rather than fabricating a whole-session percentage. |
 | `/` | Search sessions |
 | `[` / `]` | Change source filter |
 | `{` / `}` | Change data space |

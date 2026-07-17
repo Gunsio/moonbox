@@ -24,8 +24,8 @@ use super::{
     model::{
         CanonicalTimeline, CliTool, ProviderSessionMetadata, SessionRuntimeStatus, SessionStatus,
         SessionSummary, SourceProvenance, TimelineAttachment, TimelineEvent, TimelineEventMetadata,
-        TimelineEventRawRef, TimelineFileChange, TimelineKind, TimelineRuntimeMetadata,
-        TimelineToolCall, TimelineToolResult,
+        TimelineEventRawRef, TimelineFileChange, TimelineKind, TimelineParseProgress,
+        TimelineRuntimeMetadata, TimelineToolCall, TimelineToolResult,
     },
 };
 
@@ -241,7 +241,7 @@ impl CodexAppServerSource {
         &self,
         thread_id: &str,
         event_limit: Option<usize>,
-        on_progress: &mut dyn FnMut(usize),
+        on_progress: &mut dyn FnMut(TimelineParseProgress),
     ) -> Result<CanonicalTimeline, AdapterError> {
         let mut events = Vec::new();
         let mut cursor = None;
@@ -270,6 +270,7 @@ impl CodexAppServerSource {
             source_cli: CODEX_TOOL,
             source_session: thread_id.into(),
             events,
+            source_coverage: None,
         })
     }
 
@@ -494,17 +495,20 @@ fn append_timeline_events_from_turns(
     turns: &[CodexAppTurn],
     events: &mut Vec<TimelineEvent>,
     event_limit: Option<usize>,
-    on_progress: &mut dyn FnMut(usize),
+    on_progress: &mut dyn FnMut(TimelineParseProgress),
 ) -> bool {
     for turn in turns {
         if let Some(event) = turn_error_event(thread_id, turn, events.len() + 1) {
             let before = events.len();
             let reached_limit = push_timeline_event(events, event, event_limit);
             if events.len() != before {
-                on_progress(if reached_limit {
-                    events.len().saturating_sub(1)
-                } else {
-                    events.len()
+                on_progress(TimelineParseProgress {
+                    parsed_event_count: if reached_limit {
+                        events.len().saturating_sub(1)
+                    } else {
+                        events.len()
+                    },
+                    coverage: None,
                 });
             }
             if reached_limit {
@@ -516,10 +520,13 @@ fn append_timeline_events_from_turns(
                 let before = events.len();
                 let reached_limit = push_timeline_event(events, event, event_limit);
                 if events.len() != before {
-                    on_progress(if reached_limit {
-                        events.len().saturating_sub(1)
-                    } else {
-                        events.len()
+                    on_progress(TimelineParseProgress {
+                        parsed_event_count: if reached_limit {
+                            events.len().saturating_sub(1)
+                        } else {
+                            events.len()
+                        },
+                        coverage: None,
                     });
                 }
                 if reached_limit {
@@ -1047,8 +1054,8 @@ mod tests {
         let mut reported = Vec::new();
 
         let timeline = source
-            .load_timeline_limited_with_progress("codex-app-1", Some(2), &mut |count| {
-                reported.push(count)
+            .load_timeline_limited_with_progress("codex-app-1", Some(2), &mut |progress| {
+                reported.push(progress.parsed_event_count)
             })
             .expect("timeline");
 

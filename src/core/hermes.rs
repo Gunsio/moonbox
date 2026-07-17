@@ -24,8 +24,8 @@ use super::{
         ProviderHandoffMetadata, ProviderScrollContext, ProviderSearchMetadata,
         ProviderSessionMetadata, SessionRuntimeStatus, SessionStatus, SessionSummary,
         SourceFidelity, SourceFidelityStatus, SourceProvenance, TimelineEvent,
-        TimelineEventMetadata, TimelineEventRawRef, TimelineKind, TimelineToolCall, TokenBreakdown,
-        unknown_runtime_reason,
+        TimelineEventMetadata, TimelineEventRawRef, TimelineKind, TimelineParseProgress,
+        TimelineToolCall, TokenBreakdown, unknown_runtime_reason,
     },
     model_context::resolve_model_context_window,
 };
@@ -569,7 +569,7 @@ impl SourceAdapter for HermesSourceAdapter {
         &self,
         session: &SessionSummary,
         event_limit: Option<usize>,
-        on_progress: &mut dyn FnMut(usize),
+        on_progress: &mut dyn FnMut(TimelineParseProgress),
     ) -> Result<CanonicalTimeline, AdapterError> {
         self.load_timeline_limited_for_id(&session.id, event_limit, on_progress)
     }
@@ -580,7 +580,7 @@ impl HermesSourceAdapter {
         &self,
         session_id: &str,
         event_limit: Option<usize>,
-        on_progress: &mut dyn FnMut(usize),
+        on_progress: &mut dyn FnMut(TimelineParseProgress),
     ) -> Result<CanonicalTimeline, AdapterError> {
         if self.find_session_row(session_id)?.is_none() {
             return Err(AdapterError::SessionNotFound {
@@ -595,7 +595,10 @@ impl HermesSourceAdapter {
                 let before = events.len();
                 push_timeline_event(&mut events, event, None);
                 if events.len() != before {
-                    on_progress(events.len().min(event_limit.unwrap_or(usize::MAX)));
+                    on_progress(TimelineParseProgress {
+                        parsed_event_count: events.len().min(event_limit.unwrap_or(usize::MAX)),
+                        coverage: None,
+                    });
                 }
             }
         }
@@ -604,7 +607,10 @@ impl HermesSourceAdapter {
         {
             events.truncate(limit);
             events.push(timeline_preview_truncated_event(events.len() + 1, limit));
-            on_progress(limit);
+            on_progress(TimelineParseProgress {
+                parsed_event_count: limit,
+                coverage: None,
+            });
         }
 
         Ok(CanonicalTimeline {
@@ -612,6 +618,7 @@ impl HermesSourceAdapter {
             source_cli: HERMES_TOOL,
             source_session: session_id.into(),
             events,
+            source_coverage: None,
         })
     }
 }

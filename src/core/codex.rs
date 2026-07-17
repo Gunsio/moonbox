@@ -20,15 +20,17 @@ use super::{
         find_token_count, human_timestamp, is_moonbox_handoff_control_text,
         is_provider_context_text, max_timestamp, open_reader, push_timeline_event, read_error,
         replace_time_dashes, stable_text_digest, stable_value_digest, string_field,
-        text_from_value, title_case, truncate, truncate_timeline_detail,
+        text_from_value, timeline_preview_truncated_event, title_case, truncate,
+        truncate_timeline_detail,
     },
     model::{
         CanonicalTimeline, CliTool, ContextHealth, EvidenceConfidence, ProviderSessionMetadata,
         SessionRuntimeStatus, SessionStatus, SessionSummary, SourceCapabilities, SourceCapability,
         SourceCapabilityStatus, SourceFidelity, SourceFidelityStatus, SourceProvenance,
         TimelineApproval, TimelineEvent, TimelineEventMetadata, TimelineEventRawRef,
-        TimelineFileChange, TimelineKind, TimelineRuntimeMetadata, TimelineToolCall,
-        TimelineToolResult, TokenBreakdown, unknown_runtime_reason,
+        TimelineFileChange, TimelineKind, TimelineParseProgress, TimelineRuntimeMetadata,
+        TimelineSourceCoverage, TimelineToolCall, TimelineToolResult, TokenBreakdown,
+        unknown_runtime_reason,
     },
 };
 
@@ -595,57 +597,108 @@ impl CodexSourceAdapter {
         session_id: &str,
         path: &Path,
         event_limit: Option<usize>,
-        on_progress: &mut dyn FnMut(usize),
+        on_progress: &mut dyn FnMut(TimelineParseProgress),
     ) -> Result<CanonicalTimeline, AdapterError> {
-        let reader = open_reader(CODEX_TOOL, path)?;
+        let total_bytes = fs::metadata(path)
+            .map_err(|error| read_error(CODEX_TOOL, path, error))?
+            .len();
+        let mut reader = open_reader(CODEX_TOOL, path)?;
         let mut events = Vec::new();
+        let mut line = String::new();
+        let mut line_index = 0usize;
+        let mut scanned_bytes = 0u64;
+        let mut loaded_bytes = 0u64;
+        let mut truncated = false;
 
-        for (line_index, line) in reader.lines().enumerate() {
-            let line = line.map_err(|error| read_error(CODEX_TOOL, path, error))?;
+        loop {
+            line.clear();
+            let bytes_read = reader
+                .read_line(&mut line)
+                .map_err(|error| read_error(CODEX_TOOL, path, error))?;
+            if bytes_read == 0 {
+                break;
+            }
+            line_index = line_index.saturating_add(1);
+            scanned_bytes = scanned_bytes.saturating_add(bytes_read as u64);
+            let line = line.strip_suffix('\n').unwrap_or(&line);
+            let line = line.strip_suffix('\r').unwrap_or(line);
+
             if line.trim().is_empty() {
+                on_progress(TimelineParseProgress {
+                    parsed_event_count: events.len().min(event_limit.unwrap_or(usize::MAX)),
+                    coverage: TimelineSourceCoverage::from_scanned_bytes(loaded_bytes, total_bytes),
+                });
                 continue;
             }
 
-            let record = match serde_json::from_str::<CodexRecord>(&line) {
-                Ok(record) => record,
-                Err(error) => {
-                    let event = TimelineEvent {
-                        id: event_id(events.len() + 1),
-                        time: "??:??".into(),
-                        kind: TimelineKind::Error,
-                        title: "Malformed event".into(),
-                        detail: format!("line {}: {}", line_index + 1, error),
-                        metadata: TimelineEventMetadata {
-                            raw_refs: vec![TimelineEventRawRef {
-                                source_cli: Some(CODEX_TOOL),
-                                source_session: Some(session_id.into()),
-                                source_path: Some(path.display().to_string()),
-                                line_number: Some(line_index + 1),
-                                record_type: Some("malformed".into()),
-                                digest: Some(stable_text_digest(&line)),
-                                ..TimelineEventRawRef::default()
-                            }],
-                            ..TimelineEventMetadata::default()
-                        },
-                    };
-                    let reached_limit = push_timeline_event(&mut events, event, event_limit);
-                    on_progress(events.len().min(event_limit.unwrap_or(usize::MAX)));
-                    if reached_limit {
-                        break;
-                    }
-                    continue;
+            let candidate = match serde_json::from_str::<CodexRecord>(line) {
+                Ok(record) => {
+                    timeline_event(record, events.len() + 1, session_id, path, line_index)
                 }
+                Err(error) => Some(TimelineEvent {
+                    id: event_id(events.len() + 1),
+                    time: "??:??".into(),
+                    kind: TimelineKind::Error,
+                    title: "Malformed event".into(),
+                    detail: format!("line {line_index}: {error}"),
+                    metadata: TimelineEventMetadata {
+                        raw_refs: vec![TimelineEventRawRef {
+                            source_cli: Some(CODEX_TOOL),
+                            source_session: Some(session_id.into()),
+                            source_path: Some(path.display().to_string()),
+                            line_number: Some(line_index),
+                            record_type: Some("malformed".into()),
+                            digest: Some(stable_text_digest(line)),
+                            ..TimelineEventRawRef::default()
+                        }],
+                        ..TimelineEventMetadata::default()
+                    },
+                }),
             };
 
-            if let Some(event) =
-                timeline_event(record, events.len() + 1, session_id, path, line_index + 1)
-            {
-                let reached_limit = push_timeline_event(&mut events, event, event_limit);
-                on_progress(events.len().min(event_limit.unwrap_or(usize::MAX)));
-                if reached_limit {
-                    break;
+            let mut reached_limit = false;
+            if let Some(event) = candidate {
+                let limit = event_limit.filter(|limit| *limit > 0 && events.len() >= *limit);
+                let previous_len = events.len();
+                push_timeline_event(&mut events, event, None);
+                if let Some(limit) = limit
+                    && events.len() > previous_len
+                {
+                    // We only advertise another page after reading one more
+                    // canonical event. Coverage remains at the last loaded
+                    // event, so lookahead cannot make a truncated timeline
+                    // claim a genuine 100% source frontier.
+                    events.pop();
+                    events.push(timeline_preview_truncated_event(events.len() + 1, limit));
+                    reached_limit = true;
+                    truncated = true;
+                } else if events.len() > previous_len {
+                    loaded_bytes = scanned_bytes;
                 }
             }
+
+            on_progress(TimelineParseProgress {
+                parsed_event_count: events.len().min(event_limit.unwrap_or(usize::MAX)),
+                coverage: TimelineSourceCoverage::from_scanned_bytes(loaded_bytes, total_bytes),
+            });
+            if reached_limit {
+                break;
+            }
+        }
+
+        let source_coverage = TimelineSourceCoverage::from_scanned_bytes(
+            if truncated {
+                loaded_bytes
+            } else {
+                scanned_bytes
+            },
+            total_bytes,
+        );
+        if !truncated {
+            on_progress(TimelineParseProgress {
+                parsed_event_count: events.len().min(event_limit.unwrap_or(usize::MAX)),
+                coverage: source_coverage,
+            });
         }
 
         Ok(CanonicalTimeline {
@@ -653,6 +706,7 @@ impl CodexSourceAdapter {
             source_cli: CODEX_TOOL,
             source_session: session_id.into(),
             events,
+            source_coverage,
         })
     }
 
@@ -857,7 +911,7 @@ impl CodexSourceAdapter {
         session_id: &str,
         path: &Path,
         event_limit: Option<usize>,
-        on_progress: &mut dyn FnMut(usize),
+        on_progress: &mut dyn FnMut(TimelineParseProgress),
     ) -> Result<CanonicalTimeline, AdapterError> {
         let contents =
             fs::read_to_string(path).map_err(|error| read_error(CODEX_TOOL, path, error))?;
@@ -872,7 +926,10 @@ impl CodexSourceAdapter {
         for (index, message) in session.messages.iter().enumerate() {
             if let Some(event) = k2_timeline_event(message, events.len() + 1, session_id, path) {
                 let reached_limit = push_timeline_event(&mut events, event, event_limit);
-                on_progress(events.len().min(event_limit.unwrap_or(usize::MAX)));
+                on_progress(TimelineParseProgress {
+                    parsed_event_count: events.len().min(event_limit.unwrap_or(usize::MAX)),
+                    coverage: None,
+                });
                 if reached_limit {
                     break;
                 }
@@ -887,6 +944,7 @@ impl CodexSourceAdapter {
             source_cli: CODEX_TOOL,
             source_session: session_id.into(),
             events,
+            source_coverage: None,
         })
     }
 
@@ -1097,7 +1155,7 @@ impl SourceAdapter for CodexSourceAdapter {
         &self,
         session: &SessionSummary,
         event_limit: Option<usize>,
-        on_progress: &mut dyn FnMut(usize),
+        on_progress: &mut dyn FnMut(TimelineParseProgress),
     ) -> Result<CanonicalTimeline, AdapterError> {
         if let Some(path) = session
             .source_path
@@ -2954,14 +3012,62 @@ mod tests {
         let mut reported = Vec::new();
 
         let timeline = adapter
-            .load_timeline_limited_with_progress(&session, Some(3), &mut |count| {
-                reported.push(count)
+            .load_timeline_limited_with_progress(&session, Some(3), &mut |progress| {
+                reported.push(progress)
             })
             .expect("timeline");
 
-        assert_eq!(reported, vec![1, 2, 3]);
+        assert_eq!(
+            reported
+                .iter()
+                .map(|progress| progress.parsed_event_count)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3, 3]
+        );
         assert_eq!(timeline.events.len(), 4);
         assert_eq!(timeline.events[3].title, "Timeline preview truncated");
+
+        let preview_coverage = timeline.source_coverage.expect("source coverage");
+        assert_eq!(
+            preview_coverage.total_bytes,
+            fs::metadata(session.source_path.as_deref().expect("source path"))
+                .expect("source metadata")
+                .len()
+        );
+        assert!(preview_coverage.scanned_bytes > 0);
+        assert!(preview_coverage.scanned_bytes < preview_coverage.total_bytes);
+        assert!((1..100).contains(&preview_coverage.percent()));
+        assert_eq!(
+            reported.last().and_then(|progress| progress.coverage),
+            Some(preview_coverage)
+        );
+
+        let complete = adapter
+            .load_timeline(&session.id)
+            .expect("complete timeline");
+        let complete_coverage = complete.source_coverage.expect("complete source coverage");
+        assert_eq!(
+            complete_coverage.scanned_bytes,
+            complete_coverage.total_bytes
+        );
+        assert_eq!(complete_coverage.percent(), 100);
+
+        let eof_aligned = adapter
+            .load_timeline_limited(&session, Some(4))
+            .expect("EOF-aligned preview");
+        assert!(
+            eof_aligned
+                .events
+                .iter()
+                .all(|event| event.title != "Timeline preview truncated")
+        );
+        assert_eq!(
+            eof_aligned
+                .source_coverage
+                .expect("EOF source coverage")
+                .percent(),
+            100
+        );
     }
 
     #[test]

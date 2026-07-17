@@ -19,6 +19,12 @@
   loaded count and next `G` action instead of stale `100%`; do not expose
   implementation labels such as `Preview` or imply whole-session progress
   before the source has reached its end.
+- [x] **Persistent large-Timeline source coverage** — show a constant,
+  third-column percentage for local Codex and Claude JSONL sessions using the
+  loaded Timeline frontier's bytes against the read-start source-size snapshot.
+  It is explicitly source coverage rather than a guessed event total; `G`
+  continues to expose exact page-relative progress, and unknown-total providers
+  remain count/action based.
 
 ## P0 — Experience regressions to verify and fix
 

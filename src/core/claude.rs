@@ -17,14 +17,16 @@ use super::{
         event_id, extract_timeline_image_markup, find_token_count, human_timestamp,
         is_moonbox_handoff_control_text, is_provider_context_text, max_timestamp, open_reader,
         push_timeline_event, read_error, sort_paths_by_modified_desc, stable_text_digest,
-        stable_value_digest, text_from_value, title_case, truncate, truncate_timeline_detail,
+        stable_value_digest, text_from_value, timeline_preview_truncated_event, title_case,
+        truncate, truncate_timeline_detail,
     },
     model::{
         CanonicalTimeline, CliTool, ContextHealth, EvidenceConfidence, SessionRuntimeStatus,
         SessionStatus, SessionSummary, SourceFidelity, SourceFidelityStatus, SourceProvenance,
         TimelineAttachment, TimelineCostMetadata, TimelineEvent, TimelineEventMetadata,
-        TimelineEventRawRef, TimelineFileChange, TimelineKind, TimelineRuntimeMetadata,
-        TimelineToolCall, TimelineToolResult, TokenBreakdown, unknown_runtime_reason,
+        TimelineEventRawRef, TimelineFileChange, TimelineKind, TimelineParseProgress,
+        TimelineRuntimeMetadata, TimelineSourceCoverage, TimelineToolCall, TimelineToolResult,
+        TokenBreakdown, unknown_runtime_reason,
     },
     model_context::resolve_model_context_window,
 };
@@ -418,57 +420,107 @@ impl ClaudeSourceAdapter {
         session_id: &str,
         path: &Path,
         event_limit: Option<usize>,
-        on_progress: &mut dyn FnMut(usize),
+        on_progress: &mut dyn FnMut(TimelineParseProgress),
     ) -> Result<CanonicalTimeline, AdapterError> {
-        let reader = open_reader(CLAUDE_TOOL, path)?;
+        let total_bytes = fs::metadata(path)
+            .map_err(|error| read_error(CLAUDE_TOOL, path, error))?
+            .len();
+        let mut reader = open_reader(CLAUDE_TOOL, path)?;
         let mut events = Vec::new();
+        let mut line = String::new();
+        let mut line_index = 0usize;
+        let mut scanned_bytes = 0u64;
+        let mut loaded_bytes = 0u64;
+        let mut truncated = false;
 
-        for (line_index, line) in reader.lines().enumerate() {
-            let line = line.map_err(|error| read_error(CLAUDE_TOOL, path, error))?;
+        loop {
+            line.clear();
+            let bytes_read = reader
+                .read_line(&mut line)
+                .map_err(|error| read_error(CLAUDE_TOOL, path, error))?;
+            if bytes_read == 0 {
+                break;
+            }
+            line_index = line_index.saturating_add(1);
+            scanned_bytes = scanned_bytes.saturating_add(bytes_read as u64);
+            let line = line.strip_suffix('\n').unwrap_or(&line);
+            let line = line.strip_suffix('\r').unwrap_or(line);
+
             if line.trim().is_empty() {
+                on_progress(TimelineParseProgress {
+                    parsed_event_count: events.len().min(event_limit.unwrap_or(usize::MAX)),
+                    coverage: TimelineSourceCoverage::from_scanned_bytes(loaded_bytes, total_bytes),
+                });
                 continue;
             }
 
-            let record = match serde_json::from_str::<ClaudeRecord>(&line) {
-                Ok(record) => record,
-                Err(error) => {
-                    let event = TimelineEvent {
-                        id: event_id(events.len() + 1),
-                        time: "??:??".into(),
-                        kind: TimelineKind::Error,
-                        title: "Malformed event".into(),
-                        detail: format!("line {}: {}", line_index + 1, error),
-                        metadata: TimelineEventMetadata {
-                            raw_refs: vec![TimelineEventRawRef {
-                                source_cli: Some(CLAUDE_TOOL),
-                                source_session: Some(session_id.into()),
-                                source_path: Some(path.display().to_string()),
-                                line_number: Some(line_index + 1),
-                                record_type: Some("malformed".into()),
-                                digest: Some(stable_text_digest(&line)),
-                                ..TimelineEventRawRef::default()
-                            }],
-                            ..TimelineEventMetadata::default()
-                        },
-                    };
-                    let reached_limit = push_timeline_event(&mut events, event, event_limit);
-                    on_progress(events.len().min(event_limit.unwrap_or(usize::MAX)));
-                    if reached_limit {
-                        break;
-                    }
-                    continue;
+            let candidate = match serde_json::from_str::<ClaudeRecord>(line) {
+                Ok(record) => {
+                    timeline_event(record, events.len() + 1, session_id, path, line_index)
                 }
+                Err(error) => Some(TimelineEvent {
+                    id: event_id(events.len() + 1),
+                    time: "??:??".into(),
+                    kind: TimelineKind::Error,
+                    title: "Malformed event".into(),
+                    detail: format!("line {line_index}: {error}"),
+                    metadata: TimelineEventMetadata {
+                        raw_refs: vec![TimelineEventRawRef {
+                            source_cli: Some(CLAUDE_TOOL),
+                            source_session: Some(session_id.into()),
+                            source_path: Some(path.display().to_string()),
+                            line_number: Some(line_index),
+                            record_type: Some("malformed".into()),
+                            digest: Some(stable_text_digest(line)),
+                            ..TimelineEventRawRef::default()
+                        }],
+                        ..TimelineEventMetadata::default()
+                    },
+                }),
             };
 
-            if let Some(event) =
-                timeline_event(record, events.len() + 1, session_id, path, line_index + 1)
-            {
-                let reached_limit = push_timeline_event(&mut events, event, event_limit);
-                on_progress(events.len().min(event_limit.unwrap_or(usize::MAX)));
-                if reached_limit {
-                    break;
+            let mut reached_limit = false;
+            if let Some(event) = candidate {
+                let limit = event_limit.filter(|limit| *limit > 0 && events.len() >= *limit);
+                let previous_len = events.len();
+                push_timeline_event(&mut events, event, None);
+                if let Some(limit) = limit
+                    && events.len() > previous_len
+                {
+                    // Confirm a next canonical event before inserting the
+                    // marker. Coverage remains at the last loaded event, so
+                    // lookahead cannot make a truncated timeline claim 100%.
+                    events.pop();
+                    events.push(timeline_preview_truncated_event(events.len() + 1, limit));
+                    reached_limit = true;
+                    truncated = true;
+                } else if events.len() > previous_len {
+                    loaded_bytes = scanned_bytes;
                 }
             }
+
+            on_progress(TimelineParseProgress {
+                parsed_event_count: events.len().min(event_limit.unwrap_or(usize::MAX)),
+                coverage: TimelineSourceCoverage::from_scanned_bytes(loaded_bytes, total_bytes),
+            });
+            if reached_limit {
+                break;
+            }
+        }
+
+        let source_coverage = TimelineSourceCoverage::from_scanned_bytes(
+            if truncated {
+                loaded_bytes
+            } else {
+                scanned_bytes
+            },
+            total_bytes,
+        );
+        if !truncated {
+            on_progress(TimelineParseProgress {
+                parsed_event_count: events.len().min(event_limit.unwrap_or(usize::MAX)),
+                coverage: source_coverage,
+            });
         }
 
         Ok(CanonicalTimeline {
@@ -476,6 +528,7 @@ impl ClaudeSourceAdapter {
             source_cli: CLAUDE_TOOL,
             source_session: session_id.into(),
             events,
+            source_coverage,
         })
     }
 }
@@ -602,7 +655,7 @@ impl SourceAdapter for ClaudeSourceAdapter {
         &self,
         session: &SessionSummary,
         event_limit: Option<usize>,
-        on_progress: &mut dyn FnMut(usize),
+        on_progress: &mut dyn FnMut(TimelineParseProgress),
     ) -> Result<CanonicalTimeline, AdapterError> {
         if let Some(path) = session
             .source_path
@@ -2296,6 +2349,76 @@ mod tests {
         assert_eq!(timeline.events[0].detail, "first");
         assert_eq!(timeline.events[1].detail, "second");
         assert_eq!(timeline.events[2].title, "Timeline preview truncated");
+    }
+
+    #[test]
+    fn local_jsonl_source_coverage_is_partial_for_preview_and_complete_at_eof() {
+        let root = test_root("timeline-source-coverage");
+        write_session(
+            &root,
+            "repo/claude-coverage.jsonl",
+            r#"{"type":"user","sessionId":"claude-coverage","timestamp":"2026-06-06T10:00:00.000Z","cwd":"/repo","message":{"content":"first"}}
+{"type":"assistant","sessionId":"claude-coverage","timestamp":"2026-06-06T10:01:00.000Z","cwd":"/repo","message":{"content":[{"type":"text","text":"second"}]}}
+{"type":"assistant","sessionId":"claude-coverage","timestamp":"2026-06-06T10:02:00.000Z","cwd":"/repo","message":{"content":[{"type":"text","text":"third"}]}}"#,
+        );
+        let adapter = ClaudeSourceAdapter::new(&root);
+        let session = adapter
+            .find_session("claude-coverage")
+            .expect("find")
+            .expect("session");
+        let mut checkpoints = Vec::new();
+
+        let preview = adapter
+            .load_timeline_limited_with_progress(&session, Some(2), &mut |progress| {
+                checkpoints.push(progress)
+            })
+            .expect("preview timeline");
+
+        assert_eq!(
+            preview.events.last().map(|event| event.title.as_str()),
+            Some("Timeline preview truncated")
+        );
+        let preview_coverage = preview.source_coverage.expect("preview source coverage");
+        assert_eq!(
+            preview_coverage.total_bytes,
+            fs::metadata(session.source_path.as_deref().expect("source path"))
+                .expect("source metadata")
+                .len()
+        );
+        assert!(preview_coverage.scanned_bytes > 0);
+        assert!(preview_coverage.scanned_bytes < preview_coverage.total_bytes);
+        assert!((1..100).contains(&preview_coverage.percent()));
+        assert_eq!(
+            checkpoints.last().and_then(|progress| progress.coverage),
+            Some(preview_coverage)
+        );
+
+        let complete = adapter
+            .load_timeline(&session.id)
+            .expect("complete timeline");
+        let complete_coverage = complete.source_coverage.expect("complete source coverage");
+        assert_eq!(
+            complete_coverage.scanned_bytes,
+            complete_coverage.total_bytes
+        );
+        assert_eq!(complete_coverage.percent(), 100);
+
+        let eof_aligned = adapter
+            .load_timeline_limited(&session, Some(3))
+            .expect("EOF-aligned preview");
+        assert!(
+            eof_aligned
+                .events
+                .iter()
+                .all(|event| event.title != "Timeline preview truncated")
+        );
+        assert_eq!(
+            eof_aligned
+                .source_coverage
+                .expect("EOF source coverage")
+                .percent(),
+            100
+        );
     }
 
     #[test]

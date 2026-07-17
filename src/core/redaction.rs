@@ -932,6 +932,7 @@ mod tests {
                 event("evt-002", TimelineKind::Tool, "Remove"),
                 event("evt-003", TimelineKind::RewindPoint, "Keep rewind"),
             ],
+            source_coverage: None,
         };
 
         let redacted = redact_timeline(timeline, "evt-003", &policy, &mut stats);
@@ -1056,6 +1057,7 @@ mod tests {
                 source_cli: CliTool::Codex,
                 source_session: "session".into(),
                 events: vec![source_event],
+                source_coverage: None,
             },
             redaction: RedactionReport::default(),
         };

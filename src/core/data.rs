@@ -12,10 +12,20 @@ use super::{
         BranchNode, CanonicalTimeline, CapsuleCompileOutput, CapsuleCompileRequest,
         CapsuleCoverage, CliTool, RedactionReport, SessionRuntimeStatus, SessionStatus,
         SessionSummary, SourceAdapterReport, SourceProvenance, TimelineEvent, TimelineKind,
-        WorkCapsule, WorkbenchData, unknown_runtime_reason,
+        TimelineParseProgress, WorkCapsule, WorkbenchData, unknown_runtime_reason,
     },
     redaction, sources,
 };
+
+struct WorkbenchBuildInput {
+    source: CliTool,
+    target: CliTool,
+    source_adapters: Vec<SourceAdapterReport>,
+    sessions: Vec<SessionSummary>,
+    timeline: CanonicalTimeline,
+    capsule: WorkCapsule,
+    source_session_id: String,
+}
 
 pub fn workbench_data(source: CliTool, target: CliTool) -> Result<WorkbenchData, CoreError> {
     let inventory = sources::source_inventory()?;
@@ -47,15 +57,15 @@ pub fn workbench_data(source: CliTool, target: CliTool) -> Result<WorkbenchData,
         &rewind_event_id,
         &compiler,
     )?;
-    Ok(build_workbench_data(
+    Ok(build_workbench_data(WorkbenchBuildInput {
         source,
         target,
         source_adapters,
         sessions,
-        timeline.events,
+        timeline,
         capsule,
-        &source_session_id,
-    ))
+        source_session_id,
+    }))
 }
 
 pub fn workbench_data_for_session(
@@ -121,7 +131,7 @@ pub fn workbench_data_from_session_snapshot_with_timeline_limit_and_progress(
     source_adapters: Vec<SourceAdapterReport>,
     target: CliTool,
     event_limit: usize,
-    on_progress: &mut dyn FnMut(usize),
+    on_progress: &mut dyn FnMut(TimelineParseProgress),
 ) -> Result<WorkbenchData, CoreError> {
     let source_session = ensure_session_anatomy(source_session);
     let timeline = timeline_up_to_for_workbench(&source_session, event_limit, on_progress)?;
@@ -147,15 +157,15 @@ pub fn workbench_data_from_timeline_snapshot(
     let rewind_event_id = rewind_event_id_for_timeline(&source_session_id, &timeline);
     let compiler = default_compiler_id();
     let capsule = pending_work_capsule(&source_session, target, &rewind_event_id, &compiler);
-    Ok(build_workbench_data(
-        source_session.cli,
+    Ok(build_workbench_data(WorkbenchBuildInput {
+        source: source_session.cli,
         target,
         source_adapters,
         sessions,
-        timeline.events,
+        timeline,
         capsule,
-        &source_session_id,
-    ))
+        source_session_id,
+    }))
 }
 
 pub fn workbench_data_from_readonly_inventory(
@@ -170,15 +180,15 @@ pub fn workbench_data_from_readonly_inventory(
     let rewind_event_id = rewind_event_id_for_timeline(&source_session_id, &timeline);
     let compiler = default_compiler_id();
     let capsule = pending_work_capsule(&source_session, target, &rewind_event_id, &compiler);
-    build_workbench_data(
-        source_session.cli,
+    build_workbench_data(WorkbenchBuildInput {
+        source: source_session.cli,
         target,
         source_adapters,
         sessions,
-        timeline.events,
+        timeline,
         capsule,
-        &source_session_id,
-    )
+        source_session_id,
+    })
 }
 
 fn ensure_session_anatomy(session: SessionSummary) -> SessionSummary {
@@ -209,26 +219,27 @@ pub fn fixture_workbench_data(
         &timeline,
         &rewind_event_id,
     )?;
-    Ok(build_workbench_data(
+    Ok(build_workbench_data(WorkbenchBuildInput {
         source,
         target,
         source_adapters,
         sessions,
-        timeline.events,
+        timeline,
         capsule,
-        &source_session_id,
-    ))
+        source_session_id,
+    }))
 }
 
-fn build_workbench_data(
-    source: CliTool,
-    target: CliTool,
-    source_adapters: Vec<SourceAdapterReport>,
-    sessions: Vec<SessionSummary>,
-    timeline: Vec<TimelineEvent>,
-    capsule: WorkCapsule,
-    source_session_id: &str,
-) -> WorkbenchData {
+fn build_workbench_data(input: WorkbenchBuildInput) -> WorkbenchData {
+    let WorkbenchBuildInput {
+        source,
+        target,
+        source_adapters,
+        sessions,
+        timeline,
+        capsule,
+        source_session_id,
+    } = input;
     let rewind_id = capsule
         .rewind_point
         .split_whitespace()
@@ -265,7 +276,8 @@ fn build_workbench_data(
         target,
         source_adapters,
         sessions,
-        timeline,
+        timeline: timeline.events,
+        timeline_source_coverage: timeline.source_coverage,
         capsule,
         branches,
         compilers: compiler_catalog(),
@@ -331,7 +343,7 @@ fn full_timeline_for_workbench(
 fn timeline_up_to_for_workbench(
     source_session: &SessionSummary,
     event_limit: usize,
-    on_progress: &mut dyn FnMut(usize),
+    on_progress: &mut dyn FnMut(TimelineParseProgress),
 ) -> Result<CanonicalTimeline, CoreError> {
     if should_skip_timeline_load(source_session) {
         return Ok(empty_timeline(source_session));
@@ -492,6 +504,7 @@ fn compile_request_from_parts(
             source_cli: source,
             source_session: timeline.source_session,
             events: timeline.events,
+            source_coverage: timeline.source_coverage,
         },
         redaction: RedactionReport::default(),
     })
@@ -710,6 +723,7 @@ fn empty_timeline(source_session: &SessionSummary) -> CanonicalTimeline {
         source_cli: source_session.cli,
         source_session: source_session.id.clone(),
         events: Vec::new(),
+        source_coverage: None,
     }
 }
 
@@ -893,6 +907,7 @@ mod tests {
                     metadata: Default::default(),
                 },
             ],
+            source_coverage: None,
         };
 
         assert_eq!(

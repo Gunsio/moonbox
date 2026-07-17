@@ -7,6 +7,20 @@ and this project uses semantic versioning once tagged releases start.
 
 ## [Unreleased]
 
+## [0.1.14] - 2026-07-17
+
+### Fixed
+
+- Restore a meaningful, persistent Timeline percentage in the fixed third
+  Session Details column for local Codex and Claude JSONL sources. The value is
+  explicitly source coverage—loaded Timeline frontier bytes divided by the
+  source file-size snapshot—not a guessed canonical-event total. It remains
+  visible after a bounded `G` page settles, updates alongside real page
+  checkpoints while `G` is loading, and reaches `100%` only when the local
+  source has actually reached its end. Providers without a trustworthy source
+  total keep the explicit count/action status instead of showing a fake
+  percentage.
+
 ## [0.1.13] - 2026-07-17
 
 ### Fixed

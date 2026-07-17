@@ -4,7 +4,7 @@ use super::{
     capability,
     model::{
         CanonicalTimeline, CliTool, SessionSummary, SourceAdapterReport, SourceCapabilities,
-        SourceFidelity, SourceFidelityStatus, SourceProvenance,
+        SourceFidelity, SourceFidelityStatus, SourceProvenance, TimelineParseProgress,
     },
 };
 
@@ -106,10 +106,13 @@ pub trait SourceAdapter {
         &self,
         session: &SessionSummary,
         event_limit: Option<usize>,
-        on_progress: &mut dyn FnMut(usize),
+        on_progress: &mut dyn FnMut(TimelineParseProgress),
     ) -> Result<CanonicalTimeline, AdapterError> {
         let timeline = self.load_timeline_limited(session, event_limit)?;
-        on_progress(timeline_progress_event_count(&timeline));
+        on_progress(TimelineParseProgress {
+            parsed_event_count: timeline_progress_event_count(&timeline),
+            coverage: timeline.source_coverage,
+        });
         Ok(timeline)
     }
 }
