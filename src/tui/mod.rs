@@ -37,11 +37,15 @@ pub fn run(terminal: &mut DefaultTerminal, mut app: App) -> Result<Option<TuiExi
         app.poll_background();
         app.advance_animation();
         terminal.draw(|frame| view::render(frame, &app))?;
-        if event::poll(Duration::from_millis(120))?
+        let event_wait = if app.is_timeline_expansion_pending() {
+            Duration::from_millis(30)
+        } else {
+            Duration::from_millis(120)
+        };
+        if event::poll(event_wait)?
             && let Event::Key(key) = event::read()?
         {
             app.handle_key(key);
-            app.poll_background();
             if let Some(text) = app.take_clipboard_text() {
                 copy_to_terminal_clipboard(&text)?;
             }
