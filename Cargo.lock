@@ -962,7 +962,7 @@ dependencies = [
 
 [[package]]
 name = "moonbox"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "clap",
  "clap_complete",
@@ -978,7 +978,7 @@ dependencies = [
 
 [[package]]
 name = "moonbox-theme"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "ratatui",
 ]

@@ -65,6 +65,16 @@ brew install moonbox
 moon --version
 ```
 
+Then verify the already-installed and upgrade paths against the same bottled
+formula:
+
+```bash
+brew reinstall moonbox
+brew upgrade moonbox
+brew info moonbox
+moon --version
+```
+
 ## Local Dry-Run
 
 Before publishing or updating the tap, run the repository-level Homebrew formula

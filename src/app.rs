@@ -1846,9 +1846,9 @@ impl App {
 
         let loaded_events = loaded_timeline_event_count(&self.data);
         if timeline_has_preview_truncation(&self.data) {
-            let next_page_size = sources::configured_timeline_event_limit()
-                .unwrap_or(sources::DEFAULT_TIMELINE_EVENT_LIMIT)
-                .max(1);
+            let next_page_size = next_timeline_event_limit(&self.data)
+                .map(|limit| limit.saturating_sub(loaded_events))
+                .unwrap_or_default();
             return TimelineLoadState::Preview {
                 loaded_events,
                 next_page_size,
@@ -5826,6 +5826,9 @@ impl App {
         if !timeline_has_preview_truncation(&self.data) {
             return;
         }
+        let Some(event_limit) = next_timeline_event_limit(&self.data) else {
+            return;
+        };
         if self.is_timeline_expansion_pending() {
             self.set_status("Timeline page load already running");
             return;
@@ -5840,10 +5843,6 @@ impl App {
             );
             return;
         }
-
-        let Some(event_limit) = next_timeline_event_limit(&self.data) else {
-            return;
-        };
         let loaded_event_count = loaded_timeline_event_count(&self.data);
 
         let Some(session) = self.data.sessions.get(self.selected_session).cloned() else {
@@ -5921,8 +5920,10 @@ impl App {
         self.compile_status = "LOADING";
         self.verify_passed = false;
         self.set_status(format!(
-            "Loading next timeline page: {} {}",
-            session.cli, session.title,
+            "Loading next timeline batch (+{}): {} {}",
+            event_limit.saturating_sub(loaded_event_count),
+            session.cli,
+            session.title,
         ));
     }
 
@@ -7075,7 +7076,21 @@ fn next_timeline_event_limit(data: &WorkbenchData) -> Option<usize> {
     let page_size = sources::configured_timeline_event_limit()
         .unwrap_or(sources::DEFAULT_TIMELINE_EVENT_LIMIT)
         .max(1);
-    Some(loaded_event_count.saturating_add(page_size))
+    // Each request still has a finite event limit, but the next batch grows
+    // with the already-loaded prefix. This avoids the fixed `+300` sequence
+    // repeatedly reparsing almost the same huge JSONL prefix one tiny page at
+    // a time (300 -> 600 -> 900 -> ...). With a 300-event base it becomes
+    // 300 -> 600 -> 1200 -> 2400, keeping large-history navigation practical
+    // without asking the non-virtualized TUI to materialize a whole source in
+    // one automatic load.
+    Some(
+        loaded_event_count
+            .saturating_add(adaptive_timeline_page_size(loaded_event_count, page_size)),
+    )
+}
+
+fn adaptive_timeline_page_size(loaded_event_count: usize, configured_page_size: usize) -> usize {
+    configured_page_size.max(1).max(loaded_event_count)
 }
 
 fn loaded_timeline_event_count(data: &WorkbenchData) -> usize {
@@ -7841,7 +7856,7 @@ mod tests {
         assert!(app.is_timeline_expansion_pending());
         assert!(
             app.status_message
-                .starts_with("Loading next timeline page:")
+                .starts_with("Loading next timeline batch (+300):")
         );
         assert_eq!(
             app.timeline_expansion_progress(),
@@ -7875,6 +7890,82 @@ mod tests {
             last_visible_timeline_event(&app.data, &app.rewind_event_id)
         );
         assert!(app.status_message.starts_with("Timeline complete: "));
+    }
+
+    #[test]
+    fn adaptive_timeline_page_grows_with_the_loaded_prefix() {
+        assert_eq!(adaptive_timeline_page_size(0, 300), 300);
+        assert_eq!(adaptive_timeline_page_size(300, 300), 300);
+        assert_eq!(adaptive_timeline_page_size(600, 300), 600);
+        assert_eq!(adaptive_timeline_page_size(1_200, 300), 1_200);
+
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        let seed = app.data.timeline.first().cloned().expect("fixture event");
+        app.data.timeline = (1..=600)
+            .map(|index| {
+                let mut event = seed.clone();
+                event.id = format!("adaptive-{index}");
+                event
+            })
+            .collect();
+        app.data
+            .timeline
+            .push(crate::core::local_jsonl::timeline_preview_truncated_event(
+                601, 600,
+            ));
+
+        assert_eq!(next_timeline_event_limit(&app.data), Some(1_200));
+        assert!(matches!(
+            app.timeline_load_state(),
+            TimelineLoadState::Preview {
+                loaded_events: 600,
+                next_page_size: 600,
+                can_expand: true,
+                source_coverage: _,
+            }
+        ));
+    }
+
+    #[test]
+    fn timeline_g_requests_an_adaptive_next_batch_for_a_large_preview() {
+        let mut app = new_app(CliTool::Codex, CliTool::Hermes);
+        app.focus = Focus::Timeline;
+        let seed = app.data.timeline.first().cloned().expect("fixture event");
+        app.data.timeline = (1..=600)
+            .map(|index| {
+                let mut event = seed.clone();
+                event.id = format!("adaptive-g-{index}");
+                event
+            })
+            .collect();
+        app.data
+            .timeline
+            .push(crate::core::local_jsonl::timeline_preview_truncated_event(
+                601, 600,
+            ));
+
+        app.handle_key(key('G'));
+
+        assert!(
+            app.status_message
+                .starts_with("Loading next timeline batch (+600):")
+        );
+        assert_eq!(
+            app.timeline_expansion_progress(),
+            Some(TimelineExpansionProgress {
+                loaded_events: 0,
+                total_events: 600,
+            })
+        );
+        assert!(matches!(
+            app.pending_session_load
+                .as_ref()
+                .map(|pending| pending.purpose),
+            Some(SessionLoadPurpose::TimelineExpansion {
+                event_limit: 1_200,
+                loaded_event_count: 600,
+            })
+        ));
     }
 
     #[test]

@@ -7,6 +7,18 @@ and this project uses semantic versioning once tagged releases start.
 
 ## [Unreleased]
 
+## [0.1.15] - 2026-07-18
+
+### Fixed
+
+- Make very large local Timelines practical to navigate without an unsafe
+  full in-memory materialization. In a truncated Timeline, `G` now grows its
+  next background batch with the loaded prefix (`+300`, `+600`, `+1200`, …)
+  rather than repeating fixed `+300` pages from the source start. The fixed
+  third Session Details column shows the real next batch, tells users to
+  `Tab` to Timeline before using `G` when another panel is focused, and labels
+  nonzero source coverage below one percent as `<1%` rather than `0%`.
+
 ## [0.1.14] - 2026-07-17
 
 ### Fixed
