@@ -2465,10 +2465,11 @@ fn timeline_load_status_height(area: Rect) -> u16 {
 
 fn render_timeline_load_status(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(
-        Paragraph::new(timeline_load_status_lines(
+        Paragraph::new(timeline_load_status_lines_for_focus(
             app.effective_language(),
             app.animation_tick(),
             app.timeline_load_state(),
+            app.focus == Focus::Timeline,
             area.width,
         ))
         .wrap(Wrap { trim: true }),
@@ -2476,10 +2477,21 @@ fn render_timeline_load_status(frame: &mut Frame, area: Rect, app: &App) {
     );
 }
 
+#[cfg(test)]
 fn timeline_load_status_lines(
     language: UiLanguage,
     animation_tick: usize,
     state: TimelineLoadState,
+    width: u16,
+) -> Vec<Line<'static>> {
+    timeline_load_status_lines_for_focus(language, animation_tick, state, true, width)
+}
+
+fn timeline_load_status_lines_for_focus(
+    language: UiLanguage,
+    animation_tick: usize,
+    state: TimelineLoadState,
+    timeline_focused: bool,
     width: u16,
 ) -> Vec<Line<'static>> {
     let source_coverage = match state {
@@ -2526,6 +2538,7 @@ fn timeline_load_status_lines(
             animation_tick,
             coverage,
             phase,
+            timeline_focused,
             width,
         );
     }
@@ -2710,19 +2723,27 @@ fn timeline_load_status_lines(
                 let loaded_count = timeline_load_compact_count(loaded_events);
                 let next_page_count = timeline_load_compact_count(next_page_size);
                 let labels = if can_expand {
-                    match language {
-                        UiLanguage::English => vec![
-                            format!("{loaded_count} loaded · G+{next_page_count}"),
-                            format!("{loaded_count} · G+{next_page_count}"),
-                            format!("G +{next_page_count}"),
-                            "G".into(),
-                        ],
-                        UiLanguage::ZhHans => vec![
-                            format!("{loaded_count} 条 · G+{next_page_count}"),
-                            format!("{loaded_count} · G+{next_page_count}"),
-                            format!("G +{next_page_count}"),
-                            "G".into(),
-                        ],
+                    if timeline_focused {
+                        match language {
+                            UiLanguage::English => vec![
+                                format!("{loaded_count} loaded · G+{next_page_count}"),
+                                format!("{loaded_count} · G+{next_page_count}"),
+                                format!("G +{next_page_count}"),
+                                "G".into(),
+                            ],
+                            UiLanguage::ZhHans => vec![
+                                format!("{loaded_count} 条 · G+{next_page_count}"),
+                                format!("{loaded_count} · G+{next_page_count}"),
+                                format!("G +{next_page_count}"),
+                                "G".into(),
+                            ],
+                        }
+                    } else {
+                        vec![
+                            format!("Tab→TL G+{next_page_count}"),
+                            "Tab→TL".into(),
+                            "Tab".into(),
+                        ]
                     }
                 } else {
                     match language {
@@ -2753,29 +2774,56 @@ fn timeline_load_status_lines(
             let loaded_count = timeline_load_status_count(loaded_events);
             let next_page_count = timeline_load_status_count(next_page_size);
             let detail_label = if can_expand {
-                match language {
-                    UiLanguage::English => timeline_load_fitting_label(
-                        width,
-                        vec![
-                            format!("  {loaded_count} loaded · G loads next {next_page_count}"),
-                            format!("  {loaded_count} loaded · G +{next_page_count}"),
-                            format!("  {loaded_count} · G+{next_page_count}"),
-                            format!("G +{next_page_count}"),
-                            "G".into(),
-                        ],
-                    ),
-                    UiLanguage::ZhHans => timeline_load_fitting_label(
-                        width,
-                        vec![
-                            format!(
-                                "  已加载 {loaded_count} 条 · 按 G 再加载 {next_page_count} 条"
-                            ),
-                            format!("  已加载 {loaded_count} 条 · G +{next_page_count}"),
-                            format!("  {loaded_count} · G+{next_page_count}"),
-                            format!("G +{next_page_count}"),
-                            "G".into(),
-                        ],
-                    ),
+                if timeline_focused {
+                    match language {
+                        UiLanguage::English => timeline_load_fitting_label(
+                            width,
+                            vec![
+                                format!("  {loaded_count} loaded · G loads next {next_page_count}"),
+                                format!("  {loaded_count} loaded · G +{next_page_count}"),
+                                format!("  {loaded_count} · G+{next_page_count}"),
+                                format!("G +{next_page_count}"),
+                                "G".into(),
+                            ],
+                        ),
+                        UiLanguage::ZhHans => timeline_load_fitting_label(
+                            width,
+                            vec![
+                                format!(
+                                    "  已加载 {loaded_count} 条 · 按 G 再加载 {next_page_count} 条"
+                                ),
+                                format!("  已加载 {loaded_count} 条 · G +{next_page_count}"),
+                                format!("  {loaded_count} · G+{next_page_count}"),
+                                format!("G +{next_page_count}"),
+                                "G".into(),
+                            ],
+                        ),
+                    }
+                } else {
+                    match language {
+                        UiLanguage::English => timeline_load_fitting_label(
+                            width,
+                            vec![
+                                format!("  Tab → Timeline · G loads next {next_page_count}"),
+                                format!("  Tab → Timeline · G +{next_page_count}"),
+                                format!("  Tab→TL · G+{next_page_count}"),
+                                format!("Tab→TL G+{next_page_count}"),
+                                "Tab→TL".into(),
+                            ],
+                        ),
+                        UiLanguage::ZhHans => timeline_load_fitting_label(
+                            width,
+                            vec![
+                                format!(
+                                    "  已加载 {loaded_count} 条 · Tab 切换 Timeline · G+{next_page_count}"
+                                ),
+                                format!("  Tab 切换 Timeline · G 再加载 {next_page_count} 条"),
+                                format!("  Tab→TL · G+{next_page_count}"),
+                                format!("Tab→TL G+{next_page_count}"),
+                                "Tab→TL".into(),
+                            ],
+                        ),
+                    }
                 }
             } else {
                 match language {
@@ -2888,11 +2936,12 @@ fn timeline_source_coverage_status_lines(
     animation_tick: usize,
     coverage: crate::core::model::TimelineSourceCoverage,
     phase: TimelineSourceCoveragePhase,
+    timeline_focused: bool,
     width: u16,
 ) -> Vec<Line<'static>> {
-    let percent = coverage.percent();
+    let percent_label = timeline_source_coverage_percent_label(coverage);
     let compact = width < 26;
-    let active_page = matches!(phase, TimelineSourceCoveragePhase::LoadingPage(_));
+    let active_load = matches!(phase, TimelineSourceCoveragePhase::LoadingPage(_));
     let complete = matches!(phase, TimelineSourceCoveragePhase::Complete { .. });
     let accent = if complete {
         theme::green()
@@ -2904,26 +2953,26 @@ fn timeline_source_coverage_status_lines(
         let labels = match phase {
             TimelineSourceCoveragePhase::LoadingPage(progress) => match language {
                 UiLanguage::English => vec![
-                    format!("TL src {percent}% · P{}%", progress.percent()),
-                    format!("TL src {percent}%"),
-                    format!("TL {percent}%"),
+                    format!("TL src {percent_label} · P{}%", progress.percent()),
+                    format!("TL src {percent_label}"),
+                    format!("TL {percent_label}"),
                 ],
                 UiLanguage::ZhHans => vec![
-                    format!("TL 源 {percent}% · 本页{}%", progress.percent()),
-                    format!("TL 源 {percent}%"),
-                    format!("TL {percent}%"),
+                    format!("TL 源 {percent_label} · 本页{}%", progress.percent()),
+                    format!("TL 源 {percent_label}"),
+                    format!("TL {percent_label}"),
                 ],
             },
             TimelineSourceCoveragePhase::FinalizingPage { .. } => match language {
                 UiLanguage::English => vec![
-                    format!("TL src {percent}% · apply"),
-                    format!("TL src {percent}%"),
-                    format!("TL {percent}%"),
+                    format!("TL src {percent_label} · apply"),
+                    format!("TL src {percent_label}"),
+                    format!("TL {percent_label}"),
                 ],
                 UiLanguage::ZhHans => vec![
-                    format!("TL 源 {percent}% · 更新中"),
-                    format!("TL 源 {percent}%"),
-                    format!("TL {percent}%"),
+                    format!("TL 源 {percent_label} · 更新中"),
+                    format!("TL 源 {percent_label}"),
+                    format!("TL {percent_label}"),
                 ],
             },
             TimelineSourceCoveragePhase::Preview {
@@ -2933,29 +2982,37 @@ fn timeline_source_coverage_status_lines(
             } => {
                 let next = timeline_load_compact_count(next_page_size);
                 if can_expand {
-                    match language {
-                        UiLanguage::English => vec![
-                            format!("TL src {percent}% · G+{next}"),
-                            format!("TL src {percent}%"),
-                            format!("TL {percent}%"),
-                        ],
-                        UiLanguage::ZhHans => vec![
-                            format!("TL 源 {percent}% · G+{next}"),
-                            format!("TL 源 {percent}%"),
-                            format!("TL {percent}%"),
-                        ],
+                    if timeline_focused {
+                        match language {
+                            UiLanguage::English => vec![
+                                format!("TL src {percent_label} · G+{next}"),
+                                format!("TL src {percent_label}"),
+                                format!("TL {percent_label}"),
+                            ],
+                            UiLanguage::ZhHans => vec![
+                                format!("TL 源 {percent_label} · G+{next}"),
+                                format!("TL 源 {percent_label}"),
+                                format!("TL {percent_label}"),
+                            ],
+                        }
+                    } else {
+                        vec![
+                            format!("TL {percent_label} · Tab→G+{next}"),
+                            format!("TL {percent_label} · Tab"),
+                            format!("TL {percent_label}"),
+                        ]
                     }
                 } else {
                     match language {
                         UiLanguage::English => vec![
-                            format!("TL src {percent}% · read-only"),
-                            format!("TL src {percent}%"),
-                            format!("TL {percent}%"),
+                            format!("TL src {percent_label} · read-only"),
+                            format!("TL src {percent_label}"),
+                            format!("TL {percent_label}"),
                         ],
                         UiLanguage::ZhHans => vec![
-                            format!("TL 源 {percent}% · 只读"),
-                            format!("TL 源 {percent}%"),
-                            format!("TL {percent}%"),
+                            format!("TL 源 {percent_label} · 只读"),
+                            format!("TL 源 {percent_label}"),
+                            format!("TL {percent_label}"),
                         ],
                     }
                 }
@@ -2963,19 +3020,19 @@ fn timeline_source_coverage_status_lines(
             TimelineSourceCoveragePhase::Complete { loaded_events } => match language {
                 UiLanguage::English => vec![
                     format!(
-                        "TL src {percent}% · {}",
+                        "TL src {percent_label} · {}",
                         timeline_load_compact_count(loaded_events)
                     ),
-                    format!("TL src {percent}%"),
-                    format!("TL {percent}%"),
+                    format!("TL src {percent_label}"),
+                    format!("TL {percent_label}"),
                 ],
                 UiLanguage::ZhHans => vec![
                     format!(
-                        "TL 源 {percent}% · {}",
+                        "TL 源 {percent_label} · {}",
                         timeline_load_compact_count(loaded_events)
                     ),
-                    format!("TL 源 {percent}%"),
-                    format!("TL {percent}%"),
+                    format!("TL 源 {percent_label}"),
+                    format!("TL {percent_label}"),
                 ],
             },
         };
@@ -2986,7 +3043,7 @@ fn timeline_source_coverage_status_lines(
     }
 
     let mut headline = Vec::new();
-    if active_page && width >= 30 {
+    if active_load && width >= 30 {
         headline.push(Span::styled(
             spinner_frame(animation_tick),
             Style::default().fg(accent).add_modifier(Modifier::BOLD),
@@ -3001,7 +3058,7 @@ fn timeline_source_coverage_status_lines(
     ));
     headline.push(Span::raw(" "));
     headline.push(Span::styled(
-        format!("{percent}%"),
+        percent_label,
         Style::default().fg(accent).add_modifier(Modifier::BOLD),
     ));
     if width >= 42 {
@@ -3081,25 +3138,52 @@ fn timeline_source_coverage_status_lines(
             let loaded = timeline_load_status_count(loaded_events);
             let next = timeline_load_status_count(next_page_size);
             if can_expand {
-                match language {
-                    UiLanguage::English => timeline_load_fitting_label(
-                        width,
-                        vec![
-                            format!("  {loaded} loaded · {source_bytes} covered · G +{next}"),
-                            format!("  {loaded} loaded · G loads next {next}"),
-                            format!("  {loaded} loaded · G +{next}"),
-                            format!("G +{next}"),
-                        ],
-                    ),
-                    UiLanguage::ZhHans => timeline_load_fitting_label(
-                        width,
-                        vec![
-                            format!("  已加载 {loaded} 条 · 源进度 {source_bytes} · G +{next}"),
-                            format!("  已加载 {loaded} 条 · 按 G 再加载 {next} 条"),
-                            format!("  {loaded} 条 · G +{next}"),
-                            format!("G +{next}"),
-                        ],
-                    ),
+                if timeline_focused {
+                    match language {
+                        UiLanguage::English => timeline_load_fitting_label(
+                            width,
+                            vec![
+                                format!("  {loaded} loaded · {source_bytes} covered · G +{next}"),
+                                format!("  {loaded} loaded · G loads next {next}"),
+                                format!("  {loaded} loaded · G +{next}"),
+                                format!("G +{next}"),
+                            ],
+                        ),
+                        UiLanguage::ZhHans => timeline_load_fitting_label(
+                            width,
+                            vec![
+                                format!("  已加载 {loaded} 条 · 源进度 {source_bytes} · G +{next}"),
+                                format!("  已加载 {loaded} 条 · 按 G 再加载 {next} 条"),
+                                format!("  {loaded} 条 · G +{next}"),
+                                format!("G +{next}"),
+                            ],
+                        ),
+                    }
+                } else {
+                    match language {
+                        UiLanguage::English => timeline_load_fitting_label(
+                            width,
+                            vec![
+                                format!(
+                                    "  {loaded} loaded · {source_bytes} covered · Tab → Timeline · G +{next}"
+                                ),
+                                format!("  Tab → Timeline · G loads next {next}"),
+                                format!("  Tab→TL · G+{next}"),
+                                format!("Tab→TL G+{next}"),
+                            ],
+                        ),
+                        UiLanguage::ZhHans => timeline_load_fitting_label(
+                            width,
+                            vec![
+                                format!(
+                                    "  已加载 {loaded} 条 · 源进度 {source_bytes} · Tab 切换 Timeline · G+{next}"
+                                ),
+                                format!("  Tab 切换 Timeline · G 再加载 {next} 条"),
+                                format!("  Tab→TL · G+{next}"),
+                                format!("Tab→TL G+{next}"),
+                            ],
+                        ),
+                    }
                 }
             } else {
                 match language {
@@ -3162,11 +3246,28 @@ fn timeline_source_coverage_bar(
         .saturating_mul(width)
         .saturating_div(100)
         .min(width);
+    let filled = if coverage.scanned_bytes > 0 && coverage.scanned_bytes < coverage.total_bytes {
+        filled.max(1)
+    } else {
+        filled
+    };
     format!(
         "{}{}",
         "█".repeat(filled),
         "░".repeat(width.saturating_sub(filled))
     )
+}
+
+fn timeline_source_coverage_percent_label(
+    coverage: crate::core::model::TimelineSourceCoverage,
+) -> String {
+    if coverage.scanned_bytes == 0 {
+        "0%".into()
+    } else if coverage.percent() == 0 {
+        "<1%".into()
+    } else {
+        format!("{}%", coverage.percent())
+    }
 }
 
 fn timeline_load_compact_count(count: usize) -> String {
@@ -3396,10 +3497,11 @@ fn render_zoomed_capsule(frame: &mut Frame, area: Rect, app: &App, capsule: &Wor
 }
 
 fn session_overview_lines(app: &App, width: u16) -> Vec<Line<'static>> {
-    let mut lines = timeline_load_status_lines(
+    let mut lines = timeline_load_status_lines_for_focus(
         app.effective_language(),
         app.animation_tick(),
         app.timeline_load_state(),
+        app.focus == Focus::Timeline,
         width,
     );
     lines.push(Line::raw(""));
@@ -4704,18 +4806,34 @@ fn active_key_hints(app: &App) -> Vec<KeyHint> {
             ("x/H", i18n::text(language, Text::Handoff)),
             ("tab", i18n::text(language, Text::Next)),
         ],
-        Focus::Timeline => vec![
-            ("j/k", i18n::text(language, Text::Events)),
-            ("gg/G", i18n::text(language, Text::Jump)),
-            ("e", i18n::text(language, Text::Detail)),
-            ("space", i18n::text(language, Text::RewindPoint)),
-            ("c", i18n::text(language, Text::Review)),
-            ("+", i18n::text(language, Text::Zoom)),
-            ("-", i18n::text(language, Text::Restore)),
-            ("tab", i18n::text(language, Text::Next)),
-            (":", i18n::text(language, Text::Cmd)),
-            ("q", i18n::text(language, Text::Quit)),
-        ],
+        Focus::Timeline => {
+            let mut hints = vec![("j/k", i18n::text(language, Text::Events))];
+            if matches!(
+                app.timeline_load_state(),
+                TimelineLoadState::Preview {
+                    can_expand: true,
+                    ..
+                }
+            ) {
+                hints.extend([
+                    ("gg", localized(language, "Top", "顶部")),
+                    ("G", localized(language, "Load next batch", "加载下一批")),
+                ]);
+            } else {
+                hints.push(("gg/G", i18n::text(language, Text::Jump)));
+            }
+            hints.extend([
+                ("e", i18n::text(language, Text::Detail)),
+                ("space", i18n::text(language, Text::RewindPoint)),
+                ("c", i18n::text(language, Text::Review)),
+                ("+", i18n::text(language, Text::Zoom)),
+                ("-", i18n::text(language, Text::Restore)),
+                ("tab", i18n::text(language, Text::Next)),
+                (":", i18n::text(language, Text::Cmd)),
+                ("q", i18n::text(language, Text::Quit)),
+            ]);
+            hints
+        }
         Focus::Capsule => vec![
             ("j/k", i18n::text(language, Text::Scroll)),
             ("gg/G", i18n::text(language, Text::TopBottom)),
@@ -5712,7 +5830,7 @@ fn render_help(frame: &mut Frame, root: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         )),
         Line::raw(""),
-        Line::raw("j/k, gg/G       navigate"),
+        Line::raw("j/k, gg         navigate; Timeline-focus G loads its next larger batch"),
         Line::raw("tab, shift-tab  switch panel"),
         Line::raw("f               cycle session source filter"),
         Line::raw("a               archive / unarchive selected session"),
@@ -11120,6 +11238,67 @@ mod tests {
     }
 
     #[test]
+    fn truncated_timeline_status_and_footer_make_g_focus_specific() {
+        let state = TimelineLoadState::Preview {
+            loaded_events: 600,
+            next_page_size: 600,
+            can_expand: true,
+            source_coverage: None,
+        };
+        let focused = timeline_load_status_lines_for_focus(UiLanguage::English, 0, state, true, 68);
+        let focused_text = focused.iter().map(line_text).collect::<String>();
+        assert_screen_contains(&focused_text, "600 loaded · G loads next 600");
+
+        let unfocused =
+            timeline_load_status_lines_for_focus(UiLanguage::English, 0, state, false, 68);
+        let unfocused_text = unfocused.iter().map(line_text).collect::<String>();
+        assert_screen_contains(&unfocused_text, "Tab → Timeline · G loads next 600");
+
+        let compact = timeline_load_status_lines_for_focus(UiLanguage::ZhHans, 0, state, false, 20);
+        assert_eq!(line_text(&compact[0]), "Tab→TL G+600");
+
+        let compact_source = timeline_load_status_lines_for_focus(
+            UiLanguage::English,
+            0,
+            TimelineLoadState::Preview {
+                loaded_events: 600,
+                next_page_size: 600,
+                can_expand: true,
+                source_coverage: Some(crate::core::model::TimelineSourceCoverage {
+                    scanned_bytes: 8 * 1024 * 1024,
+                    total_bytes: 1024 * 1024 * 1024,
+                }),
+            },
+            false,
+            20,
+        );
+        assert_eq!(line_text(&compact_source[0]), "TL <1% · Tab→G+600");
+
+        let mut app = App::new_fixture(CliTool::Codex, CliTool::Hermes).expect("app");
+        app.focus = Focus::Timeline;
+        app.data
+            .timeline
+            .push(crate::core::local_jsonl::timeline_preview_truncated_event(
+                app.data.timeline.len() + 1,
+                app.data.timeline.len(),
+            ));
+        let hints = active_key_hints(&app);
+        assert!(hints.contains(&("G", "Load next batch")), "{hints:?}");
+        assert!(hints.contains(&("gg", "Top")), "{hints:?}");
+
+        app.focus = Focus::Capsule;
+        let overview = session_overview_lines(&app, 68)
+            .iter()
+            .map(line_text)
+            .collect::<String>();
+        assert_screen_contains(&overview, "Tab → Timeline · G loads next 300");
+        assert!(
+            !overview.contains("300 loaded · G loads next 300"),
+            "{overview}"
+        );
+    }
+
+    #[test]
     fn timeline_source_scan_percentage_is_persistent_and_explicit() {
         let coverage = crate::core::model::TimelineSourceCoverage {
             scanned_bytes: 34 * 1024 * 1024,
@@ -11182,6 +11361,54 @@ mod tests {
                     assert!(
                         display_width(&text) <= usize::from(width),
                         "{language:?} source-scan status overflows {width} columns: {text:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn source_coverage_keeps_nonzero_subpercent_progress_visible() {
+        let coverage = crate::core::model::TimelineSourceCoverage {
+            scanned_bytes: 8 * 1024 * 1024,
+            total_bytes: 1024 * 1024 * 1024,
+        };
+        let wide = timeline_load_status_lines(
+            UiLanguage::English,
+            0,
+            TimelineLoadState::LoadingPage {
+                progress: crate::app::TimelineExpansionProgress {
+                    loaded_events: 12,
+                    total_events: 300,
+                },
+                source_coverage: Some(coverage),
+            },
+            68,
+        );
+        let wide_text = wide.iter().map(line_text).collect::<String>();
+        assert_screen_contains(&wide_text, "Timeline source <1%");
+        assert_screen_contains(&wide_text, "This page 4%");
+        assert!(wide_text.contains('█'), "{wide_text}");
+        assert!(!wide_text.contains("Timeline source 0%"), "{wide_text}");
+
+        for language in [UiLanguage::English, UiLanguage::ZhHans] {
+            for width in [20, 25, 26, 42, 68] {
+                for line in timeline_load_status_lines(
+                    language,
+                    0,
+                    TimelineLoadState::LoadingPage {
+                        progress: crate::app::TimelineExpansionProgress {
+                            loaded_events: 12,
+                            total_events: 300,
+                        },
+                        source_coverage: Some(coverage),
+                    },
+                    width,
+                ) {
+                    let text = line_text(&line);
+                    assert!(
+                        display_width(&text) <= usize::from(width),
+                        "{language:?} subpercent status overflows {width} columns: {text:?}"
                     );
                 }
             }
@@ -11391,7 +11618,7 @@ mod tests {
 
         let wide = render_text(&app, 140, 40);
         assert_screen_contains(&wide, "Timeline source 42%");
-        assert_screen_contains(&wide, "150 loaded · G loads next 300");
+        assert_screen_contains(&wide, "Tab → Timeline · G loads next 300");
         assert!(!wide.contains("This page 100%"), "{wide}");
         assert!(!wide.contains("Preview"), "{wide}");
         assert!(

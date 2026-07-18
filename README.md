@@ -48,12 +48,16 @@ moon export --session <session-id> --to lark --mode handoff --execute
   inventory without modifying the provider store.
 - **Timeline rewind**: inspect turns, tool evidence, images, and compact
   boundaries before choosing where to continue. When a preview is truncated,
-  `G` loads its next bounded page in the background. The third **Session
-  Details** column keeps a fixed Timeline status: local JSONL sessions show
-  persistent source coverage (loaded-source bytes / the read-start file-size
-  snapshot), while `G` also shows the current page's parsed-event progress.
-  Providers without a trustworthy source total remain explicitly count-based;
-  Moonbox never turns their event counts into a fabricated percentage.
+  `G` loads a larger bounded batch in the background: it starts at the
+  configured page size, then grows with the loaded prefix (for example,
+  `+300`, `+600`, `+1200`) instead of forcing repeated tiny pages. The third
+  **Session Details** column keeps a fixed Timeline status: local JSONL
+  sessions show persistent source coverage (loaded-source bytes / the
+  read-start file-size snapshot), while `G` also shows the current batch's
+  parsed-event progress. Nonzero progress below one percent is shown as `<1%`,
+  never as a misleading `0%`. Providers without a trustworthy source total
+  remain explicitly count-based; Moonbox never turns their event counts into a
+  fabricated percentage.
 - **Context health**: see provider-backed context usage, agent/model-resolved
   windows, quality-cliff estimates, and compact markers; unknown usage stays
   explicit instead of being turned into a fake percentage.
@@ -100,7 +104,7 @@ core map stays predictable:
 | Key | Action |
 | --- | --- |
 | `j` / `k` | Move through the active list |
-| `gg` / `G` | Jump to top or bottom; `G` loads the next Timeline page when history is truncated. Its fixed third-column status permanently shows verified local source coverage when available, plus the real current-page percentage while loading. It otherwise names the loaded count and next `G` action rather than fabricating a whole-session percentage. |
+| `gg` / `G` | Jump to top or bottom; with Timeline focused, `G` loads the next larger bounded batch (`+300`, then `+600`, then `+1200`, …). Its fixed third-column status permanently shows verified local source coverage when available, plus the real current-batch percentage while loading. When another panel is focused it says `Tab → Timeline` first, rather than falsely implying that `G` will load history there. |
 | `/` | Search sessions |
 | `[` / `]` | Change source filter |
 | `{` / `}` | Change data space |

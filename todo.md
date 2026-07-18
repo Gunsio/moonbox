@@ -25,6 +25,13 @@
   It is explicitly source coverage rather than a guessed event total; `G`
   continues to expose exact page-relative progress, and unknown-total providers
   remain count/action based.
+- [x] **Large Timeline adaptive continuation** — make truncated local Timelines
+  grow their bounded background `G` batch with the loaded prefix (`+300`, then
+  `+600`, then `+1200`) instead of repeating tiny fixed pages from the source
+  start. Keep the UI responsive by avoiding an unsafe all-history materialize;
+  show verified source-byte coverage in the permanent third-column status,
+  direct unfocused users to `Tab` to Timeline before pressing `G`, and render
+  nonzero sub-percent progress as `<1%`.
 
 ## P0 — Experience regressions to verify and fix
 
@@ -36,6 +43,10 @@
 
 ## P1 — Foundation and workflow closure
 
+- [ ] **Large Timeline cursor + virtualization** — replace prefix reparsing
+  with a read-only resumable local JSONL cursor and virtualized Timeline window
+  so arbitrarily large histories can be traversed in one source pass without
+  materializing every raw event or rebuilding every row per frame.
 - [ ] **M108: Live State Completion** — reliably determine process liveness and attachment to a locatable tmux pane. Expose Jump only when both are known; unknown state must not be presented as jumpable.
 - [ ] **M109: Header / Footer information architecture** — retain only high-value global/session context: data source, filter, theme, defaults, hooks/live state, alive/tmux/cwd/branch, actions, and blocking reasons.
 - [ ] **M110: Deterministic Primary Action** — implement explainable, low-risk rules: Jump only when safe, otherwise Resume/Handoff/Inspect. Do not use opaque or heuristic “smart” recommendations.
